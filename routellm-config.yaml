@@ -1,0 +1,2 @@
+strong_model: openai/claude-3-5-sonnet
+weak_model: groq/llama3-70b-8192

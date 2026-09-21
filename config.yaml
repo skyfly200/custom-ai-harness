@@ -1,0 +1,23 @@
+model_list:
+  # Primary Model
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20240620
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Fallback 1: Groq (Fastest local fallback)
+  - model_name: llama3-70b
+    litellm_params:
+      model: groq/llama3-70b-8192
+      api_key: os.environ/GROQ_API_KEY
+
+  # Fallback 2: Gemini (Free Tier backup)
+  - model_name: gemini-1.5-flash
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+# The fallback logic: If Claude fails (rate limit, API down, etc.), 
+# LiteLLM will automatically try Llama 3 on Groq, and then Gemini Flash.
+litellm_settings:
+  fallbacks: [{"claude-3-5-sonnet": ["llama3-70b", "gemini-1.5-flash"]}]

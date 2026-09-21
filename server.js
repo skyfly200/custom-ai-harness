@@ -2,7 +2,9 @@ const express = require('express');
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 
 const app = express();
-app.use(express.json());
+// Increase the JSON payload limit to handle large context windows from Claude Code
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const CAVEMAN_PROMPT = "Be terse. Do not restate context. Do not use preamble text.";
 

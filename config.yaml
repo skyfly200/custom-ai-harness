@@ -19,13 +19,7 @@ model_list:
       model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
 
-  # Tier 3: Gemini Flash (Free Tier)
-  - model_name: fallback-gemini
-    litellm_params:
-      model: gemini/gemini-1.5-flash
-      api_key: os.environ/GEMINI_API_KEY
-
-  # Tier 4: OpenRouter Auto-Free (Free Tier)
+  # Tier 3: OpenRouter Auto-Free (Free Tier)
   - model_name: fallback-openrouter
     litellm_params:
       model: openrouter/openrouter/free
@@ -33,6 +27,6 @@ model_list:
 
 # LiteLLM Fallback Chain
 litellm_settings:
-  fallbacks: 
-    - {"claude-3-5-sonnet": ["fallback-groq", "fallback-gemini", "fallback-openrouter"]}
-    - {"claude-sonnet-5": ["fallback-groq", "fallback-gemini", "fallback-openrouter"]}
+  fallbacks:
+    - {"claude-3-5-sonnet": ["fallback-groq", "fallback-openrouter"]}
+    - {"claude-sonnet-5": ["fallback-groq", "fallback-openrouter"]}

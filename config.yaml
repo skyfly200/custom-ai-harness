@@ -16,20 +16,29 @@ model_list:
       api_base: http://localhost:8000/v1
       api_key: dummy-key-not-needed
 
-  # Tier 2: Groq GPT-OSS 20B (Always-Free Tier)
+  # Tier 2: Groq — GPT-OSS 20B (always-free, replaces deprecated Llama 3/3.1)
   - model_name: fallback-groq
     litellm_params:
       model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
 
-  # Tier 3: OpenRouter Auto-Free (Free Tier)
+  # Tier 2b: Groq — explicit alias used by RouteLLM weak-model routing
+  - model_name: fallback-groq-20b
+    litellm_params:
+      model: groq/openai/gpt-oss-20b
+      api_key: os.environ/GROQ_API_KEY
+
+  # Tier 3: OpenRouter auto-free (catch-all when Groq quota exhausted)
   - model_name: fallback-openrouter
     litellm_params:
       model: openrouter/openrouter/free
       api_key: os.environ/OPENROUTER_API_KEY
 
 # LiteLLM Fallback Chain
+# Deprecated Llama 3/3.1 variants are intentionally absent; GPT-OSS 20B
+# is the active free-tier workhorse across all fallback paths.
 litellm_settings:
   fallbacks:
-    - {"claude-3-5-sonnet": ["fallback-groq", "fallback-openrouter"]}
-    - {"claude-sonnet-5": ["fallback-groq", "fallback-openrouter"]}
+    - {"claude-3-5-sonnet": ["fallback-groq", "fallback-groq-20b", "fallback-openrouter"]}
+    - {"claude-sonnet-5":   ["fallback-groq", "fallback-groq-20b", "fallback-openrouter"]}
+    - {"fallback-groq":     ["fallback-groq-20b", "fallback-openrouter"]}

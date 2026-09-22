@@ -2,8 +2,12 @@
   "name": "custom-ai-harness",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
+    "compress": "node caveman-compress.js",
+    "validate": "node validate-config.js",
+    "validate:fix": "node validate-config.js --fix",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

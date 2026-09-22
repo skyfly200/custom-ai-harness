@@ -1,88 +1,175 @@
 # Custom AI Coding Harness
 
-A high-performance, cost-optimized proxy and routing harness designed to sit between your coding agent (such as Claude Code or Cursor) and local/cloud LLM endpoints. 
+A high-performance, cost-optimized proxy and routing harness designed to sit between your coding agent (such as Claude Code or Cursor) and local/cloud LLM endpoints.
 
-This repository implements a three-pillar efficiency stack:
-1. **Intelligent Complexity Routing (RouteLLM):** Automatically classifies incoming prompt complexity, diverting simple scaffolding tasks to free models while reserving heavy models for complex architecture.
-2. **Output Compression (Caveman):** Injects specialized system instructions to eliminate preambles, conversational filler, and redundant code duplication, reducing output token consumption by ~65%.
-3. **Multi-Model Fallback & Free-Tier Pooling:** Integrates with LiteLLM and local CLI wrappers to pool free providers (Groq, Gemini, OpenRouter) and bypass per-token billing.
+Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
 
----
-
-## Architecture Overview
-
-```
-[ Coding Agent / Cursor ] 
-        │
-        ▼ (Port 3000: Node.js Interceptor + Caveman Prompt)
-[ RouteLLM Server ] ──(Complex)──► [ Claude Code CLI Wrapper ] (Pro OAuth)
-        │
-        └──(Simple)──► [ LiteLLM Fallback Proxy ] ──► [ Groq / Gemini Free Tier ]
-```
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Architecture Stabilization & Core Routing | ✅ |
+| 2 | Intelligent Complexity Routing (RouteLLM & BERT) | ✅ |
+| 3 | Zero-Cost Token & Context Compression | ✅ |
+| 4 | Local Model Resilience & Anti-Looping | ✅ |
 
 ---
 
-## Prerequisites & Installation
+## Architecture
 
-### 1. Initialize the Repository
+```
+[ Coding Agent / Claude Code / Cursor ]
+        │
+        ▼  Port 3000 — Node.js interceptor (server.js)
+        │  • Injects Caveman compression prompt
+        │  • Headroom: compresses tool outputs & file payloads
+        │  • Derives complexity threshold from message content
+        │  • Rewrites model name → router-bert-<threshold>
+        │
+        ▼  Port 6060 — RouteLLM (BERT classifier, no external embedding API)
+        │
+        ├─(complex)─► Port 4000 — LiteLLM proxy → Tier 1 local engine (port 8000)
+        │                                        → Groq GPT-OSS 20B fallback
+        │                                        → OpenRouter free-tier catch-all
+        │
+        └─(simple)──► Port 4000 — LiteLLM proxy → Groq GPT-OSS 20B (free tier)
+                                                 → OpenRouter free-tier catch-all
+```
+
+---
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `server.js` | Node.js interceptor — Caveman injection, Headroom compression, RouteLLM model routing |
+| `config.yaml` | LiteLLM proxy — model list, fallback chain, port 4000 |
+| `routellm-config.yaml` | RouteLLM — BERT router, strong/weak model targets |
+| `launch-local.sh` | Hardened launcher for llama.cpp / vLLM local engines |
+| `caveman-compress.js` | Standing context trimmer for `CLAUDE.md`, `.qwen/settings.json` |
+| `validate-config.js` | UTF-8 / non-breaking space validator for config directories |
+
+---
+
+## Prerequisites
+
+- **Node.js** 18+
+- **Python** 3.10+ with a virtual environment
+- **llama.cpp** or **vLLM** (optional — only needed for local Tier 1 engine)
+
+---
+
+## Installation
+
 ```bash
-git clone https://github.com/your-username/custom-ai-harness.git
+git clone https://github.com/skyfly200/custom-ai-harness.git
 cd custom-ai-harness
+
+# Node dependencies
+npm install
+
+# Python dependencies
 python -m venv .venv
-npm init -y
+source .venv/bin/activate          # Windows: .\.venv\Scripts\activate
+pip install "litellm[proxy]" routellm
 ```
-
-### 2. Install Dependencies
-* **Node.js Interceptor Dependencies:**
-  ```bash
-  npm install express http-proxy-middleware
-  ```
-* **Python Environment & Routers:**
-  ```bash
-  # Activate virtual environment on Windows
-  .\.venv\Scripts\activate
-  
-  # Install LiteLLM and RouteLLM
-  pip install "litellm[proxy]" routellm
-  ```
 
 ---
 
-## Configuration & Setup
+## Configuration
 
-### Step 1: Set Up Environment Variables
-Export your free-tier provider API keys in your active terminal session:
+### Environment variables
 
-```cmd
-set ANTHROPIC_API_KEY=your_anthropic_key
-set GROQ_API_KEY=your_groq_key
-set GEMINI_API_KEY=your_gemini_key
-set OPENROUTER_API_KEY=your_openrouter_key
+```bash
+export GROQ_API_KEY=your_groq_key
+export OPENROUTER_API_KEY=your_openrouter_key
+# Optional — only needed if Tier 1 calls a remote Anthropic endpoint
+export ANTHROPIC_API_KEY=your_anthropic_key
 ```
 
-### Step 2: Configure LiteLLM (`config.yaml`)
-Create or verify your `config.yaml` file in the root directory to define your fallback tiers.
+### `config.yaml`
 
-### Step 3: Run the Services
-To spin up your local harness, run the services across your terminal sessions:
+Defines the LiteLLM model list and fallback chain. The fallback order for every strong-model request is:
 
-1. **Launch RouteLLM Classifier:**
-   ```cmd
-   .\.venv\Scripts\python -m routellm.openai_server --routers mf --port 6060
-   ```
-2. **Launch Node.js Interceptor:**
-   ```cmd
-   node server.js
-   ```
+```
+Tier 1 local engine → fallback-groq (GPT-OSS 20B) → fallback-groq-20b → fallback-openrouter
+```
+
+Deprecated Llama 3/3.1 variants are intentionally absent; GPT-OSS 20B is the active free-tier workhorse.
+
+### `routellm-config.yaml`
+
+Uses the local `bert` router — no external embedding API key (`text-embedding-3-small`) required. Strong and weak models both resolve through the LiteLLM proxy on port 4000.
 
 ---
 
-## Usage
+## Running the stack
 
-Point your coding assistant or custom development environment to your local proxy endpoint:
-* **Base URL:** `http://localhost:3000/v1`
+Open three terminal sessions (or use a process manager like `tmux`/`pm2`):
 
-The harness will automatically append the Caveman system instructions, evaluate prompt complexity via RouteLLM, and seamlessly balance traffic between your paid subscription wrappers and free-tier fallback models.
+**1. Local engine** (skip if routing entirely to cloud fallbacks)
+```bash
+# Qwen Coder
+./launch-local.sh qwen models/qwen2.5-coder-7b-instruct-q5_k_m.gguf
+
+# Gemma 4
+./launch-local.sh gemma models/gemma-4-9b-it-q5_k_m.gguf
+```
+
+**2. LiteLLM proxy** (port 4000)
+```bash
+source .venv/bin/activate
+litellm --config config.yaml
+```
+
+**3. RouteLLM classifier** (port 6060)
+```bash
+source .venv/bin/activate
+python -m routellm.openai_server --config routellm-config.yaml --port 6060
+```
+
+**4. Node.js interceptor** (port 3000)
+```bash
+npm start
+```
+
+Point your coding assistant to `http://localhost:3000/v1`.
+
+---
+
+## Utility scripts
+
+### Compress standing context files
+Trims `CLAUDE.md` and `.qwen/settings.json` before a session to reduce foundational token overhead. Originals are backed up as `.bak`.
+
+```bash
+npm run compress
+# or target specific files:
+node caveman-compress.js path/to/CLAUDE.md
+```
+
+### Validate config directories
+Scans `.vscode`, `.qwen`, and `.claude` for non-breaking spaces, BOM characters, smart quotes, and en/em dashes that silently break VS Code's JSON parser.
+
+```bash
+npm run validate          # report only
+npm run validate:fix      # auto-correct in place
+```
+
+---
+
+## How routing decisions are made
+
+The interceptor analyses each request's message content for complexity signals before forwarding to RouteLLM:
+
+| Signal type | Examples | Threshold | Effect |
+|-------------|----------|-----------|--------|
+| Complex | architect, refactor, debug, security, algorithm | 0.20 | Favours strong model |
+| Balanced | (mixed or no signal) | 0.50 | Default |
+| Simple | test, format, lint, rename, comment | 0.80 | Favours free weak model |
+
+The threshold is encoded as `router-bert-<threshold>` — the strict three-part format required to prevent RouteLLM `ValueError` parser crashes.
+
+---
 
 ## License
-MIT License
+
+MIT

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 

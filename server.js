@@ -8,7 +8,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const CAVEMAN_PROMPT = "Be terse. Do not restate context. Do not use preamble text.";
 
-app.use('/chat/completions', (req, res, next) => {
+// Use app.post instead of app.use to prevent Express from stripping the path
+app.post(['/chat/completions', '/v1/chat/completions'], (req, res, next) => {
     const messages = req.body.messages || [];
     const hasSystem = messages.length > 0 && messages[0].role === 'system';
     
@@ -20,12 +21,14 @@ app.use('/chat/completions', (req, res, next) => {
     }
 
     // Direct the payload to RouteLLM's intelligent classifier
-    req.body.model = "route-llm"; 
+    // Note: RouteLLM typically expects a specific format like "router-mf-0.5" 
+    req.body.model = "router-bert-0.5"; 
 
     next();
 }, createProxyMiddleware({
     target: 'http://localhost:6060', // RouteLLM server endpoint
     changeOrigin: true,
+    pathRewrite: (path, req) => '/v1/chat/completions', // Force the correct target endpoint
     on: {
         proxyReq: fixRequestBody,
     }

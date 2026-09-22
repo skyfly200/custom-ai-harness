@@ -6,10 +6,17 @@ model_list:
       api_base: http://localhost:8000/v1
       api_key: dummy-key-not-needed
 
-  # Tier 2: Groq Llama 3 (Free Tier)
+  # Map Claude Code's default request directly to your Tier 1 wrapper
+  - model_name: claude-sonnet-5
+    litellm_params:
+      model: openai/claude-3-5-sonnet-20240620
+      api_base: http://localhost:8000/v1
+      api_key: dummy-key-not-needed
+
+  # Tier 2: Groq GPT-OSS 20B (Always-Free Tier)
   - model_name: fallback-groq
     litellm_params:
-      model: groq/llama3-70b-8192
+      model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
 
   # Tier 3: Gemini Flash (Free Tier)
@@ -26,4 +33,6 @@ model_list:
 
 # LiteLLM Fallback Chain
 litellm_settings:
-  fallbacks: [{"claude-3-5-sonnet": ["fallback-groq", "fallback-gemini", "fallback-openrouter"]}]
+  fallbacks: 
+    - {"claude-3-5-sonnet": ["fallback-groq", "fallback-gemini", "fallback-openrouter"]}
+    - {"claude-sonnet-5": ["fallback-groq", "fallback-gemini", "fallback-openrouter"]}

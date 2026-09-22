@@ -1,3 +1,6 @@
+general_settings:
+  port: 4000
+
 model_list:
   # Tier 1: Local CLI Wrapper (Zero API Cost)
   - model_name: claude-3-5-sonnet

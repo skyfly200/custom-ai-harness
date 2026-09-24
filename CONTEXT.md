@@ -30,6 +30,14 @@ _Avoid_: agent (too broad), instance
 A unit of implementation work cleared for a Worker, as distinct from a decision ticket on a planning map.
 _Avoid_: task, job
 
+**Build Parent**:
+An issue that groups one batch of Build Tickets as its sub-issues and orders them with blocking links.
+_Avoid_: epic, build map
+
+**Ready**:
+The human-applied mark that makes a ticket takeable by the Orchestrator; an open, unblocked ticket without it is never picked up.
+_Avoid_: queued, approved (Approved is a post-Audit state)
+
 **Audit**:
 A frontier-model review of a Worker's pull request against its Build Ticket, ending in approval or a structured critique.
 _Avoid_: review (overloaded with human PR review)
@@ -48,6 +56,8 @@ _Avoid_: Tier 0 (a tier is a Model Layer concept; Pre-triage is a step)
 - The **Orchestrator** dispatches each **Build Ticket** to one **Worker** and runs an **Audit** on the pull request it delivers.
 - After 2 rejected **Audits** a **Build Ticket** gets one **Escalation** to a stronger **Worker**, then goes to the human.
 - The **Orchestrator** only works on AFK tickets; HITL decisions happen in the human's own sessions.
+- The **Orchestrator** takes only **Ready** tickets: **Build Tickets** and research tickets. It never closes research tickets or edits a planning map; a human session does both.
+- A ticket assigned to the human always means it is the human's turn to act.
 
 ## Flagged ambiguities
 

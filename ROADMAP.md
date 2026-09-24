@@ -23,6 +23,13 @@ This roadmap outlines the strategic upgrades for the `custom-ai-harness` reposit
 ## Phase 3: Pocock Skill Engine Integration & Context Compression
 * **Multi-Session Orchestration (`/wayfinder` via Claude Sonnet 4.6):** Invoke Sonnet 4.6 to map project destinations, track "fog of war" domain questions, and break goals down into a JSON/DAG ticket matrix.
 * **Interactive State Interrogation (`/grill-me` & `/grill-with-docs` via Claude Opus 5):** Intercept architectural decision tickets and run multi-round interview sessions with Opus 5 to update domain models, `GLOSSARY.md`, and Architectural Decision Records (ADRs) prior to writing code.
+  * **Voice Grilling (STT/TTS):** Grilling is HITL and runs in the human's own Claude Code session, so voice lives client-side, not in the Orchestrator or Model Layer.
+    * ✅ **MVP TTS:** `.claude/hooks/speak.js` Stop hook reads each reply aloud via Windows `System.Speech` when `GRILL_VOICE=1` is set; strips code blocks and markdown, and cuts off stale speech when a new reply arrives.
+    * ✅ **MVP STT:** No code — answer with Windows dictation (`Win+H`) or Claude Code `/voice` push-to-talk.
+    * **Natural Local Voices:** Swap `System.Speech` for Piper or Kokoro (free, local) behind the same hook.
+    * **Voice-Mode Prompting:** When `GRILL_VOICE` is set, instruct the grilling skill to ask one short question per turn, state its recommended answer in one sentence, and avoid tables and option menus.
+    * **Glossary-Primed Transcription:** Run Whisper (local or Groq free tier) with `CONTEXT.md` glossary terms in its `prompt` parameter so domain words (Orchestrator, Build Ticket, ADR) transcribe correctly.
+    * **Gateway Audio Routes (optional):** Add `/v1/audio/transcriptions` and `/v1/audio/speech` pass-through to the Interceptor so audio calls use LiteLLM fallbacks like chat does. Only if dictation accuracy becomes a real problem.
 * **Parallel Worker Fan-Out:** Automatically dispatch cleared build tickets to parallel local Qwen 3 Coder or Groq instances.
 * **Adversarial Audit & Closed-Loop Refactoring:** Run a short Opus 5 review pass over completed code outputs. If rejected, route concise JSON critiques back to Qwen 3 Coder for refactoring without burning high-cost frontier output tokens.
 * **Caveman Output Compression:** Automatically inject the `CAVEMAN_PROMPT` system instruction (`"Be terse. Do not restate context. Do not use preamble text."`) to slash expensive output tokens by ~65%.

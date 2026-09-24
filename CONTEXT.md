@@ -52,6 +52,7 @@ _Avoid_: Tier 0 (a tier is a Model Layer concept; Pre-triage is a step)
 ## Relationships
 
 - The **Orchestrator** consumes the **Model Layer**; the **Model Layer** never knows the **Orchestrator** exists.
+- The **Model Layer** is the core and runs on its own; the **Orchestrator** is an optional add-on (ADR 0002).
 - The **Model Layer** is a chain: **Interceptor** → **Router** → **Gateway** → provider.
 - The **Orchestrator** dispatches each **Build Ticket** to one **Worker** and runs an **Audit** on the pull request it delivers.
 - After 2 rejected **Audits** a **Build Ticket** gets one **Escalation** to a stronger **Worker**, then goes to the human.

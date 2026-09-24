@@ -22,13 +22,32 @@ const SIMPLE_PATTERNS = [
 ];
 
 /**
- * Derive a RouteLLM threshold from message content.
- * Returns a value in [0.0, 1.0]; lower = more likely to use weak model.
- * RouteLLM routes to the strong model when complexity score > threshold,
+ * Text typed in the most recent user turn that has any. Turns carrying only
+ * tool results are skipped, so an agent loop keeps the routing of its task.
+ * The system prompt and tool output are never scored: they mention "test",
+ * "debug" etc. constantly and would pin every request at the 0.5 default.
+ */
+function latestUserText(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg.role !== 'user') continue;
+        if (typeof msg.content === 'string') return msg.content;
+        if (Array.isArray(msg.content)) {
+            const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join(' ');
+            if (text) return text;
+        }
+    }
+    return '';
+}
+
+/**
+ * Derive a RouteLLM threshold from the latest user request.
+ * Returns a value in [0.0, 1.0].
+ * RouteLLM routes to the strong model when its win-rate score >= threshold,
  * so a LOW threshold means the strong model is used more often.
  */
 function deriveThreshold(messages) {
-    const text = messages.map(m => (typeof m.content === 'string' ? m.content : '')).join(' ');
+    const text = latestUserText(messages);
     const complexHits = COMPLEX_PATTERNS.filter(p => p.test(text)).length;
     const simpleHits  = SIMPLE_PATTERNS.filter(p => p.test(text)).length;
 
@@ -91,20 +110,58 @@ function compressToolContent(content) {
         block.type === 'text' ? { ...block, text: headroomCompressText(block.text) } : block);
 }
 
-function applyHeadroom(messages) {
+// Apply fn(content, id) to every tool result: OpenAI role=tool messages and
+// Anthropic tool_result blocks. Text the user typed is never passed to fn.
+function mapToolResults(messages, fn) {
     return messages.map(msg => {
         if (msg.role === 'tool') {
-            return { ...msg, content: compressToolContent(msg.content) };
+            return { ...msg, content: fn(msg.content, msg.tool_call_id) };
         }
-        // User turns: only compress embedded tool_result blocks, never typed text
         if (msg.role === 'user' && Array.isArray(msg.content)) {
             return {
                 ...msg,
                 content: msg.content.map(block =>
-                    block.type === 'tool_result' ? { ...block, content: compressToolContent(block.content) } : block),
+                    block.type === 'tool_result' ? { ...block, content: fn(block.content, block.tool_use_id) } : block),
             };
         }
         return msg;
+    });
+}
+
+function applyHeadroom(messages) {
+    return mapToolResults(messages, compressToolContent);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Context anchor — zero-duplication tool results
+// Agents re-read the same file or re-run the same command many times in one
+// conversation. A tool result identical to an earlier one in the same request
+// is replaced with a pointer to the first copy. The first copy is always the
+// one kept, so earlier messages never change and provider prompt caches stay
+// valid. Stateless: nothing is remembered between requests.
+// ---------------------------------------------------------------------------
+
+const ANCHOR_MIN_CHARS = 500; // shorter results cost less than the pointer is worth
+
+// Plain text of a tool result, or null when it holds images or other non-text blocks.
+function toolResultText(content) {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content) && content.every(b => b.type === 'text')) {
+        return content.map(b => b.text).join('\n');
+    }
+    return null;
+}
+
+function applyContextAnchor(messages) {
+    const firstSeen = new Map(); // result text -> id of the first tool result carrying it
+    return mapToolResults(messages, (content, id) => {
+        const text = toolResultText(content);
+        if (text === null || text.length < ANCHOR_MIN_CHARS) return content;
+        if (!firstSeen.has(text)) {
+            firstSeen.set(text, id);
+            return content;
+        }
+        return `[harness: identical to earlier tool result ${firstSeen.get(text)}; not repeated]`;
     });
 }
 
@@ -118,8 +175,8 @@ app.post(['/chat/completions', '/v1/chat/completions'], (req, res, next) => {
         messages.unshift({ role: 'system', content: CAVEMAN_PROMPT });
     }
 
-    // Headroom: compress tool outputs and file payloads before forwarding
-    messages = applyHeadroom(messages);
+    // Context anchor first, on the raw results, then Headroom compression
+    messages = applyHeadroom(applyContextAnchor(messages));
     req.body.messages = messages;
 
     const threshold = deriveThreshold(messages);
@@ -139,4 +196,4 @@ if (require.main === module) {
     app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
 }
 
-module.exports = { applyHeadroom, headroomCompressText };
+module.exports = { applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold };

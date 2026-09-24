@@ -2,12 +2,17 @@ general_settings:
   port: 4000
 
 model_list:
+  # Concurrency: max_parallel_requests caps in-flight calls per deployment;
+  # extra requests queue instead of tripping provider rate limits. The cap is
+  # per entry, so two aliases for one backend share its budget (1+1 for the
+  # CLI wrapper, 3+3 for Groq).
   # Tier 1: Local CLI Wrapper (Zero API Cost)
   - model_name: claude-3-5-sonnet
     litellm_params:
       model: openai/claude-3-5-sonnet-20240620
       api_base: http://localhost:8000/v1
       api_key: dummy-key-not-needed
+      max_parallel_requests: 1
 
   # Map Claude Code's default request directly to your Tier 1 wrapper
   - model_name: claude-sonnet-5
@@ -15,24 +20,28 @@ model_list:
       model: openai/claude-3-5-sonnet-20240620
       api_base: http://localhost:8000/v1
       api_key: dummy-key-not-needed
+      max_parallel_requests: 1
 
   # Tier 2: Groq — GPT-OSS 20B (always-free, replaces deprecated Llama 3/3.1)
   - model_name: fallback-groq
     litellm_params:
       model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
+      max_parallel_requests: 3
 
   # Tier 2b: Groq — explicit alias used by RouteLLM weak-model routing
   - model_name: fallback-groq-20b
     litellm_params:
       model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
+      max_parallel_requests: 3
 
   # Tier 3: OpenRouter auto-free (catch-all when Groq quota exhausted)
   - model_name: fallback-openrouter
     litellm_params:
       model: openrouter/openrouter/free
       api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
 
 # LiteLLM Fallback Chain
 # Deprecated Llama 3/3.1 variants are intentionally absent; GPT-OSS 20B

@@ -21,6 +21,7 @@ Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
         ▼  Port 3000 — Node.js interceptor (server.js)
         │  • Loads .env via dotenv
         │  • Injects Caveman compression prompt
+        │  • Context anchor: replaces repeated tool results with pointers
         │  • Headroom: compresses tool outputs & file payloads
         │  • Derives complexity threshold from message content
         │  • Rewrites model name → router-bert-<threshold>
@@ -143,6 +144,8 @@ Tier 1 local engine → fallback-groq (GPT-OSS 20B) → fallback-groq-20b → fa
 
 Deprecated Llama 3/3.1 variants are intentionally absent; GPT-OSS 20B is the active free-tier workhorse.
 
+Each deployment sets `max_parallel_requests` (CLI wrapper 1, Groq 3, OpenRouter 5), so bursts queue in the Gateway instead of tripping provider rate limits. The cap is per entry, so aliases for one backend add up.
+
 ### `routellm-config.yaml`
 
 Uses the local `bert` router — no external embedding API key (`text-embedding-3-small`) required. Strong and weak models both resolve through the LiteLLM proxy on port 4000.
@@ -241,7 +244,7 @@ npm run validate:fix      # auto-correct in place
 
 ## How routing decisions are made
 
-The interceptor analyses each request's message content for complexity signals before forwarding to RouteLLM:
+The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the routing of the request that started them:
 
 | Signal type | Examples | Threshold | Effect |
 |-------------|----------|-----------|--------|
@@ -250,6 +253,14 @@ The interceptor analyses each request's message content for complexity signals b
 | Simple | test, format, lint, rename, comment | 0.80 | Favours free weak model |
 
 The threshold is encoded as `router-bert-<threshold>` — the strict three-part format required to prevent RouteLLM `ValueError` parser crashes.
+
+---
+
+## Tests
+
+```bash
+npm test
+```
 
 ---
 

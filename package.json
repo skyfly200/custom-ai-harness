@@ -8,7 +8,7 @@
     "compress": "node caveman-compress.js",
     "validate": "node validate-config.js",
     "validate:fix": "node validate-config.js --fix",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",

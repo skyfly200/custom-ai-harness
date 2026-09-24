@@ -48,49 +48,61 @@ function buildRouteLLMModel(threshold) {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3: Headroom — tool output / file / log compression
-// Intercepts tool_result and tool messages before they are forwarded,
-// stripping redundant whitespace, truncating oversized payloads, and removing
-// boilerplate patterns that contribute nothing to model understanding.
-// Targets up to 92% reduction on code-search and file-read tool outputs.
+// Phase 3: Headroom — tool output compression
+// Compresses tool results only (role=tool messages and tool_result blocks);
+// text the user typed is never altered. Strips redundant whitespace and pure
+// separator lines, then truncates oversized results from the middle with a
+// visible marker, keeping the tail where build/test errors usually land.
 // ---------------------------------------------------------------------------
 
-const HEADROOM_MAX_TOOL_CHARS = 4000; // hard cap per tool result block
-const HEADROOM_MAX_ARRAY_ITEMS = 20;  // cap repeated list items (e.g. grep results)
+const HEADROOM_MAX_TOOL_CHARS = 4000; // cap per tool result, marker included
+const HEADROOM_HEAD_SHARE = 0.4;      // share of the cap kept from the start; the rest comes from the end
 
-// Patterns that add no signal: blank lines, trailing whitespace, repeated dashes/equals
+// Patterns that add no signal: blank lines, trailing whitespace
 const NOISE_RE = /(\r?\n){3,}/g;
 const TRAIL_RE = /[ \t]+$/gm;
-// Long runs of decoration characters used as visual separators
-const DECOR_RE = /^[-=*#]{4,}.*$/gm;
+// Lines made only of separator characters (keeps "#### Heading" and diff lines with content)
+const DECOR_RE = /^[-=*#]{4,}[ \t]*$/gm;
+
+function truncateMiddle(text, max) {
+    if (text.length <= max) return text;
+    const marker = (n) => `\n[... ${n} chars truncated by harness ...]\n`;
+    const budget = max - marker(text.length).length;
+    const head = Math.floor(budget * HEADROOM_HEAD_SHARE);
+    const tail = budget - head;
+    return text.slice(0, head) + marker(text.length - head - tail) + text.slice(text.length - tail);
+}
 
 function headroomCompressText(text) {
     if (typeof text !== 'string') return text;
-    return text
+    const cleaned = text
         .replace(DECOR_RE, '')
         .replace(TRAIL_RE, '')
         .replace(NOISE_RE, '\n\n')
-        .trim()
-        .slice(0, HEADROOM_MAX_TOOL_CHARS);
+        .trim();
+    return truncateMiddle(cleaned, HEADROOM_MAX_TOOL_CHARS);
 }
 
-function headroomCompressContent(content) {
+// Compress a tool result's content: a string, or an array of content blocks.
+function compressToolContent(content) {
     if (typeof content === 'string') return headroomCompressText(content);
     if (!Array.isArray(content)) return content;
-
-    const trimmed = content.slice(0, HEADROOM_MAX_ARRAY_ITEMS);
-    return trimmed.map(block => {
-        if (block.type === 'text')        return { ...block, text: headroomCompressText(block.text) };
-        if (block.type === 'tool_result') return { ...block, content: headroomCompressContent(block.content) };
-        return block;
-    });
+    return content.map(block =>
+        block.type === 'text' ? { ...block, text: headroomCompressText(block.text) } : block);
 }
 
 function applyHeadroom(messages) {
     return messages.map(msg => {
-        // Compress tool result messages (role=tool) and any user turn carrying tool_result blocks
-        if (msg.role === 'tool' || msg.role === 'user') {
-            return { ...msg, content: headroomCompressContent(msg.content) };
+        if (msg.role === 'tool') {
+            return { ...msg, content: compressToolContent(msg.content) };
+        }
+        // User turns: only compress embedded tool_result blocks, never typed text
+        if (msg.role === 'user' && Array.isArray(msg.content)) {
+            return {
+                ...msg,
+                content: msg.content.map(block =>
+                    block.type === 'tool_result' ? { ...block, content: compressToolContent(block.content) } : block),
+            };
         }
         return msg;
     });
@@ -123,4 +135,8 @@ app.post(['/chat/completions', '/v1/chat/completions'], (req, res, next) => {
     }
 }));
 
-app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
+if (require.main === module) {
+    app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
+}
+
+module.exports = { applyHeadroom, headroomCompressText };

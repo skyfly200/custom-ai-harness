@@ -23,10 +23,12 @@ Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
         │  • Injects Caveman compression prompt
         │  • Context anchor: replaces repeated tool results with pointers
         │  • Headroom: compresses tool outputs & file payloads
-        │  • Derives complexity threshold from message content
-        │  • Rewrites model name → router-bert-<threshold>
+        │  • Derives complexity threshold from the latest typed request
+        │  • Asks the Router which model to use, rewrites the model name
+        │  • Accepts OpenAI (/v1/chat/completions) and Anthropic (/v1/messages)
         │
-        ▼  Port 6060 — RouteLLM (BERT classifier, no external embedding API)
+        │  ◄──► Port 6060 — Router (router.py): local RouteLLM BERT classifier,
+        │                   answers "strong or weak?" and nothing else
         │
         ├─(complex)─► Port 4000 — LiteLLM proxy → Tier 1 local engine (port 8000)
         │                                        → Groq GPT-OSS 20B fallback
@@ -44,7 +46,8 @@ Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
 |------|---------|
 | `server.js` | Node.js interceptor — Caveman injection, Headroom compression, RouteLLM model routing |
 | `config.yaml` | LiteLLM proxy — model list, fallback chain, port 4000 |
-| `routellm-config.yaml` | RouteLLM — BERT router, strong/weak model targets |
+| `router.py` | Router — local BERT classifier service; picks the strong or weak Gateway model |
+| `routellm-config.yaml` | Router — BERT checkpoint and strong/weak Gateway model names |
 | `.env.example` | Environment variable template — copy to `.env` and fill in keys |
 | `launch-local.sh` | Hardened launcher for llama.cpp / vLLM local engines |
 | `caveman-compress.js` | Standing context trimmer for `CLAUDE.md`, `.qwen/settings.json` |
@@ -148,7 +151,9 @@ Each deployment sets `max_parallel_requests` (CLI wrapper 1, Groq 3, OpenRouter 
 
 ### `routellm-config.yaml`
 
-Uses the local `bert` router — no external embedding API key (`text-embedding-3-small`) required. Strong and weak models both resolve through the LiteLLM proxy on port 4000.
+Configures `router.py`: the local RouteLLM `bert` checkpoint (no external embedding API key needed) and the Gateway model names it picks between. The Router only classifies; the Interceptor then sends the request to the Gateway on port 4000 itself.
+
+RouteLLM's bundled `openai_server` is not used: it rejects tool schemas, can't carry the Anthropic format, and needs an `OPENAI_API_KEY` even for BERT.
 
 ---
 
@@ -192,21 +197,22 @@ litellm --config config.yaml
 **Windows (PowerShell)**
 ```powershell
 .\.venv\Scripts\Activate.ps1
+$env:PYTHONUTF8 = 1   # LiteLLM's startup banner crashes on a non-UTF-8 console
 litellm --config config.yaml
 ```
 
-### 3. RouteLLM classifier (port 6060)
+### 3. Router (port 6060)
 
 **macOS / Linux**
 ```bash
 source .venv/bin/activate
-python -m routellm.openai_server --config routellm-config.yaml --port 6060
+python router.py
 ```
 
 **Windows (PowerShell)**
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m routellm.openai_server --config routellm-config.yaml --port 6060
+python router.py
 ```
 
 ### 4. Node.js interceptor (port 3000)
@@ -215,7 +221,17 @@ python -m routellm.openai_server --config routellm-config.yaml --port 6060
 npm start
 ```
 
-Point your coding assistant to `http://localhost:3000/v1`.
+Point an OpenAI-compatible assistant (Cursor, Aider, Continue, Cline) at `http://localhost:3000/v1`.
+
+### Using Claude Code through the harness
+
+```powershell
+$env:ANTHROPIC_BASE_URL = "http://localhost:3000"
+$env:ANTHROPIC_AUTH_TOKEN = "local-harness"   # dummy; keeps your real Anthropic credentials off the local stack
+claude
+```
+
+The Interceptor routes each request and the Gateway translates the Anthropic Messages format for whichever model serves it, including tool use and streaming. The Interceptor log shows each routing decision.
 
 ---
 

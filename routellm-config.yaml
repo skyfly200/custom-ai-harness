@@ -1,12 +1,7 @@
-# RouteLLM configuration — uses local BERT classifier (no external embedding API needed)
-router: bert
+# Router (router.py) — local RouteLLM BERT classifier, no external embedding API needed
+checkpoint: routellm/bert_gpt4_augmented
 
-# Strong model routes to LiteLLM proxy (port 4000) which handles the fallback chain
-strong_model: openai/claude-sonnet-5
-strong_model_api_base: http://localhost:4000/v1
-strong_model_api_key: dummy-key-not-needed
-
-# Weak model routes directly to the always-free Groq tier via LiteLLM
-weak_model: openai/fallback-groq
-weak_model_api_base: http://localhost:4000/v1
-weak_model_api_key: dummy-key-not-needed
+# Gateway (config.yaml) model names the Router picks between.
+# The Interceptor sends the request to the Gateway, which applies the fallback chain.
+strong_model: claude-sonnet-5
+weak_model: fallback-groq

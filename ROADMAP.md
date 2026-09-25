@@ -14,6 +14,8 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 ## Phase 1: Architecture Stabilization & Core Routing
 * ✅ **Unified Service Interceptor (`server.js`):** Express interceptor on port 3000 with a 50MB body-parser limit to handle massive context windows and repository payloads cleanly.
 * ✅ **Dual Route Handling:** Handles both `/chat/completions` and `/v1/chat/completions` to support standard OpenAI-compatible coding extensions and agents.
+* ✅ **Claude Code Support (Anthropic `/v1/messages`):** The Interceptor accepts the Anthropic Messages format alongside OpenAI's, so Claude Code runs through the harness with `ANTHROPIC_BASE_URL=http://localhost:3000`. The Gateway translates tool use and streaming for non-Anthropic models; the Interceptor strips unsigned thinking blocks from history (no provider accepts them back) and ignores `<system-reminder>` text when routing.
+* ✅ **Router as a Classifier Service (`router.py`):** RouteLLM's bundled proxy server rejected tool schemas, couldn't carry the Anthropic format, and needed an OpenAI key even for BERT. The Router now only answers "strong or weak?"; the Interceptor sends the request to the Gateway itself. If the Router is down, requests degrade to the free tier instead of failing.
 * ✅ **LiteLLM Proxy Tier (Port 4000):** Central fallback chain via `config.yaml`, routing across local wrappers and free-tier APIs.
 * **Local Qwen 3 Coder Launch Flags:** Finish hardening `launch-local.sh` for Qwen 3 Coder:
   * ✅ Clamp local context length (`-c 8192`) to prevent VRAM memory crashes.

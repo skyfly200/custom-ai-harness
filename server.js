@@ -31,13 +31,19 @@ function latestUserText(messages) {
     for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
         if (msg.role !== 'user') continue;
-        if (typeof msg.content === 'string') return msg.content;
-        if (Array.isArray(msg.content)) {
-            const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join(' ');
-            if (text) return text;
-        }
+        const raw = typeof msg.content === 'string' ? msg.content
+            : Array.isArray(msg.content) ? msg.content.filter(b => b.type === 'text').map(b => b.text).join(' ')
+            : '';
+        const text = stripInjectedContext(raw);
+        if (text) return text;
     }
     return '';
+}
+
+// Claude Code wraps harness context (reminders, skill listings) in
+// <system-reminder> tags inside user turns; none of it was typed by the user.
+function stripInjectedContext(text) {
+    return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
 }
 
 /**
@@ -56,14 +62,69 @@ function deriveThreshold(messages) {
     return 0.5; // balanced default
 }
 
+const ROUTER_URL = process.env.ROUTER_URL || 'http://localhost:6060';
+const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:4000';
+const ROUTER_DOWN_MODEL = 'fallback-groq'; // free tier when the Router can't be reached
+// Claude Code asks for more output than Groq's 65,536 limit, which fails every
+// Groq call and pushes everything down the fallback chain. 32k fits every tier.
+const MAX_OUTPUT_TOKENS = 32768;
+
+function capMaxTokens(value) {
+    return typeof value === 'number' ? Math.min(value, MAX_OUTPUT_TOKENS) : value;
+}
+
 /**
- * Build a valid three-part RouteLLM model string.
- * Format required: router-bert-<threshold>
- * Prevents ValueError crashes in the RouteLLM parser.
+ * Ask the Router (router.py, local BERT) which Gateway model should serve
+ * this request. Never throws: a down Router degrades to the free tier.
  */
-function buildRouteLLMModel(threshold) {
-    const clamped = Math.min(1.0, Math.max(0.0, threshold));
-    return `router-bert-${clamped.toFixed(2)}`;
+async function routeModel(messages) {
+    const threshold = deriveThreshold(messages);
+    try {
+        const res = await fetch(`${ROUTER_URL}/route`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ prompt: latestUserText(messages), threshold }),
+            signal: AbortSignal.timeout(10000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { model, win_rate } = await res.json();
+        return { model, threshold, winRate: win_rate };
+    } catch (err) {
+        console.warn(`Router unavailable (${err.message}); using ${ROUTER_DOWN_MODEL}`);
+        return { model: ROUTER_DOWN_MODEL, threshold, winRate: null };
+    }
+}
+
+function logRoute(path, { model, threshold, winRate }) {
+    console.log(`${path} → ${model} (threshold ${threshold}, strong win rate ${winRate ?? 'n/a'})`);
+}
+
+// Caveman goes last in the system prompt, after any cached blocks.
+function withCavemanOpenAI(messages) {
+    const [first, ...rest] = messages;
+    if (first?.role !== 'system') return [{ role: 'system', content: CAVEMAN_PROMPT }, ...messages];
+    const content = Array.isArray(first.content)
+        ? [...first.content, { type: 'text', text: CAVEMAN_PROMPT }]
+        : `${first.content}\n\n${CAVEMAN_PROMPT}`;
+    return [{ ...first, content }, ...rest];
+}
+
+// Thinking blocks produced by non-Anthropic models (via the Gateway) carry no
+// signature. No provider accepts them back: Anthropic rejects the missing
+// signature and Groq rejects the reasoning_content they translate into.
+// Signed blocks from real Claude models are kept, as Anthropic requires.
+function dropUnsignedThinking(messages) {
+    return messages.map(msg => {
+        if (msg.role !== 'assistant' || !Array.isArray(msg.content)) return msg;
+        const content = msg.content.filter(b => b.type !== 'thinking' || b.signature);
+        return content.length ? { ...msg, content } : msg;
+    });
+}
+
+function withCavemanAnthropic(system) {
+    if (!system) return CAVEMAN_PROMPT;
+    if (Array.isArray(system)) return [...system, { type: 'text', text: CAVEMAN_PROMPT }];
+    return `${system}\n\n${CAVEMAN_PROMPT}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,35 +226,46 @@ function applyContextAnchor(messages) {
     });
 }
 
-app.post(['/chat/completions', '/v1/chat/completions'], (req, res, next) => {
-    let messages = req.body.messages || [];
-    const hasSystem = messages.length > 0 && messages[0].role === 'system';
-
-    if (hasSystem) {
-        messages[0].content += `\n\n${CAVEMAN_PROMPT}`;
-    } else {
-        messages.unshift({ role: 'system', content: CAVEMAN_PROMPT });
-    }
-
-    // Context anchor first, on the raw results, then Headroom compression
-    messages = applyHeadroom(applyContextAnchor(messages));
-    req.body.messages = messages;
-
-    const threshold = deriveThreshold(messages);
-    req.body.model = buildRouteLLMModel(threshold);
-
-    next();
-}, createProxyMiddleware({
-    target: 'http://localhost:6060', // RouteLLM BERT classifier (port 6060)
+// Everything goes to the Gateway (LiteLLM), which speaks both the OpenAI and
+// the Anthropic Messages formats and applies the fallback chain.
+const toGateway = createProxyMiddleware({
+    target: GATEWAY_URL,
     changeOrigin: true,
-    pathRewrite: () => '/v1/chat/completions',
     on: {
         proxyReq: fixRequestBody,
     }
-}));
+});
+
+// OpenAI-compatible agents (Cursor, Aider, Continue, ...)
+app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) => {
+    // Context anchor first, on the raw results, then Headroom compression
+    const messages = applyHeadroom(applyContextAnchor(withCavemanOpenAI(req.body.messages || [])));
+    const route = await routeModel(messages);
+    req.body.messages = messages;
+    req.body.model = route.model;
+    req.body.max_tokens = capMaxTokens(req.body.max_tokens);
+    req.body.max_completion_tokens = capMaxTokens(req.body.max_completion_tokens);
+    logRoute(req.path, route);
+    next();
+}, toGateway);
+
+// Anthropic Messages API: Claude Code with ANTHROPIC_BASE_URL=http://localhost:3000
+app.post('/v1/messages', async (req, res, next) => {
+    const messages = applyHeadroom(applyContextAnchor(dropUnsignedThinking(req.body.messages || [])));
+    const route = await routeModel(messages);
+    req.body.system = withCavemanAnthropic(req.body.system);
+    req.body.messages = messages;
+    req.body.model = route.model;
+    req.body.max_tokens = capMaxTokens(req.body.max_tokens);
+    logRoute(req.path, route);
+    next();
+}, toGateway);
+
+// Anything else (token counting, model listing) passes through untouched
+app.use(toGateway);
 
 if (require.main === module) {
     app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
 }
 
-module.exports = { applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold };
+module.exports = { applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking };

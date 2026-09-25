@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { applyContextAnchor, applyHeadroom, deriveThreshold } = require('../server');
+const { applyContextAnchor, applyHeadroom, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking } = require('../server');
 
 const FILE = 'const x = 1;\n'.repeat(100); // well over the anchor minimum
 
@@ -68,4 +68,32 @@ test('Headroom still compresses tool results after the refactor', () => {
     const out = applyHeadroom([{ role: 'tool', tool_call_id: 'a', content: 'x'.repeat(10000) }]);
     assert.ok(out[0].content.length <= 4000);
     assert.match(out[0].content, /chars truncated by harness/);
+});
+
+test('routing ignores Claude Code system-reminder blocks in user turns', () => {
+    const messages = [{ role: 'user', content: [
+        { type: 'text', text: '<system-reminder>Skills: debug, refactor, design</system-reminder>' },
+        { type: 'text', text: 'format this file' },
+    ] }];
+    assert.equal(deriveThreshold(messages), 0.8);
+});
+
+test('Caveman is appended after Anthropic system blocks, keeping cache markers', () => {
+    const cached = { type: 'text', text: 'base', cache_control: { type: 'ephemeral' } };
+    const out = withCavemanAnthropic([cached]);
+    assert.deepEqual(out[0], cached);
+    assert.match(out[1].text, /Be terse/);
+    assert.match(withCavemanAnthropic('base'), /^base\n\nBe terse/);
+    assert.match(withCavemanAnthropic(undefined), /^Be terse/);
+});
+
+test('unsigned thinking is dropped from history, signed Claude thinking is kept', () => {
+    const out = dropUnsignedThinking([
+        { role: 'assistant', content: [
+            { type: 'thinking', thinking: 'gpt-oss reasoning', signature: '' },
+            { type: 'thinking', thinking: 'claude reasoning', signature: 'sig' },
+            { type: 'tool_use', id: 't1', name: 'Read', input: {} },
+        ] },
+    ]);
+    assert.deepEqual(out[0].content.map(b => b.signature ?? b.type), ['sig', 'tool_use']);
 });

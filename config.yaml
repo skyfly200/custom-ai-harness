@@ -28,6 +28,7 @@ model_list:
       model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
       max_parallel_requests: 3
+      additional_drop_params: ["prompt_cache_key"] # LiteLLM adds it for Claude Code; Groq rejects it
 
   # Tier 2b: Groq — explicit alias used by RouteLLM weak-model routing
   - model_name: fallback-groq-20b
@@ -35,6 +36,7 @@ model_list:
       model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
       max_parallel_requests: 3
+      additional_drop_params: ["prompt_cache_key"] # LiteLLM adds it for Claude Code; Groq rejects it
 
   # Tier 3: OpenRouter auto-free (catch-all when Groq quota exhausted)
   - model_name: fallback-openrouter
@@ -47,6 +49,9 @@ model_list:
 # Deprecated Llama 3/3.1 variants are intentionally absent; GPT-OSS 20B
 # is the active free-tier workhorse across all fallback paths.
 litellm_settings:
+  # Drop request fields a provider doesn't support (Claude Code sends Anthropic-only
+  # ones like thinking) instead of failing the call.
+  drop_params: true
   fallbacks:
     - {"claude-3-5-sonnet": ["fallback-groq", "fallback-groq-20b", "fallback-openrouter"]}
     - {"claude-sonnet-5":   ["fallback-groq", "fallback-groq-20b", "fallback-openrouter"]}

@@ -5,7 +5,7 @@ A system that plans and executes coding work across frontier, free-tier, and loc
 ## Language
 
 **Model Layer**:
-The stateless request-routing stack (Interceptor → Router → Gateway) that any agent can point at as an OpenAI-compatible endpoint.
+The stateless request-routing stack (Interceptor → Router → Gateway) that any agent can point at as an OpenAI- or Anthropic-compatible endpoint.
 _Avoid_: proxy (ambiguous; names the whole stack or one hop)
 
 **Interceptor**:
@@ -53,7 +53,7 @@ _Avoid_: Tier 0 (a tier is a Model Layer concept; Pre-triage is a step)
 
 - The **Orchestrator** consumes the **Model Layer**; the **Model Layer** never knows the **Orchestrator** exists.
 - The **Model Layer** is the core and runs on its own; the **Orchestrator** is an optional add-on (ADR 0002).
-- The **Model Layer** is a chain: **Interceptor** → **Router** → **Gateway** → provider.
+- The **Model Layer** is a chain: **Interceptor** → **Gateway** → provider. The **Interceptor** consults the **Router** to pick the model; the **Router** never forwards a request.
 - The **Orchestrator** dispatches each **Build Ticket** to one **Worker** and runs an **Audit** on the pull request it delivers.
 - After 2 rejected **Audits** a **Build Ticket** gets one **Escalation** to a stronger **Worker**, then goes to the human.
 - The **Orchestrator** only works on AFK tickets; HITL decisions happen in the human's own sessions.

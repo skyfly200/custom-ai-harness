@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
+const { countTokens, isEnabled, recordObservation } = require('./utils/tokenCounter');
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -105,6 +106,27 @@ async function routeModel(body) {
 
 function logRoute(path, { model, threshold, winRate }) {
     console.log(`${path} → ${model} (threshold ${threshold}, strong win rate ${winRate ?? 'n/a'})`);
+}
+
+/**
+ * Token counting (opt‑in). When enabled we log estimated in/out tokens and
+ * feed the actual output count back into the correction factor so the estimate
+ * learns from real data.
+ */
+function logTokens(req, label) {
+    if (!isEnabled) return;
+    const inText = JSON.stringify(req.body);
+    const inTok = countTokens(inText);
+    console.info(`[tokens] ${label} in=${inTok}`);
+    const oldSend = res.send;
+    res.send = function (body) {
+        try {
+            const outText = typeof body === 'string' ? body : JSON.stringify(body);
+-ish);
+            const outTok =;}
+        } catch {}
+        return oldSend.call(this, body);
+    };
 }
 
 // Caveman goes last in the system prompt, after any cached blocks.

@@ -64,7 +64,7 @@ function deriveThreshold(messages) {
 
 const ROUTER_URL = process.env.ROUTER_URL || 'http://localhost:6060';
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:4000';
-const ROUTER_DOWN_MODEL = 'fallback-groq'; // free tier when the Router can't be reached
+const ROUTER_DOWN_MODEL = 'fallback-openrouter'; // free tier with no size cap, when the Router can't be reached
 // Claude Code asks for more output than Groq's 65,536 limit, which fails every
 // Groq call and pushes everything down the fallback chain. 32k fits every tier.
 const MAX_OUTPUT_TOKENS = 32768;
@@ -73,17 +73,25 @@ function capMaxTokens(value) {
     return typeof value === 'number' ? Math.min(value, MAX_OUTPUT_TOKENS) : value;
 }
 
+// Rough size of a request as providers count it: input (~4 chars per token,
+// tools and system prompt included) plus the output it asks for.
+function estimateTokens(body) {
+    const output = body.max_tokens ?? body.max_completion_tokens ?? 0;
+    return Math.ceil(JSON.stringify(body).length / 4) + output;
+}
+
 /**
  * Ask the Router (router.py, local BERT) which Gateway model should serve
  * this request. Never throws: a down Router degrades to the free tier.
  */
-async function routeModel(messages) {
+async function routeModel(body) {
+    const { messages } = body;
     const threshold = deriveThreshold(messages);
     try {
         const res = await fetch(`${ROUTER_URL}/route`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ prompt: latestUserText(messages), threshold }),
+            body: JSON.stringify({ prompt: latestUserText(messages), threshold, tokens: estimateTokens(body) }),
             signal: AbortSignal.timeout(10000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -239,24 +247,22 @@ const toGateway = createProxyMiddleware({
 // OpenAI-compatible agents (Cursor, Aider, Continue, ...)
 app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) => {
     // Context anchor first, on the raw results, then Headroom compression
-    const messages = applyHeadroom(applyContextAnchor(withCavemanOpenAI(req.body.messages || [])));
-    const route = await routeModel(messages);
-    req.body.messages = messages;
-    req.body.model = route.model;
+    req.body.messages = applyHeadroom(applyContextAnchor(withCavemanOpenAI(req.body.messages || [])));
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);
     req.body.max_completion_tokens = capMaxTokens(req.body.max_completion_tokens);
+    const route = await routeModel(req.body);
+    req.body.model = route.model;
     logRoute(req.path, route);
     next();
 }, toGateway);
 
 // Anthropic Messages API: Claude Code with ANTHROPIC_BASE_URL=http://localhost:3000
 app.post('/v1/messages', async (req, res, next) => {
-    const messages = applyHeadroom(applyContextAnchor(dropUnsignedThinking(req.body.messages || [])));
-    const route = await routeModel(messages);
+    req.body.messages = applyHeadroom(applyContextAnchor(dropUnsignedThinking(req.body.messages || [])));
     req.body.system = withCavemanAnthropic(req.body.system);
-    req.body.messages = messages;
-    req.body.model = route.model;
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);
+    const route = await routeModel(req.body);
+    req.body.model = route.model;
     logRoute(req.path, route);
     next();
 }, toGateway);

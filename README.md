@@ -30,12 +30,16 @@ Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
         │  ◄──► Port 6060 — Router (router.py): local RouteLLM BERT classifier,
         │                   answers "strong or weak?" and nothing else
         │
-        ├─(complex)─► Port 4000 — LiteLLM proxy → Tier 1 local engine (port 8000)
-        │                                        → Groq GPT-OSS 20B fallback
-        │                                        → OpenRouter free-tier catch-all
+        ├─(complex)──────────► Port 4000 — LiteLLM → Tier 1 local engine (port 8000)
+        │                                          → OpenRouter free-tier
+        │                                          → Groq GPT-OSS 120B
         │
-        └─(simple)──► Port 4000 — LiteLLM proxy → Groq GPT-OSS 20B (free tier)
-                                                 → OpenRouter free-tier catch-all
+        ├─(simple, < 7K tok)─► Port 4000 — LiteLLM → Groq GPT-OSS 120B (free tier)
+        │                                          → OpenRouter free-tier
+        │
+        └─(simple, larger)───► Port 4000 — LiteLLM → OpenRouter free-tier
+                               (Groq's free tier caps requests at 8K tokens/min;
+                                every Claude Code request is larger)
 ```
 
 ---
@@ -142,12 +146,12 @@ $env:OPENROUTER_API_KEY = "your_openrouter_key"
 Defines the LiteLLM model list and fallback chain. The fallback order for every strong-model request is:
 
 ```
-Tier 1 local engine → fallback-groq (GPT-OSS 20B) → fallback-groq-20b → fallback-openrouter
+Tier 1 local engine → fallback-openrouter → fallback-groq (GPT-OSS 120B)
 ```
 
-Deprecated Llama 3/3.1 variants are intentionally absent; GPT-OSS 20B is the active free-tier workhorse.
+Deprecated Llama 3/3.1 variants are intentionally absent. Groq serves GPT-OSS 120B: its free tier gives it the same limits as the 20B (8K tokens/min, 1K requests/day), so the bigger model costs nothing extra.
 
-Each deployment sets `max_parallel_requests` (CLI wrapper 1, Groq 3, OpenRouter 5), so bursts queue in the Gateway instead of tripping provider rate limits. The cap is per entry, so aliases for one backend add up.
+Each deployment sets `max_parallel_requests` (CLI wrapper 1, Groq 3, OpenRouter 5), so bursts queue in the Gateway instead of tripping provider rate limits. The cap is per entry, so the two CLI wrapper aliases add up to 2.
 
 ### `routellm-config.yaml`
 

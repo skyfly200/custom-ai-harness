@@ -5,3 +5,9 @@ checkpoint: routellm/bert_gpt4_augmented
 # The Interceptor sends the request to the Gateway, which applies the fallback chain.
 strong_model: claude-sonnet-5
 weak_model: fallback-groq
+
+# Groq's free tier allows 8K tokens per minute, counting requested output.
+# Weak requests estimated above this go to the overflow model instead
+# (every Claude Code request does: its system prompt and tools alone exceed it).
+weak_model_max_tokens: 7000
+weak_model_overflow: fallback-openrouter

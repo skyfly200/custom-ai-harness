@@ -15,6 +15,7 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 * ✅ **Unified Service Interceptor (`server.js`):** Express interceptor on port 3000 with a 50MB body-parser limit to handle massive context windows and repository payloads cleanly.
 * ✅ **Dual Route Handling:** Handles both `/chat/completions` and `/v1/chat/completions` to support standard OpenAI-compatible coding extensions and agents.
 * ✅ **Claude Code Support (Anthropic `/v1/messages`):** The Interceptor accepts the Anthropic Messages format alongside OpenAI's, so Claude Code runs through the harness with `ANTHROPIC_BASE_URL=http://localhost:3000`. The Gateway translates tool use and streaming for non-Anthropic models; the Interceptor strips unsigned thinking blocks from history (no provider accepts them back) and ignores `<system-reminder>` text when routing.
+* ✅ **Size-Aware Free Tier:** Groq's free tier caps every text model at 8K tokens/min (input plus requested output), which no Claude Code request fits under. The Interceptor sends the Router a size estimate; weak requests over 7K tokens go to OpenRouter's free tier instead of failing on Groq first. Groq now serves GPT-OSS 120B, which has the same free limits as the 20B.
 * ✅ **Router as a Classifier Service (`router.py`):** RouteLLM's bundled proxy server rejected tool schemas, couldn't carry the Anthropic format, and needed an OpenAI key even for BERT. The Router now only answers "strong or weak?"; the Interceptor sends the request to the Gateway itself. If the Router is down, requests degrade to the free tier instead of failing.
 * ✅ **LiteLLM Proxy Tier (Port 4000):** Central fallback chain via `config.yaml`, routing across local wrappers and free-tier APIs.
 * **Local Qwen 3 Coder Launch Flags:** Finish hardening `launch-local.sh` for Qwen 3 Coder:
@@ -26,7 +27,7 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 * ✅ **Local BERT Classifier Integration:** RouteLLM on port 6060 uses the local `bert` router instead of matrix factorization (`mf`), bypassing the need for external embedding API keys (`text-embedding-3-small`).
 * ✅ **Three-Part Model Mutation:** Strict `router-bert-[threshold]` model names in `server.js` prevent RouteLLM parser crashes (`ValueError`).
 * ✅ **Dynamic Cost Thresholds:** The Interceptor scores only the text typed in the latest user turn (string or text blocks). The system prompt and tool output are never scored, since they mention "test"/"debug"/"design" constantly and pinned nearly every request at the 0.5 default. Turns carrying only tool results keep the routing of the request that started them.
-* ✅ **Concurrency Throttling (Gateway):** Per-deployment `max_parallel_requests` in `config.yaml` (CLI wrapper 1 per alias → 2 total, Groq 3 per alias → 6 total, OpenRouter 5). Bursts queue in LiteLLM instead of tripping provider rate limits. This lives in the Gateway rather than the Interceptor because only the Gateway knows which provider a request finally hits. A local Qwen deployment gets a cap of 10 when it is added to the model list.
+* ✅ **Concurrency Throttling (Gateway):** Per-deployment `max_parallel_requests` in `config.yaml` (CLI wrapper 1 per alias → 2 total, Groq 3, OpenRouter 5). Bursts queue in LiteLLM instead of tripping provider rate limits. This lives in the Gateway rather than the Interceptor because only the Gateway knows which provider a request finally hits. A local Qwen deployment gets a cap of 10 when it is added to the model list.
 * ✅ **Context Anchor (within one request):** A tool result identical to an earlier one in the same request (a re-read file, a re-run command) is replaced with a pointer to the first copy's tool ID. The first copy is always kept, so earlier messages never change and provider prompt caches stay valid. Results under 500 chars, images, and anything the user typed are left alone.
   * Anchoring across requests or model handoffs needs memory the stateless core doesn't have; that part moves to the Orchestrator add-on as **Cross-Session Context Handoff**.
 
@@ -39,7 +40,7 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 ## Phase 4: Local Model Resilience & Lifecycle Management ✅
 * ✅ **Local Engine Hardening (`llama.cpp` / vLLM):** Anti-looping parameters for local models (such as Qwen 3 Coder and Gemma 4) using explicit context limits (`-c 8192`), layer offloading (`-ngl`), and reasoning budget controls (`--reasoning-budget 2048`).
 * ✅ **Non-Breaking Space Validation:** `validate-config.js` enforces valid UTF-8 spacing across configuration directories to prevent silent JSON parser crashes in VS Code extensions.
-* ✅ **Automated Deprecation Fallbacks:** LiteLLM fallback chains substitute deprecated models (such as legacy Llama variants) with active free-tier workhorses like OpenAI GPT-OSS 20B.
+* ✅ **Automated Deprecation Fallbacks:** LiteLLM fallback chains substitute deprecated models (such as legacy Llama variants) with active free-tier workhorses like OpenAI GPT-OSS 120B.
 
 ---
 

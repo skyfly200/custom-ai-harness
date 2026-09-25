@@ -122,8 +122,7 @@ function logTokens(req, label) {
     res.send = function (body) {
         try {
             const outText = typeof body === 'string' ? body : JSON.stringify(body);
--ish);
-            const outTok =;}
+            const outTok = countTokens(outText);
         } catch {}
         return oldSend.call(this, body);
     };

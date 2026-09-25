@@ -9,8 +9,8 @@
     "validate": "node validate-config.js",
     "validate:fix": "node validate-config.js --fix",
     "test": "node --test",
-    "all": "npm run start && npm run compress && npm run validate",
-    "full": "npm run start && npm run compress && npm run validate && npm run test"
+    "all": "concurrently \"npm run start\" \"npm run compress\" \"npm run validate\"",
+    "full": "concurrently \"npm run start\" \"npm run compress\" \"npm run validate\" \"npm run test\""
   },
   "keywords": [],
   "author": "",
@@ -20,5 +20,8 @@
     "dotenv": "^18.0.3",
     "express": "^5.2.1",
     "http-proxy-middleware": "^4.2.0"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }

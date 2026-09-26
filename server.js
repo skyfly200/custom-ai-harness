@@ -84,9 +84,18 @@ function estimateTokens(body) {
 /**
  * Ask the Router (router.py, local BERT) which Gateway model should serve
  * this request. Never throws: a down Router degrades to the free tier.
+ * Requests that include tools always stay on Claude: non-Claude models
+ * respond with text instructions instead of tool calls.
  */
 async function routeModel(body) {
     const { messages } = body;
+    // The wildcard free tier picks models that may not support tool calls.
+    // Prefer local Ollama (zero cost) for tool requests; falls back to the
+    // OpenRouter tool-capable tier if Ollama is unavailable.
+    const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+    if (hasTools) {
+        return { model: 'fallback-ollama', threshold: null, winRate: null, reason: 'tools' };
+    }
     const threshold = deriveThreshold(messages);
     try {
         const res = await fetch(`${ROUTER_URL}/route`, {
@@ -104,8 +113,12 @@ async function routeModel(body) {
     }
 }
 
-function logRoute(path, { model, threshold, winRate }) {
-    console.log(`${path} → ${model} (threshold ${threshold}, strong win rate ${winRate ?? 'n/a'})`);
+function logRoute(path, { model, threshold, winRate, reason }) {
+    if (reason) {
+        console.log(`${path} → ${model} (pinned: ${reason})`);
+    } else {
+        console.log(`${path} → ${model} (threshold ${threshold}, strong win rate ${winRate ?? 'n/a'})`);
+    }
 }
 
 /**

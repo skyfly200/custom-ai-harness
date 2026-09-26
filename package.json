@@ -9,8 +9,9 @@
     "validate": "node validate-config.js",
     "validate:fix": "node validate-config.js --fix",
     "test": "node --test",
-    "all": "concurrently \"npm run start\" \"npm run compress\" \"npm run validate\"",
-    "full": "concurrently \"npm run start\" \"npm run compress\" \"npm run validate\" \"npm run test\""
+    "ollama": "ollama serve",
+    "all": "concurrently \"npm run start\" \"npm run compress\" \"npm run validate\" \"npm run ollama\"",
+    "full": "concurrently \"npm run start\" \"npm run compress\" \"npm run validate\" \"npm run ollama\" \"npm run test\""
   },
   "keywords": [],
   "author": "",

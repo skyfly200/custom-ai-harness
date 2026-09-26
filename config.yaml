@@ -47,6 +47,16 @@ model_list:
       api_key: os.environ/OPENROUTER_API_KEY
       max_parallel_requests: 5
 
+  # Tier 4: Local Ollama — zero API cost, runs on-device.
+  # Qwen2.5-Coder 7B has solid tool/function-calling support for coding tasks.
+  # Requires `ollama serve` to be running locally.
+  - model_name: fallback-ollama
+    litellm_params:
+      model: openai/qwen2.5-coder:7b
+      api_base: http://localhost:11434/v1
+      api_key: dummy
+      max_parallel_requests: 2
+
 # LiteLLM Fallback Chain
 # OpenRouter comes before Groq for strong-model failures: those are mostly
 # Claude Code requests, which Groq's 8K tokens/min limit always rejects.
@@ -55,7 +65,8 @@ litellm_settings:
   # ones like thinking) instead of failing the call.
   drop_params: true
   fallbacks:
-    - {"claude-3-5-sonnet":        ["fallback-openrouter", "fallback-groq"]}
-    - {"claude-sonnet-5":          ["fallback-openrouter", "fallback-groq"]}
-    - {"fallback-groq":            ["fallback-openrouter"]}
-    - {"fallback-openrouter-tools": ["fallback-openrouter", "fallback-groq"]}
+    - {"claude-3-5-sonnet":         ["fallback-openrouter", "fallback-groq"]}
+    - {"claude-sonnet-5":           ["fallback-openrouter", "fallback-groq"]}
+    - {"fallback-groq":             ["fallback-openrouter"]}
+    - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter", "fallback-groq"]}
+    - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter"]}

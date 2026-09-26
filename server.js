@@ -90,10 +90,11 @@ function estimateTokens(body) {
 async function routeModel(body) {
     const { messages } = body;
     // The wildcard free tier picks models that may not support tool calls.
-    // Route tool-bearing requests to a model known to handle them reliably.
+    // Prefer local Ollama (zero cost) for tool requests; falls back to the
+    // OpenRouter tool-capable tier if Ollama is unavailable.
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
     if (hasTools) {
-        return { model: 'fallback-openrouter-tools', threshold: null, winRate: null, reason: 'tools' };
+        return { model: 'fallback-ollama', threshold: null, winRate: null, reason: 'tools' };
     }
     const threshold = deriveThreshold(messages);
     try {

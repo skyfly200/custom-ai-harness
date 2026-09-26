@@ -38,6 +38,15 @@ model_list:
       api_key: os.environ/OPENROUTER_API_KEY
       max_parallel_requests: 5
 
+  # Tier 3b: OpenRouter free model with reliable tool/function-calling support.
+  # Llama 3.3 70B supports the full tool_use spec and handles Claude Code's
+  # multi-tool agentic loops without falling back to text instructions.
+  - model_name: fallback-openrouter-tools
+    litellm_params:
+      model: openrouter/meta-llama/llama-3.3-70b-instruct:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+
 # LiteLLM Fallback Chain
 # OpenRouter comes before Groq for strong-model failures: those are mostly
 # Claude Code requests, which Groq's 8K tokens/min limit always rejects.
@@ -46,6 +55,7 @@ litellm_settings:
   # ones like thinking) instead of failing the call.
   drop_params: true
   fallbacks:
-    - {"claude-3-5-sonnet": ["fallback-openrouter", "fallback-groq"]}
-    - {"claude-sonnet-5":   ["fallback-openrouter", "fallback-groq"]}
-    - {"fallback-groq":     ["fallback-openrouter"]}
+    - {"claude-3-5-sonnet":        ["fallback-openrouter", "fallback-groq"]}
+    - {"claude-sonnet-5":          ["fallback-openrouter", "fallback-groq"]}
+    - {"fallback-groq":            ["fallback-openrouter"]}
+    - {"fallback-openrouter-tools": ["fallback-openrouter", "fallback-groq"]}

@@ -89,9 +89,11 @@ function estimateTokens(body) {
  */
 async function routeModel(body) {
     const { messages } = body;
+    // The wildcard free tier picks models that may not support tool calls.
+    // Route tool-bearing requests to a model known to handle them reliably.
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
     if (hasTools) {
-        return { model: 'claude-sonnet-5', threshold: null, winRate: null, reason: 'tools' };
+        return { model: 'fallback-openrouter-tools', threshold: null, winRate: null, reason: 'tools' };
     }
     const threshold = deriveThreshold(messages);
     try {

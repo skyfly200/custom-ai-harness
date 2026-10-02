@@ -46,6 +46,53 @@ def test_laya_scorer_reads_noul_probability():
     assert calls["text"].endswith("TAIL") and len(calls["text"]) == 10
 
 
+def test_parse_score_handles_reasoning_output():
+    assert router.parse_score("<think>maybe 0.2? no 0.9</think>\nScore: 0.7") == 0.7
+    assert router.parse_score("1.5") == 1.0
+    try:
+        router.parse_score("n/a"); assert False
+    except ValueError:
+        pass
+
+
+def _mock(handler):
+    import httpx
+    real = httpx.Client
+    httpx.Client = lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
+    return lambda: setattr(httpx, "Client", real)
+
+
+def test_systemone_scorer_posts_protocol_and_auth():
+    import httpx, json
+    seen = {}
+    def handler(req):
+        seen.update(url=str(req.url), auth=req.headers.get("authorization"), body=json.loads(req.content))
+        return httpx.Response(200, json={"answers": {"hard": {"noul": 0.42}}})
+    undo = _mock(handler); os.environ["JEV_KEY"] = "k"
+    try:
+        score = router.make_systemone_scorer({"base_url": "http://jev/", "api_key_env": "JEV_KEY", "model": "jev-1"})
+        assert score("hello") == 0.42
+    finally:
+        undo()
+    assert seen["url"] == "http://jev/v1/systemone" and seen["auth"] == "Bearer k"
+    assert seen["body"]["state"] == {"body": "hello"} and seen["body"]["model"] == "jev-1"
+
+
+def test_llm_scorer_parses_chat_completion():
+    import httpx
+    undo = _mock(lambda req: httpx.Response(200, json={"choices": [{"message": {"content": "<think>x</think>0.85"}}]}))
+    try:
+        assert router.make_llm_scorer({"base_url": "http://m/v1", "model": "r1"})("p") == 0.85
+    finally:
+        undo()
+
+
+def test_custom_scorer_loads_factory():
+    import types
+    sys.modules["my_scorer"] = types.SimpleNamespace(make=lambda cfg: (lambda p: 0.5))
+    assert router.make_custom_scorer({"scorer": "my_scorer:make"})("x") == 0.5
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"): f(); print("ok", n)

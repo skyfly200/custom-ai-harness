@@ -1,11 +1,17 @@
 """Router: classifies a prompt as strong or weak with a local classifier.
 
-Two interchangeable backends (config key `backend`):
+Interchangeable backends (config key `backend`); each turns a prompt into the
+strong model's win rate in [0, 1]:
   routellm (default) - RouteLLM's BERT checkpoint
-  laya               - Laya (https://github.com/NandhaKishorM/laya), a
-                       non-autoregressive typed-decision model; asks one yes/no
-                       question ("is this hard?") and uses its probability as
-                       the strong win rate. Multilingual via laya's own Router.
+  laya               - Laya (https://github.com/NandhaKishorM/laya) in-process;
+                       one yes/no question ("needs a strong model?"), its
+                       probability is the win rate
+  systemone          - any server speaking the Jev /v1/systemone protocol:
+                       TypeSafe's hosted Jev, or `laya-serve`
+  llm                - any OpenAI-compatible chat endpoint (a reasoning model
+                       asked to rate difficulty 0-1)
+  custom             - `scorer: "package.module:factory"`; factory(config)
+                       returns a callable prompt -> float
 
     POST /route {"prompt": str, "threshold": float, "tokens": int}
       -> {"model": str, "win_rate": float}
@@ -18,7 +24,9 @@ key even for BERT).
 Run: python router.py [--config routellm-config.yaml] [--port 6060]
 """
 import argparse
+import importlib
 import os
+import re
 
 # RouteLLM builds an OpenAI client at import time for routers we never use.
 os.environ.setdefault("OPENAI_API_KEY", "unused-local-bert-router")
@@ -64,7 +72,77 @@ def make_laya_scorer(config: dict):
     return score
 
 
-BACKENDS = {"routellm": make_routellm_scorer, "laya": make_laya_scorer}
+def _headers(config: dict) -> dict:
+    key = os.environ.get(config.get("api_key_env", ""), "") if config.get("api_key_env") else ""
+    return {config.get("auth_header", "Authorization"): f"Bearer {key}"} if key else {}
+
+
+def make_systemone_scorer(config: dict):
+    """Jev (TypeSafe) or laya-serve: POST {base_url}/v1/systemone."""
+    import httpx
+
+    url = config["base_url"].rstrip("/") + "/v1/systemone"
+    timeout = float(config.get("timeout", 10))
+    client = httpx.Client(headers=_headers(config), timeout=timeout)
+    extra = {"model": config["model"]} if config.get("model") else {}
+    max_chars = int(config.get("max_chars", 2000))
+
+    def score(prompt: str) -> float:
+        body = {"state": {"body": prompt[-max_chars:]}, "questions": LAYA_QUESTION, **extra}
+        res = client.post(url, json=body)
+        res.raise_for_status()
+        return float(res.json()["answers"]["hard"]["noul"])
+
+    return score
+
+
+LLM_SYSTEM = ("You rate how hard a coding request is for an AI model. Reply with only a number "
+              "from 0 (trivial: small edit, simple question, explanation) to 1 (very hard: "
+              "multi-file change, architecture, refactor, subtle bug).")
+
+
+def parse_score(text: str) -> float:
+    """Last number in the reply, after dropping any <think> block; clamped to [0, 1]."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+    nums = re.findall(r"\d*\.?\d+", text)
+    if not nums:
+        raise ValueError(f"no score in model reply: {text[:80]!r}")
+    return min(1.0, max(0.0, float(nums[-1])))
+
+
+def make_llm_scorer(config: dict):
+    """Any OpenAI-compatible /chat/completions endpoint, e.g. a reasoning model."""
+    import httpx
+
+    url = config["base_url"].rstrip("/") + "/chat/completions"
+    client = httpx.Client(headers=_headers(config), timeout=float(config.get("timeout", 30)))
+    max_chars = int(config.get("max_chars", 4000))
+
+    def score(prompt: str) -> float:
+        res = client.post(url, json={
+            "model": config["model"],
+            "max_tokens": int(config.get("max_tokens", 2048)),  # headroom for reasoning tokens
+            "messages": [{"role": "system", "content": LLM_SYSTEM},
+                         {"role": "user", "content": prompt[-max_chars:]}],
+        })
+        res.raise_for_status()
+        return parse_score(res.json()["choices"][0]["message"]["content"] or "")
+
+    return score
+
+
+def make_custom_scorer(config: dict):
+    module, _, name = config["scorer"].partition(":")
+    return getattr(importlib.import_module(module), name)(config)
+
+
+BACKENDS = {
+    "routellm": make_routellm_scorer,
+    "laya": make_laya_scorer,
+    "systemone": make_systemone_scorer,
+    "llm": make_llm_scorer,
+    "custom": make_custom_scorer,
+}
 
 
 class RouteRequest(BaseModel):

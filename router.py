@@ -1,4 +1,11 @@
-"""Router: classifies a prompt as strong or weak with RouteLLM's local BERT model.
+"""Router: classifies a prompt as strong or weak with a local classifier.
+
+Two interchangeable backends (config key `backend`):
+  routellm (default) - RouteLLM's BERT checkpoint
+  laya               - Laya (https://github.com/NandhaKishorM/laya), a
+                       non-autoregressive typed-decision model; asks one yes/no
+                       question ("is this hard?") and uses its probability as
+                       the strong win rate. Multilingual via laya's own Router.
 
     POST /route {"prompt": str, "threshold": float, "tokens": int}
       -> {"model": str, "win_rate": float}
@@ -22,8 +29,42 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 config = {}
-bert = None
+scorer = None  # callable: prompt -> strong win rate in [0, 1]
 app = FastAPI()
+
+LAYA_QUESTION = {
+    "hard": {
+        "type": "noul",
+        "instructions": "Does this coding request need a strong model: multi-file changes, "
+                        "architecture, refactoring, or debugging a subtle bug, rather than "
+                        "a small edit, a simple question or an explanation?",
+    }
+}
+
+
+def make_routellm_scorer(config: dict):
+    from routellm.routers.routers import BERTRouter
+
+    scorer = BACKENDS[config.get("backend", "routellm")](config)
+    return lambda prompt: float(bert.calculate_strong_win_rate(prompt))
+
+
+def make_laya_scorer(config: dict):
+    from laya import Router as LayaRouter
+
+    laya = LayaRouter(preload=bool(config.get("laya_preload", False)))
+    max_chars = int(config.get("laya_max_chars", 2000))  # encoder context is 512-1024 tokens
+    questions = {"hard": {**LAYA_QUESTION["hard"]}}
+
+    def score(prompt: str) -> float:
+        # Keep the tail: the end of a long prompt is the actual ask.
+        result = laya.predict(prompt[-max_chars:], questions)
+        return float(result["answers"]["hard"]["noul"])  # P(yes) = needs strong
+
+    return score
+
+
+BACKENDS = {"routellm": make_routellm_scorer, "laya": make_laya_scorer}
 
 
 class RouteRequest(BaseModel):
@@ -45,19 +86,17 @@ def pick_model(win_rate: float, threshold: float, tokens: int, config: dict) -> 
 
 @app.post("/route")
 def route(req: RouteRequest):
-    win_rate = float(bert.calculate_strong_win_rate(req.prompt))
+    win_rate = scorer(req.prompt)
     return {"model": pick_model(win_rate, req.threshold, req.tokens, config), "win_rate": round(win_rate, 3)}
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "backend": config.get("backend", "routellm")}
 
 
 if __name__ == "__main__":
     import uvicorn
-    from routellm.routers.routers import BERTRouter
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="routellm-config.yaml")
     parser.add_argument("--port", type=int, default=6060)
@@ -65,5 +104,5 @@ if __name__ == "__main__":
 
     with open(args.config, encoding="utf-8") as f:
         config.update(yaml.safe_load(f))
-    bert = BERTRouter(checkpoint_path=config["checkpoint"])
+    scorer = BACKENDS[config.get("backend", "routellm")](config)
     uvicorn.run(app, host="127.0.0.1", port=args.port)

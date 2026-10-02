@@ -11,3 +11,9 @@ weak_model: fallback-groq
 # (every Claude Code request does: its system prompt and tools alone exceed it).
 weak_model_max_tokens: 7000
 weak_model_overflow: fallback-openrouter
+
+# Classifier backend: routellm (default) or laya (pip install laya).
+# laya's checkpoints download from Hugging Face on first use.
+# backend: laya
+# laya_max_chars: 2000   # tail of the prompt sent to laya (encoder context is 512-1024 tokens)
+# laya_preload: false

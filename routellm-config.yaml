@@ -14,6 +14,16 @@ weak_model_overflow: fallback-openrouter
 
 # Classifier backend: routellm (default) | laya | systemone | llm | custom.
 # Each returns the strong model's win rate; the rest of the Router is unchanged.
+
+# Active: the self-hosted Laya server from ./launch-laya.sh. If it is down, the
+# Router errors and the Interceptor sends the request to fallback-openrouter.
+backend: systemone
+base_url: http://127.0.0.1:8001
+max_chars: 2000          # tail of the prompt sent (encoder context is 512-1024 tokens)
+timeout: 5               # under the Interceptor's 10 s wait on the Router
+# api_key_env: LAYA_API_KEY   # when the server runs elsewhere with LAYA_API_KEY set
+
+# -- routellm: the BERT checkpoint above, in-process
 # backend: routellm
 
 # -- laya: in-process (pip install -r requirements-laya.txt; weights come from Hugging Face)

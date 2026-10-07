@@ -54,6 +54,7 @@ Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
 | `routellm-config.yaml` | Router — BERT checkpoint and strong/weak Gateway model names |
 | `.env.example` | Environment variable template — copy to `.env` and fill in keys |
 | `launch-local.sh` | Hardened launcher for llama.cpp / vLLM local engines |
+| `launch-laya.sh` | CPU launcher for the self-hosted Laya server the Router classifies with |
 | `caveman-compress.js` | Standing context trimmer for `CLAUDE.md`, `.qwen/settings.json` |
 | `validate-config.js` | UTF-8 / non-breaking space validator for config directories |
 
@@ -240,6 +241,31 @@ python router.py
 .\.venv\Scripts\Activate.ps1
 python router.py
 ```
+
+#### Router classifier: self-hosted Laya (port 8001)
+
+`routellm-config.yaml` points the Router at a [Laya](https://github.com/NandhaKishorM/laya) server (`backend: systemone`), which answers "does this request need a strong model?" on CPU in a single forward pass. Start it before the Router:
+
+**macOS / Linux**
+```bash
+source .venv/bin/activate
+./launch-laya.sh            # installs laya[serve] with CPU PyTorch on first run
+./launch-laya.sh docker     # or: Laya's own CPU Docker image
+```
+
+**Windows (PowerShell)**
+```powershell
+.\.venv\Scripts\Activate.ps1
+pip install --index-url https://download.pytorch.org/whl/cpu torch
+pip install "laya[serve]"
+$env:LAYA_HOST = "127.0.0.1"; $env:LAYA_PORT = "8001"; $env:LAYA_DEVICE = "cpu"
+$env:LAYA_MODELS = "english"; $env:LAYA_PRELOAD = "1"
+laya-serve
+```
+
+The first start downloads the English checkpoint from Hugging Face. `curl localhost:8001/health` answers once it is loaded. If the server is down, the Router returns an error and the Interceptor sends the request to `fallback-openrouter`.
+
+To host it on another machine, run `LAYA_HOST=0.0.0.0 LAYA_API_KEY=<secret> ./launch-laya.sh` there, then set `base_url` to that machine and uncomment `api_key_env: LAYA_API_KEY` (export the same key in the Router's shell). To go back to the BERT classifier, set `backend: routellm`.
 
 ### 4. Node.js interceptor (port 3000)
 

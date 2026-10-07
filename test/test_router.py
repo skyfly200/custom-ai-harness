@@ -40,9 +40,14 @@ def test_laya_scorer_reads_noul_probability():
         def predict(self, text, questions):
             calls["text"] = text
             return {"answers": {"hard": {"noul": 0.83}}}
+    real = sys.modules.get("laya")
     sys.modules["laya"] = types.SimpleNamespace(Router=Fake)
-    score = router.make_laya_scorer({"laya_max_chars": 10})
-    assert score("a" * 50 + "TAIL") == 0.83
+    try:
+        score = router.make_laya_scorer({"laya_max_chars": 10})
+        assert score("a" * 50 + "TAIL") == 0.83
+    finally:  # don't leak the fake into test_router_backends.py
+        if real is None: sys.modules.pop("laya")
+        else: sys.modules["laya"] = real
     assert calls["text"].endswith("TAIL") and len(calls["text"]) == 10
 
 

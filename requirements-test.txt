@@ -1,0 +1,8 @@
+# Router tests: python -m pytest test/
+pytest
+httpx
+fastapi
+uvicorn
+pyyaml
+routellm
+laya[serve]

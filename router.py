@@ -53,7 +53,7 @@ LAYA_QUESTION = {
 def make_routellm_scorer(config: dict):
     from routellm.routers.routers import BERTRouter
 
-    scorer = BACKENDS[config.get("backend", "routellm")](config)
+    bert = BERTRouter(checkpoint_path=config["checkpoint"])
     return lambda prompt: float(bert.calculate_strong_win_rate(prompt))
 
 
@@ -162,6 +162,15 @@ def pick_model(win_rate: float, threshold: float, tokens: int, config: dict) -> 
     return config["weak_model"]
 
 
+def load_config(path: str) -> None:
+    """Read the YAML config and build the configured backend's scorer."""
+    global scorer
+    with open(path, encoding="utf-8") as f:
+        config.clear()
+        config.update(yaml.safe_load(f))
+    scorer = BACKENDS[config.get("backend", "routellm")](config)
+
+
 @app.post("/route")
 def route(req: RouteRequest):
     win_rate = scorer(req.prompt)
@@ -179,8 +188,5 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="routellm-config.yaml")
     parser.add_argument("--port", type=int, default=6060)
     args = parser.parse_args()
-
-    with open(args.config, encoding="utf-8") as f:
-        config.update(yaml.safe_load(f))
-    scorer = BACKENDS[config.get("backend", "routellm")](config)
+    load_config(args.config)
     uvicorn.run(app, host="127.0.0.1", port=args.port)

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { applyContextAnchor, applyHeadroom, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking } = require('../server');
+const { applyContextAnchor, applyHeadroom, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking } = require('../utils/messageTransforms');
 
 const FILE = 'const x = 1;\n'.repeat(100); // well over the anchor minimum
 

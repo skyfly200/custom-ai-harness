@@ -54,6 +54,7 @@ Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
 | `routellm-config.yaml` | Router — BERT checkpoint and strong/weak Gateway model names |
 | `.env.example` | Environment variable template — copy to `.env` and fill in keys |
 | `launch-local.sh` | Hardened launcher for llama.cpp / vLLM local engines |
+| `launch-laya.sh` | CPU launcher for the self-hosted Laya server the Router classifies with |
 | `caveman-compress.js` | Standing context trimmer for `CLAUDE.md`, `.qwen/settings.json` |
 | `validate-config.js` | UTF-8 / non-breaking space validator for config directories |
 
@@ -175,7 +176,7 @@ Every backend turns the prompt into the strong model's win rate in [0, 1]; the t
 
 ```yaml
 backend: systemone
-base_url: https://api.example-jev-host.com   # or http://localhost:8000 for laya-serve
+base_url: https://api.typesafe.ai   # or http://localhost:8001 for laya-serve (launch-laya.sh)
 api_key_env: JEV_API_KEY
 ```
 
@@ -240,6 +241,37 @@ python router.py
 .\.venv\Scripts\Activate.ps1
 python router.py
 ```
+
+#### Router classifier: Jev, or self-hosted Laya
+
+`routellm-config.yaml` points the Router at TypeSafe's hosted [Jev](https://api.typesafe.ai) (`backend: systemone`), which answers "does this request need a strong model?" with nothing to run locally. The Router does not read `.env`, so export the key in its shell before starting it:
+
+```bash
+export JEV_API_KEY=your_typesafe_key        # PowerShell: $env:JEV_API_KEY = "your_typesafe_key"
+```
+
+If Jev errors or takes longer than `timeout` (5 s), the Router returns an error and the Interceptor sends the request to `fallback-openrouter`.
+
+To run the same classifier yourself instead, start a [Laya](https://github.com/NandhaKishorM/laya) server on CPU (it speaks the same protocol) and set `base_url: http://127.0.0.1:8001`, removing `api_key_env` and `model`:
+
+**macOS / Linux**
+```bash
+source .venv/bin/activate
+./launch-laya.sh            # installs laya[serve] with CPU PyTorch on first run
+./launch-laya.sh docker     # or: Laya's own CPU Docker image
+```
+
+**Windows (PowerShell)**
+```powershell
+.\.venv\Scripts\Activate.ps1
+pip install --index-url https://download.pytorch.org/whl/cpu torch
+pip install "laya[serve]"
+$env:LAYA_HOST = "127.0.0.1"; $env:LAYA_PORT = "8001"; $env:LAYA_DEVICE = "cpu"
+$env:LAYA_MODELS = "english"; $env:LAYA_PRELOAD = "1"
+laya-serve
+```
+
+The first start downloads the English checkpoint from Hugging Face; `curl localhost:8001/health` answers once it is loaded. To host it on another machine, run `LAYA_HOST=0.0.0.0 LAYA_API_KEY=<secret> ./launch-laya.sh` there and set `base_url` to that machine with `api_key_env: LAYA_API_KEY`. To go back to the BERT classifier, set `backend: routellm`.
 
 ### 4. Node.js interceptor (port 3000)
 

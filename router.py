@@ -8,6 +8,7 @@ strong model's win rate in [0, 1]:
                        probability is the win rate
   systemone          - any server speaking the Jev /v1/systemone protocol:
                        TypeSafe's hosted Jev, or `laya-serve`
+                       (launch-laya.sh)
   llm                - any OpenAI-compatible chat endpoint (a reasoning model
                        asked to rate difficulty 0-1)
   custom             - `scorer: "package.module:factory"`; factory(config)

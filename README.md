@@ -176,7 +176,7 @@ Every backend turns the prompt into the strong model's win rate in [0, 1]; the t
 
 ```yaml
 backend: systemone
-base_url: https://api.example-jev-host.com   # or http://localhost:8000 for laya-serve
+base_url: https://api.typesafe.ai   # or http://localhost:8001 for laya-serve (launch-laya.sh)
 api_key_env: JEV_API_KEY
 ```
 
@@ -242,9 +242,17 @@ python router.py
 python router.py
 ```
 
-#### Router classifier: self-hosted Laya (port 8001)
+#### Router classifier: Jev, or self-hosted Laya
 
-`routellm-config.yaml` points the Router at a [Laya](https://github.com/NandhaKishorM/laya) server (`backend: systemone`), which answers "does this request need a strong model?" on CPU in a single forward pass. Start it before the Router:
+`routellm-config.yaml` points the Router at TypeSafe's hosted [Jev](https://api.typesafe.ai) (`backend: systemone`), which answers "does this request need a strong model?" with nothing to run locally. The Router does not read `.env`, so export the key in its shell before starting it:
+
+```bash
+export JEV_API_KEY=your_typesafe_key        # PowerShell: $env:JEV_API_KEY = "your_typesafe_key"
+```
+
+If Jev errors or takes longer than `timeout` (5 s), the Router returns an error and the Interceptor sends the request to `fallback-openrouter`.
+
+To run the same classifier yourself instead, start a [Laya](https://github.com/NandhaKishorM/laya) server on CPU (it speaks the same protocol) and set `base_url: http://127.0.0.1:8001`, removing `api_key_env` and `model`:
 
 **macOS / Linux**
 ```bash
@@ -263,9 +271,7 @@ $env:LAYA_MODELS = "english"; $env:LAYA_PRELOAD = "1"
 laya-serve
 ```
 
-The first start downloads the English checkpoint from Hugging Face. `curl localhost:8001/health` answers once it is loaded. If the server is down, the Router returns an error and the Interceptor sends the request to `fallback-openrouter`.
-
-To host it on another machine, run `LAYA_HOST=0.0.0.0 LAYA_API_KEY=<secret> ./launch-laya.sh` there, then set `base_url` to that machine and uncomment `api_key_env: LAYA_API_KEY` (export the same key in the Router's shell). To go back to the BERT classifier, set `backend: routellm`.
+The first start downloads the English checkpoint from Hugging Face; `curl localhost:8001/health` answers once it is loaded. To host it on another machine, run `LAYA_HOST=0.0.0.0 LAYA_API_KEY=<secret> ./launch-laya.sh` there and set `base_url` to that machine with `api_key_env: LAYA_API_KEY`. To go back to the BERT classifier, set `backend: routellm`.
 
 ### 4. Node.js interceptor (port 3000)
 

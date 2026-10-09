@@ -159,6 +159,28 @@ Configures `router.py`: the local RouteLLM `bert` checkpoint (no external embedd
 
 RouteLLM's bundled `openai_server` is not used: it rejects tool schemas, can't carry the Anthropic format, and needs an `OPENAI_API_KEY` even for BERT.
 
+#### Choosing a classifier: `backend:`
+
+Every backend turns the prompt into the strong model's win rate in [0, 1]; the threshold and overflow rules are the same for all of them. Set one in `routellm-config.yaml` (the file has a commented block for each):
+
+| `backend:` | What scores the prompt | Keys it reads | Install |
+|---|---|---|---|
+| `routellm` (default) | RouteLLM BERT, in-process | `checkpoint` | `pip install routellm` |
+| `laya` | [Laya](https://github.com/NandhaKishorM/laya), in-process: P(yes) for "does this need a strong model?" | `laya_max_chars` (2000), `laya_preload` (false) | `pip install -r requirements-laya.txt` |
+| `systemone` | A server speaking the Jev `POST /v1/systemone` protocol: TypeSafe Jev, or a local `laya-serve` | `base_url`, `api_key_env`, `auth_header` (Authorization), `model`, `max_chars` (2000), `timeout` (10) | `pip install httpx` |
+| `llm` | Any OpenAI-compatible `/chat/completions` model asked to rate difficulty 0 to 1; `<think>` blocks are ignored | `base_url`, `model`, `api_key_env`, `max_tokens` (2048), `max_chars` (4000), `timeout` (30) | `pip install httpx` |
+| `custom` | Your `factory(config)` returning `prompt -> float` | `scorer: "package.module:factory"` | |
+
+`api_key_env` names the environment variable holding the key, so the key itself never goes in the file. For example, Jev:
+
+```yaml
+backend: systemone
+base_url: https://api.example-jev-host.com   # or http://localhost:8000 for laya-serve
+api_key_env: JEV_API_KEY
+```
+
+`GET /health` on the Router reports which backend is running.
+
 ---
 
 ## Running the stack
@@ -279,8 +301,19 @@ The threshold is encoded as `router-bert-<threshold>` — the strict three-part 
 ## Tests
 
 ```bash
-npm test
+npm test                                   # Interceptor (Node)
+pip install -r requirements-test.txt
+python -m pytest test/                     # Router: contract tests and every backend end to end
 ```
+
+`test/test_router_backends.py` starts the real Router for each backend and calls `/route` over HTTP. It runs RouteLLM on a tiny BERT checkpoint built on the spot, the real `laya` Router and a real `laya-serve` (the Jev protocol, with auth), a local stand-in for a reasoning model, and a custom scorer; only model weights and paid endpoints are faked. To run against the real thing, set any of:
+
+| Variable | Runs |
+|---|---|
+| `ROUTER_LIVE_ROUTELLM=1` | the `routellm/bert_gpt4_augmented` checkpoint (downloads from Hugging Face) |
+| `ROUTER_LIVE_LAYA=1` | real Laya weights (downloads from Hugging Face) |
+| `ROUTER_LIVE_JEV_URL` (+ `ROUTER_LIVE_JEV_KEY`, `ROUTER_LIVE_JEV_MODEL`) | a real Jev or `laya-serve` |
+| `ROUTER_LIVE_LLM_URL` + `ROUTER_LIVE_LLM_MODEL` (+ `ROUTER_LIVE_LLM_KEY`) | a real OpenAI-compatible reasoning model |
 
 ---
 

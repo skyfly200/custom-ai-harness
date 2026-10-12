@@ -23,6 +23,6 @@
     "http-proxy-middleware": "^4.2.0"
   },
   "devDependencies": {
-    "concurrently": "^10.0.5"
+    "concurrently": "^10.0.6"
   }
 }

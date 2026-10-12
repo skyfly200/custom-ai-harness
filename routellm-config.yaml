@@ -15,16 +15,16 @@ weak_model_overflow: fallback-openrouter
 # Classifier backend: routellm (default) | laya | systemone | llm | custom.
 # Each returns the strong model's win rate; the rest of the Router is unchanged.
 
-# Active: TypeSafe's hosted Jev. Export JEV_API_KEY in the Router's shell. If Jev
-# errors or times out, the Interceptor sends the request to fallback-openrouter.
+# Active: TypeSafe's Jev through OpenRouter, with the OPENROUTER_API_KEY from .env.
+# If Jev errors or times out, the Interceptor sends the request to fallback-openrouter.
 backend: systemone
-base_url: https://api.typesafe.ai
-api_key_env: JEV_API_KEY
-model: jev-latest
+base_url: https://openrouter.ai/api      # the Router appends /v1/systemone
+api_key_env: OPENROUTER_API_KEY
+model: jev-latest                        # or pin a version, e.g. jev-1.13
 max_chars: 2000          # tail of the prompt sent
 timeout: 5               # under the Interceptor's 10 s wait on the Router
 
-# -- self-hosted Laya instead (./launch-laya.sh, same protocol, no key on localhost)
+# -- Laya on your own machine instead (./launch-laya.sh, same protocol, no key on localhost)
 # base_url: http://127.0.0.1:8001
 # and drop api_key_env and model
 
@@ -38,8 +38,8 @@ timeout: 5               # under the Interceptor's 10 s wait on the Router
 
 # -- systemone: TypeSafe Jev, or a running `laya-serve`, via POST /v1/systemone
 # backend: systemone
-# base_url: https://api.typesafe.ai               # or http://localhost:8001 for launch-laya.sh
-# api_key_env: JEV_API_KEY                      # name of the env var holding the key (optional)
+# base_url: https://openrouter.ai/api            # Jev via OpenRouter, https://api.typesafe.ai direct, or http://localhost:8001 for launch-laya.sh
+# api_key_env: OPENROUTER_API_KEY               # name of the env var holding the key (optional)
 # auth_header: Authorization                    # header that gets "Bearer <key>"
 # model: jev-latest                             # optional
 

@@ -183,8 +183,21 @@ def health():
     return {"status": "ok", "backend": config.get("backend", "routellm")}
 
 
+def load_dotenv(path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")) -> None:
+    """Fill unset variables from .env, the file the Interceptor reads, so API keys live in one place."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                key, sep, value = line.strip().partition("=")
+                if sep and key and not key.startswith("#"):
+                    os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+    except FileNotFoundError:
+        pass
+
+
 if __name__ == "__main__":
     import uvicorn
+    load_dotenv()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="routellm-config.yaml")
     parser.add_argument("--port", type=int, default=6060)

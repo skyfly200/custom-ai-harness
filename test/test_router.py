@@ -51,6 +51,17 @@ def test_laya_scorer_reads_noul_probability():
     assert calls["text"].endswith("TAIL") and len(calls["text"]) == 10
 
 
+def test_load_dotenv_fills_only_unset_keys(tmp_path=None):
+    import tempfile
+    path = os.path.join(tempfile.mkdtemp(), ".env")
+    with open(path, "w") as f:
+        f.write('# comment\nDOTENV_A="from-file"\nDOTENV_B=from-file\nnot a pair\n')
+    os.environ["DOTENV_B"] = "from-shell"
+    router.load_dotenv(path)
+    assert os.environ["DOTENV_A"] == "from-file" and os.environ["DOTENV_B"] == "from-shell"
+    router.load_dotenv(path + ".missing")  # no file is fine
+
+
 def test_parse_score_handles_reasoning_output():
     assert router.parse_score("<think>maybe 0.2? no 0.9</think>\nScore: 0.7") == 0.7
     assert router.parse_score("1.5") == 1.0

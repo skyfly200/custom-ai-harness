@@ -176,8 +176,9 @@ Every backend turns the prompt into the strong model's win rate in [0, 1]; the t
 
 ```yaml
 backend: systemone
-base_url: https://api.typesafe.ai   # or http://localhost:8001 for laya-serve (launch-laya.sh)
-api_key_env: JEV_API_KEY
+base_url: https://openrouter.ai/api   # Jev via OpenRouter, or http://localhost:8001 for laya-serve (launch-laya.sh)
+api_key_env: OPENROUTER_API_KEY
+model: jev-latest
 ```
 
 `GET /health` on the Router reports which backend is running.
@@ -242,36 +243,44 @@ python router.py
 python router.py
 ```
 
-#### Router classifier: Jev, or self-hosted Laya
+#### Router classifier: Jev through OpenRouter
 
-`routellm-config.yaml` points the Router at TypeSafe's hosted [Jev](https://api.typesafe.ai) (`backend: systemone`), which answers "does this request need a strong model?" with nothing to run locally. The Router does not read `.env`, so export the key in its shell before starting it:
+`routellm-config.yaml` points the Router at TypeSafe's [Jev on OpenRouter](https://openrouter.ai/typesafe) (`backend: systemone`, `base_url: https://openrouter.ai/api`), which answers "does this request need a strong model?" with nothing to run locally. It uses the same `OPENROUTER_API_KEY` as the Gateway; the Router reads it from `.env` like the Interceptor does. Jev bills per input token, and the Router sends at most the last 2,000 characters of each request (`max_chars`).
 
-```bash
-export JEV_API_KEY=your_typesafe_key        # PowerShell: $env:JEV_API_KEY = "your_typesafe_key"
-```
+If Jev errors or takes longer than `timeout` (5 s), the Router returns an error and the Interceptor sends the request to `fallback-openrouter`. To go back to the BERT classifier, set `backend: routellm`.
 
-If Jev errors or takes longer than `timeout` (5 s), the Router returns an error and the Interceptor sends the request to `fallback-openrouter`.
+#### Running Laya locally (optional)
 
-To run the same classifier yourself instead, start a [Laya](https://github.com/NandhaKishorM/laya) server on CPU (it speaks the same protocol) and set `base_url: http://127.0.0.1:8001`, removing `api_key_env` and `model`:
+[Laya](https://github.com/NandhaKishorM/laya) is an open-source classifier that speaks the same protocol as Jev, so it can replace Jev with no API key or per-token cost. It runs on CPU.
 
-**macOS / Linux**
-```bash
-source .venv/bin/activate
-./launch-laya.sh            # installs laya[serve] with CPU PyTorch on first run
-./launch-laya.sh docker     # or: Laya's own CPU Docker image
-```
+1. Start the server on port 8001 (the Tier 1 local engine already uses 8000).
 
-**Windows (PowerShell)**
-```powershell
-.\.venv\Scripts\Activate.ps1
-pip install --index-url https://download.pytorch.org/whl/cpu torch
-pip install "laya[serve]"
-$env:LAYA_HOST = "127.0.0.1"; $env:LAYA_PORT = "8001"; $env:LAYA_DEVICE = "cpu"
-$env:LAYA_MODELS = "english"; $env:LAYA_PRELOAD = "1"
-laya-serve
-```
+   **macOS / Linux**
+   ```bash
+   source .venv/bin/activate
+   ./launch-laya.sh            # installs laya[serve] with CPU PyTorch on first run
+   ./launch-laya.sh docker     # or: Laya's own CPU Docker image
+   ```
 
-The first start downloads the English checkpoint from Hugging Face; `curl localhost:8001/health` answers once it is loaded. To host it on another machine, run `LAYA_HOST=0.0.0.0 LAYA_API_KEY=<secret> ./launch-laya.sh` there and set `base_url` to that machine with `api_key_env: LAYA_API_KEY`. To go back to the BERT classifier, set `backend: routellm`.
+   **Windows (PowerShell)**
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   pip install --index-url https://download.pytorch.org/whl/cpu torch
+   pip install "laya[serve]"
+   $env:LAYA_HOST = "127.0.0.1"; $env:LAYA_PORT = "8001"; $env:LAYA_DEVICE = "cpu"
+   $env:LAYA_MODELS = "english"; $env:LAYA_PRELOAD = "1"
+   laya-serve
+   ```
+
+   The first start downloads the English checkpoint from Hugging Face.
+
+2. Wait until `curl http://127.0.0.1:8001/health` answers.
+
+3. In `routellm-config.yaml`, set `base_url: http://127.0.0.1:8001` and comment out `api_key_env` and `model` (Laya rejects model names it does not serve).
+
+4. Restart the Router. `GET http://localhost:6060/health` still reports `systemone`; the Router log shows connection errors if Laya is not running.
+
+To run Laya on another machine, start it there with `LAYA_HOST=0.0.0.0 LAYA_API_KEY=<secret> ./launch-laya.sh`, set `base_url` to that machine, and set `api_key_env: LAYA_API_KEY` with the same key in `.env`.
 
 ### 4. Node.js interceptor (port 3000)
 

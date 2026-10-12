@@ -11,7 +11,7 @@
 # Port 8001, because the Tier 1 local engine (launch-local.sh) already has 8000.
 # On another machine: LAYA_HOST=0.0.0.0 LAYA_API_KEY=<secret> ./launch-laya.sh,
 # then set base_url and api_key_env in routellm-config.yaml.
-# First start downloads the English checkpoint from Hugging Face (~600 MB).
+# First start downloads the English checkpoint from Hugging Face.
 
 set -euo pipefail
 

@@ -233,7 +233,8 @@ def test_systemone_backend_wrong_key_is_an_error(run_router, laya_serve):
     url = run_router({"backend": "systemone", "base_url": laya_serve, "api_key_env": "TEST_JEV_KEY"},
                      env={"TEST_JEV_KEY": "wrong"})
     res = httpx.post(url + "/route", json={"prompt": "hi", "threshold": 0.5})
-    assert res.status_code == 500  # 401 from Jev surfaces; the Interceptor then falls back
+    assert res.status_code == 502  # the Interceptor falls back on any non-200
+    assert res.json()["error"].startswith("HTTP 401 from ")
 
 
 @pytest.mark.skipif(not os.environ.get("ROUTER_LIVE_JEV_URL"), reason="set ROUTER_LIVE_JEV_URL")

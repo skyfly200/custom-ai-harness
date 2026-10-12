@@ -26,6 +26,7 @@ Run: python router.py [--config routellm-config.yaml] [--port 6060]
 """
 import argparse
 import importlib
+import logging
 import os
 import re
 
@@ -35,6 +36,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import yaml
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 config = {}
@@ -73,8 +75,14 @@ def make_laya_scorer(config: dict):
     return score
 
 
+log = logging.getLogger("router")
+
+
 def _headers(config: dict) -> dict:
     key = os.environ.get(config.get("api_key_env", ""), "") if config.get("api_key_env") else ""
+    if config.get("api_key_env") and not key:
+        log.warning("%s is not set (in the shell or .env); calling %s without a key",
+                    config["api_key_env"], config.get("base_url"))
     return {config.get("auth_header", "Authorization"): f"Bearer {key}"} if key else {}
 
 
@@ -174,8 +182,22 @@ def load_config(path: str) -> None:
 
 @app.post("/route")
 def route(req: RouteRequest):
-    win_rate = scorer(req.prompt)
+    try:
+        win_rate = scorer(req.prompt)
+    except Exception as err:
+        # One readable line instead of an ASGI traceback; the Interceptor falls back on any non-200.
+        detail = describe_error(err)
+        log.error("classifier (%s) failed: %s", config.get("backend", "routellm"), detail)
+        return JSONResponse(status_code=502, content={"error": detail})
     return {"model": pick_model(win_rate, req.threshold, req.tokens, config), "win_rate": round(win_rate, 3)}
+
+
+def describe_error(err: Exception) -> str:
+    """The upstream status and body for an HTTP error, else the exception type and message."""
+    response = getattr(err, "response", None)
+    if response is not None and getattr(err, "request", None) is not None:
+        return f"HTTP {response.status_code} from {err.request.url}: {response.text[:300]}"
+    return f"{type(err).__name__}: {err}"
 
 
 @app.get("/health")

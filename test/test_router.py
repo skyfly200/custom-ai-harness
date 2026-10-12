@@ -62,6 +62,19 @@ def test_load_dotenv_fills_only_unset_keys(tmp_path=None):
     router.load_dotenv(path + ".missing")  # no file is fine
 
 
+def test_classifier_error_is_a_502_with_the_upstream_reason():
+    import httpx
+    undo = _mock(lambda req: httpx.Response(401, json={"error": {"message": "No auth credentials found"}}))
+    try:
+        c = client(0)
+        router.scorer = router.make_systemone_scorer({"base_url": "http://jev"})
+        r = c.post("/route", json={"prompt": "x", "threshold": 0.5})
+    finally:
+        undo()
+    assert r.status_code == 502
+    assert "HTTP 401 from http://jev/v1/systemone" in r.json()["error"] and "No auth credentials" in r.json()["error"]
+
+
 def test_parse_score_handles_reasoning_output():
     assert router.parse_score("<think>maybe 0.2? no 0.9</think>\nScore: 0.7") == 0.7
     assert router.parse_score("1.5") == 1.0

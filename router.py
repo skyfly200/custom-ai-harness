@@ -158,12 +158,16 @@ class RouteRequest(BaseModel):
     prompt: str
     threshold: float = Field(ge=0.0, le=1.0)
     tokens: int = 0  # Interceptor's estimate of input + requested output tokens
+    tools: bool = False  # the request carries tool definitions (every Claude Code request does)
 
 
-def pick_model(win_rate: float, threshold: float, tokens: int, config: dict) -> str:
+def pick_model(win_rate: float, threshold: float, tokens: int, config: dict, tools: bool = False) -> str:
     # RouteLLM rule: strong model when the strong model's win rate >= threshold
     if win_rate >= threshold:
         return config["strong_model"]
+    # A weak model that can't call tools answers a tool request with text instead of tool calls
+    if tools and config.get("weak_model_tools"):
+        return config["weak_model_tools"]
     # The weak model's provider may cap request size (Groq free tier: 8K tokens/min)
     limit = config.get("weak_model_max_tokens")
     if limit and tokens > limit:
@@ -189,7 +193,7 @@ def route(req: RouteRequest):
         detail = describe_error(err)
         log.error("classifier (%s) failed: %s", config.get("backend", "routellm"), detail)
         return JSONResponse(status_code=502, content={"error": detail})
-    return {"model": pick_model(win_rate, req.threshold, req.tokens, config), "win_rate": round(win_rate, 3)}
+    return {"model": pick_model(win_rate, req.threshold, req.tokens, config, req.tools), "win_rate": round(win_rate, 3)}
 
 
 def describe_error(err: Exception) -> str:

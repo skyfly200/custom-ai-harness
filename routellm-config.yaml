@@ -12,6 +12,10 @@ weak_model: fallback-groq
 weak_model_max_tokens: 7000
 weak_model_overflow: fallback-openrouter
 
+# Weak requests that carry tools (every Claude Code request) need a model that
+# makes tool calls; the size cap above doesn't apply to it.
+weak_model_tools: fallback-openrouter-tools
+
 # Classifier backend: routellm (default) | laya | systemone | llm | custom.
 # Each returns the strong model's win rate; the rest of the Router is unchanged.
 

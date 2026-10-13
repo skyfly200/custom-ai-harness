@@ -65,8 +65,9 @@ litellm_settings:
   # ones like thinking) instead of failing the call.
   drop_params: true
   fallbacks:
-    - {"claude-3-5-sonnet":         ["fallback-openrouter", "fallback-groq"]}
-    - {"claude-sonnet-5":           ["fallback-openrouter", "fallback-groq"]}
+    # Tool-capable first: strong requests are mostly Claude Code, which needs tool calls.
+    - {"claude-3-5-sonnet":         ["fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
+    - {"claude-sonnet-5":           ["fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
     - {"fallback-groq":             ["fallback-openrouter"]}
     - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter", "fallback-groq"]}
     - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter"]}

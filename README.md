@@ -327,7 +327,7 @@ npm run validate:fix      # auto-correct in place
 
 ## How routing decisions are made
 
-The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the routing of the request that started them:
+The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the routing of the request that started them. Requests that define tools (every Claude Code request) go to the strong model or, when weak, to `weak_model_tools` (`fallback-openrouter-tools`), because the wildcard free tier may answer them with text instead of tool calls:
 
 | Signal type | Examples | Threshold | Effect |
 |-------------|----------|-----------|--------|

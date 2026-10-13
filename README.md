@@ -300,6 +300,17 @@ claude
 
 The Interceptor routes each request and the Gateway translates the Anthropic Messages format for whichever model serves it, including tool use and streaming. The Interceptor log shows each routing decision.
 
+### Control UI
+
+With the Interceptor running, open <http://localhost:3000/ui>. It refreshes every 3 seconds and shows:
+
+- **Components**: whether the Router, Gateway, local engine (port 8000), Ollama (11434) and a local Laya (8001) answer, and which classifier the Router is using. The last three are optional and show as "not running" rather than down.
+- **Counters** since the Interceptor started: requests, times the Router couldn't be reached, Gateway fallbacks and errors.
+- **Recent routing decisions**: the model each request went to and why (win rate against threshold, tool requests, or the Router being down), the Gateway's status and time to first byte, how many fallbacks LiteLLM tried and which model group answered (from LiteLLM's `x-litellm-attempted-fallbacks` and `x-litellm-model-group` headers, when your LiteLLM version sends them), and the start of the typed request.
+- **Router classifier**: switch the backend, or reload `routellm-config.yaml` after editing it, without restarting the Router. A switch reuses the settings already in the file (switching to `llm` needs its `base_url` and `model` there) and lasts until the next reload or restart. A config file that fails to load leaves the running config in place.
+
+History is kept in memory (the last 200 requests) and starts fresh when the Interceptor restarts. Override the probed addresses with `LOCAL_ENGINE_URL`, `OLLAMA_URL` and `LAYA_URL` in `.env`. The page has no login. The Interceptor listens on every network interface, so other machines that can reach port 3000 can view it, but the classifier controls only answer requests from this machine.
+
 ---
 
 ## Utility scripts

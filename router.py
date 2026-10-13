@@ -16,6 +16,8 @@ strong model's win rate in [0, 1]:
 
     POST /route {"prompt": str, "threshold": float, "tokens": int}
       -> {"model": str, "win_rate": float}
+    POST /admin/reload               re-read the config file
+    POST /admin/backend {"backend"}  switch classifier until the next reload
 
 The Router only classifies. The Interceptor sends the request to the Gateway
 itself, so the Router never has to understand OpenAI or Anthropic request
@@ -40,7 +42,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 config = {}
+config_path = None  # file load_config read, for /admin/reload
 scorer = None  # callable: prompt -> strong win rate in [0, 1]
+last_error = None  # most recent classifier failure, shown on /health
 app = FastAPI()
 
 LAYA_QUESTION = {
@@ -177,11 +181,14 @@ def pick_model(win_rate: float, threshold: float, tokens: int, config: dict, too
 
 def load_config(path: str) -> None:
     """Read the YAML config and build the configured backend's scorer."""
-    global scorer
+    global scorer, config_path, last_error
     with open(path, encoding="utf-8") as f:
-        config.clear()
-        config.update(yaml.safe_load(f))
-    scorer = BACKENDS[config.get("backend", "routellm")](config)
+        new_config = yaml.safe_load(f)
+    # Build the scorer before swapping, so a bad file leaves the running config in place
+    new_scorer = BACKENDS[new_config.get("backend", "routellm")](new_config)
+    config.clear()
+    config.update(new_config)
+    scorer, config_path, last_error = new_scorer, path, None
 
 
 @app.post("/route")
@@ -190,7 +197,9 @@ def route(req: RouteRequest):
         win_rate = scorer(req.prompt)
     except Exception as err:
         # One readable line instead of an ASGI traceback; the Interceptor falls back on any non-200.
+        global last_error
         detail = describe_error(err)
+        last_error = detail
         log.error("classifier (%s) failed: %s", config.get("backend", "routellm"), detail)
         return JSONResponse(status_code=502, content={"error": detail})
     return {"model": pick_model(win_rate, req.threshold, req.tokens, config, req.tools), "win_rate": round(win_rate, 3)}
@@ -206,7 +215,43 @@ def describe_error(err: Exception) -> str:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "backend": config.get("backend", "routellm")}
+    return {"status": "ok", "backend": config.get("backend", "routellm"), "backends": list(BACKENDS),
+            "config": config_path, "last_error": last_error}
+
+
+class BackendRequest(BaseModel):
+    backend: str
+
+
+@app.post("/admin/backend")
+def switch_backend(req: BackendRequest):
+    """Use another classifier with the current config's settings, until the next reload."""
+    global scorer, last_error
+    if req.backend not in BACKENDS:
+        return JSONResponse(status_code=400, content={"error": f"unknown backend {req.backend!r}"})
+    new_config = {**config, "backend": req.backend}
+    try:
+        new_scorer = BACKENDS[req.backend](new_config)
+    except KeyError as err:
+        # e.g. llm without base_url in the config file
+        return JSONResponse(status_code=400, content={"error": f"{req.backend} needs {err} in the config file"})
+    except Exception as err:
+        # e.g. laya not installed
+        return JSONResponse(status_code=400, content={"error": describe_error(err)})
+    config["backend"] = req.backend
+    scorer, last_error = new_scorer, None
+    return health()
+
+
+@app.post("/admin/reload")
+def reload_config():
+    if not config_path:
+        return JSONResponse(status_code=400, content={"error": "no config file loaded"})
+    try:
+        load_config(config_path)
+    except Exception as err:
+        return JSONResponse(status_code=400, content={"error": describe_error(err)})
+    return health()
 
 
 def load_dotenv(path: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")) -> None:

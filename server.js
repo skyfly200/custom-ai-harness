@@ -12,6 +12,8 @@ const {
     headroomCompressText,
     applyContextAnchor,
 } = require('./utils/messageTransforms');
+const monitor = require('./utils/monitor');
+const path = require('path');
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -19,6 +21,13 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const ROUTER_URL = process.env.ROUTER_URL || 'http://localhost:6060';
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:4000';
+const COMPONENT_URLS = {
+    router: ROUTER_URL,
+    gateway: GATEWAY_URL,
+    localEngine: process.env.LOCAL_ENGINE_URL || 'http://localhost:8000',
+    ollama: process.env.OLLAMA_URL || 'http://localhost:11434',
+    laya: process.env.LAYA_URL || 'http://127.0.0.1:8001',
+};
 const ROUTER_DOWN_MODEL = 'fallback-openrouter'; // free tier with no size cap, when the Router can't be reached
 const ROUTER_DOWN_TOOLS_MODEL = 'fallback-openrouter-tools'; // same, for requests that need tool calls
 // Claude Code asks for more output than Groq's 65,536 limit, which fails every
@@ -55,11 +64,11 @@ async function routeModel(body) {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const { model, win_rate } = await res.json();
-        return { model, threshold, winRate: win_rate };
+        return { model, threshold, winRate: win_rate, tools: hasTools };
     } catch (err) {
         const model = hasTools ? ROUTER_DOWN_TOOLS_MODEL : ROUTER_DOWN_MODEL;
         console.warn(`Router unavailable (${err.message}); using ${model}`);
-        return { model, threshold, winRate: null };
+        return { model, threshold, winRate: null, tools: hasTools, routerError: err.message };
     }
 }
 
@@ -98,8 +107,45 @@ const toGateway = createProxyMiddleware({
     changeOrigin: true,
     on: {
         proxyReq: fixRequestBody,
+        proxyRes: (proxyRes, req) => monitor.recordResponse(req.harnessEvent, proxyRes.statusCode, proxyRes.headers),
+        error: (err, req) => monitor.recordError(req.harnessEvent, err),
     }
 });
+
+// Control UI: monitor the stack and switch the Router's classifier.
+app.use('/ui', express.static(path.join(__dirname, 'ui')));
+
+app.get('/ui/api/status', async (req, res) => {
+    res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats() });
+});
+
+app.get('/ui/api/events', (req, res) => {
+    res.json(monitor.recentEvents(Math.min(parseInt(req.query.limit, 10) || 50, 200)));
+});
+
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+// Controls answer only on this machine, and only to JSON: a plain cross-site
+// form can't send that without a CORS preflight, so another web page can't
+// flip the Router's settings either.
+async function forwardToRouter(req, res, routerPath) {
+    if (!LOOPBACK.has(req.socket.remoteAddress)) return res.status(403).json({ error: 'controls work only from this machine' });
+    if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+    try {
+        const upstream = await fetch(`${ROUTER_URL}${routerPath}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(req.body ?? {}),
+            signal: AbortSignal.timeout(120000), // building a scorer can load a model
+        });
+        res.status(upstream.status).json(await upstream.json());
+    } catch (err) {
+        res.status(502).json({ error: `Router unreachable: ${err.cause?.code || err.message}` });
+    }
+}
+
+app.post('/ui/api/router/backend', (req, res) => forwardToRouter(req, res, '/admin/backend'));
+app.post('/ui/api/router/reload', (req, res) => forwardToRouter(req, res, '/admin/reload'));
 
 // OpenAI-compatible agents (Cursor, Aider, Continue, ...)
 app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) => {
@@ -110,6 +156,9 @@ app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) =
     const route = await routeModel(req.body);
     req.body.model = route.model;
     logRoute(req.path, route);
+    req.harnessEvent = monitor.recordRoute({
+        path: req.path, ...route, tokens: estimateTokens(req.body), prompt: latestUserText(req.body.messages),
+    });
     next();
 }, toGateway);
 
@@ -121,6 +170,9 @@ app.post('/v1/messages', async (req, res, next) => {
     const route = await routeModel(req.body);
     req.body.model = route.model;
     logRoute(req.path, route);
+    req.harnessEvent = monitor.recordRoute({
+        path: req.path, ...route, tokens: estimateTokens(req.body), prompt: latestUserText(req.body.messages),
+    });
     next();
 }, toGateway);
 

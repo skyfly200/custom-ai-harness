@@ -210,7 +210,7 @@ app.get('/ui/api/models', async (req, res) => {
 // OpenRouter, or the Gateway if it has a TTS model. Off unless TTS_URL is set.
 const TTS_URL = (process.env.TTS_URL || '').replace(/\/+$/, '');
 const TTS_MODEL = process.env.TTS_MODEL || 'kokoro';
-const TTS_VOICE = process.env.TTS_VOICE || 'af_heart';
+const TTS_VOICE = process.env.TTS_VOICE ?? 'af_heart'; // TTS_VOICE= (empty) sends none, for models with a default voice
 const TTS_KEY = process.env.TTS_API_KEY
     || (TTS_URL.startsWith(GATEWAY_URL) ? GATEWAY_KEY : '')
     || (/openrouter\.ai/.test(TTS_URL) ? process.env.OPENROUTER_API_KEY || '' : '');
@@ -242,7 +242,7 @@ app.get('/ui/api/tts', async (req, res) => {
         }
     } catch {}
     if (!voices.length && /tts-1|gpt-4o-mini-tts|^openai\//i.test(TTS_MODEL)) voices = OPENAI_VOICES;
-    if (!voices.includes(TTS_VOICE)) voices.unshift(TTS_VOICE);
+    if (TTS_VOICE && !voices.includes(TTS_VOICE)) voices.unshift(TTS_VOICE);
     res.json({ configured: true, model: TTS_MODEL, voice: TTS_VOICE, voices, host: new URL(TTS_URL).host });
 });
 
@@ -258,7 +258,7 @@ app.post('/ui/api/tts', async (req, res) => {
             body: JSON.stringify({
                 model: TTS_MODEL,
                 input: text.slice(0, 4000),
-                voice: typeof voice === 'string' && voice ? voice : TTS_VOICE,
+                ...((typeof voice === 'string' && voice) || TTS_VOICE ? { voice: (typeof voice === 'string' && voice) || TTS_VOICE } : {}),
                 // some models reject any speed but the default, so send it only when changed
                 ...(Number(speed) && Number(speed) !== 1 ? { speed: Math.min(4, Math.max(0.25, Number(speed))) } : {}),
                 ...(TTS_INSTRUCTIONS ? { instructions: TTS_INSTRUCTIONS } : {}),

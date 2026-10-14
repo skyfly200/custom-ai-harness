@@ -954,7 +954,7 @@ async function loadServerTTS() {
   opt.disabled = !info?.configured;
   opt.textContent = info?.configured ? `Harness TTS server (${info.model})` : 'Harness TTS server (not set up)';
   if (info?.configured) {
-    $('serverVoice').innerHTML = (info.voices.length ? info.voices : [info.voice]).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    $('serverVoice').innerHTML = (info.voices.length ? info.voices : [info.voice]).map(v => `<option value="${esc(v)}">${esc(v || "Model default")}</option>`).join('');
     $('serverVoice').value = prefs.serverVoice && info.voices.includes(prefs.serverVoice) ? prefs.serverVoice : info.voice;
   }
   drawEngine();

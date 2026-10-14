@@ -451,20 +451,23 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 
 The counts are the ones each reply reports (`usage` in OpenAI replies, `input_tokens`/`output_tokens` in Anthropic ones, streamed or not). Replies without them, such as OpenAI streams that don't ask for `stream_options.include_usage`, are estimated at about 4 characters a token and marked ~. The service for each model comes from its `litellm_params` in `config.yaml`. Totals are kept per day in `harness-usage.json` (gitignored) so they survive a restart; **Clear totals** on the page empties it. The page updates live as requests finish, and the dashboard's routing log shows the same in/out counts per request.
 
-#### Better read-aloud voices
+#### Read-aloud voices
 
-By default replies are read by the browser's own voices. Quality depends on the browser: Edge on Windows has the best free ones (the "Online (Natural)" voices, marked ★ and picked by default), Chrome has "Google" voices, and the built-in Windows voices sound robotic.
+Under Options → Voice, **Read aloud with** chooses between a speech model and the browser's own voices.
 
-For better or more consistent voices, point the harness at a text-to-speech server with an OpenAI-style `/v1/audio/speech` endpoint, then choose **Harness TTS server** under Options → Voice. Set these in `.env` and restart the Interceptor:
+**Speech model (the default).** With `OPENROUTER_API_KEY` in `.env`, the harness offers every [OpenRouter speech model](https://openrouter.ai/collections/text-to-speech-models) in the **Speech model** menu, with each model's voices in the **Voice** menu. It starts on the free Fish Audio model; paid ones include Kokoro ($0.62 per million characters), Gemini Flash TTS, Microsoft MAI Voice and ElevenLabs. Your choice is saved in the browser. The page sends each sentence to `/ui/api/tts` as it streams in, and the harness forwards it.
 
-| Server | `.env` |
+**Browser voices.** Free and offline, but quality depends on the browser: Edge on Windows has the best (the "Online (Natural)" voices, marked ★ and picked by default), Chrome has "Google" voices, and the built-in Windows voices sound robotic.
+
+Optional `.env` settings:
+
+| Setting | What it does |
 |---|---|
-| [Kokoro](https://github.com/remsky/Kokoro-FastAPI), free and local (natural, runs on CPU): `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest` | `TTS_URL=http://localhost:8880/v1` (voices are listed automatically; the default is `af_heart`) |
-| OpenAI (paid) | `TTS_URL=https://api.openai.com/v1`, `TTS_MODEL=gpt-4o-mini-tts`, `TTS_VOICE=coral`, `TTS_API_KEY=sk-...` |
-| [OpenRouter](https://openrouter.ai/collections/text-to-speech-models) (paid, one key for many voices: OpenAI, ElevenLabs, Gemini, Microsoft, Kokoro...) | `TTS_URL=https://openrouter.ai/api/v1`, `TTS_MODEL=<model id, e.g. openai/gpt-4o-mini-tts-2025-12-15>`, `TTS_VOICE=<one of its voices>` (uses your `OPENROUTER_API_KEY`) |
-| A TTS model in your LiteLLM config | `TTS_URL=http://localhost:4000/v1`, `TTS_MODEL=<its model_name>` (the master key is sent for you) |
-
-The page sends each sentence to `/ui/api/tts` as it streams in, and the harness forwards it to the server. If the voice list comes up short, list voices yourself with `TTS_VOICES=voice1,voice2`. `TTS_INSTRUCTIONS` sets tone and pacing for models that take it (OpenAI, Gemini, Fish Audio), for example `TTS_INSTRUCTIONS=Calm, friendly, a little brisk`.
+| `TTS_URL` | Use another OpenAI-style speech server instead of OpenRouter: [Kokoro](https://github.com/remsky/Kokoro-FastAPI) locally (`docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest`, then `http://localhost:8880/v1`), OpenAI (`https://api.openai.com/v1` with `TTS_API_KEY`), or a TTS model in LiteLLM (`http://localhost:4000/v1`). |
+| `TTS_MODEL`, `TTS_VOICE` | The default model and voice before you pick in the page. |
+| `TTS_API_KEY` | Key for `TTS_URL`. Not needed for OpenRouter or the Gateway. |
+| `TTS_VOICES` | Comma-separated voices for the default model, when the server doesn't list them. |
+| `TTS_INSTRUCTIONS` | Tone and pacing for models that take it (OpenAI, Gemini, Fish Audio), e.g. `Calm, friendly, a little brisk`. |
 
 Any client can skip the Router for one request the same way: send the model name in an `x-harness-model` header. Every routed response carries `x-harness-model` and `x-harness-route` headers saying where it went.
 

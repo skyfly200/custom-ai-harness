@@ -63,9 +63,10 @@
           <label>Read aloud with
             <select id="ttsEngine">
               <option value="browser">Browser voices</option>
-              <option value="server">Harness TTS server</option>
+              <option value="server">Speech model (through the harness)</option>
             </select>
           </label>
+          <label id="serverModelRow" hidden>Speech model <select id="serverModel"></select></label>
           <div class="voice-row">
             <label>Voice <select id="voice"></select><select id="serverVoice" hidden></select></label>
             <button type="button" id="testVoice" class="mini" title="Hear this voice">Test</button>

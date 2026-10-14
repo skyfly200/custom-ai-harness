@@ -128,6 +128,12 @@ OPENROUTER_API_KEY=your_openrouter_key
 ANTHROPIC_API_KEY=your_anthropic_key   # optional
 ```
 
+`LITELLM_MASTER_KEY` is optional. Set it to require a key on the Gateway and to log in to LiteLLM's admin UI at http://localhost:4000/ui (username `admin`, the key as the password). LiteLLM reads it from `.env` too, as long as you start `litellm` from the repo folder. The harness then sends the master key on every call it forwards to LiteLLM, so clients such as Claude Code keep working with whatever key they already use. Generate one with:
+
+```bash
+python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
+```
+
 Keys can also be set in the shell session if preferred:
 
 **macOS / Linux**

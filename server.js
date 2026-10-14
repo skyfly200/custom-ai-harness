@@ -23,6 +23,11 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const ROUTER_URL = process.env.ROUTER_URL || 'http://localhost:6060';
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:4000';
+// LiteLLM reads the same LITELLM_MASTER_KEY from .env. When it is set, every
+// call to the Gateway needs it, so the harness sends it in place of whatever
+// key the client used.
+const GATEWAY_KEY = process.env.LITELLM_MASTER_KEY || '';
+const gatewayAuth = GATEWAY_KEY ? { authorization: `Bearer ${GATEWAY_KEY}`, 'x-api-key': GATEWAY_KEY } : {};
 const COMPONENT_URLS = {
     router: ROUTER_URL,
     gateway: GATEWAY_URL,
@@ -110,7 +115,10 @@ const toGateway = createProxyMiddleware({
     target: GATEWAY_URL,
     changeOrigin: true,
     on: {
-        proxyReq: fixRequestBody,
+        proxyReq: (proxyReq, req, res) => {
+            for (const [name, value] of Object.entries(gatewayAuth)) proxyReq.setHeader(name, value);
+            fixRequestBody(proxyReq, req, res);
+        },
         proxyRes: (proxyRes, req) => monitor.recordResponse(req.harnessEvent, proxyRes.statusCode, proxyRes.headers),
         error: (err, req) => monitor.recordError(req.harnessEvent, err),
     }
@@ -170,7 +178,7 @@ app.post('/ui/api/settings/reset', localJsonOnly, (req, res) => res.json({ setti
 // Model names the Gateway serves: its /v1/models, else the model_name entries in config.yaml
 app.get('/ui/api/models', async (req, res) => {
     try {
-        const upstream = await fetch(`${GATEWAY_URL}/v1/models`, { signal: AbortSignal.timeout(3000) });
+        const upstream = await fetch(`${GATEWAY_URL}/v1/models`, { headers: gatewayAuth, signal: AbortSignal.timeout(3000) });
         if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
         const { data } = await upstream.json();
         res.json({ source: 'gateway', models: [...new Set(data.map(m => m.id))] });

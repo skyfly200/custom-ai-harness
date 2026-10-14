@@ -108,7 +108,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree'];
+const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['model', 'maxTokens', 'temperature']) {
@@ -135,6 +135,7 @@ for (const id of PREF_FIELDS) {
     if (id === 'handsFree' && el.checked) { $('autoSend').checked = $('autoSpeak').checked = true; prefs.autoSend = prefs.autoSpeak = true; store.set(PREF_KEY, prefs); }
     if (id === 'autoSpeak' && !el.checked) speech.stop();
     if (id === 'ttsEngine') { speech.stop(); drawEngine(); }
+    if (id === 'serverModel') { speech.stop(); drawServerVoices(); prefs.serverVoice = $('serverVoice').value; store.set(PREF_KEY, prefs); drawEngine(); }
     drawHint();
   });
 }
@@ -771,7 +772,7 @@ const serverTTS = {
     return fetch('api/tts', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text, voice: $('serverVoice').value || undefined, speed: Number($('rate').value) || 1 }),
+      body: JSON.stringify({ text, model: $('serverModel').value || undefined, voice: $('serverVoice').value || undefined, speed: Number($('rate').value) || 1 }),
       signal: this.aborter.signal,
     }).then(async (res) => {
       if (!res.ok) {
@@ -952,12 +953,29 @@ async function loadServerTTS() {
   const info = serverTTS.info;
   const opt = $('ttsEngine').querySelector('option[value=server]');
   opt.disabled = !info?.configured;
-  opt.textContent = info?.configured ? `Harness TTS server (${info.model})` : 'Harness TTS server (not set up)';
+  if (!info?.configured) opt.textContent = 'Speech model (needs OPENROUTER_API_KEY or TTS_URL)';
   if (info?.configured) {
-    $('serverVoice').innerHTML = (info.voices.length ? info.voices : [info.voice]).map(v => `<option value="${esc(v)}">${esc(v || "Model default")}</option>`).join('');
-    $('serverVoice').value = prefs.serverVoice && info.voices.includes(prefs.serverVoice) ? prefs.serverVoice : info.voice;
+    // free models first, then by name
+    const models = [...info.models].sort((a, b) => (b.free - a.free) || (a.id === info.model ? -1 : b.id === info.model ? 1 : 0) || a.name.localeCompare(b.name));
+    $('serverModel').innerHTML = models.map(m => `<option value="${esc(m.id)}">${esc(m.name)}${m.free && !/free/i.test(m.name) ? ' · free' : ''}</option>`).join('');
+    $('serverModel').value = prefs.serverModel && models.some(m => m.id === prefs.serverModel) ? prefs.serverModel : info.model;
+    drawServerVoices();
+    // the server's model is the default read-aloud until the user picks otherwise
+    if (prefs.ttsEngine === undefined) $('ttsEngine').value = 'server';
   }
   drawEngine();
+}
+
+function drawServerVoices() {
+  const info = serverTTS.info;
+  const model = info.models.find(m => m.id === $('serverModel').value);
+  const voices = model?.voices || [];
+  // most models need a voice; only offer "default" when the model lists none
+  const fallback = (model?.id === info.model && info.voice) || voices[0] || '';
+  $('serverVoice').innerHTML = (voices.length ? '' : '<option value="">Model default</option>') +
+    voices.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if (fallback && !voices.includes(fallback)) $('serverVoice').insertAdjacentHTML('beforeend', `<option value="${esc(fallback)}">${esc(fallback)}</option>`);
+  $('serverVoice').value = prefs.serverVoice && [...$('serverVoice').options].some(o => o.value === prefs.serverVoice) ? prefs.serverVoice : fallback;
 }
 
 function drawEngine() {
@@ -965,14 +983,16 @@ function drawEngine() {
   if ($('ttsEngine').value === 'server' && !serverTTS.ok) $('ttsEngine').value = 'browser';
   $('voice').hidden = server;
   $('serverVoice').hidden = !server;
+  $('serverModelRow').hidden = !server;
   document.querySelector('[data-engine=browser]').hidden = server;
+  const model = server && serverTTS.info.models.find(m => m.id === $('serverModel').value);
   $('voiceNote').textContent = [
     !SR && 'Dictation needs Chrome or Edge.',
     SR && !window.isSecureContext && 'The microphone works only on http://localhost or https.',
     SR && 'Chrome and Edge send dictated audio to their speech service.',
-    server ? `Replies are spoken by ${serverTTS.info.model} at ${serverTTS.info.host}.`
+    server ? `Replies are spoken by ${model?.name || $('serverModel').value} via ${serverTTS.info.host}${model?.free ? ' (free)' : ' (paid)'}.`
       : !browserTTS.ok ? 'This browser cannot read aloud.'
-      : 'For browser voices, Edge’s ★ Natural voices sound best. Set TTS_URL to use a TTS server instead (see the README).',
+      : 'For browser voices, Edge’s ★ Natural voices sound best.',
   ].filter(Boolean).join(' ');
 }
 

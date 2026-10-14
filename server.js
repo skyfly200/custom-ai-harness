@@ -206,59 +206,82 @@ app.get('/ui/api/models', async (req, res) => {
 });
 
 // Read-aloud for the chat page through an OpenAI-compatible speech endpoint
-// (POST {TTS_URL}/audio/speech): Kokoro-FastAPI or another local server, OpenAI,
-// OpenRouter, or the Gateway if it has a TTS model. Off unless TTS_URL is set.
-const TTS_URL = (process.env.TTS_URL || '').replace(/\/+$/, '');
-const TTS_MODEL = process.env.TTS_MODEL || 'kokoro';
-const TTS_VOICE = process.env.TTS_VOICE ?? 'af_heart'; // TTS_VOICE= (empty) sends none, for models with a default voice
+// (POST {TTS_URL}/audio/speech). With an OpenRouter key and no TTS_URL it uses
+// OpenRouter's speech models; TTS_URL points it at Kokoro-FastAPI, OpenAI, or
+// the Gateway instead. The chat page picks the model and voice; TTS_MODEL and
+// TTS_VOICE are only the defaults.
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
+const TTS_URL = (process.env.TTS_URL || (process.env.OPENROUTER_API_KEY ? OPENROUTER_URL : '')).replace(/\/+$/, '');
+const TTS_OPENROUTER = /openrouter\.ai/.test(TTS_URL);
+const TTS_MODEL = process.env.TTS_MODEL || (TTS_OPENROUTER ? 'fish-audio/s2.1-pro-free:free' : 'kokoro');
+const TTS_VOICE = process.env.TTS_VOICE ?? (TTS_OPENROUTER ? '' : 'af_heart'); // empty sends none: the model's default voice
 const TTS_KEY = process.env.TTS_API_KEY
     || (TTS_URL.startsWith(GATEWAY_URL) ? GATEWAY_KEY : '')
-    || (/openrouter\.ai/.test(TTS_URL) ? process.env.OPENROUTER_API_KEY || '' : '');
+    || (TTS_OPENROUTER ? process.env.OPENROUTER_API_KEY || '' : '');
 const TTS_INSTRUCTIONS = process.env.TTS_INSTRUCTIONS || ''; // tone and pacing, for models that take it
 const TTS_VOICES = (process.env.TTS_VOICES || '').split(',').map(v => v.trim()).filter(Boolean);
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
 const ttsHeaders = () => ({ 'content-type': 'application/json', ...(TTS_KEY ? { authorization: `Bearer ${TTS_KEY}` } : {}) });
+const voiceIds = (list) => (list || []).map(v => (typeof v === 'string' ? v : v.id || v.voice_id || v.name)).filter(Boolean);
 
-app.get('/ui/api/tts', async (req, res) => {
-    if (!TTS_URL) return res.json({ configured: false });
-    let voices = [...TTS_VOICES];
-    const ids = (list) => (list || []).map(v => (typeof v === 'string' ? v : v.id || v.voice_id || v.name)).filter(Boolean);
-    try {
-        // Kokoro-FastAPI lists its voices here; OpenAI and others don't
-        if (!voices.length) {
+// Speech models the server offers, with their voices: [{ id, name, voices, free }]
+let ttsModelCache = { at: 0, models: null };
+async function listTtsModels() {
+    if (ttsModelCache.models && Date.now() - ttsModelCache.at < 10 * 60 * 1000) return ttsModelCache.models;
+    let models = [];
+    if (TTS_OPENROUTER) {
+        try {
+            const upstream = await fetch(`${TTS_URL}/models?output_modalities=speech`, { headers: ttsHeaders(), signal: AbortSignal.timeout(8000) });
+            if (upstream.ok) {
+                models = ((await upstream.json()).data || []).map(m => ({
+                    id: m.id,
+                    name: m.name || m.id,
+                    voices: voiceIds(m.supported_voices || m.architecture?.supported_voices),
+                    free: m.id.endsWith(':free') || Object.values(m.pricing || {}).every(v => !Number(v)),
+                }));
+            }
+        } catch {}
+    } else {
+        // one model; Kokoro-FastAPI lists its voices, OpenAI and others don't
+        let voices = [];
+        try {
             const upstream = await fetch(`${TTS_URL}/audio/voices`, { headers: ttsHeaders(), signal: AbortSignal.timeout(3000) });
             if (upstream.ok) {
                 const body = await upstream.json();
-                voices = ids(Array.isArray(body) ? body : body.voices);
+                voices = voiceIds(Array.isArray(body) ? body : body.voices);
             }
-        }
-    } catch {}
-    try {
-        // OpenRouter lists each speech model's voices in its models API
-        if (!voices.length && /openrouter\.ai/.test(TTS_URL)) {
-            const upstream = await fetch(`${TTS_URL}/models?output_modalities=speech`, { headers: ttsHeaders(), signal: AbortSignal.timeout(5000) });
-            const model = upstream.ok ? (await upstream.json()).data?.find(m => m.id === TTS_MODEL) : null;
-            voices = ids(model?.supported_voices || model?.architecture?.supported_voices);
-        }
-    } catch {}
-    if (!voices.length && /tts-1|gpt-4o-mini-tts|^openai\//i.test(TTS_MODEL)) voices = OPENAI_VOICES;
-    if (TTS_VOICE && !voices.includes(TTS_VOICE)) voices.unshift(TTS_VOICE);
-    res.json({ configured: true, model: TTS_MODEL, voice: TTS_VOICE, voices, host: new URL(TTS_URL).host });
+        } catch {}
+        if (!voices.length && /tts-1|gpt-4o-mini-tts|^openai\//i.test(TTS_MODEL)) voices = OPENAI_VOICES;
+        models = [{ id: TTS_MODEL, name: TTS_MODEL, voices, free: false }];
+    }
+    let fallback = models.find(m => m.id === TTS_MODEL);
+    if (!fallback) models.unshift(fallback = { id: TTS_MODEL, name: TTS_MODEL, voices: [], free: TTS_MODEL.endsWith(':free') });
+    if (TTS_VOICES.length) fallback.voices = TTS_VOICES;
+    if (models.length > 1) ttsModelCache = { at: Date.now(), models }; // don't cache a failed lookup
+    return models;
+}
+
+app.get('/ui/api/tts', async (req, res) => {
+    if (!TTS_URL) return res.json({ configured: false });
+    res.json({ configured: true, model: TTS_MODEL, voice: TTS_VOICE, host: new URL(TTS_URL).host, models: await listTtsModels() });
 });
 
 app.post('/ui/api/tts', async (req, res) => {
-    if (!TTS_URL) return res.status(404).json({ error: 'No TTS server: set TTS_URL in .env' });
+    if (!TTS_URL) return res.status(404).json({ error: 'No TTS server: add OPENROUTER_API_KEY or TTS_URL to .env' });
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
     const { text, voice, speed } = req.body || {};
     if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text is required' });
+    const model = typeof req.body.model === 'string' && req.body.model ? req.body.model : TTS_MODEL;
+    // the default voice belongs to the default model
+    const chosenVoice = (typeof voice === 'string' && voice) || (model === TTS_MODEL ? TTS_VOICE : '');
     try {
         const upstream = await fetch(`${TTS_URL}/audio/speech`, {
             method: 'POST',
             headers: ttsHeaders(),
             body: JSON.stringify({
-                model: TTS_MODEL,
+                model,
                 input: text.slice(0, 4000),
-                ...((typeof voice === 'string' && voice) || TTS_VOICE ? { voice: (typeof voice === 'string' && voice) || TTS_VOICE } : {}),
+                ...(chosenVoice ? { voice: chosenVoice } : {}),
                 // some models reject any speed but the default, so send it only when changed
                 ...(Number(speed) && Number(speed) !== 1 ? { speed: Math.min(4, Math.max(0.25, Number(speed))) } : {}),
                 ...(TTS_INSTRUCTIONS ? { instructions: TTS_INSTRUCTIONS } : {}),

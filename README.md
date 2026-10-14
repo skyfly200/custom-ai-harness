@@ -439,7 +439,21 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 - **Formatting and copying.** Replies render Markdown (headings, lists, tables, quotes, highlighted code). Every message has a copy button, and so does every code block. Messages can be edited and resent, and the last reply regenerated.
 - **Export.** Download a chat as Markdown, copy it, or export every chat into one file.
 - **Context.** Attach text files and images with the paperclip, by dropping them on the page, or by pasting. Under Options, each chat has a system prompt and notes the model sees with every message. The composer shows a rough token count for the request.
-- **Voice.** The mic button (Ctrl+M) dictates into the message box, optionally sending when you stop talking. Replies can be read aloud on demand or automatically as they stream, with a choice of voice and speed. Hands-free mode does both in a loop. Voice uses the browser's own speech features: dictation needs Chrome or Edge, and they send the audio to their speech service. The microphone only works on `http://localhost` or https, not from another machine over plain http.
+- **Voice.** The mic button (Ctrl+M) dictates into the message box, optionally sending when you stop talking. Replies can be read aloud on demand or automatically as they stream, with a choice of voice, speed, pitch and volume, and a Test button to hear a voice. Hands-free mode does both in a loop. Dictation uses the browser's speech recognition: it needs Chrome or Edge, they send the audio to their speech service, and the microphone only works on `http://localhost` or https.
+
+#### Better read-aloud voices
+
+By default replies are read by the browser's own voices. Quality depends on the browser: Edge on Windows has the best free ones (the "Online (Natural)" voices, marked ★ and picked by default), Chrome has "Google" voices, and the built-in Windows voices sound robotic.
+
+For better or more consistent voices, point the harness at a text-to-speech server with an OpenAI-style `/v1/audio/speech` endpoint, then choose **Harness TTS server** under Options → Voice. Set these in `.env` and restart the Interceptor:
+
+| Server | `.env` |
+|---|---|
+| [Kokoro](https://github.com/remsky/Kokoro-FastAPI), free and local (natural, runs on CPU): `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest` | `TTS_URL=http://localhost:8880/v1` (voices are listed automatically; the default is `af_heart`) |
+| OpenAI (paid) | `TTS_URL=https://api.openai.com/v1`, `TTS_MODEL=gpt-4o-mini-tts`, `TTS_VOICE=coral`, `TTS_API_KEY=sk-...` |
+| A TTS model in your LiteLLM config | `TTS_URL=http://localhost:4000/v1`, `TTS_MODEL=<its model_name>` (the master key is sent for you) |
+
+The page sends each sentence to `/ui/api/tts` as it streams in, and the harness forwards it to the server.
 
 Any client can skip the Router for one request the same way: send the model name in an `x-harness-model` header. Every routed response carries `x-harness-model` and `x-harness-route` headers saying where it went.
 

@@ -108,7 +108,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'sttLang', 'autoSend', 'voice', 'rate', 'autoSpeak', 'handsFree'];
+const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['model', 'maxTokens', 'temperature']) {
@@ -120,7 +120,12 @@ function applyPrefs() {
     const el = $(id);
     if (el.type === 'checkbox') el.checked = !!prefs[id]; else el.value = prefs[id];
   }
+  drawSliders();
+}
+function drawSliders() {
   $('rateOut').textContent = `${Number($('rate').value).toFixed(1)}×`;
+  $('pitchOut').textContent = Number($('pitch').value).toFixed(1);
+  $('volumeOut').textContent = `${Math.round($('volume').value * 100)}%`;
 }
 for (const id of PREF_FIELDS) {
   $(id).addEventListener('change', () => {
@@ -129,10 +134,11 @@ for (const id of PREF_FIELDS) {
     store.set(PREF_KEY, prefs);
     if (id === 'handsFree' && el.checked) { $('autoSend').checked = $('autoSpeak').checked = true; prefs.autoSend = prefs.autoSpeak = true; store.set(PREF_KEY, prefs); }
     if (id === 'autoSpeak' && !el.checked) speech.stop();
+    if (id === 'ttsEngine') { speech.stop(); drawEngine(); }
     drawHint();
   });
 }
-$('rate').addEventListener('input', () => { $('rateOut').textContent = `${Number($('rate').value).toFixed(1)}×`; });
+for (const id of ['rate', 'pitch', 'volume']) $(id).addEventListener('input', drawSliders);
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -731,35 +737,109 @@ $('exportAll').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Read aloud (speechSynthesis). Replies can be read sentence by sentence as
-// they stream in.
+// Read aloud. Two engines: the browser's own voices (speechSynthesis), or a
+// TTS server the harness forwards to (/ui/api/tts: Kokoro, OpenAI, LiteLLM...).
+// Replies can be read sentence by sentence as they stream in.
 // ---------------------------------------------------------------------------
-const speech = {
+
+// Browser voices. Chrome stops long utterances after ~15 s, hence short pieces.
+const browserTTS = {
   ok: 'speechSynthesis' in window,
+  play(text, done) {
+    const u = new SpeechSynthesisUtterance(text);
+    const v = speechSynthesis.getVoices().find(x => x.voiceURI === $('voice').value);
+    if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = Number($('rate').value) || 1;
+    u.pitch = Number($('pitch').value);
+    u.volume = Number($('volume').value);
+    u.onend = u.onerror = done;
+    speechSynthesis.speak(u);
+  },
+  stop() { if (this.ok) speechSynthesis.cancel(); },
+};
+
+// Harness TTS server: fetch audio per piece, a couple ahead, and play in order
+const serverTTS = {
+  info: null,           // GET /ui/api/tts
+  items: [],            // [{ text, done, audio: Promise<url> }]
+  playing: null,
+  el: new Audio(),
+  aborter: new AbortController(),
+  get ok() { return !!this.info?.configured; },
+
+  fetchAudio(text) {
+    return fetch('api/tts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, voice: $('serverVoice').value || undefined, speed: Number($('rate').value) || 1 }),
+      signal: this.aborter.signal,
+    }).then(async (res) => {
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { msg = (await res.json()).error || msg; } catch {}
+        throw new Error(msg);
+      }
+      return URL.createObjectURL(await res.blob());
+    });
+  },
+
+  play(text, done) {
+    this.items.push({ text, done });
+    this.pump();
+  },
+
+  // keep two pieces fetching ahead of the one playing
+  pump() {
+    for (const item of this.items.slice(0, 3)) if (!item.audio) {
+      item.audio = this.fetchAudio(item.text);
+      item.audio.catch(() => {});
+    }
+    if (this.playing || !this.items.length) return;
+    const item = this.playing = this.items.shift();
+    const next = () => { this.playing = null; item.done(); this.pump(); };
+    item.audio.then((url) => {
+      if (this.playing !== item) return URL.revokeObjectURL(url);
+      this.el.src = url;
+      this.el.volume = Number($('volume').value);
+      this.el.onended = this.el.onerror = () => { URL.revokeObjectURL(url); next(); };
+      this.el.play().catch((err) => { toast(`Read aloud: ${err.message}`); next(); });
+    }, (err) => {
+      if (err.name !== 'AbortError') toast(`TTS server: ${err.message}`);
+      if (this.playing === item) next();
+    });
+  },
+
+  stop() {
+    this.aborter.abort();
+    this.aborter = new AbortController();
+    this.items = [];
+    this.playing = null;
+    this.el.pause();
+    this.el.removeAttribute('src');
+  },
+};
+
+const speech = {
   current: null,      // message id being read
   queue: 0,
   spoken: new Map(),  // reply id -> chars of content already queued
-  onIdle: null,
+  get engine() { return $('ttsEngine').value === 'server' && serverTTS.ok ? serverTTS : browserTTS; },
+  get ok() { return browserTTS.ok || serverTTS.ok; },
 
-  voice() { return speechSynthesis.getVoices().find(v => v.voiceURI === $('voice').value) || null; },
-
-  // Chrome stops long utterances after ~15 s, so speak in sentence-sized pieces
   enqueue(text, id) {
     if (!this.ok || !text.trim()) return;
+    const engine = this.engine;
+    // the server takes longer pieces; fewer requests, smoother audio
+    const max = engine === serverTTS ? 400 : 220;
     const pieces = text.match(/[^.!?\n]+[.!?]*\s*|\n+/g) || [text];
     let chunk = '';
     const flush = () => {
       if (!/[\p{L}\p{N}]/u.test(chunk)) { chunk = ''; return; }
-      const u = new SpeechSynthesisUtterance(chunk.trim());
-      const v = this.voice();
-      if (v) { u.voice = v; u.lang = v.lang; }
-      u.rate = Number($('rate').value) || 1;
       this.queue++;
-      u.onend = u.onerror = () => { if (--this.queue <= 0) this.idle(id); };
-      speechSynthesis.speak(u);
+      engine.play(chunk.trim(), () => { if (--this.queue <= 0) this.idle(id); });
       chunk = '';
     };
-    for (const p of pieces) { if ((chunk + p).length > 220) flush(); chunk += p; }
+    for (const p of pieces) { if ((chunk + p).length > max) flush(); chunk += p; }
     flush();
     this.current = id;
     this.mark(id);
@@ -772,11 +852,11 @@ const speech = {
   },
 
   stop() {
-    if (!this.ok) return;
     const was = this.current;
     this.queue = 0;
     this.current = null;
-    speechSynthesis.cancel();
+    browserTTS.stop();
+    serverTTS.stop();
     if (was) this.mark(was);
   },
 
@@ -814,6 +894,9 @@ const speech = {
       for (const m of tail.matchAll(/[^\d\s][.!?](?=\s)/g)) end = Math.max(end, m.index + 1);
       if (end < 0) return;
       to = from + end + 1;
+      // never stop inside a code block: wait until its closing fence is in
+      const before = text.slice(0, to);
+      if ((before.match(/```/g) || []).length % 2) to = before.lastIndexOf('```');
     }
     if (to <= from) return;
     this.spoken.set(reply.id, to);
@@ -830,19 +913,73 @@ const speech = {
   },
 };
 
+// Neural voices sound far better than the old ones: Edge's "Online (Natural)",
+// Chrome's "Google ...", macOS "Premium"/"Enhanced". Pick one by default.
+const voiceScore = (v) => /natural|neural/i.test(v.name) ? 3 : /premium|enhanced/i.test(v.name) ? 2 : /^google/i.test(v.name) ? 1 : 0;
+
 function loadVoices() {
-  if (!speech.ok) return;
+  if (!browserTTS.ok) return;
   const voices = speechSynthesis.getVoices();
   const lang = (navigator.language || 'en').slice(0, 2);
-  const sorted = [...voices].sort((a, b) => (b.lang.startsWith(lang) - a.lang.startsWith(lang)) || a.name.localeCompare(b.name));
-  $('voice').innerHTML = '<option value="">System default</option>' +
-    sorted.map(v => `<option value="${esc(v.voiceURI)}">${esc(v.name)} (${esc(v.lang)})${v.localService ? '' : ' · online'}</option>`).join('');
-  if (prefs.voice) $('voice').value = prefs.voice;
+  const groups = new Map();
+  for (const v of [...voices].sort((a, b) => voiceScore(b) - voiceScore(a) || a.name.localeCompare(b.name))) {
+    const key = v.lang.slice(0, 2);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(v);
+  }
+  let names = null;
+  try { names = new Intl.DisplayNames([navigator.language, 'en'], { type: 'language' }); } catch {}
+  const label = (code) => { try { return names?.of(code) || code; } catch { return code; } };
+  const order = [...groups.keys()].sort((a, b) => (b === lang) - (a === lang) || label(a).localeCompare(label(b)));
+  $('voice').innerHTML = '<option value="">System default</option>' + order.map(code =>
+    `<optgroup label="${esc(label(code))}">${groups.get(code).map(v =>
+      `<option value="${esc(v.voiceURI)}">${esc(v.name.replace(/^Microsoft /, ''))} (${esc(v.lang)})${voiceScore(v) >= 3 ? ' ★' : ''}${v.localService ? '' : ' · online'}</option>`).join('')}</optgroup>`).join('');
+  const best = groups.get(lang)?.[0];
+  $('voice').value = prefs.voice && voices.some(v => v.voiceURI === prefs.voice) ? prefs.voice
+    : best && voiceScore(best) > 0 ? best.voiceURI : '';
 }
-if (speech.ok) {
+if (browserTTS.ok) {
   loadVoices();
   speechSynthesis.addEventListener?.('voiceschanged', loadVoices);
 }
+
+async function loadServerTTS() {
+  try {
+    serverTTS.info = await (await fetch('api/tts')).json();
+  } catch {
+    serverTTS.info = null;
+  }
+  const info = serverTTS.info;
+  const opt = $('ttsEngine').querySelector('option[value=server]');
+  opt.disabled = !info?.configured;
+  opt.textContent = info?.configured ? `Harness TTS server (${info.model})` : 'Harness TTS server (not set up)';
+  if (info?.configured) {
+    $('serverVoice').innerHTML = (info.voices.length ? info.voices : [info.voice]).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    $('serverVoice').value = prefs.serverVoice && info.voices.includes(prefs.serverVoice) ? prefs.serverVoice : info.voice;
+  }
+  drawEngine();
+}
+
+function drawEngine() {
+  const server = $('ttsEngine').value === 'server' && serverTTS.ok;
+  if ($('ttsEngine').value === 'server' && !serverTTS.ok) $('ttsEngine').value = 'browser';
+  $('voice').hidden = server;
+  $('serverVoice').hidden = !server;
+  document.querySelector('[data-engine=browser]').hidden = server;
+  $('voiceNote').textContent = [
+    !SR && 'Dictation needs Chrome or Edge.',
+    SR && !window.isSecureContext && 'The microphone works only on http://localhost or https.',
+    SR && 'Chrome and Edge send dictated audio to their speech service.',
+    server ? `Replies are spoken by ${serverTTS.info.model} at ${serverTTS.info.host}.`
+      : !browserTTS.ok ? 'This browser cannot read aloud.'
+      : 'For browser voices, Edge’s ★ Natural voices sound best. Set TTS_URL to use a TTS server instead (see the README).',
+  ].filter(Boolean).join(' ');
+}
+
+$('testVoice').addEventListener('click', () => {
+  if (speech.current === 'test') return speech.stop();
+  speech.say('Hi! This is how replies will sound when they are read aloud.', 'test');
+});
 
 // ---------------------------------------------------------------------------
 // Dictation (SpeechRecognition). Chrome and Edge have it; Firefox doesn't.
@@ -938,12 +1075,7 @@ const dictation = {
 };
 $('mic').addEventListener('click', () => (dictation.want && !dictation.paused ? dictation.stop() : dictation.start()));
 if (!SR) $('mic').disabled = true;
-$('voiceNote').textContent = [
-  !SR && 'Dictation needs Chrome or Edge.',
-  !speech.ok && 'This browser cannot read aloud.',
-  SR && !window.isSecureContext && 'The microphone works only on http://localhost or https.',
-  SR && 'Chrome and Edge send dictated audio to their speech service.',
-].filter(Boolean).join(' ');
+loadServerTTS();
 
 // ---------------------------------------------------------------------------
 // Live activity: the Interceptor's feed of every request

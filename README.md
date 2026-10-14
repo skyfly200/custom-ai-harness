@@ -451,9 +451,10 @@ For better or more consistent voices, point the harness at a text-to-speech serv
 |---|---|
 | [Kokoro](https://github.com/remsky/Kokoro-FastAPI), free and local (natural, runs on CPU): `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest` | `TTS_URL=http://localhost:8880/v1` (voices are listed automatically; the default is `af_heart`) |
 | OpenAI (paid) | `TTS_URL=https://api.openai.com/v1`, `TTS_MODEL=gpt-4o-mini-tts`, `TTS_VOICE=coral`, `TTS_API_KEY=sk-...` |
+| [OpenRouter](https://openrouter.ai/collections/text-to-speech-models) (paid, one key for many voices: OpenAI, ElevenLabs, Gemini, Microsoft, Kokoro...) | `TTS_URL=https://openrouter.ai/api/v1`, `TTS_MODEL=<model id, e.g. openai/gpt-4o-mini-tts-2025-12-15>`, `TTS_VOICE=<one of its voices>` (uses your `OPENROUTER_API_KEY`) |
 | A TTS model in your LiteLLM config | `TTS_URL=http://localhost:4000/v1`, `TTS_MODEL=<its model_name>` (the master key is sent for you) |
 
-The page sends each sentence to `/ui/api/tts` as it streams in, and the harness forwards it to the server.
+The page sends each sentence to `/ui/api/tts` as it streams in, and the harness forwards it to the server. If the voice list comes up short, list voices yourself with `TTS_VOICES=voice1,voice2`. `TTS_INSTRUCTIONS` sets tone and pacing for models that take it (OpenAI, Gemini, Fish Audio), for example `TTS_INSTRUCTIONS=Calm, friendly, a little brisk`.
 
 Any client can skip the Router for one request the same way: send the model name in an `x-harness-model` header. Every routed response carries `x-harness-model` and `x-harness-route` headers saying where it went.
 

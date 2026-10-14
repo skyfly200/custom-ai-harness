@@ -1,5 +1,6 @@
 general_settings:
   port: 4000
+  master_key: os.environ/LITELLM_MASTER_KEY
 
 model_list:
   # Concurrency: max_parallel_requests caps in-flight calls per deployment;

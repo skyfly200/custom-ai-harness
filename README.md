@@ -235,6 +235,24 @@ $env:PYTHONUTF8 = 1   # LiteLLM's startup banner crashes on a non-UTF-8 console
 litellm --config config.yaml
 ```
 
+#### LiteLLM admin UI database (optional)
+
+You don't need this to run the harness: the [Control UI](#control-ui) covers health, routing and fallbacks. LiteLLM's own admin UI at http://localhost:4000/ui logs in with just `LITELLM_MASTER_KEY`, but its pages (virtual keys, users, spend) show "Not connected to DB" until LiteLLM has a Postgres database. To add one with Docker:
+
+```bash
+docker run -d --name litellm-db -e POSTGRES_PASSWORD=litellm -p 5432:5432 postgres:16
+```
+
+Then add the connection string to `.env`, install Prisma in the venv, and restart LiteLLM, which creates its tables on startup:
+
+```
+DATABASE_URL=postgresql://postgres:litellm@localhost:5432/postgres
+```
+
+```bash
+pip install prisma
+```
+
 ### 3. Router (port 6060)
 
 **macOS / Linux**

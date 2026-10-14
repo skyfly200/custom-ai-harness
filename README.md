@@ -128,7 +128,7 @@ OPENROUTER_API_KEY=your_openrouter_key
 ANTHROPIC_API_KEY=your_anthropic_key   # optional
 ```
 
-`LITELLM_MASTER_KEY` is optional. Set it to require a key on the Gateway and to log in to LiteLLM's admin UI at http://localhost:4000/ui (username `admin`, the key as the password). LiteLLM reads it from `.env` too, as long as you start `litellm` from the repo folder. The harness then sends the master key on every call it forwards to LiteLLM, so clients such as Claude Code keep working with whatever key they already use. Generate one with:
+`LITELLM_MASTER_KEY` is optional. Set it to require a key on the Gateway and to log in to LiteLLM's admin UI at http://localhost:4000/ui (username `admin`, the key as the password). LiteLLM reads it from `.env` too, as long as LiteLLM is installed in this repo's `.venv` as shown above (LiteLLM looks for `.env` in the folders above its own install, not the folder you start it from). If LiteLLM is installed somewhere else, set the variable in the shell before starting it. The harness then sends the master key on every call it forwards to LiteLLM, so clients such as Claude Code keep working with whatever key they already use. Generate one with:
 
 ```bash
 python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
@@ -233,6 +233,24 @@ litellm --config config.yaml
 .\.venv\Scripts\Activate.ps1
 $env:PYTHONUTF8 = 1   # LiteLLM's startup banner crashes on a non-UTF-8 console
 litellm --config config.yaml
+```
+
+#### LiteLLM admin UI database (optional)
+
+You don't need this to run the harness: the [Control UI](#control-ui) covers health, routing and fallbacks. LiteLLM's own admin UI at http://localhost:4000/ui logs in with just `LITELLM_MASTER_KEY`, but its pages (virtual keys, users, spend) show "Not connected to DB" until LiteLLM has a Postgres database. To add one with Docker:
+
+```bash
+docker run -d --name litellm-db -e POSTGRES_PASSWORD=litellm -p 5432:5432 postgres:16
+```
+
+Then add the connection string to `.env`, install Prisma in the venv, and restart LiteLLM, which creates its tables on startup:
+
+```
+DATABASE_URL=postgresql://postgres:litellm@localhost:5432/postgres
+```
+
+```bash
+pip install prisma
 ```
 
 ### 3. Router (port 6060)

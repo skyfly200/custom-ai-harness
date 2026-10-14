@@ -341,7 +341,14 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 
 #### Chat
 
-<http://localhost:3000/ui/chat.html> is a chat page that sends through the Interceptor like any other client, so the Router picks the model unless you name one. Each reply shows the model it went to, why, and how long it took. You can set a system prompt, max tokens, temperature and streaming; the conversation is kept in the browser until you press "New chat".
+<http://localhost:3000/ui/chat.html> is a chat page that sends through the Interceptor like any other client, so the Router picks the model unless you name one. What it does:
+
+- **Live progress.** Each reply shows its steps as they happen: the Router choosing, the model it picked and why, the transforms applied, the Gateway's answer (with fallbacks and the model that actually served it), time to first token and tokens per second. The **Activity** panel shows every request through the harness live, from this page and from other clients such as Claude Code, plus the health of each part. Both come from `/ui/api/live`, a Server-Sent Events feed of the routing log.
+- **Chats.** Every chat is saved in the browser and listed on the left with search. Alt+↑/↓ moves between chats, Ctrl+Shift+O starts a new one, Ctrl+K searches.
+- **Formatting and copying.** Replies render Markdown (headings, lists, tables, quotes, highlighted code). Every message has a copy button, and so does every code block. Messages can be edited and resent, and the last reply regenerated.
+- **Export.** Download a chat as Markdown, copy it, or export every chat into one file.
+- **Context.** Attach text files and images with the paperclip, by dropping them on the page, or by pasting. Under Options, each chat has a system prompt and notes the model sees with every message. The composer shows a rough token count for the request.
+- **Voice.** The mic button (Ctrl+M) dictates into the message box, optionally sending when you stop talking. Replies can be read aloud on demand or automatically as they stream, with a choice of voice and speed. Hands-free mode does both in a loop. Voice uses the browser's own speech features: dictation needs Chrome or Edge, and they send the audio to their speech service. The microphone only works on `http://localhost` or https, not from another machine over plain http.
 
 Any client can skip the Router for one request the same way: send the model name in an `x-harness-model` header. Every routed response carries `x-harness-model` and `x-harness-route` headers saying where it went.
 

@@ -32,6 +32,26 @@ test('history keeps the newest 200 decisions, newest first', () => {
     assert.equal(events[0].model, 'm249');
 });
 
+test('the live feed announces routing, the response and the end of a request', () => {
+    const seen = [];
+    const listen = (u) => seen.push(u);
+    monitor.live.on('update', listen);
+    try {
+        monitor.recordRouting({ path: '/v1/chat/completions', clientId: 'c1', prompt: 'hi' });
+        const event = monitor.recordRoute({ path: '/v1/chat/completions', model: 'm', clientId: 'c1', transforms: ['caveman'], routeMs: 4 });
+        monitor.recordResponse(event, 200, { 'x-litellm-model-group': 'g' });
+        monitor.recordFinish(event);
+    } finally {
+        monitor.live.off('update', listen);
+    }
+    assert.deepEqual(seen.map(u => u.type), ['routing', 'route', 'response', 'finish']);
+    assert.equal(seen[1].event.clientId, 'c1');
+    assert.deepEqual(seen[1].event.transforms, ['caveman']);
+    assert.equal(seen[2].event.servedBy, 'g');
+    assert.equal(typeof seen[3].event.doneMs, 'number');
+    assert.equal(seen[3].event.started, undefined);
+});
+
 test('probe reports up, down, and optional components', async () => {
     const server = http.createServer((req, res) => res.end('{"status":"ok"}')).listen(0);
     const port = server.address().port;

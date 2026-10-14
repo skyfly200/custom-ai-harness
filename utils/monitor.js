@@ -1,6 +1,9 @@
 // Monitoring for the control UI (/ui): a ring buffer of recent routing
 // decisions and health checks for every part of the stack. In memory only;
-// a restart of the Interceptor starts the history fresh.
+// a restart of the Interceptor starts the history fresh. Every change is
+// also emitted as an 'update' so pages can follow requests live.
+
+const { EventEmitter } = require('events');
 
 const MAX_EVENTS = 200;
 const PROMPT_PREVIEW_CHARS = 160;
@@ -8,12 +11,24 @@ const PROMPT_PREVIEW_CHARS = 160;
 const events = [];
 let nextId = 1;
 const counters = { requests: 0, routerDown: 0, errors: 0, fallbacks: 0 };
+const live = new EventEmitter();
+live.setMaxListeners(0); // one listener per open page
+
+const publicEvent = ({ started, ...e }) => e;
+function emit(type, event) {
+    live.emit('update', { type, event: publicEvent(event) });
+}
+
+// A request arrived and is waiting on the Router. Not stored, only announced.
+function recordRouting({ path, clientId, prompt }) {
+    live.emit('update', { type: 'routing', event: { path, clientId: clientId || null, prompt: (prompt || '').slice(0, PROMPT_PREVIEW_CHARS), time: new Date().toISOString() } });
+}
 
 /**
  * Record a routing decision. Returns the event so the response can be added
  * to it once the Gateway answers.
  */
-function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError, reason }) {
+function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError, reason, clientId, transforms, routeMs }) {
     const event = {
         id: nextId++,
         time: new Date().toISOString(),
@@ -26,17 +41,22 @@ function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, r
         prompt: (prompt || '').slice(0, PROMPT_PREVIEW_CHARS),
         routerError: routerError || null,
         reason: reason || null,  // set when the Router was skipped (model pinned or chosen by the client)
+        clientId: clientId || null, // x-harness-request-id, so a page can find its own request
+        transforms: transforms || [],
+        routeMs: routeMs ?? null,
         status: null,
         ms: null,
         servedBy: null,
         fallbacks: null,
         error: null,
+        doneMs: null,  // when the last byte of the reply left the Gateway (streams end after `ms`)
         started: Date.now(),
     };
     events.push(event);
     if (events.length > MAX_EVENTS) events.shift();
     counters.requests++;
     if (routerError) counters.routerDown++;
+    emit('route', event);
     return event;
 }
 
@@ -54,6 +74,13 @@ function recordResponse(event, status, headers = {}) {
     event.fallbacks = Number.isFinite(fallbacks) ? fallbacks : null;
     if (event.fallbacks > 0) counters.fallbacks++;
     if (status >= 400) counters.errors++;
+    emit('response', event);
+}
+
+function recordFinish(event) {
+    if (!event) return;
+    event.doneMs = Date.now() - event.started;
+    emit('finish', event);
 }
 
 function recordError(event, err) {
@@ -61,10 +88,11 @@ function recordError(event, err) {
     event.ms = Date.now() - event.started;
     event.error = err?.message || String(err);
     counters.errors++;
+    emit('error', event);
 }
 
 function recentEvents(limit = 50) {
-    return events.slice(-limit).reverse().map(({ started, ...e }) => e);
+    return events.slice(-limit).reverse().map(publicEvent);
 }
 
 const startedAt = new Date().toISOString();
@@ -98,4 +126,4 @@ function checkComponents(urls) {
     ]);
 }
 
-module.exports = { recordRoute, recordResponse, recordError, recentEvents, stats, checkComponents, probe };
+module.exports = { live, recordRouting, recordRoute, recordResponse, recordFinish, recordError, recentEvents, stats, checkComponents, probe };

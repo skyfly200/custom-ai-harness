@@ -119,7 +119,10 @@ const toGateway = createProxyMiddleware({
             for (const [name, value] of Object.entries(gatewayAuth)) proxyReq.setHeader(name, value);
             fixRequestBody(proxyReq, req, res);
         },
-        proxyRes: (proxyRes, req) => monitor.recordResponse(req.harnessEvent, proxyRes.statusCode, proxyRes.headers),
+        proxyRes: (proxyRes, req) => {
+            monitor.recordResponse(req.harnessEvent, proxyRes.statusCode, proxyRes.headers);
+            proxyRes.on('end', () => monitor.recordFinish(req.harnessEvent));
+        },
         error: (err, req) => monitor.recordError(req.harnessEvent, err),
     }
 });
@@ -133,6 +136,18 @@ app.get('/ui/api/status', async (req, res) => {
 
 app.get('/ui/api/events', (req, res) => {
     res.json(monitor.recentEvents(Math.min(parseInt(req.query.limit, 10) || 50, 200)));
+});
+
+// Live feed of the same events (Server-Sent Events): a request arriving, the
+// Router's choice, the Gateway's answer, the end of the reply, and errors.
+app.get('/ui/api/live', (req, res) => {
+    res.set({ 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    res.flushHeaders();
+    res.write('retry: 2000\n\n');
+    const send = (update) => res.write(`data: ${JSON.stringify(update)}\n\n`);
+    const ping = setInterval(() => res.write(': ping\n\n'), 20000);
+    monitor.live.on('update', send);
+    req.on('close', () => { clearInterval(ping); monitor.live.off('update', send); });
 });
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -197,14 +212,26 @@ function compressToolResults(messages) {
     return headroom ? applyHeadroom(anchored) : anchored;
 }
 
+// Transforms the Interceptor applied to this request, for the live feed
+function activeTransforms() {
+    const { caveman, headroom, contextAnchor } = settings.get();
+    return [caveman && 'caveman', headroom && 'headroom', contextAnchor && 'context anchor'].filter(Boolean);
+}
+
 async function routeAndRecord(req, res) {
+    const clientId = req.get('x-harness-request-id');
+    const prompt = latestUserText(req.body.messages);
+    monitor.recordRouting({ path: req.path, clientId, prompt });
+    const started = Date.now();
     const route = await routeModel(req.body, req.get('x-harness-model'));
     req.body.model = route.model;
     logRoute(req.path, route);
     req.harnessEvent = monitor.recordRoute({
-        path: req.path, ...route, tokens: estimateTokens(req.body), prompt: latestUserText(req.body.messages),
+        path: req.path, ...route, tokens: estimateTokens(req.body), prompt, clientId,
+        transforms: activeTransforms(), routeMs: Date.now() - started,
     });
     // Tell the client where its request went (the chat page shows it)
+    res.set('x-harness-event', String(req.harnessEvent.id));
     res.set('x-harness-model', route.model);
     res.set('x-harness-route', route.reason || (route.routerError ? 'router down'
         : `win rate ${route.winRate} vs threshold ${route.threshold}`));

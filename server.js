@@ -14,6 +14,7 @@ const {
 } = require('./utils/messageTransforms');
 const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
+const { pcmRate, pcmToWav } = require('./utils/audio');
 const fs = require('fs');
 const path = require('path');
 
@@ -266,6 +267,8 @@ app.get('/ui/api/tts', async (req, res) => {
     res.json({ configured: true, model: TTS_MODEL, voice: TTS_VOICE, host: new URL(TTS_URL).host, models: await listTtsModels() });
 });
 
+const pcmOnlyModels = new Set(); // models that refused MP3 once
+
 app.post('/ui/api/tts', async (req, res) => {
     if (!TTS_URL) return res.status(404).json({ error: 'No TTS server: add OPENROUTER_API_KEY or TTS_URL to .env' });
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
@@ -274,24 +277,41 @@ app.post('/ui/api/tts', async (req, res) => {
     const model = typeof req.body.model === 'string' && req.body.model ? req.body.model : TTS_MODEL;
     // the default voice belongs to the default model
     const chosenVoice = (typeof voice === 'string' && voice) || (model === TTS_MODEL ? TTS_VOICE : '');
+    const speak = (format) => fetch(`${TTS_URL}/audio/speech`, {
+        method: 'POST',
+        headers: ttsHeaders(),
+        body: JSON.stringify({
+            model,
+            input: text.slice(0, 4000),
+            ...(chosenVoice ? { voice: chosenVoice } : {}),
+            // some models reject any speed but the default, so send it only when changed
+            ...(Number(speed) && Number(speed) !== 1 ? { speed: Math.min(4, Math.max(0.25, Number(speed))) } : {}),
+            ...(TTS_INSTRUCTIONS ? { instructions: TTS_INSTRUCTIONS } : {}),
+            response_format: format,
+        }),
+        signal: AbortSignal.timeout(60000),
+    });
     try {
-        const upstream = await fetch(`${TTS_URL}/audio/speech`, {
-            method: 'POST',
-            headers: ttsHeaders(),
-            body: JSON.stringify({
-                model,
-                input: text.slice(0, 4000),
-                ...(chosenVoice ? { voice: chosenVoice } : {}),
-                // some models reject any speed but the default, so send it only when changed
-                ...(Number(speed) && Number(speed) !== 1 ? { speed: Math.min(4, Math.max(0.25, Number(speed))) } : {}),
-                ...(TTS_INSTRUCTIONS ? { instructions: TTS_INSTRUCTIONS } : {}),
-                response_format: 'mp3',
-            }),
-            signal: AbortSignal.timeout(60000),
-        });
+        // MP3 when the model makes it; some (Gemini TTS) only make raw PCM
+        let format = pcmOnlyModels.has(model) ? 'pcm' : 'mp3';
+        let upstream = await speak(format);
+        if (!upstream.ok && format === 'mp3') {
+            const detail = await upstream.text();
+            if (upstream.status === 400 && /response[_ ]?format|pcm|mp3/i.test(detail)) {
+                pcmOnlyModels.add(model);
+                upstream = await speak(format = 'pcm');
+            } else {
+                return res.status(502).json({ error: `TTS server answered HTTP ${upstream.status}: ${detail.slice(0, 300)}` });
+            }
+        }
         if (!upstream.ok) {
             const detail = (await upstream.text()).slice(0, 300);
             return res.status(502).json({ error: `TTS server answered HTTP ${upstream.status}: ${detail}` });
+        }
+        const type = upstream.headers.get('content-type') || '';
+        if (format === 'pcm' && !/wav|mpeg|ogg|opus|aac|flac/i.test(type)) {
+            res.set('content-type', 'audio/wav');
+            return res.send(pcmToWav(Buffer.from(await upstream.arrayBuffer()), { sampleRate: pcmRate(type) }));
         }
         res.set('content-type', upstream.headers.get('content-type') || 'audio/mpeg');
         res.send(Buffer.from(await upstream.arrayBuffer()));

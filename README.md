@@ -295,10 +295,13 @@ Point an OpenAI-compatible assistant (Cursor, Aider, Continue, Cline) at `http:/
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://localhost:3000"
 $env:ANTHROPIC_AUTH_TOKEN = "local-harness"   # dummy; keeps your real Anthropic credentials off the local stack
+$env:CLAUDE_CODE_AUTO_MODE_SERVER = "0"       # auto mode: skip server-side checks the harness can't carry
 claude
 ```
 
 The Interceptor routes each request and the Gateway translates the Anthropic Messages format for whichever model serves it, including tool use and streaming. The Interceptor log shows each routing decision.
+
+**Auto mode.** Claude Code's auto mode asks Anthropic's server to run its safety checks inside each request, but the harness rewrites requests and sends them to non-Anthropic models, so those checks never reach the session. `CLAUDE_CODE_AUTO_MODE_SERVER=0` tells Claude Code to use its own classifier requests from the start instead of stopping at the first checked action with an "isn't eligible" notice. Those classifier requests also go through the Interceptor and are routed like any other request, so the Gateway model that serves them judges whether an action is safe. See [Auto mode classifier request charges](https://code.claude.com/docs/en/auto-mode-classifier-billing).
 
 ### Control UI
 

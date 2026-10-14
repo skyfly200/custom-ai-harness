@@ -1,8 +1,101 @@
 # Custom AI Coding Harness
 
-A high-performance, cost-optimized proxy and routing harness designed to sit between your coding agent (such as Claude Code or Cursor) and local/cloud LLM endpoints.
+## What this is, in plain words
 
-Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
+The harness is a middleman between your AI coding assistant (Claude Code, Cursor and similar tools) and the AI models that answer it. Your assistant talks to the harness as if it were the AI service. For every request, the harness decides how hard the task is, sends easy work to free models and hard work to a stronger model, and trims the request so it uses fewer tokens. If one model is down or rate-limited, it automatically tries the next one.
+
+What you get:
+
+- **Lower cost.** Most requests go to free models, and requests are compressed before they are sent.
+- **Fewer failures.** When a model refuses, errors or hits its limit, another one takes over.
+- **A dashboard.** A web page shows what each request did, which model answered and why, and lets you change settings without editing files.
+
+### The three parts you run
+
+| Part | What it does | Address |
+|------|--------------|---------|
+| **Interceptor** | The front door. Your coding assistant connects here. It also serves the dashboard and chat page. | http://localhost:3000 |
+| **Router** | Looks at each request and answers one question: does this need a strong model, or will a free one do? | http://localhost:6060 |
+| **Gateway** (LiteLLM) | Sends the request to the chosen model and switches to a backup if that one fails. | http://localhost:4000 |
+
+A fourth part, a **local engine** (a model running on your own computer), is optional. Without it, everything goes to the free cloud models.
+
+---
+
+## Quick start (Windows)
+
+The steps below use PowerShell. Mac and Linux commands are in [Installation](#installation) and [Running the stack](#running-the-stack).
+
+### What you need first
+
+- **Node.js** 18 or newer: <https://nodejs.org>
+- **Python** 3.10 or newer: <https://www.python.org/downloads/>
+- **Git**: <https://git-scm.com>
+- **API keys** from [Groq](https://console.groq.com/keys) and [OpenRouter](https://openrouter.ai/keys). Both have free tiers, and the models the harness sends work to are free. The one exception is the Router's request classifier (Jev, through OpenRouter), which costs a small amount per request, so keep a little credit on your OpenRouter account. [Router classifier](#router-classifier-jev-through-openrouter) explains how to swap it for a free one.
+
+### One-time setup
+
+1. Download the harness and install what it needs:
+
+   ```powershell
+   git clone https://github.com/skyfly200/custom-ai-harness.git
+   cd custom-ai-harness
+   npm install
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install "litellm[proxy]" routellm
+   ```
+
+   If PowerShell refuses to run `Activate.ps1`, run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` once and try again.
+
+2. Create your settings file and paste in your keys:
+
+   ```powershell
+   Copy-Item .env.example .env
+   notepad .env
+   ```
+
+   Fill in `GROQ_API_KEY=` and `OPENROUTER_API_KEY=`, then save. The file stays on your computer; Git ignores it, so it is never pushed to GitHub.
+
+### Every time you want to use it
+
+Open three PowerShell windows, `cd` into the `custom-ai-harness` folder in each, and run one command per window. Leave all three open while you work.
+
+| Window | Starts | Command |
+|--------|--------|---------|
+| 1 | Gateway | `.\.venv\Scripts\Activate.ps1; $env:PYTHONUTF8 = 1; litellm --config config.yaml` |
+| 2 | Router | `.\.venv\Scripts\Activate.ps1; python router.py` |
+| 3 | Interceptor | `npm start` |
+
+Then open the dashboard at <http://localhost:3000/ui>. When the Router and Gateway show as up, the harness is ready. The local engine, Ollama and Laya are optional and normally show as "not running". To stop, press Ctrl+C in each window.
+
+### Connect Claude Code
+
+In a fourth PowerShell window:
+
+```powershell
+$env:ANTHROPIC_BASE_URL = "http://localhost:3000"
+$env:ANTHROPIC_AUTH_TOKEN = "local-harness"
+$env:CLAUDE_CODE_AUTO_MODE_SERVER = "0"
+claude
+```
+
+These settings only last for that window. Other tools such as Cursor, Aider, Continue or Cline connect to `http://localhost:3000/v1` as an "OpenAI-compatible" endpoint.
+
+### If something goes wrong
+
+- **The dashboard shows the Router or Gateway as down.** Check that window for an error message. Most often a key in `.env` is missing or mistyped.
+- **`litellm` crashes on start with a text-encoding error.** Make sure you ran `$env:PYTHONUTF8 = 1` in that window first.
+- **`litellm` or `python router.py` says a command or module is not found.** Run `.\.venv\Scripts\Activate.ps1` in that window first; each new window needs it.
+- **Requests are slow or fail with "rate limit".** The free tiers have limits per minute and per day. The harness switches to backups on its own; the dashboard shows which ones it tried.
+
+---
+
+## Technical reference
+
+Everything below is the detail behind the quick start: how each part works, every setting, and how to run the tests.
+
+The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -10,8 +103,6 @@ Four phases of the [technical roadmap](ROADMAP.md) are fully implemented:
 | 2 | Intelligent Complexity Routing (RouteLLM & BERT) | ✅ |
 | 3 | Zero-Cost Token & Context Compression | ✅ |
 | 4 | Local Model Resilience & Anti-Looping | ✅ |
-
----
 
 ## Architecture
 

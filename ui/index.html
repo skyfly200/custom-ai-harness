@@ -9,7 +9,7 @@
 <body>
 <main>
   <header>
-    <nav><h1>Harness Control</h1><a href="./" class="here">Dashboard</a><a href="chat.html">Chat</a></nav>
+    <nav><h1>Harness Control</h1><a href="./" class="here">Dashboard</a><a href="chat.html">Chat</a><a href="usage.html">Usage</a></nav>
     <span class="muted" id="updated">Loading…</span>
   </header>
 
@@ -162,6 +162,13 @@ function result(e) {
   return out;
 }
 
+// Real counts once the reply has ended, else the Interceptor's size estimate
+function tokens(e) {
+  if (!e.usage) return e.tokens != null ? `<span class="muted" title="Estimated request size">~${e.tokens.toLocaleString()}</span>` : '';
+  const approx = e.usage.estimated ? '~' : '';
+  return `${approx}${e.usage.input.toLocaleString()} in<div class="sub">${approx}${e.usage.output.toLocaleString()} out</div>`;
+}
+
 function renderEvents(events) {
   if (!events.length) return;
   $('events').innerHTML = events.map(e => `<tr>
@@ -169,7 +176,7 @@ function renderEvents(events) {
     <td><code>${esc(e.model)}</code></td>
     <td>${why(e)}</td>
     <td>${result(e)}</td>
-    <td class="num">${e.tokens?.toLocaleString() ?? ''}</td>
+    <td class="num">${tokens(e)}</td>
     <td><div class="prompt" title="${esc(e.prompt)}">${esc(e.prompt) || '<span class="muted">(no typed text)</span>'}</div><div class="sub muted">${esc(e.path)}</div></td>
   </tr>`).join('');
 }

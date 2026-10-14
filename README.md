@@ -441,6 +441,16 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 - **Context.** Attach text files and images with the paperclip, by dropping them on the page, or by pasting. Under Options, each chat has a system prompt and notes the model sees with every message. The composer shows a rough token count for the request.
 - **Voice.** The mic button (Ctrl+M) dictates into the message box, optionally sending when you stop talking. Replies can be read aloud on demand or automatically as they stream, with a choice of voice, speed, pitch and volume, and a Test button to hear a voice. Hands-free mode does both in a loop. Dictation uses the browser's speech recognition: it needs Chrome or Edge, they send the audio to their speech service, and the microphone only works on `http://localhost` or https.
 
+#### Usage
+
+<http://localhost:3000/ui/usage.html> shows how many tokens went where, for today, the last 7 or 30 days, or all time:
+
+- **Flow through the harness**: clients (Claude Code, the chat page, Aider, other API clients) into the Interceptor, how the model was picked (the Router, a pinned model, the client's choice, or the Router being down), then the Gateway and the service that answered (OpenRouter, Groq, Ollama, the local CLI wrapper...). Line widths follow the tokens.
+- **Sankey diagram**: client → model asked for → model that served it (after any Gateway fallbacks) → service, coloured by service.
+- **Bars and a table** of input, cached input and output tokens and requests by model and by service. A switch shows all tokens, input, output or request counts.
+
+The counts are the ones each reply reports (`usage` in OpenAI replies, `input_tokens`/`output_tokens` in Anthropic ones, streamed or not). Replies without them, such as OpenAI streams that don't ask for `stream_options.include_usage`, are estimated at about 4 characters a token and marked ~. The service for each model comes from its `litellm_params` in `config.yaml`. Totals are kept per day in `harness-usage.json` (gitignored) so they survive a restart; **Clear totals** on the page empties it. The page updates live as requests finish, and the dashboard's routing log shows the same in/out counts per request.
+
 #### Better read-aloud voices
 
 By default replies are read by the browser's own voices. Quality depends on the browser: Edge on Windows has the best free ones (the "Online (Natural)" voices, marked ★ and picked by default), Chrome has "Google" voices, and the built-in Windows voices sound robotic.

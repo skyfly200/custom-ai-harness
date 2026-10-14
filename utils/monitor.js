@@ -13,7 +13,7 @@ const counters = { requests: 0, routerDown: 0, errors: 0, fallbacks: 0 };
  * Record a routing decision. Returns the event so the response can be added
  * to it once the Gateway answers.
  */
-function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError }) {
+function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError, reason }) {
     const event = {
         id: nextId++,
         time: new Date().toISOString(),
@@ -25,6 +25,7 @@ function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, r
         tokens,
         prompt: (prompt || '').slice(0, PROMPT_PREVIEW_CHARS),
         routerError: routerError || null,
+        reason: reason || null,  // set when the Router was skipped (model pinned or chosen by the client)
         status: null,
         ms: null,
         servedBy: null,

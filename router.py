@@ -18,6 +18,8 @@ strong model's win rate in [0, 1]:
       -> {"model": str, "win_rate": float}
     POST /admin/reload               re-read the config file
     POST /admin/backend {"backend"}  switch classifier until the next reload
+    POST /admin/config {"changes"}   change settings until the next reload
+    POST /admin/save                 write the running settings to the config file
 
 The Router only classifies. The Interceptor sends the request to the Gateway
 itself, so the Router never has to understand OpenAI or Anthropic request
@@ -28,6 +30,7 @@ Run: python router.py [--config routellm-config.yaml] [--port 6060]
 """
 import argparse
 import importlib
+import json
 import logging
 import os
 import re
@@ -216,7 +219,8 @@ def describe_error(err: Exception) -> str:
 @app.get("/health")
 def health():
     return {"status": "ok", "backend": config.get("backend", "routellm"), "backends": list(BACKENDS),
-            "config": config_path, "last_error": last_error}
+            "config": config_path, "last_error": last_error,
+            "settings": {k: v for k, v in config.items() if k in EDITABLE}}
 
 
 class BackendRequest(BaseModel):
@@ -240,6 +244,110 @@ def switch_backend(req: BackendRequest):
         return JSONResponse(status_code=400, content={"error": describe_error(err)})
     config["backend"] = req.backend
     scorer, last_error = new_scorer, None
+    return health()
+
+
+# Settings the control UI may change, each with its type. The model names only
+# affect pick_model; the rest build the scorer, so changing them rebuilds it.
+EDITABLE = {
+    "strong_model": str, "weak_model": str, "weak_model_tools": str, "weak_model_overflow": str,
+    "weak_model_max_tokens": int,
+    "backend": str, "checkpoint": str, "base_url": str, "model": str, "api_key_env": str,
+    "auth_header": str, "timeout": float, "max_chars": int, "max_tokens": int,
+    "laya_max_chars": int, "laya_preload": bool, "scorer": str,
+}
+MODEL_KEYS = {"strong_model", "weak_model", "weak_model_tools", "weak_model_overflow", "weak_model_max_tokens"}
+REQUIRED = {"strong_model", "weak_model", "backend"}
+
+
+class ConfigRequest(BaseModel):
+    changes: dict  # key -> new value; null or "" removes an optional key
+
+
+def apply_changes(current: dict, changes: dict) -> dict:
+    new_config = dict(current)
+    for key, value in changes.items():
+        if key not in EDITABLE:
+            raise ValueError(f"{key} can't be changed here")
+        if value is None or value == "":
+            if key in REQUIRED:
+                raise ValueError(f"{key} can't be empty")
+            new_config.pop(key, None)
+            continue
+        kind = EDITABLE[key]
+        if kind is bool and not isinstance(value, bool):
+            raise ValueError(f"{key} must be true or false")
+        try:
+            new_config[key] = kind(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be a {kind.__name__}")
+    if new_config.get("backend") not in BACKENDS:
+        raise ValueError(f"unknown backend {new_config.get('backend')!r}")
+    return new_config
+
+
+@app.post("/admin/config")
+def change_config(req: ConfigRequest):
+    """Change settings until the next reload; the scorer is rebuilt only when a classifier setting changed."""
+    global scorer, last_error
+    try:
+        new_config = apply_changes(config, req.changes)
+        new_scorer = scorer
+        if set(req.changes) - MODEL_KEYS:
+            new_scorer = BACKENDS[new_config["backend"]](new_config)
+    except KeyError as err:
+        return JSONResponse(status_code=400, content={"error": f"{config.get('backend')} needs {err} in the config"})
+    except Exception as err:
+        return JSONResponse(status_code=400, content={"error": describe_error(err)})
+    config.clear()
+    config.update(new_config)
+    if new_scorer is not scorer:
+        scorer, last_error = new_scorer, None
+    return health()
+
+
+def yaml_scalar(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    plain = re.fullmatch(r"[\w./:@-]+", text) and yaml.safe_load(text) == text
+    return text if plain else json.dumps(text)
+
+
+def write_settings(text: str, settings: dict) -> str:
+    """Set each editable key in the YAML text, keeping comments and layout.
+    A key that is no longer set is commented out; a new one is appended."""
+    lines = text.splitlines()
+    for key in EDITABLE:
+        pattern = re.compile(rf"^{re.escape(key)}:(\s*)([^#\n]*?)(\s*#.*)?$")
+        index = next((i for i, line in enumerate(lines) if pattern.match(line)), None)
+        if key in settings:
+            if index is None:
+                lines.append(f"{key}: {yaml_scalar(settings[key])}")
+            else:
+                m = pattern.match(lines[index])
+                comment = m.group(3) or ""
+                lines[index] = f"{key}: {yaml_scalar(settings[key])}{comment}"
+        elif index is not None:
+            lines[index] = "# " + lines[index]
+    return "\n".join(lines) + "\n"
+
+
+@app.post("/admin/save")
+def save_config():
+    if not config_path:
+        return JSONResponse(status_code=400, content={"error": "no config file loaded"})
+    with open(config_path, encoding="utf-8") as f:
+        text = f.read()
+    updated = write_settings(text, config)
+    # Check the edit reads back as the running settings before touching the file
+    editable = lambda c: {k: v for k, v in (c or {}).items() if k in EDITABLE}
+    if editable(yaml.safe_load(updated)) != editable(config):
+        return JSONResponse(status_code=500, content={"error": "couldn't write the settings without changing others; edit the file by hand"})
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(updated)
     return health()
 
 

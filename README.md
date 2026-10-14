@@ -302,14 +302,23 @@ The Interceptor routes each request and the Gateway translates the Anthropic Mes
 
 ### Control UI
 
-With the Interceptor running, open <http://localhost:3000/ui>. It refreshes every 3 seconds and shows:
+With the Interceptor running, open <http://localhost:3000/ui>. The dashboard refreshes every 3 seconds and shows:
 
 - **Components**: whether the Router, Gateway, local engine (port 8000), Ollama (11434) and a local Laya (8001) answer, and which classifier the Router is using. The last three are optional and show as "not running" rather than down.
 - **Counters** since the Interceptor started: requests, times the Router couldn't be reached, Gateway fallbacks and errors.
-- **Recent routing decisions**: the model each request went to and why (win rate against threshold, tool requests, or the Router being down), the Gateway's status and time to first byte, how many fallbacks LiteLLM tried and which model group answered (from LiteLLM's `x-litellm-attempted-fallbacks` and `x-litellm-model-group` headers, when your LiteLLM version sends them), and the start of the typed request.
-- **Router classifier**: switch the backend, or reload `routellm-config.yaml` after editing it, without restarting the Router. A switch reuses the settings already in the file (switching to `llm` needs its `base_url` and `model` there) and lasts until the next reload or restart. A config file that fails to load leaves the running config in place.
+- **Recent routing decisions**: the model each request went to and why (win rate against threshold, tool requests, a pinned model, or the Router being down), the Gateway's status and time to first byte, how many fallbacks LiteLLM tried and which model group answered (from LiteLLM's `x-litellm-attempted-fallbacks` and `x-litellm-model-group` headers, when your LiteLLM version sends them), and the start of the typed request.
+- **Interceptor settings**: pin every request to one model (skipping the Router), replace the keyword threshold with a fixed one, the output-token cap, the Router timeout, the models used when the Router is down, and switches for the caveman prompt, Headroom and the context anchor. They apply on the next request and are saved to `harness-settings.json` (gitignored); delete it or press "Reset to defaults" to go back.
+- **Router settings**: the strong, weak, tool and overflow models, the weak model's size limit, the classifier backend and its settings (base URL, model, API key variable name, timeout, and so on). **Apply** lasts until the Router restarts; **Apply and save to file** also writes them to `routellm-config.yaml`, editing only those lines and keeping your comments (a cleared setting is commented out); **Reload from file** picks up edits you made by hand. A change that fails to build the classifier leaves the running one in place.
 
-History is kept in memory (the last 200 requests) and starts fresh when the Interceptor restarts. Override the probed addresses with `LOCAL_ENGINE_URL`, `OLLAMA_URL` and `LAYA_URL` in `.env`. The page has no login. The Interceptor listens on every network interface, so other machines that can reach port 3000 can view it, but the classifier controls only answer requests from this machine.
+Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml` when the Gateway is down). The Gateway's own fallback chain still lives in `config.yaml`.
+
+#### Chat
+
+<http://localhost:3000/ui/chat.html> is a chat page that sends through the Interceptor like any other client, so the Router picks the model unless you name one. Each reply shows the model it went to, why, and how long it took. You can set a system prompt, max tokens, temperature and streaming; the conversation is kept in the browser until you press "New chat".
+
+Any client can skip the Router for one request the same way: send the model name in an `x-harness-model` header. Every routed response carries `x-harness-model` and `x-harness-route` headers saying where it went.
+
+History is kept in memory (the last 200 requests) and starts fresh when the Interceptor restarts. Override the probed addresses with `LOCAL_ENGINE_URL`, `OLLAMA_URL` and `LAYA_URL` in `.env`. The pages have no login. The Interceptor listens on every network interface, so other machines that can reach port 3000 can view them and chat, but settings only change from requests made on this machine.
 
 ---
 

@@ -4,54 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harness Control</title>
-<style>
-  :root {
-    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5f6b7a; --border: #dde1e6;
-    --ok: #1a7f37; --bad: #cf222e; --warn: #9a6700; --off: #8c959f; --accent: #0969da;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1216; --panel: #171b21; --text: #e6e9ed; --muted: #95a0ad; --border: #2a3038;
-      --ok: #3fb950; --bad: #f85149; --warn: #d29922; --off: #6e7681; --accent: #4493f8;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; }
-  header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-  h1 { font-size: 20px; margin: 0; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 0 8px; }
-  .muted { color: var(--muted); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
-  .card .name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
-  .card .sub { color: var(--muted); font-size: 12px; margin-top: 4px; word-break: break-word; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--off); }
-  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.off { background: var(--off); }
-  .stat .num { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  select, button { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
-  button { cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button:disabled { opacity: .5; cursor: default; }
-  #msg { font-size: 13px; }
-  #msg.err { color: var(--bad); } #msg.ok { color: var(--ok); }
-  .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
-  table { border-collapse: collapse; width: 100%; min-width: 760px; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { font-size: 12px; color: var(--muted); font-weight: 600; }
-  tr:last-child td { border-bottom: none; }
-  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .prompt { color: var(--muted); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
-  .tag.bad { color: var(--bad); border-color: var(--bad); } .tag.warn { color: var(--warn); border-color: var(--warn); }
-  code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
   <header>
-    <h1>Harness Control</h1>
+    <nav><h1>Harness Control</h1><a href="./" class="here">Dashboard</a><a href="chat.html">Chat</a></nav>
     <span class="muted" id="updated">Loading…</span>
   </header>
 
@@ -61,18 +19,76 @@
   <h2>Since the Interceptor started</h2>
   <div class="grid" id="stats"></div>
 
-  <h2>Router classifier</h2>
+  <h2>Interceptor settings</h2>
   <div class="card">
-    <div class="controls">
-      <label for="backend">Backend</label>
-      <select id="backend" disabled></select>
-      <button class="primary" id="apply" disabled>Switch</button>
-      <button id="reload" disabled>Reload config file</button>
-      <span id="msg"></span>
+    <form id="isettings" class="form" autocomplete="off">
+      <label class="field"><span>Pin every request to a model</span>
+        <input type="text" name="pinModel" list="models" placeholder="Off: the Router decides">
+        <small>Skips the Router entirely. Leave empty for normal routing.</small></label>
+      <label class="field"><span>Fixed threshold</span>
+        <input type="number" name="fixedThreshold" min="0" max="1" step="0.05" placeholder="Off: from keywords">
+        <small>0 always strong, 1 almost always weak. Empty uses the keyword rule (0.2 / 0.5 / 0.8).</small></label>
+      <label class="field"><span>Max output tokens</span>
+        <input type="number" name="maxOutputTokens" min="1" step="1">
+        <small>Caps what clients ask for. Groq rejects more than 65,536.</small></label>
+      <label class="field"><span>Router timeout (ms)</span>
+        <input type="number" name="routerTimeoutMs" min="100" step="100">
+        <small>After this the request goes to the fallback model below.</small></label>
+      <label class="field"><span>Model when the Router is down</span>
+        <input type="text" name="routerDownModel" list="models"></label>
+      <label class="field"><span>…for requests with tools</span>
+        <input type="text" name="routerDownToolsModel" list="models"></label>
+      <label class="field check"><input type="checkbox" name="caveman">
+        <span>Caveman prompt<br><small>Tell the model to be terse, to cut output tokens.</small></span></label>
+      <label class="field check"><input type="checkbox" name="headroom">
+        <span>Headroom<br><small>Compress tool results over 4,000 characters.</small></span></label>
+      <label class="field check"><input type="checkbox" name="contextAnchor">
+        <span>Context anchor<br><small>Replace repeated identical tool results with a pointer.</small></span></label>
+    </form>
+    <div class="actions">
+      <button class="primary" id="isave">Save</button>
+      <button id="ireset">Reset to defaults</button>
+      <span class="note" id="imsg"></span>
+    </div>
+    <div class="sub muted" style="margin-top:8px">Takes effect on the next request and is kept in <code>harness-settings.json</code> across restarts.</div>
+  </div>
+
+  <h2>Router settings</h2>
+  <div class="card">
+    <div id="rdown" class="sub"></div>
+    <form id="rsettings" class="form" autocomplete="off">
+      <div class="subhead" style="grid-column:1/-1;margin:0">Models it picks between</div>
+      <label class="field"><span>Strong model</span><input type="text" name="strong_model" list="models">
+        <small>When the strong model's win rate reaches the threshold.</small></label>
+      <label class="field"><span>Weak model</span><input type="text" name="weak_model" list="models"></label>
+      <label class="field"><span>Weak model for tool requests</span><input type="text" name="weak_model_tools" list="models">
+        <small>Claude Code requests always carry tools. Empty uses the weak model.</small></label>
+      <label class="field"><span>Weak model size limit (tokens)</span><input type="number" name="weak_model_max_tokens" min="1">
+        <small>Bigger weak requests go to the overflow model. Empty for no limit.</small></label>
+      <label class="field"><span>Overflow model</span><input type="text" name="weak_model_overflow" list="models"></label>
+
+      <div class="subhead" style="grid-column:1/-1;margin:8px 0 0">Classifier</div>
+      <label class="field"><span>Backend</span><select name="backend"></select>
+        <small id="backendHelp"></small></label>
+      <label class="field" data-for="systemone llm"><span>Base URL</span><input type="text" name="base_url"
+        placeholder="https://openrouter.ai/api"><small>Jev via OpenRouter, or http://127.0.0.1:8001 for local Laya.</small></label>
+      <label class="field" data-for="systemone llm"><span>Model</span><input type="text" name="model" placeholder="jev-latest"></label>
+      <label class="field" data-for="systemone llm"><span>API key variable</span><input type="text" name="api_key_env"
+        placeholder="OPENROUTER_API_KEY"><small>Name of the variable in .env, not the key itself.</small></label>
+      <label class="field" data-for="systemone llm"><span>Timeout (s)</span><input type="number" name="timeout" min="0.1" step="0.5"></label>
+      <label class="field" data-for="systemone llm"><span>Prompt characters sent</span><input type="number" name="max_chars" min="1"></label>
+      <label class="field" data-for="routellm"><span>Checkpoint</span><input type="text" name="checkpoint"></label>
+      <label class="field" data-for="laya"><span>Prompt characters sent</span><input type="number" name="laya_max_chars" min="1"></label>
+      <label class="field" data-for="custom"><span>Scorer</span><input type="text" name="scorer" placeholder="package.module:factory"></label>
+    </form>
+    <div class="actions">
+      <button class="primary" id="rapply">Apply</button>
+      <button id="rsave">Apply and save to file</button>
+      <button id="rreload">Reload from file</button>
+      <span class="note" id="rmsg"></span>
     </div>
     <div class="sub muted" style="margin-top:8px">
-      Switching uses the settings already in the config file and lasts until the next reload or Router restart.
-      To make it permanent, change <code>backend:</code> in <code>routellm-config.yaml</code> and reload.
+      Apply lasts until the Router restarts. Save also writes <span id="rpath">the config file</span>, keeping its comments; a setting you clear is commented out.
     </div>
     <div class="sub" id="routerError"></div>
   </div>
@@ -86,12 +102,20 @@
       <tbody id="events"><tr><td colspan="6" class="muted">No requests yet.</td></tr></tbody>
     </table>
   </div>
+  <datalist id="models"></datalist>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-let backendTouched = false;
+const BACKEND_HELP = {
+  routellm: 'RouteLLM BERT, in the Router process.',
+  laya: 'Laya in the Router process (pip install -r requirements-laya.txt).',
+  systemone: 'Jev via OpenRouter, or a Laya server, over HTTP.',
+  llm: 'An OpenAI-compatible model rates difficulty 0 to 1.',
+  custom: 'Your own scorer factory.',
+};
+let routerFormDirty = false, interceptorFormDirty = false;
 
 async function getJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -99,6 +123,11 @@ async function getJSON(url, opts) {
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;
 }
+const postJSON = (url, body) => getJSON(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+function note(id, text, cls) { $(id).textContent = text; $(id).className = 'note ' + (cls || ''); }
+
+// ---- status and events ---------------------------------------------------
 
 function renderComponents(components) {
   $('components').innerHTML = components.map(c => {
@@ -108,45 +137,26 @@ function renderComponents(components) {
     return `<div class="card"><div class="name"><span class="dot ${state}"></span>${esc(c.name)}</div>
       <div class="sub">${label}${extra}</div><div class="sub"><code>${esc(c.url)}</code></div></div>`;
   }).join('');
-
-  const router = components.find(c => c.name === 'Router');
-  const sel = $('backend');
-  if (router?.ok && router.detail?.backends) {
-    if (!backendTouched) {
-      sel.innerHTML = router.detail.backends.map(b => `<option ${b === router.detail.backend ? 'selected' : ''}>${esc(b)}</option>`).join('');
-    }
-    sel.disabled = $('apply').disabled = $('reload').disabled = false;
-    $('routerError').innerHTML = router.detail.last_error
-      ? `<span class="tag bad">last classifier error</span> ${esc(router.detail.last_error)}` : '';
-  } else {
-    sel.disabled = $('apply').disabled = $('reload').disabled = true;
-    $('routerError').textContent = router?.ok ? 'This Router version has no admin endpoints; update router.py.' : 'Router is down, so its classifier can’t be changed.';
-  }
+  renderRouterForm(components.find(c => c.name === 'Router'));
 }
 
 function renderStats(s) {
-  const items = [
-    ['Requests', s.requests],
-    ['Router unreachable', s.routerDown],
-    ['Gateway fallbacks', s.fallbacks],
-    ['Errors', s.errors],
-  ];
+  const items = [['Requests', s.requests], ['Router unreachable', s.routerDown], ['Gateway fallbacks', s.fallbacks], ['Errors', s.errors]];
   $('stats').innerHTML = items.map(([k, v]) => `<div class="card stat"><div class="num">${v}</div><div class="sub">${k}</div></div>`).join('')
     + `<div class="card stat"><div class="num" style="font-size:14px">${new Date(s.since).toLocaleString()}</div><div class="sub">Started</div></div>`;
 }
 
 function why(e) {
+  if (e.reason) return `<span class="tag">${esc(e.reason)}</span>`;
   if (e.routerError) return `<span class="tag bad">Router down</span> fallback model <div class="sub">${esc(e.routerError)}</div>`;
   const strong = e.winRate != null && e.winRate >= e.threshold;
-  return `win rate ${e.winRate ?? 'n/a'} ${strong ? '≥' : '<'} threshold ${e.threshold}`
-    + (e.tools ? ' <span class="tag">tools</span>' : '');
+  return `win rate ${e.winRate ?? 'n/a'} ${strong ? '≥' : '<'} threshold ${e.threshold}` + (e.tools ? ' <span class="tag">tools</span>' : '');
 }
 
 function result(e) {
   if (e.error) return `<span class="tag bad">failed</span> <div class="sub">${esc(e.error)}</div>`;
   if (e.status == null) return '<span class="muted">waiting…</span>';
-  const cls = e.status >= 400 ? 'bad' : '';
-  let out = `<span class="tag ${cls}">${e.status}</span> ${e.ms} ms`;
+  let out = `<span class="tag ${e.status >= 400 ? 'bad' : ''}">${e.status}</span> ${e.ms} ms`;
   if (e.fallbacks > 0) out += ` <span class="tag warn">${e.fallbacks} fallback${e.fallbacks > 1 ? 's' : ''}</span>`;
   if (e.servedBy && e.servedBy !== e.model) out += `<div class="sub">served by ${esc(e.servedBy)}</div>`;
   return out;
@@ -164,6 +174,111 @@ function renderEvents(events) {
   </tr>`).join('');
 }
 
+// ---- Interceptor settings --------------------------------------------------
+
+function fillInterceptorForm(s) {
+  const f = $('isettings');
+  for (const [k, v] of Object.entries(s)) {
+    const el = f.elements[k];
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? '';
+  }
+  interceptorFormDirty = false;
+}
+
+function readInterceptorForm() {
+  const f = $('isettings'), out = {};
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    out[el.name] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (el.value === '' ? null : Number(el.value)) : el.value.trim();
+  }
+  return out;
+}
+
+async function loadInterceptorSettings() {
+  try { fillInterceptorForm((await getJSON('api/settings')).settings); } catch (err) { note('imsg', err.message, 'err'); }
+}
+
+$('isettings').addEventListener('input', () => { interceptorFormDirty = true; });
+$('isave').addEventListener('click', async () => {
+  try { fillInterceptorForm((await postJSON('api/settings', readInterceptorForm())).settings); note('imsg', 'Saved.', 'ok'); }
+  catch (err) { note('imsg', err.message, 'err'); }
+});
+$('ireset').addEventListener('click', async () => {
+  try { fillInterceptorForm((await postJSON('api/settings/reset', {})).settings); note('imsg', 'Back to defaults.', 'ok'); }
+  catch (err) { note('imsg', err.message, 'err'); }
+});
+
+// ---- Router settings -------------------------------------------------------
+
+let routerSettings = {};
+
+function showBackendFields() {
+  const f = $('rsettings'), backend = f.elements.backend.value;
+  for (const el of f.querySelectorAll('[data-for]')) el.style.display = el.dataset.for.split(' ').includes(backend) ? '' : 'none';
+  $('backendHelp').textContent = BACKEND_HELP[backend] || '';
+}
+
+function renderRouterForm(router) {
+  const f = $('rsettings');
+  const ready = router?.ok && router.detail?.settings;
+  for (const b of ['rapply', 'rsave', 'rreload']) $(b).disabled = !ready;
+  f.querySelectorAll('input, select').forEach(el => { el.disabled = !ready; });
+  if (!ready) {
+    $('rdown').textContent = router?.ok ? 'This Router version has no admin endpoints; update router.py and restart it.' : 'The Router is down, so its settings can’t be read or changed.';
+    return;
+  }
+  $('rdown').textContent = '';
+  $('rpath').innerHTML = router.detail.config ? `<code>${esc(router.detail.config)}</code>` : 'the config file';
+  $('routerError').innerHTML = router.detail.last_error ? `<span class="tag bad">last classifier error</span> ${esc(router.detail.last_error)}` : '';
+  if (routerFormDirty) return;
+  routerSettings = router.detail.settings;
+  f.elements.backend.innerHTML = router.detail.backends.map(b => `<option>${esc(b)}</option>`).join('');
+  for (const el of f.elements) if (el.name) el.value = routerSettings[el.name] ?? '';
+  showBackendFields();
+}
+
+// Only send what changed; an emptied field removes the setting.
+function routerChanges() {
+  const changes = {};
+  for (const el of $('rsettings').elements) {
+    if (!el.name || el.closest('[data-for]')?.style.display === 'none') continue;
+    const raw = el.value.trim();
+    const value = raw === '' ? null : el.type === 'number' ? Number(raw) : raw;
+    if (value !== (routerSettings[el.name] ?? null)) changes[el.name] = value;
+  }
+  return changes;
+}
+
+async function routerAction(fn, busy, done) {
+  note('rmsg', busy);
+  for (const b of ['rapply', 'rsave', 'rreload']) $(b).disabled = true;
+  try { await fn(); routerFormDirty = false; note('rmsg', done, 'ok'); }
+  catch (err) { note('rmsg', err.message, 'err'); }
+  for (const b of ['rapply', 'rsave', 'rreload']) $(b).disabled = false;
+  refresh();
+}
+
+async function applyRouter() {
+  const changes = routerChanges();
+  if (Object.keys(changes).length) await postJSON('api/router/config', { changes });
+}
+
+$('rsettings').addEventListener('input', () => { routerFormDirty = true; });
+$('rsettings').elements.backend.addEventListener('change', showBackendFields);
+$('rapply').addEventListener('click', () => routerAction(applyRouter, 'Applying… (a classifier change can load a model)', 'Applied.'));
+$('rsave').addEventListener('click', () => routerAction(async () => { await applyRouter(); await postJSON('api/router/save', {}); }, 'Saving…', 'Applied and saved.'));
+$('rreload').addEventListener('click', () => routerAction(() => postJSON('api/router/reload', {}), 'Reloading…', 'Reloaded from file.'));
+
+// ---- loop ------------------------------------------------------------------
+
+async function loadModels() {
+  try {
+    const { models } = await getJSON('api/models');
+    $('models').innerHTML = models.map(m => `<option value="${esc(m)}">`).join('');
+  } catch {}
+}
+
 async function refresh() {
   try {
     const [status, events] = await Promise.all([getJSON('api/status'), getJSON('api/events?limit=100')]);
@@ -176,25 +291,8 @@ async function refresh() {
   }
 }
 
-function setMsg(text, cls) { $('msg').textContent = text; $('msg').className = cls || ''; }
-
-async function post(path, body, busyText) {
-  setMsg(busyText);
-  $('apply').disabled = $('reload').disabled = true;
-  try {
-    const r = await getJSON(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    setMsg(`Classifier is now ${r.backend}.`, 'ok');
-    backendTouched = false;
-  } catch (err) {
-    setMsg(err.message, 'err');
-  }
-  refresh();
-}
-
-$('backend').addEventListener('change', () => { backendTouched = true; });
-$('apply').addEventListener('click', () => post('api/router/backend', { backend: $('backend').value }, 'Switching… (loading a model can take a while)'));
-$('reload').addEventListener('click', () => post('api/router/reload', {}, 'Reloading…'));
-
+loadModels();
+loadInterceptorSettings();
 refresh();
 setInterval(refresh, 3000);
 </script>

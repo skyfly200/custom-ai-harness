@@ -49,6 +49,7 @@ function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, r
         servedBy: null,
         fallbacks: null,
         error: null,
+        usage: null,   // { input, output, cacheRead, provider, estimated } once the reply ends
         doneMs: null,  // when the last byte of the reply left the Gateway (streams end after `ms`)
         started: Date.now(),
     };
@@ -91,6 +92,13 @@ function recordError(event, err) {
     emit('error', event);
 }
 
+// Real token counts once the reply has ended (utils/usage.js reads them)
+function recordUsage(event, row) {
+    if (!event || !row) return;
+    event.usage = { input: row.input, output: row.output, cacheRead: row.cacheRead, provider: row.provider, estimated: !!row.estimated };
+    emit('usage', event);
+}
+
 function recentEvents(limit = 50) {
     return events.slice(-limit).reverse().map(publicEvent);
 }
@@ -126,4 +134,4 @@ function checkComponents(urls) {
     ]);
 }
 
-module.exports = { live, recordRouting, recordRoute, recordResponse, recordFinish, recordError, recentEvents, stats, checkComponents, probe };
+module.exports = { live, recordRouting, recordRoute, recordResponse, recordFinish, recordError, recordUsage, recentEvents, stats, checkComponents, probe };

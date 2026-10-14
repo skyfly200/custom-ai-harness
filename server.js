@@ -14,6 +14,7 @@ const {
 } = require('./utils/messageTransforms');
 const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
+const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const fs = require('fs');
 const path = require('path');
@@ -110,6 +111,24 @@ function logTokens(req, label) {
     };
 }
 
+// Token counts from a routed request's reply, for the Usage page. Failed
+// calls carry no usage and aren't counted.
+function recordUsage(req, proxyRes) {
+    const event = req.harnessEvent;
+    if (!event || proxyRes.statusCode >= 400) return;
+    usage.tap(proxyRes, ({ usage: counts, outputChars }) => {
+        const row = usage.record({
+            client: req.harnessClient,
+            route: usage.routeOf(event),
+            model: event.model,
+            servedBy: event.servedBy,
+            usage: counts,
+            estimate: { input: req.harnessInputEstimate, outputChars },
+        });
+        monitor.recordUsage(event, row);
+    });
+}
+
 // Everything goes to the Gateway (LiteLLM), which speaks both the OpenAI and
 // the Anthropic Messages formats and applies the fallback chain.
 const toGateway = createProxyMiddleware({
@@ -122,6 +141,7 @@ const toGateway = createProxyMiddleware({
         },
         proxyRes: (proxyRes, req) => {
             monitor.recordResponse(req.harnessEvent, proxyRes.statusCode, proxyRes.headers);
+            recordUsage(req, proxyRes);
             proxyRes.on('end', () => monitor.recordFinish(req.harnessEvent));
         },
         error: (err, req) => monitor.recordError(req.harnessEvent, err),
@@ -133,6 +153,15 @@ app.use('/ui', express.static(path.join(__dirname, 'ui')));
 
 app.get('/ui/api/status', async (req, res) => {
     res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats() });
+});
+
+// Token totals by client, model and provider; days=N for the last N days
+app.get('/ui/api/usage', (req, res) => {
+    res.json(usage.summary(Math.max(0, parseInt(req.query.days, 10) || 0)));
+});
+app.post('/ui/api/usage/clear', localJsonOnly, (req, res) => {
+    usage.clear();
+    res.json(usage.summary());
 });
 
 app.get('/ui/api/events', (req, res) => {
@@ -341,6 +370,10 @@ async function routeAndRecord(req, res) {
     const route = await routeModel(req.body, req.get('x-harness-model'));
     req.body.model = route.model;
     logRoute(req.path, route);
+    req.harnessClient = usage.clientOf(req);
+    req.harnessInputEstimate = Math.ceil(JSON.stringify(req.body.messages || []).length / 4)
+        + Math.ceil(JSON.stringify(req.body.system || '').length / 4)
+        + Math.ceil(JSON.stringify(req.body.tools || []).length / 4);
     req.harnessEvent = monitor.recordRoute({
         path: req.path, ...route, tokens: estimateTokens(req.body), prompt, clientId,
         transforms: activeTransforms(), routeMs: Date.now() - started,

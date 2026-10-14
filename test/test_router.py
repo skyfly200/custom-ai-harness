@@ -130,6 +130,99 @@ def test_custom_scorer_loads_factory():
     assert router.make_custom_scorer({"scorer": "my_scorer:make"})("x") == 0.5
 
 
+def test_admin_switches_backend_and_reload_restores_file(tmp_path=None):
+    import tempfile, types
+    sys.modules["stub_scorer"] = types.SimpleNamespace(make=lambda cfg: (lambda p: 0.9))
+    cfg = os.path.join(tmp_path or tempfile.mkdtemp(), "router.yaml")
+    with open(cfg, "w") as f:
+        f.write("strong_model: S\nweak_model: W\nbackend: custom\nscorer: stub_scorer:make\n")
+    router.load_config(cfg)
+    c = TestClient(router.app)
+    assert c.get("/health").json()["backend"] == "custom"
+
+    # llm without base_url in the config can't be built: refused, nothing changes
+    r = c.post("/admin/backend", json={"backend": "llm"})
+    assert r.status_code == 400 and "base_url" in r.json()["error"]
+    assert c.post("/admin/backend", json={"backend": "nope"}).status_code == 400
+    assert c.get("/health").json()["backend"] == "custom"
+
+    router.BACKENDS["stub2"] = lambda cfg: (lambda p: 0.1)
+    try:
+        assert c.post("/admin/backend", json={"backend": "stub2"}).json()["backend"] == "stub2"
+        assert c.post("/route", json={"prompt": "x", "threshold": 0.5}).json()["model"] == "W"
+        assert c.post("/admin/reload").json()["backend"] == "custom"
+        assert c.post("/route", json={"prompt": "x", "threshold": 0.5}).json()["model"] == "S"
+    finally:
+        del router.BACKENDS["stub2"]
+
+
+def test_reload_keeps_running_config_when_file_is_bad(tmp_path=None):
+    import tempfile, types
+    sys.modules["stub_scorer"] = types.SimpleNamespace(make=lambda cfg: (lambda p: 0.9))
+    cfg = os.path.join(tmp_path or tempfile.mkdtemp(), "router.yaml")
+    with open(cfg, "w") as f:
+        f.write("strong_model: S\nweak_model: W\nbackend: custom\nscorer: stub_scorer:make\n")
+    router.load_config(cfg)
+    with open(cfg, "w") as f:
+        f.write("strong_model: S2\nweak_model: W\nbackend: missing\n")
+    c = TestClient(router.app)
+    assert c.post("/admin/reload").status_code == 400
+    assert router.config["strong_model"] == "S" and c.get("/health").json()["backend"] == "custom"
+
+
+def _load_stub(text):
+    import tempfile, types
+    sys.modules["stub_scorer"] = types.SimpleNamespace(make=lambda cfg: (lambda p: float(cfg.get("max_chars", 90)) / 100))
+    path = os.path.join(tempfile.mkdtemp(), "router.yaml")
+    with open(path, "w") as f:
+        f.write(text)
+    router.load_config(path)
+    return path, TestClient(router.app)
+
+
+STUB_YAML = """# Router config
+strong_model: S          # the strong one
+weak_model: W
+weak_model_tools: T
+backend: custom
+scorer: stub_scorer:make
+# base_url: http://example
+"""
+
+
+def test_admin_config_changes_models_and_rebuilds_scorer():
+    _, c = _load_stub(STUB_YAML)
+    assert c.post("/route", json={"prompt": "x", "threshold": 0.5}).json()["model"] == "S"
+    old = router.scorer
+    assert c.post("/admin/config", json={"changes": {"strong_model": "S2"}}).status_code == 200
+    assert router.scorer is old  # model names alone don't rebuild the classifier
+    assert c.post("/route", json={"prompt": "x", "threshold": 0.5}).json()["model"] == "S2"
+    # a classifier setting rebuilds it: win rate 0.1 now
+    assert c.post("/admin/config", json={"changes": {"max_chars": 10}}).status_code == 200
+    assert c.post("/route", json={"prompt": "x", "threshold": 0.5}).json()["model"] == "W"
+    # optional keys can be removed, required ones can't, unknown ones are refused
+    assert c.post("/admin/config", json={"changes": {"weak_model_tools": None}}).status_code == 200
+    assert "weak_model_tools" not in router.config
+    assert c.post("/admin/config", json={"changes": {"weak_model": ""}}).status_code == 400
+    assert c.post("/admin/config", json={"changes": {"evil": 1}}).status_code == 400
+    assert c.post("/admin/config", json={"changes": {"max_chars": "lots"}}).status_code == 400
+    assert router.config["weak_model"] == "W"
+
+
+def test_admin_save_keeps_comments_and_layout():
+    path, c = _load_stub(STUB_YAML)
+    c.post("/admin/config", json={"changes": {"strong_model": "S2", "weak_model_tools": None,
+                                              "base_url": "https://openrouter.ai/api", "timeout": 5}})
+    assert c.post("/admin/save").status_code == 200
+    text = open(path).read()
+    assert "# Router config" in text
+    assert "strong_model: S2          # the strong one" in text
+    assert "# weak_model_tools: T" in text
+    assert "base_url: https://openrouter.ai/api" in text and "timeout: 5.0" in text
+    assert c.post("/admin/reload").json()["backend"] == "custom"
+    assert router.config["strong_model"] == "S2" and "weak_model_tools" not in router.config
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"): f(); print("ok", n)

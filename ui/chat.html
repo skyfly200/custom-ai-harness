@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Chat</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { height: 100%; }
+  main.chat { display: flex; flex-direction: column; height: 100%; max-width: 900px; padding-bottom: 16px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 14px 0 10px; }
+  .toolbar label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .toolbar input[type=text] { width: 230px; }
+  .toolbar input[type=number] { width: 90px; }
+  details.sys { margin-bottom: 10px; font-size: 13px; }
+  details.sys textarea { margin-top: 6px; min-height: 60px; resize: vertical; }
+  #log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 12px; }
+  .msg { max-width: 85%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); overflow-wrap: anywhere; }
+  .msg.user { align-self: flex-end; background: var(--accent); border-color: var(--accent); color: #fff; white-space: pre-wrap; }
+  .msg.assistant { align-self: flex-start; }
+  .msg.error { align-self: flex-start; border-color: var(--bad); color: var(--bad); }
+  .msg .meta { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .msg p { margin: 0 0 8px; } .msg p:last-child { margin-bottom: 0; }
+  .msg pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; }
+  .msg :not(pre) > code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+  .empty { color: var(--muted); text-align: center; margin: auto; max-width: 420px; }
+  form.compose { display: flex; gap: 8px; align-items: flex-end; }
+  form.compose textarea { flex: 1; min-height: 44px; max-height: 220px; resize: vertical; }
+</style>
+</head>
+<body>
+<main class="chat">
+  <header>
+    <nav><h1>Harness Chat</h1><a href="./">Dashboard</a><a href="chat.html" class="here">Chat</a></nav>
+    <button id="clear">New chat</button>
+  </header>
+
+  <div class="toolbar">
+    <label>Model <input type="text" id="model" list="models" placeholder="Auto (Router decides)"></label>
+    <label>Max tokens <input type="number" id="maxTokens" min="1" value="2048"></label>
+    <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
+    <label><input type="checkbox" id="stream" checked> Stream</label>
+  </div>
+  <details class="sys"><summary>System prompt</summary>
+    <textarea id="system" placeholder="Optional. The Interceptor still adds its caveman line unless it's off in the dashboard."></textarea>
+  </details>
+
+  <div id="log"><div class="empty">Messages go through the Interceptor like any other client, so the Router picks the model unless you name one above. Each reply shows where it went.</div></div>
+
+  <form class="compose" id="compose">
+    <textarea id="input" placeholder="Message (Enter to send, Shift+Enter for a new line)" rows="2"></textarea>
+    <button class="primary" id="send" type="submit">Send</button>
+  </form>
+  <datalist id="models"></datalist>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const STORE = 'harness-chat';
+let chat = [];   // [{role, content, meta?}]
+let controller = null;
+
+// Small Markdown subset: fenced code, inline code, bold, paragraphs. Escaped first, so model output can't inject HTML.
+function render(text) {
+  const parts = String(text).split(/```[^\n]*\n?/);
+  return parts.map((part, i) => {
+    if (i % 2) return `<pre><code>${esc(part.replace(/\n$/, ''))}</code></pre>`;
+    return esc(part).split(/\n{2,}/).filter(p => p.trim()).map(p =>
+      '<p>' + p.replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>') + '</p>').join('');
+  }).join('');
+}
+
+function metaLine(meta) {
+  if (!meta) return '';
+  const bits = [meta.model && `<code>${esc(meta.model)}</code>`, meta.route && esc(meta.route), meta.ms != null && `${meta.ms} ms`];
+  return `<div class="meta">${bits.filter(Boolean).join(' · ')}</div>`;
+}
+
+function bubble(m) {
+  if (m.role === 'user') return `<div class="msg user">${esc(m.content)}</div>`;
+  if (m.role === 'error') return `<div class="msg error">${esc(m.content)}</div>`;
+  return `<div class="msg assistant">${render(m.content) || '<span class="muted">…</span>'}${metaLine(m.meta)}</div>`;
+}
+
+function draw() {
+  const log = $('log');
+  if (chat.length) log.innerHTML = chat.map(bubble).join('');
+  log.scrollTop = log.scrollHeight;
+  try { localStorage.setItem(STORE, JSON.stringify(chat)); } catch {}
+}
+
+function busy(on) {
+  $('send').textContent = on ? 'Stop' : 'Send';
+  $('send').type = on ? 'button' : 'submit';
+}
+
+async function send(text) {
+  chat.push({ role: 'user', content: text });
+  const reply = { role: 'assistant', content: '', meta: {} };
+  chat.push(reply);
+  draw();
+
+  const system = $('system').value.trim();
+  const messages = [
+    ...(system ? [{ role: 'system', content: system }] : []),
+    ...chat.filter(m => m !== reply && (m.role === 'user' || m.role === 'assistant')).map(({ role, content }) => ({ role, content })),
+  ];
+  const body = { model: 'auto', messages, stream: $('stream').checked };
+  const maxTokens = parseInt($('maxTokens').value, 10);
+  if (maxTokens > 0) body.max_tokens = maxTokens;
+  if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
+  const headers = { 'content-type': 'application/json' };
+  if ($('model').value.trim()) headers['x-harness-model'] = $('model').value.trim();
+
+  controller = new AbortController();
+  busy(true);
+  const started = Date.now();
+  try {
+    const res = await fetch('/v1/chat/completions', { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal });
+    reply.meta = { model: res.headers.get('x-harness-model'), route: res.headers.get('x-harness-route') };
+    if (!res.ok) {
+      const errText = await res.text();
+      let msg = errText;
+      try { const j = JSON.parse(errText); msg = j.error?.message || j.error || errText; } catch {}
+      throw new Error(`HTTP ${res.status}: ${String(msg).slice(0, 500)}`);
+    }
+    if (body.stream && res.body) {
+      await readStream(res.body, reply);
+    } else {
+      const j = await res.json();
+      reply.content = j.choices?.[0]?.message?.content ?? '';
+    }
+    reply.meta.ms = Date.now() - started;
+    if (!reply.content) reply.content = '(empty reply)';
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      reply.content += reply.content ? '\n\n(stopped)' : '(stopped)';
+    } else {
+      if (!reply.content) chat.splice(chat.indexOf(reply), 1);
+      chat.push({ role: 'error', content: err.message });
+    }
+  } finally {
+    controller = null;
+    busy(false);
+    draw();
+  }
+}
+
+// OpenAI server-sent events: lines of "data: {json}", ending with "data: [DONE]"
+async function readStream(stream, reply) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      const data = line.replace(/^data:\s*/, '').trim();
+      if (!line.startsWith('data:') || !data || data === '[DONE]') continue;
+      try {
+        const j = JSON.parse(data);
+        if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+        reply.content += j.choices?.[0]?.delta?.content ?? '';
+      } catch (err) {
+        if (!(err instanceof SyntaxError)) throw err;
+      }
+    }
+    draw();
+  }
+}
+
+$('compose').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = $('input').value.trim();
+  if (!text || controller) return;
+  $('input').value = '';
+  send(text);
+});
+$('send').addEventListener('click', (e) => { if (controller) { e.preventDefault(); controller.abort(); } });
+$('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('compose').requestSubmit(); }
+});
+$('clear').addEventListener('click', () => {
+  if (controller) controller.abort();
+  chat = [];
+  try { localStorage.removeItem(STORE); } catch {}
+  location.reload();
+});
+
+// Keep the toolbar between visits
+for (const id of ['model', 'maxTokens', 'temperature', 'system']) {
+  try { const v = localStorage.getItem(`${STORE}-${id}`); if (v !== null) $(id).value = v; } catch {}
+  $(id).addEventListener('change', () => { try { localStorage.setItem(`${STORE}-${id}`, $(id).value); } catch {} });
+}
+
+fetch('api/models').then(r => r.json()).then(({ models }) => {
+  $('models').innerHTML = models.map(m => `<option value="${esc(m)}">`).join('');
+}).catch(() => {});
+
+try { chat = JSON.parse(localStorage.getItem(STORE)) || []; } catch { chat = []; }
+draw();
+$('input').focus();
+</script>
+</body>
+</html>

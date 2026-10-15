@@ -456,6 +456,12 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 
 The counts are the ones each reply reports (`usage` in OpenAI replies, `input_tokens`/`output_tokens` in Anthropic ones, streamed or not). Replies without them, such as OpenAI streams that don't ask for `stream_options.include_usage`, are estimated at about 4 characters a token and marked ~. The service for each model comes from its `litellm_params` in `config.yaml`. Totals are kept per day in `harness-usage.json` (gitignored) so they survive a restart; **Clear totals** on the page empties it. The page updates live as requests finish, and the dashboard's routing log shows the same in/out counts per request.
 
+#### Routing editor
+
+<http://localhost:3000/ui/routing.html> draws the routing as connected boxes: the Interceptor (pin, Router down), the Router (classifier, threshold, and its Strong / Weak / Weak with tools / Weak over N tokens outputs), and every model in `config.yaml`, each with its fallback chain. Drag from a dot on the right of a box to a model to connect it; click a line and press **Remove connection** (or Delete) to unset it; reorder a model's fallbacks with the arrows in its box. Hover a model to see its fallback lines in full. With **Show live requests** on, the path of each request lights up as it is routed.
+
+**Save** writes each change where its owner reads it: the Router's choices to `routellm-config.yaml` (as the dashboard's "Apply and save" does), the Interceptor's to `harness-settings.json`, and the fallback chains to the `fallbacks:` block of `config.yaml`, rewriting only the chains that changed and keeping comments. The Router and Interceptor use their changes on the next request; **restart the Gateway** (LiteLLM) for new fallbacks to apply. Box positions are kept in the browser; **Tidy layout** resets them. Adding a model to the Gateway is still done in `config.yaml`'s `model_list`.
+
 #### Read-aloud voices
 
 Under Options → Voice, **Read aloud with** chooses between a speech model and the browser's own voices.

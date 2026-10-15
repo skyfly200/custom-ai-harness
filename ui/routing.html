@@ -10,16 +10,33 @@
 <body>
 <main class="wide">
   <header>
-    <nav><h1>Harness Routing</h1><a href="./">Dashboard</a><a href="chat.html">Chat</a><a href="usage.html">Usage</a><a href="routing.html" class="here">Routing</a></nav>
+    <nav><h1>Harness Routing</h1><a href="./" data-hint="Health of each part, settings, and recent requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" class="here" data-hint="Where requests go, as connected boxes">Routing</a></nav>
     <span class="muted" id="updated">Loading…</span>
   </header>
 
+  <details class="guide card" id="guide">
+    <summary data-hint="Click to show or hide the guide">How to use this page</summary>
+    <div class="guide-body">
+      <p>This page is a map of where every request goes. Boxes are the parts of the harness; lines are the routes between them. Change the lines and boxes, then press <b>Save</b>.</p>
+      <ol>
+        <li><b>Follow a request from left to right.</b> It enters at <b>Request</b> (the Interceptor), which hands it to the <b>Router</b>. The Router scores how hard it is and sends it out of one of its outputs (Strong, Weak, Weak with tools, Weak over a size limit) to a <b>model</b> box. A model box is a name the Gateway serves; inside it, <i>Served by</i> lists the provider models that actually answer.</li>
+        <li><b>Change where a route goes</b> by dragging from the dot on the right of an output to a model box. Each output goes to one model, so the new line replaces the old one.</li>
+        <li><b>Set fallbacks</b> by dragging a model's <i>If it fails</i> dot to another model. When a model errors, hits a rate limit or times out, the Gateway tries its fallbacks from the top. Reorder them with ↑ ↓, and hover a model to see its fallback lines clearly.</li>
+        <li><b>Add a model</b> with <b>Add model</b> above: give it a name, pick where it runs (OpenRouter, Groq, Ollama…) and the model id. To give an existing model a second provider model, use <i>+ Add provider model</i> in its box; the Gateway then shares requests between them.</li>
+        <li><b>Remove things</b>: × in a model's title removes the whole model; × next to a provider model removes just that one; click a line and press Delete (or <b>Remove connection</b>) to remove a route.</li>
+        <li><b>Save</b> writes each change where it belongs and tells you what it saved. The Router and Interceptor use changes on the next request. <b>Restart the Gateway</b> (LiteLLM) after changing models or fallbacks. <b>Discard changes</b> goes back to what is saved.</li>
+      </ol>
+      <p class="muted">Hover over anything on this page for a short hint. With <b>Show live requests</b> on, each request's path lights up green as it goes through. Box positions are kept in this browser; <b>Tidy layout</b> lines them up again.</p>
+    </div>
+  </details>
+
   <div class="controls toolbar">
-    <button class="primary" id="save" disabled>Save</button>
-    <button id="discard" disabled>Discard changes</button>
-    <button id="remove" disabled title="Or press Delete">Remove connection</button>
-    <button id="tidy">Tidy layout</button>
-    <label class="live"><input type="checkbox" id="live" checked> Show live requests</label>
+    <button class="primary" id="save" disabled data-hint="Write all changes to the config files">Save</button>
+    <button id="discard" disabled data-hint="Undo every change since the last save">Discard changes</button>
+    <button id="addModel" data-hint="Add a new model the Gateway serves, with the provider model behind it">Add model</button>
+    <button id="remove" disabled data-hint="Remove the selected line (or press Delete). Click a line first to select it">Remove connection</button>
+    <button id="tidy" data-hint="Put every box back in its default place">Tidy layout</button>
+    <label class="live" data-hint="Light up each request's path as it is routed"><input type="checkbox" id="live" checked> Show live requests</label>
     <span class="note" id="msg"></span>
   </div>
 
@@ -30,16 +47,37 @@
   </div>
 
   <div class="sub muted help">
-    Drag from a dot on the right of a box to a model to connect it; click a line to select it, then remove it.
-    Each request enters the Interceptor, which sends it to the Router (or straight to a pinned model). The Router's
-    classifier scores it and picks a model; the Gateway (LiteLLM) then tries that model's fallbacks in order when it fails.
     Save writes the Router's choices to <span id="routerFile">its config file</span>, the Interceptor's to
-    <code>harness-settings.json</code>, and the fallbacks to <code id="gatewayFile">config.yaml</code>. The Router and
-    Interceptor use their changes on the next request; the Gateway needs a restart to use new fallbacks.
-    Models come from <code>config.yaml</code>'s <code>model_list</code>; other classifier settings are on the
-    <a href="./">Dashboard</a>.
+    <code>harness-settings.json</code>, and models and fallbacks to <code id="gatewayFile">config.yaml</code>, keeping
+    its comments. Other classifier settings are on the <a href="./">Dashboard</a>.
   </div>
 </main>
+
+<dialog id="addDialog" class="card">
+  <form id="addForm" autocomplete="off">
+    <h3 id="addTitle">Add a model</h3>
+    <p class="sub muted" id="addIntro"></p>
+    <label class="field" id="nameField"><span>Name in the Gateway</span>
+      <input type="text" name="name" placeholder="e.g. fast-openrouter">
+      <small>What the Router, fallbacks and clients call it.</small></label>
+    <label class="field"><span>Where it runs</span><select name="provider"></select>
+      <small id="providerHelp"></small></label>
+    <label class="field"><span>Model id</span><input type="text" name="model" required></label>
+    <label class="field" id="baseField"><span>Server address</span>
+      <input type="text" name="api_base" placeholder="http://localhost:1234/v1">
+      <small>Leave empty for a provider LiteLLM already knows.</small></label>
+    <label class="field" id="keyField"><span>API key variable</span>
+      <input type="text" name="api_key_env" placeholder="MY_PROVIDER_API_KEY">
+      <small>The name of the variable in .env that holds the key, not the key itself. Empty if none.</small></label>
+    <div class="note err" id="addMsg"></div>
+    <div class="actions">
+      <button type="submit" class="primary">Add</button>
+      <button type="button" id="addCancel">Cancel</button>
+    </div>
+    <p class="sub muted">Nothing is written until you press Save. Restart the Gateway afterwards.</p>
+  </form>
+</dialog>
+<script src="hints.js"></script>
 <script src="routing.js"></script>
 </body>
 </html>

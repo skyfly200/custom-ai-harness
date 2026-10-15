@@ -2,7 +2,9 @@
 // boxes, with a line for every place a request can go. Connecting a Router or
 // Interceptor output to a model sets that choice; connecting a model's "if it
 // fails" dot to another model adds it to that model's fallback chain in
-// config.yaml. Save writes each change to the file its owner reads.
+// config.yaml. Model boxes can be added and removed, and so can the provider
+// models inside them (config.yaml model_list entries). Save writes each change
+// to the file its owner reads.
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -14,6 +16,32 @@ const BACKEND_HELP = {
   llm: 'An OpenAI-compatible model rates difficulty 0 to 1.',
   custom: 'Your own scorer factory.',
 };
+
+// Where a new provider model comes from: what the dialog asks for and the
+// model_list fields it writes. `prefix` is LiteLLM's provider part of the id.
+const PROVIDERS = {
+  openrouter: { label: 'OpenRouter', prefix: 'openrouter/', key: 'os.environ/OPENROUTER_API_KEY', example: 'openai/gpt-4o-mini',
+    help: 'A model id from openrouter.ai/models; ids ending in :free cost nothing. Uses OPENROUTER_API_KEY from .env.' },
+  groq: { label: 'Groq', prefix: 'groq/', key: 'os.environ/GROQ_API_KEY', example: 'openai/gpt-oss-120b',
+    help: 'A model id from console.groq.com/docs/models. Uses GROQ_API_KEY from .env.' },
+  ollama: { label: 'Ollama on this computer', prefix: 'openai/', base: 'http://localhost:11434/v1', key: 'dummy', example: 'qwen2.5-coder:7b',
+    help: 'A model you downloaded with "ollama pull". Ollama must be running.' },
+  local: { label: 'Local CLI wrapper (port 8000)', prefix: 'openai/', base: 'http://localhost:8000/v1', key: 'dummy-key-not-needed', example: 'claude-3-5-sonnet-20240620',
+    help: 'The model name your local wrapper serves.' },
+  openai: { label: 'Other OpenAI-compatible server', prefix: 'openai/', askBase: true, askKey: true, example: 'my-model',
+    help: 'Any server with /v1/chat/completions, such as LM Studio, vLLM or llama.cpp.' },
+  litellm: { label: 'Any LiteLLM provider (full id)', prefix: '', askBase: true, askKey: true, example: 'anthropic/claude-sonnet-4-5',
+    help: 'A full LiteLLM id, provider/model. The list of providers is at docs.litellm.ai/docs/providers.' },
+};
+
+// A short name for where a provider model runs, for its tag in a box
+function providerOf(d) {
+  const base = d.api_base || '';
+  if (/:11434\b/.test(base)) return 'Ollama';
+  if (/:8000\b/.test(base)) return 'Local';
+  const first = (d.model || '').split('/')[0];
+  return { openrouter: 'OpenRouter', groq: 'Groq', openai: base ? 'Server' : 'OpenAI', anthropic: 'Anthropic', gemini: 'Gemini' }[first] || first || '?';
+}
 
 // Outputs that pick one model. `key` is the field in the graph below.
 const ENTRY_OUTS = [
@@ -36,6 +64,7 @@ let selected = null; // id of the selected wire
 const flashing = new Map(); // node or wire id -> time the highlight ends
 let drag = null;     // a node being moved or a wire being drawn
 let focus = null;    // model under the pointer: its fallback lines are drawn in full
+let newKeys = 0;     // keys for provider models added on this page (saved ones use their file id)
 
 try { positions = JSON.parse(localStorage.getItem(LAYOUT_KEY)) || {}; } catch {}
 
@@ -65,6 +94,7 @@ function graphFrom({ router, settings, gateway }) {
     overflow: r.weak_model_overflow ?? null,
     maxTokens: r.weak_model_max_tokens ?? null,
     fallbacks: chains(gateway?.fallbacks || {}),
+    deployments: (gateway?.deployments || []).map(d => ({ ...d, key: `d${d.id}` })),
   };
 }
 
@@ -74,14 +104,15 @@ function chains(fallbacks) {
 }
 
 function models() {
-  const names = new Set(info.gateway?.models || []);
+  const names = new Set(graph.deployments.map(d => d.name));
   for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (graph[o.key]) names.add(graph[o.key]);
   for (const [src, targets] of Object.entries(graph.fallbacks)) { names.add(src); targets.forEach(t => names.add(t)); }
   return [...names];
 }
 
 const routerUp = () => !!info.router?.settings;
-const fallbacksEditable = () => !!info.gateway && !info.gatewayError;
+const gatewayEditable = () => !!info.gateway && !info.gatewayError;
+const served = (name) => graph.deployments.some(d => d.name === name);
 
 function routerChanges() {
   if (!routerUp()) return {};
@@ -100,8 +131,18 @@ function interceptorChanges() {
   return Object.fromEntries(Object.entries(want).filter(([k, v]) => (v ?? null) !== (have[k] ?? null)));
 }
 
+// model_list entries to remove (by file id) and to append
+function deploymentChanges() {
+  const kept = new Set(graph.deployments.map(d => d.id).filter(id => id !== undefined));
+  return {
+    remove: saved.deployments.filter(d => !kept.has(d.id)).map(d => d.id),
+    add: graph.deployments.filter(d => d.id === undefined).map(({ name, model, api_base, api_key }) => ({ name, model, api_base, api_key })),
+  };
+}
+
 const fallbacksChanged = () => JSON.stringify(chains(graph.fallbacks)) !== JSON.stringify(saved.fallbacks);
-const dirty = () => !!graph && (Object.keys(routerChanges()).length || Object.keys(interceptorChanges()).length || fallbacksChanged());
+const gatewayChanged = () => { const c = deploymentChanges(); return !!(c.remove.length || c.add.length) || fallbacksChanged(); };
+const dirty = () => !!graph && (Object.keys(routerChanges()).length || Object.keys(interceptorChanges()).length || gatewayChanged());
 
 function problems() {
   const out = [];
@@ -111,7 +152,12 @@ function problems() {
     if (graph.overflow && !(Number.isInteger(graph.maxTokens) && graph.maxTokens > 0)) out.push('Set the token limit for “Weak, over”.');
   }
   if (graph.threshold !== null && !(graph.threshold >= 0 && graph.threshold <= 1)) out.push('The threshold must be from 0 to 1.');
-  return out;
+  if (gatewayEditable()) {
+    for (const [src, targets] of Object.entries(graph.fallbacks)) {
+      for (const name of [src, ...targets]) if (!served(name)) out.push(`“${name}” has fallback lines but no provider model: add one, or remove its box.`);
+    }
+  }
+  return [...new Set(out)];
 }
 
 function connect(port, model) {
@@ -139,6 +185,29 @@ function removeWire(id) {
   changed();
 }
 
+function removeModel(name) {
+  const uses = [...ENTRY_OUTS, ...ROUTER_OUTS].filter(o => graph[o.key] === name).map(o => `“${o.label}”`);
+  const count = graph.deployments.filter(d => d.name === name).length;
+  const ask = `Remove ${name}?` + (count ? ` Its ${count === 1 ? 'provider model' : `${count} provider models`} and fallback lines go with it.` : '')
+    + (uses.length ? `\n\nIt is used for ${uses.join(', ')}. Connect ${uses.length === 1 ? 'that' : 'those'} to another model before saving.` : '')
+    + '\n\nNothing changes in the files until you press Save.';
+  if (!confirm(ask)) return;
+  graph.deployments = graph.deployments.filter(d => d.name !== name);
+  delete graph.fallbacks[name];
+  for (const [src, targets] of Object.entries(graph.fallbacks)) {
+    const kept = targets.filter(t => t !== name);
+    if (kept.length) graph.fallbacks[src] = kept; else delete graph.fallbacks[src];
+  }
+  for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (graph[o.key] === name) graph[o.key] = null;
+  selected = null;
+  changed();
+}
+
+function removeDeployment(key) {
+  graph.deployments = graph.deployments.filter(d => d.key !== key);
+  changed();
+}
+
 function changed() {
   render();
   updateButtons();
@@ -154,25 +223,41 @@ function updateButtons() {
 
 // ---- drawing -----------------------------------------------------------------
 
+const OUT_HINTS = {
+  pin: 'Connect to send every request to one model and skip the Router. Remove the line to turn it off',
+  down: 'Where requests go when the Router doesn’t answer in time',
+  downTools: 'Same, for requests that carry tools (all Claude Code requests)',
+  strong: 'Hard requests: the classifier’s score is at or above the threshold',
+  weak: 'Easy requests without tools',
+  tools: 'Easy requests that carry tools (all Claude Code requests). Unset sends them to Weak',
+  overflow: 'Easy requests bigger than this many tokens (e.g. over a free tier’s limit). Unset means no limit',
+};
+
 function outRow(id, o, { model, disabled }) {
   const empty = !model;
   const target = empty ? `<span class="unset">${o.required ? 'not connected' : 'off'}</span>` : '';
   const tokens = o.tokens ? ` <input type="number" min="1" step="1" data-field="maxTokens" value="${esc(graph.maxTokens ?? '')}" placeholder="tokens"${disabled ? ' disabled' : ''}>` : '';
-  return `<div class="out${o.required ? ' required' : ''}${empty ? ' empty' : ''}">
+  return `<div class="out${o.required ? ' required' : ''}${empty ? ' empty' : ''}" data-hint="${esc(OUT_HINTS[o.key] || '')}">
     <span class="label"><b>${esc(o.label)}</b>${o.help ? ` <span>· ${esc(o.help)}</span>` : ''} ${target}</span>${tokens}
-    <span class="port out-port${disabled ? ' fixed' : ''}" data-port="${id}" title="Drag to a model"></span></div>`;
+    <span class="port out-port${disabled ? ' fixed' : ''}" data-port="${id}"></span></div>`;
 }
 
-function nodeHTML(id, cls, title, kind, body, outs, hasIn) {
+const KIND_HINTS = {
+  Interceptor: 'Every request from Claude Code, the chat page or other clients arrives here first',
+  Classifier: 'Scores how hard each request is and picks a model from the outputs below',
+  Model: 'A name the Gateway (LiteLLM) serves. Drag the title to move the box',
+};
+
+function nodeHTML(id, cls, title, kind, body, outs, hasIn, extra = '') {
   return `<div class="node ${cls}" data-id="${esc(id)}"${cls === 'model' ? ` data-model="${esc(title)}"` : ''}>
     ${hasIn ? '<span class="port in-port"></span>' : ''}
-    <div class="head"><span class="name" title="${esc(title)}">${esc(title)}</span><span class="kind">${esc(kind)}</span></div>
+    <div class="head" data-hint="${esc(KIND_HINTS[kind] || '')}"><span class="name">${esc(title)}</span><span class="kind">${esc(kind)}</span>${extra}</div>
     <div class="body">${body}</div>${outs ? `<div class="outs">${outs}</div>` : ''}</div>`;
 }
 
 function entryNode() {
   const body = graph.pin ? `<div class="warn">Pinned: every request goes to <b>${esc(graph.pin)}</b> and the Router is skipped.</div>` : '';
-  const outs = `<div class="out"><span class="label"><b>Router</b> · scores each request</span><span class="port out-port fixed" data-port="entry.router"></span></div>`
+  const outs = `<div class="out" data-hint="Unless a model is pinned, every request is scored by the Router"><span class="label"><b>Router</b> · scores each request</span><span class="port out-port fixed" data-port="entry.router"></span></div>`
     + ENTRY_OUTS.map(o => outRow(`entry.${o.key}`, o, { model: graph[o.key] })).join('');
   return nodeHTML('entry', 'entry', 'Request', 'Interceptor', body, outs, false);
 }
@@ -181,28 +266,45 @@ function routerNode() {
   const up = routerUp();
   const backends = info.router?.backends || (graph.backend ? [graph.backend] : []);
   const body = (up ? '' : '<div class="warn">The Router is down, so its choices can’t be read or changed. Start it and reload this page.</div>')
-    + `<label>Classifier<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
+    + `<label data-hint="How requests are scored. Its other settings (address, key, timeout) are on the Dashboard">Classifier<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
        <small id="backendHelp">${esc(BACKEND_HELP[graph.backend] || '')}</small></label>
-     <label>Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(graph.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)">
+     <label data-hint="Requests scoring at or above this go to Strong. Empty uses the keyword rule">Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(graph.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)">
        <small>0 always strong, 1 almost always weak.</small></label>`;
   const outs = ROUTER_OUTS.map(o => outRow(`router.${o.key}`, o, { model: graph[o.key], disabled: !up })).join('');
   return nodeHTML('router', 'router' + (graph.pin ? ' dim' : ''), 'Router', 'Classifier', body, outs, true);
 }
 
+function deploymentRow(d, only) {
+  const id = d.model || '(no model id)';
+  const where = [d.model, d.api_base && `at ${d.api_base}`, d.api_key && `key: ${d.api_key}`].filter(Boolean).join('\n');
+  const remove = gatewayEditable()
+    ? `<button data-act="undeploy" data-key="${esc(d.key)}" data-hint="${only ? 'The last provider model can’t be removed on its own: remove the whole box with × in its title' : `Stop sending ${esc(d.name)} requests to this model`}"${only ? ' disabled' : ''}>×</button>`
+    : '';
+  return `<li${d.id === undefined ? ' class="new"' : ''}><span class="tag" data-hint="${esc(where)}">${esc(providerOf(d))}</span>
+    <span class="name" data-hint="${esc(where)}">${esc(id.replace(/^(openrouter|groq|openai)\//, ''))}</span>${remove}</li>`;
+}
+
 function modelNode(name) {
   const chain = graph.fallbacks[name] || [];
-  const unknown = info.gateway && !info.gateway.models.includes(name);
-  const editable = fallbacksEditable();
-  const list = chain.length
-    ? `<ol class="chain">${chain.map((t, i) => `<li><span class="n">${i + 1}</span><span class="name" title="${esc(t)}">${esc(t)}</span>${editable ? `
-        <button data-act="up" data-src="${esc(name)}" data-i="${i}" title="Try earlier"${i ? '' : ' disabled'}>↑</button>
-        <button data-act="down" data-src="${esc(name)}" data-i="${i}" title="Try later"${i < chain.length - 1 ? '' : ' disabled'}>↓</button>
-        <button data-act="del" data-src="${esc(name)}" data-i="${i}" title="Remove">×</button>` : ''}</li>`).join('')}</ol>`
+  const editable = gatewayEditable();
+  const deps = graph.deployments.filter(d => d.name === name);
+  const servedBy = editable
+    ? `<div class="sect" data-hint="The provider models that actually answer requests for ${esc(name)}. With more than one, the Gateway spreads requests across them.">Served by</div>
+       ${deps.length ? `<ul class="deps">${deps.map(d => deploymentRow(d, deps.length === 1)).join('')}</ul>`
+         : '<div class="warn">No provider model, so the Gateway can’t serve it. Add one, or remove this box.</div>'}
+       <button class="add-dep" data-act="adddep" data-name="${esc(name)}" data-hint="Add another provider model under this name; the Gateway shares requests between them">+ Add provider model</button>`
     : '';
-  const body = (unknown ? '<div class="warn">Not in config.yaml’s model_list, so the Gateway can’t serve it.</div>' : '') + list;
+  const list = chain.length
+    ? `<div class="sect" data-hint="When ${esc(name)} fails (error, rate limit, timeout) the Gateway tries these, top first">Fallbacks</div>
+       <ol class="chain">${chain.map((t, i) => `<li><span class="n">${i + 1}</span><span class="name" title="${esc(t)}">${esc(t)}</span>${editable ? `
+        <button data-act="up" data-src="${esc(name)}" data-i="${i}" data-hint="Try earlier"${i ? '' : ' disabled'}>↑</button>
+        <button data-act="down" data-src="${esc(name)}" data-i="${i}" data-hint="Try later"${i < chain.length - 1 ? '' : ' disabled'}>↓</button>
+        <button data-act="del" data-src="${esc(name)}" data-i="${i}" data-hint="Remove this fallback">×</button>` : ''}</li>`).join('')}</ol>`
+    : '';
   const outs = `<div class="out"><span class="label"><b>If it fails</b>${chain.length ? ', try in order' : ' · no fallbacks'}</span>
-    <span class="port out-port fallback${editable ? '' : ' fixed'}" data-port="fail:${esc(name)}" title="Drag to a fallback model"></span></div>`;
-  return nodeHTML(`m:${name}`, 'model', name, 'Model', body, outs, true);
+    <span class="port out-port fallback${editable ? '' : ' fixed'}" data-port="fail:${esc(name)}" data-hint="Drag to another model to try it when ${esc(name)} fails"></span></div>`;
+  const close = editable ? `<button class="close" data-act="unmodel" data-name="${esc(name)}" data-hint="Remove ${esc(name)} from the Gateway, with its provider models and fallback lines">×</button>` : '';
+  return nodeHTML(`m:${name}`, 'model', name, 'Model', servedBy + list, outs, true, close);
 }
 
 function render() {
@@ -289,7 +391,7 @@ function drawWires() {
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       parts.push(`<circle class="order" cx="${mx}" cy="${my}" r="8"/><text class="order-text" x="${mx}" y="${my}">${w.order}</text>`);
     }
-    if (w.id !== 'fixed') parts.push(`<path class="hit" data-wire="${esc(w.id)}" d="${d}"/>`);
+    if (w.id !== 'fixed') parts.push(`<path class="hit" data-wire="${esc(w.id)}" data-hint="Click to select this line, then press Delete or Remove connection" d="${d}"/>`);
   }
   if (drag?.draft) parts.push(`<path class="wire draft" d="${curve(drag.draft.a, drag.draft.b)}"/>`);
   $('wires').innerHTML = parts.join('');
@@ -317,7 +419,7 @@ $('world').addEventListener('pointerdown', (e) => {
     return;
   }
   const head = e.target.closest('.head');
-  if (head) {
+  if (head && !e.target.closest('button')) {
     e.preventDefault();
     const node = head.parentElement;
     head.setPointerCapture(e.pointerId);
@@ -368,6 +470,9 @@ $('world').addEventListener('pointercancel', endDrag);
 $('world').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-act]');
   if (!b) return;
+  if (b.dataset.act === 'unmodel') return removeModel(b.dataset.name);
+  if (b.dataset.act === 'undeploy') return removeDeployment(b.dataset.key);
+  if (b.dataset.act === 'adddep') return openAdd(b.dataset.name);
   const chain = [...graph.fallbacks[b.dataset.src]];
   const i = Number(b.dataset.i);
   if (b.dataset.act === 'del') chain.splice(i, 1);
@@ -425,7 +530,16 @@ $('save').addEventListener('click', async () => {
   if (issues.length) return note(issues[0], 'err');
   $('save').disabled = $('discard').disabled = true;
   const done = [];
+  let restart = false;
   try {
+    // The Gateway first: the Router may name a model that is only added here
+    if (gatewayChanged()) {
+      note('Writing config.yaml…');
+      info.gateway = await postJSON('api/gateway', { version: info.gateway.version, ...deploymentChanges(), fallbacks: chains(graph.fallbacks) });
+      graph.deployments = graphFrom(info).deployments;
+      done.push('Gateway models and fallbacks');
+      restart = true;
+    }
     const rc = routerChanges();
     if (Object.keys(rc).length) {
       note(rc.backend ? 'Saving the Router… (a classifier change can load a model)' : 'Saving the Router…');
@@ -439,15 +553,8 @@ $('save').addEventListener('click', async () => {
       info.settings = (await postJSON('api/settings', ic)).settings;
       done.push('Interceptor');
     }
-    let restart = false;
-    if (fallbacksChanged()) {
-      note('Writing the fallbacks…');
-      info.gateway = await postJSON('api/gateway/fallbacks', { fallbacks: chains(graph.fallbacks) });
-      done.push('Gateway fallbacks');
-      restart = true;
-    }
     saved = graphFrom(info);
-    note(`Saved: ${done.join(', ')}.${restart ? ' Restart the Gateway (LiteLLM) to use the new fallbacks.' : ''}`, 'ok');
+    note(`Saved: ${done.join(', ')}.${restart ? ' Restart the Gateway (LiteLLM) to use the new models and fallbacks.' : ''}`, 'ok');
   } catch (err) {
     saved = graphFrom(info); // keep whatever did save
     note(`${done.length ? `Saved ${done.join(', ')}, but ` : ''}${err.message}`, 'err');
@@ -459,6 +566,78 @@ $('save').addEventListener('click', async () => {
 
 window.addEventListener('beforeunload', (e) => { if (dirty()) e.preventDefault(); });
 window.addEventListener('resize', () => graph && drawWires());
+
+// ---- adding models ----------------------------------------------------------
+
+// Opens the dialog for a new model box, or with `name` for another provider model in that box
+function openAdd(name) {
+  const f = $('addForm');
+  f.reset();
+  f.dataset.name = name || '';
+  $('addTitle').textContent = name ? `Add a provider model to ${name}` : 'Add a model';
+  $('addIntro').textContent = name
+    ? `The Gateway will share ${name}'s requests between its provider models.`
+    : 'A new name the Gateway serves, and the provider model that answers it. Connect it to the Router or other models after adding.';
+  $('nameField').hidden = !!name;
+  f.elements.name.required = !name;
+  $('addMsg').textContent = '';
+  showProvider();
+  $('addDialog').showModal();
+  (name ? f.elements.provider : f.elements.name).focus();
+}
+
+function showProvider() {
+  const f = $('addForm');
+  const p = PROVIDERS[f.elements.provider.value];
+  $('providerHelp').textContent = p.help;
+  f.elements.model.placeholder = p.example;
+  $('baseField').hidden = !p.askBase;
+  $('keyField').hidden = !p.askKey;
+}
+
+$('addForm').elements.provider.innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('');
+$('addForm').elements.provider.addEventListener('change', showProvider);
+$('addModel').addEventListener('click', () => openAdd(''));
+$('addCancel').addEventListener('click', () => $('addDialog').close());
+
+$('addForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const f = $('addForm');
+  const fail = (text) => { $('addMsg').textContent = text; };
+  const name = f.dataset.name || f.elements.name.value.trim();
+  const p = PROVIDERS[f.elements.provider.value];
+  const typed = f.elements.model.value.trim();
+  const id = p.prefix && typed.startsWith(p.prefix) ? typed.slice(p.prefix.length) : typed;
+  const base = f.elements.api_base.value.trim();
+  const keyName = f.elements.api_key_env.value.trim();
+  if (!/^[\w.:/@-]+$/.test(name)) return fail('Use letters, digits and . : / @ - _ in the name.');
+  if (!f.dataset.name && models().includes(name)) return fail(`${name} already exists: use “+ Add provider model” in its box to add to it.`);
+  if (!/^[\w.:/@+-]+$/.test(id)) return fail(`Enter the model id, e.g. ${p.example}.`);
+  if (p.askBase && base && !/^https?:\/\/\S+$/.test(base)) return fail('The server address starts with http:// or https://.');
+  if (p.askBase && !base && p.prefix === 'openai/') return fail('Enter the server address, e.g. http://localhost:1234/v1.');
+  if (keyName && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyName)) return fail('Enter the name of the variable in .env, like MY_API_KEY, not the key itself.');
+  const model = p.prefix + id;
+  if (graph.deployments.some(d => d.name === name && d.model === model && (d.api_base || '') === (p.base || base))) return fail(`${name} already uses ${model}.`);
+  graph.deployments.push({
+    key: `n${++newKeys}`, name, model,
+    api_base: p.base || base || null,
+    api_key: p.key || (keyName ? `os.environ/${keyName}` : (p.prefix === 'openai/' ? 'dummy' : null)),
+  });
+  $('addDialog').close();
+  changed();
+  // Bring a new box into view
+  const node = $('world').querySelector(`.node[data-id="${CSS.escape('m:' + name)}"]`);
+  node?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  flash([`m:${name}`]);
+});
+
+// ---- the guide ---------------------------------------------------------------
+
+// Open until the reader closes it once
+try { $('guide').open = localStorage.getItem('harness-routing-guide') !== 'closed'; } catch { $('guide').open = true; }
+$('guide').addEventListener('toggle', () => {
+  try { localStorage.setItem('harness-routing-guide', $('guide').open ? 'open' : 'closed'); } catch {}
+});
 
 // ---- loading and live requests -------------------------------------------
 
@@ -478,9 +657,10 @@ async function load() {
   const issues = [
     !info.settings && `Interceptor settings: ${settings.reason?.message}`,
     !info.router && 'The Router is down or has no admin endpoints, so its choices can’t be changed.',
-    info.gatewayError && `Fallbacks can’t be edited: ${info.gatewayError}`,
+    info.gatewayError && `Models and fallbacks can’t be edited: ${info.gatewayError}`,
   ].filter(Boolean);
   $('updated').textContent = `Loaded ${new Date().toLocaleTimeString()}`;
+  $('addModel').disabled = !gatewayEditable();
   render();
   updateButtons();
   note(issues.join(' '), issues.length ? 'err' : '');

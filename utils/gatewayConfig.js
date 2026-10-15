@@ -1,9 +1,18 @@
 // The Gateway's (LiteLLM's) config.yaml, as the routing editor sees it: the
-// model names it serves and its fallback chains. Only the fallbacks block is
-// ever rewritten, line by line, so comments and the rest of the file stay put.
-// LiteLLM reads the file at start, so a changed chain needs a Gateway restart.
+// models it serves (model_list) and their fallback chains. Edits are made line
+// by line: whole model_list entries are removed or appended and fallback lines
+// rewritten, so comments and the rest of the file stay put. LiteLLM reads the
+// file at start, so a change needs a Gateway restart.
+
+const crypto = require('crypto');
 
 const NAME = /^[\w.:/@-]+$/;
+const MODEL_ID = /^[\w.:/@+-]+$/;
+const API_BASE = /^https?:\/\/[^\s"'#]+$/;
+const API_KEY = /^(os\.environ\/[A-Za-z_][A-Za-z0-9_]*|[\w.-]+)$/;
+
+/** A hash of the file, so a save can tell it was changed since the page read it. */
+const version = (text) => crypto.createHash('sha1').update(text).digest('hex').slice(0, 12);
 
 function modelNames(text) {
     return [...new Set([...text.matchAll(/^\s*-\s*model_name:\s*["']?([^"'\s#]+)/gm)].map(m => m[1]))];
@@ -49,12 +58,128 @@ function findBlock(lines) {
     return { start: null, end: lines.length, indent: 2, items: [], top };
 }
 
-/** {models, fallbacks: {model: [targets]}} from the config text; throws if the fallbacks can't be read. */
+function unquote(value) {
+    if (/^".*"$/.test(value)) { try { return JSON.parse(value); } catch {} }
+    if (/^'.*'$/.test(value)) return value.slice(1, -1).replace(/''/g, "'");
+    return value;
+}
+
+function yamlScalar(value) {
+    const plain = /^[A-Za-z_][\w./:@+-]*$/.test(value) && !value.endsWith(':') && !/^(true|false|yes|no|on|off|null)$/i.test(value);
+    return plain ? value : JSON.stringify(value);
+}
+
+/**
+ * The model_list entries, one per deployment: {start, end, indent, name, params}.
+ * Several entries with the same model_name are one model that LiteLLM spreads
+ * requests across. `start` includes the comment lines right above an entry.
+ */
+function findModelList(lines) {
+    const top = lines.findIndex(l => /^model_list:\s*(#.*)?$/.test(l));
+    if (top < 0) return null;
+    const items = [];
+    let cur = null;
+    for (let j = top + 1; j < lines.length; j++) {
+        const line = lines[j];
+        if (/^\S/.test(line)) break; // the next top-level key (or a comment at column 0)
+        if (/^\s*(#.*)?$/.test(line)) continue;
+        const m = line.match(/^(\s*)-\s+model_name:\s*(.*?)\s*(#.*)?$/);
+        if (m) {
+            let start = j;
+            while (start - 1 > top && /^\s*#/.test(lines[start - 1])) start--;
+            cur = { start, line: j, end: j + 1, indent: m[1].length, name: unquote(m[2]), params: {} };
+            items.push(cur);
+            continue;
+        }
+        if (!cur || line.match(/^\s*/)[0].length <= cur.indent) {
+            throw new Error(`can't read model_list line ${j + 1}: start each entry with "- model_name:"`);
+        }
+        const p = line.match(/^\s+(model|api_base|api_key):\s*(.*?)\s*(#.*)?$/);
+        if (p && !(p[1] in cur.params)) cur.params[p[1]] = unquote(p[2]);
+        cur.end = j + 1;
+    }
+    // The first entry's comments describe the whole list; leave them to it
+    if (items.length) items[0].start = items[0].line;
+    return { top, items };
+}
+
+// What the page may see of a key: the variable it comes from, never a literal key
+function keyLabel(key) {
+    if (!key) return null;
+    return key.startsWith('os.environ/') ? key : 'set in config.yaml';
+}
+
+/** {version, models, deployments, fallbacks: {model: [targets]}}; throws if the file can't be read. */
 function parse(text) {
-    const block = findBlock(text.split(/\r?\n/));
+    const lines = text.split(/\r?\n/);
+    const block = findBlock(lines);
     const fallbacks = {};
     for (const { source, targets } of block?.items || []) fallbacks[source] = [...(fallbacks[source] || []), ...targets];
-    return { models: modelNames(text), fallbacks };
+    const list = findModelList(lines);
+    const deployments = (list?.items || []).map((it, id) => ({
+        id, name: it.name, model: it.params.model || null, api_base: it.params.api_base || null, api_key: keyLabel(it.params.api_key),
+    }));
+    return { version: version(text), models: modelNames(text), deployments, fallbacks };
+}
+
+function checkDeployment(d) {
+    if (!d || typeof d !== 'object') throw new Error('each new model needs a name and a model id');
+    if (typeof d.name !== 'string' || !NAME.test(d.name)) throw new Error(`"${d.name}" isn't a usable Gateway name (letters, digits, . : / @ - _)`);
+    if (typeof d.model !== 'string' || !MODEL_ID.test(d.model)) throw new Error(`"${d.model}" isn't a model id, e.g. openrouter/openai/gpt-4o-mini`);
+    if (d.api_base && !API_BASE.test(d.api_base)) throw new Error(`"${d.api_base}" isn't an http(s) address`);
+    if (d.api_key && !API_KEY.test(d.api_key)) throw new Error('the key must be os.environ/NAME or a placeholder like "dummy"');
+}
+
+/**
+ * The config text after removing deployments (by id from parse), adding new
+ * ones, and setting the fallback chains. `version` must match the file the
+ * ids came from, so nothing else is removed if the file changed meanwhile.
+ */
+function update(text, { version: seen, remove = [], add = [], fallbacks } = {}) {
+    if (seen && seen !== version(text)) {
+        throw Object.assign(new Error('config.yaml changed since this page loaded it; reload the page and make your change again'), { status: 409 });
+    }
+    if (!Array.isArray(remove) || !Array.isArray(add)) throw new Error('remove and add must be lists');
+    add.forEach(checkDeployment);
+    const eol = text.includes('\r\n') ? '\r\n' : '\n';
+    let lines = text.split(/\r?\n/);
+    const list = findModelList(lines);
+    const items = list?.items || [];
+    for (const id of remove) if (!Number.isInteger(id) || !items[id]) throw new Error(`no model_list entry ${id}`);
+    const before = parse(text).deployments;
+    for (const id of [...new Set(remove)].sort((a, b) => items[b].start - items[a].start)) {
+        const { start, end } = items[id];
+        lines.splice(start, end - start);
+        // Don't leave two blank lines where the entry was
+        if (start > 0 && /^\s*$/.test(lines[start - 1] ?? 'x') && /^\s*$/.test(lines[start] ?? 'x')) lines.splice(start, 1);
+    }
+    if (add.length) {
+        const indent = ' '.repeat(items[0]?.indent ?? 2);
+        const entries = add.flatMap(d => [
+            '',
+            `${indent}- model_name: ${yamlScalar(d.name)}`,
+            `${indent}  litellm_params:`,
+            `${indent}    model: ${yamlScalar(d.model)}`,
+            ...(d.api_base ? [`${indent}    api_base: ${yamlScalar(d.api_base)}`] : []),
+            ...(d.api_key ? [`${indent}    api_key: ${yamlScalar(d.api_key)}`] : []),
+        ]);
+        const after = findModelList(lines);
+        if (after) {
+            const last = after.items.length ? after.items[after.items.length - 1].end : after.top + 1;
+            lines.splice(last, 0, ...(after.items.length ? entries : entries.slice(1)));
+        } else {
+            if (lines.length && lines[lines.length - 1] === '') lines.pop();
+            lines.push('', 'model_list:', ...entries.slice(1), '');
+        }
+    }
+    let out = lines.join(eol);
+    // Read it back: exactly the kept entries plus the new ones
+    const gone = new Set(remove);
+    const expect = [...before.filter(d => !gone.has(d.id)).map(d => `${d.name} ${d.model}`), ...add.map(d => `${d.name} ${d.model}`)];
+    const got = parse(out).deployments.map(d => `${d.name} ${d.model}`);
+    if (JSON.stringify(got) !== JSON.stringify(expect)) throw new Error("couldn't change model_list without changing other lines; edit config.yaml by hand");
+    if (fallbacks) out = write(out, fallbacks);
+    return out;
 }
 
 function check(fallbacks, models) {
@@ -113,4 +238,4 @@ function write(text, fallbacks) {
     return out;
 }
 
-module.exports = { parse, write, modelNames };
+module.exports = { parse, write, update, version, modelNames };

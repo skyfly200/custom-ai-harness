@@ -201,12 +201,13 @@
   }
 
   // Plain text for reading aloud: no code, markup or link targets.
-  function toSpeech(text) {
-    return String(text ?? '')
-      .replace(/```[\s\S]*?(```|$)/g, ' (code block) ')
+  // { clear: true } also rewrites what voices stumble on (see speakable).
+  function toSpeech(text, { clear = false } = {}) {
+    const plain = String(text ?? '')
+      .replace(/```[\s\S]*?(```|$)/g, clear ? ' (code shown on screen) ' : ' (code block) ')
       .replace(/`([^`]+)`/g, '$1')
       .replace(/!?\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .replace(/https?:\/\/\S+/g, 'link')
+      .replace(/https?:\/\/(?:www\.)?([^\/\s)]+)\S*/g, clear ? 'a link to $1' : 'link')
       .replace(/^\s{0,3}#{1,6}\s+/gm, '')
       .replace(/^\s*([-*+]|\d{1,9}[.)])\s+(\[[ xX]\]\s+)?/gm, '')
       .replace(/^\s*>\s?/gm, '')
@@ -218,9 +219,41 @@
       .replace(/([.!?:;,])?\s*\n+/g, (_, p) => (p && p !== ':' ? p + ' ' : '. '))
       .replace(/\s+/g, ' ')
       .trim();
+    return clear ? speakable(plain) : plain;
   }
 
-  const api = { render, inline, highlight, toSpeech, escape: esc };
+  // Rewrites plain text so a voice reads it the way a person would: symbols,
+  // abbreviations, identifiers and shorthand numbers become words.
+  const SCALE = { k: 'thousand', K: 'thousand', M: 'million', B: 'billion' };
+  function speakable(text) {
+    return String(text ?? '')
+      .replace(/\p{Extended_Pictographic}\uFE0F?/gu, '')
+      .replace(/\be\.g\.,?/gi, 'for example,')
+      .replace(/\bi\.e\.,?/gi, 'that is,')
+      .replace(/\betc\.(?=\s+[A-Z]|\s*$)/g, 'et cetera.')
+      .replace(/\betc\./g, 'et cetera')
+      .replace(/\bvs\.?(?=\s)/gi, 'versus')
+      .replace(/\band\/or\b/gi, 'and or')
+      .replace(/\s*(?:->|=>|→)\s*/g, ' to ')
+      .replace(/\s*(?:<-|←)\s*/g, ' from ')
+      .replace(/\s+&\s+/g, ' and ')
+      .replace(/\s+(?:==|=)\s+/g, ' equals ')
+      .replace(/\s+\+\s+/g, ' plus ')
+      .replace(/\b(Ctrl|Cmd|Alt|Shift)\+/g, (_, k) => ({ Ctrl: 'Control', Cmd: 'Command' }[k] || k) + ' ')
+      .replace(/~\s*(?=[$\d])/g, 'about ')
+      .replace(/(\d)\s*%/g, '$1 percent')
+      .replace(/(^|\s)#(\d+)\b/g, '$1number $2')
+      .replace(/\b(\d+(?:\.\d+)?)([kKMB])\b/g, (_, n, u) => `${n} ${SCALE[u]}`)
+      .replace(/\b(\d+)\s*-\s*(\d+)\b/g, '$1 to $2')
+      .replace(/\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b/g, (w) => w.replace(/_+/g, ' '))
+      .replace(/\b[a-z]{2,}(?:[A-Z][a-z0-9]+)+\b/g, (w) => w.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase())
+      .replace(/\s+([,.!?])/g, '$1')
+      .replace(/,\s*,/g, ',')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  const api = { render, inline, highlight, toSpeech, speakable, escape: esc };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.Markdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

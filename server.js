@@ -16,6 +16,7 @@ const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
+const modelInfo = require('./utils/modelInfo');
 const fs = require('fs');
 const path = require('path');
 
@@ -233,6 +234,25 @@ app.get('/ui/api/models', async (req, res) => {
         const models = [...text.matchAll(/^\s*-\s*model_name:\s*["']?([^"'\s#]+)/gm)].map(m => m[1]);
         res.json({ source: 'config.yaml', models: [...new Set(models)] });
     }
+});
+
+// Prices and context sizes for the chat page's cost and context readouts:
+// LiteLLM's /v1/model/info, else which models config.yaml says are free
+let modelInfoCache = { at: 0, body: null };
+app.get('/ui/api/model-info', async (req, res) => {
+    if (modelInfoCache.body && Date.now() - modelInfoCache.at < 5 * 60 * 1000) return res.json(modelInfoCache.body);
+    let body;
+    try {
+        const upstream = await fetch(`${GATEWAY_URL}/v1/model/info`, { headers: gatewayAuth, signal: AbortSignal.timeout(3000) });
+        if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
+        body = { source: 'gateway', models: modelInfo.fromGatewayInfo((await upstream.json()).data) };
+        modelInfoCache = { at: Date.now(), body };
+    } catch {
+        let text = '';
+        try { text = fs.readFileSync(path.join(__dirname, 'config.yaml'), 'utf8'); } catch {}
+        body = { source: 'config.yaml', models: modelInfo.fromConfig(text) };
+    }
+    res.json(body);
 });
 
 // Read-aloud for the chat page through an OpenAI-compatible speech endpoint

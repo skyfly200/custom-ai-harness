@@ -38,3 +38,14 @@ test('read-aloud text drops markup, list numbers and code', () => {
     assert.equal(toSpeech('Here is **x**:\n\n1. First step\n2. Second step!\n\n```js\ncode()\n```\nsnake_case done.'),
         'Here is x. First step. Second step! (code block). snake_case done.');
 });
+
+test('clear read-aloud rewrites symbols, abbreviations and identifiers into words', () => {
+    const { speakable } = require('../ui/markdown');
+    assert.equal(speakable('Use maxTokens, e.g. 10k or ~20% more -> fine & fast 🚀 etc. Then go'),
+        'Use max tokens, for example, 10 thousand or about 20 percent more to fine and fast et cetera. Then go');
+    assert.equal(speakable('Press Ctrl+K for issue #12, pages 3-5, snake_case vs. camelCase'),
+        'Press Control K for issue number 12, pages 3 to 5, snake case versus camel case');
+    assert.equal(toSpeech('See https://www.github.com/a/b and `read_file`.', { clear: true }),
+        'See a link to github.com and read file.');
+    assert.equal(toSpeech('See https://github.com/a/b'), 'See link');
+});

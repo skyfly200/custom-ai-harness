@@ -5,6 +5,7 @@
 
 const $ = (id) => document.getElementById(id);
 const { render, toSpeech, escape: esc } = window.Markdown;
+const speechText = (markdown) => toSpeech(markdown, { clear: $('speakClear').checked });
 
 const ICONS = {
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
@@ -25,7 +26,7 @@ const ICONS = {
 const setIcon = (id, name) => { $(id).innerHTML = ICONS[name]; };
 setIcon('copyChat', 'copy'); setIcon('exportChat', 'download'); setIcon('toggleOptions', 'sliders');
 setIcon('toggleActivity', 'pulse'); setIcon('attach', 'clip'); setIcon('mic', 'mic');
-setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close');
+setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('deleteChat', 'trash');
 
 // ---------------------------------------------------------------------------
 // Storage: an index of chats plus one key per chat, so streaming a reply only
@@ -64,6 +65,7 @@ function loadChat(id) {
 }
 
 function saveChat(c, { touch = true } = {}) {
+  if (c.deleted) return; // a reply that ends after its chat was deleted
   if (touch) c.updated = Date.now();
   cache.set(c.id, c);
   // an empty chat isn't listed until something is in it
@@ -77,13 +79,30 @@ function saveChat(c, { touch = true } = {}) {
 }
 
 function deleteChat(id) {
+  const c = cache.get(id);
+  if (c) c.deleted = true;
   running.get(id)?.controller.abort();
   index = index.filter(e => e.id !== id);
   cache.delete(id);
   store.remove(CHAT_KEY(id));
   store.set(INDEX_KEY, index);
-  if (chat?.id === id) openChat(index[0]?.id);
-  else drawList();
+  if (chat?.id === id) {
+    if (speech.current && c?.messages.some(m => m.id === speech.current)) speech.stop();
+    chat = null; // so opening the next chat doesn't save this one's draft back
+    openChat(index[0]?.id);
+  } else drawList();
+}
+
+function deleteAllChats() {
+  for (const { controller } of running.values()) controller.abort();
+  for (const e of index) store.remove(CHAT_KEY(e.id));
+  for (const c of cache.values()) c.deleted = true;
+  speech.stop();
+  index = [];
+  cache.clear();
+  store.set(INDEX_KEY, index);
+  chat = null;
+  openChat(null);
 }
 
 function chatTitle(c) {
@@ -108,7 +127,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree'];
+const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['model', 'maxTokens', 'temperature']) {
@@ -248,6 +267,19 @@ function stepChat(dir) {
 }
 
 $('newChat').addEventListener('click', () => { openChat(null); $('app').classList.remove('side-open'); });
+$('deleteChat').addEventListener('click', () => {
+  if (!index.some(e => e.id === chat.id)) {
+    // nothing saved yet: just clear what's typed
+    if (!$('input').value && !pending.length) return toast('Nothing to delete yet.');
+    $('input').value = ''; pending = []; drawChips(); autoGrow();
+    return;
+  }
+  if (confirm(`Delete “${chatTitle(chat)}”? This can't be undone.`)) deleteChat(chat.id);
+});
+$('deleteAll').addEventListener('click', () => {
+  if (!index.length) return toast('No saved chats to delete.');
+  if (confirm(`Delete all ${index.length} saved chat${index.length === 1 ? '' : 's'} in this browser? This can't be undone. (Export all chats first to keep a copy.)`)) deleteAllChats();
+});
 $('toggleSide').addEventListener('click', () => $('app').classList.toggle('side-open'));
 $('title').addEventListener('change', () => { chat.title = $('title').value.trim(); saveChat(chat, { touch: false }); drawList(); });
 $('system').addEventListener('change', () => { chat.system = $('system').value; saveChat(chat); drawList(); drawContextSize(); });
@@ -326,9 +358,91 @@ function metaHtml(m) {
     tr?.answered?.fallbacks > 0 && `<span class="warn">${tr.answered.fallbacks} fallback${tr.answered.fallbacks > 1 ? 's' : ''}</span>`,
     (tr?.done ?? meta.ms) != null && fmtMs(tr?.done ?? meta.ms),
     tr?.usage && `${tr.usage.prompt_tokens ?? '?'} in · ${tr.usage.completion_tokens ?? '?'} out`,
+    costHtml(m),
   ].filter(Boolean);
   if (!bits.length) return '';
   return `<div class="meta">${bits.join(' · ')}${tr ? `<details><summary>How this reply was made</summary>${traceHtml(m)}</details>` : ''}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Token costs and context size, from the Gateway's prices (/ui/api/model-info)
+// ---------------------------------------------------------------------------
+let modelInfo = {};   // model name -> { maxInput, maxOutput, inputCost, outputCost, free }
+const replyModel = (m) => m?.trace?.answered?.servedBy || m?.trace?.routed?.model || m?.meta?.model || '';
+const fmtTok = (n) => n < 1000 ? String(n) : n < 1e6 ? `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`;
+const fmtUsd = (n) => n === 0 ? '$0' : n < 0.0001 ? '<$0.0001' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`;
+
+// { usd, free, estimated } or null when the price isn't known. The provider's
+// own figure wins (OpenRouter's usage.cost, LiteLLM's cost header); else the
+// tokens times the Gateway's price list.
+function computeCost(m) {
+  const tr = m.trace || {};
+  const u = tr.usage;
+  if (typeof u?.cost === 'number') return { usd: u.cost, free: u.cost === 0 };
+  if (tr.headerCost > 0) return { usd: tr.headerCost, free: false };
+  const info = modelInfo[replyModel(m)];
+  if (info?.free) return { usd: 0, free: true };
+  if (!info || info.inputCost == null || !u) return null;
+  return { usd: (u.prompt_tokens || 0) * info.inputCost + (u.completion_tokens || 0) * (info.outputCost || 0), free: false, estimated: true };
+}
+const replyCost = (m) => (m.cost !== undefined && !m.streaming ? m.cost : computeCost(m));
+
+function costHtml(m) {
+  const c = replyCost(m);
+  if (!c) return '';
+  if (c.free) return '<span class="cost free" title="This model is free to use">free</span>';
+  return `<span class="cost" title="${c.estimated ? 'Worked out from the Gateway’s price list' : 'Reported by the provider'}">${c.estimated ? '≈ ' : ''}${fmtUsd(c.usd)}</span>`;
+}
+
+// Tokens the next request will send: context, history, attachments and the box
+function requestTokens() {
+  if (!chat) return 0;
+  const files = (list) => (list || []).reduce((n, a) => n + (a.text?.length || 0), 0);
+  const ctx = contextText(chat).length + files(pending);
+  const hist = chat.messages.filter(m => m.role === 'user' || m.role === 'assistant')
+    .reduce((n, m) => n + String(m.content).length + files(m.attachments), 0);
+  return approxTokens(ctx + hist + $('input').value.length);
+}
+
+// Header: tokens and cost so far in this chat, and how full the context is
+function drawStats() {
+  const el = $('chatStats');
+  if (!chat) return;
+  const replies = chat.messages.filter(m => m.role === 'assistant' && !m.streaming);
+  let input = 0, output = 0, usd = 0, paid = 0, free = 0, unknown = 0;
+  for (const m of replies) {
+    const u = m.trace?.usage;
+    if (u) { input += u.prompt_tokens || 0; output += u.completion_tokens || 0; }
+    const c = replyCost(m);
+    if (!c) unknown++; else if (c.free) free++; else { paid++; usd += c.usd; }
+  }
+  const next = requestTokens();
+  const model = $('model').value.trim() || replyModel(replies[replies.length - 1]);
+  const max = modelInfo[model]?.maxInput;
+  const lastSent = [...replies].reverse().find(m => m.trace?.usage?.prompt_tokens)?.trace.usage.prompt_tokens;
+  if (!replies.length && !next) { el.innerHTML = ''; return; }
+  const pct = max ? Math.min(100, Math.round(next / max * 100)) : null;
+  const bits = [];
+  if (input + output) bits.push(`<span>${fmtTok(input + output)} tokens</span>`);
+  if (paid) bits.push(`<span>${fmtUsd(usd)}${unknown ? '+' : ''}</span>`);
+  else if (free && !unknown) bits.push('<span class="ok">free</span>');
+  bits.push(max
+    ? `<span class="ctx-text">context ${fmtTok(next)} / ${fmtTok(max)}</span><span class="meter${pct >= 90 ? ' bad' : pct >= 70 ? ' warn' : ''}"><i style="width:${Math.max(2, pct)}%"></i></span>`
+    : `<span class="ctx-text">context ≈ ${fmtTok(next)}</span>`);
+  el.innerHTML = bits.join('');
+  el.title = [
+    `This chat: ${input.toLocaleString()} tokens in, ${output.toLocaleString()} out over ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}.`,
+    `Cost: ${fmtUsd(usd)} for ${paid} paid repl${paid === 1 ? 'y' : 'ies'}${free ? `, ${free} free` : ''}${unknown ? `, ${unknown} with no known price` : ''}.`,
+    `Next request: about ${next.toLocaleString()} tokens${max ? ` of ${model}'s ${max.toLocaleString()} (${pct}%)` : model ? ` (no context size known for ${model})` : ''}.`,
+    lastSent ? `The last reply was sent ${lastSent.toLocaleString()} tokens.` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function loadModelInfo() {
+  fetch('api/model-info').then(r => r.json()).then((j) => {
+    modelInfo = j.models || {};
+    if (chat && !running.has(chat.id)) drawLog(); else drawStats();
+  }).catch(() => {});
 }
 
 function messageHtml(m, i, list) {
@@ -337,16 +451,18 @@ function messageHtml(m, i, list) {
   if (m.role === 'user') {
     return `<div class="msg user" data-id="${m.id}"><div class="who">You<span class="actions">
         <button data-act="copy" title="Copy">${ICONS.copy}</button>
-        <button data-act="edit" title="Edit and resend">${ICONS.edit}</button></span></div>
+        <button data-act="edit" title="Edit and resend">${ICONS.edit}</button>
+        <button data-act="resend" title="Send this again (replies after it are replaced)">${ICONS.retry}</button></span></div>
       ${attachmentsHtml(m.attachments)}${m.content ? `<div class="bubble">${esc(m.content)}</div>` : ''}</div>`;
   }
   if (m.role === 'error') {
     return `<div class="msg error" data-id="${m.id}"><div class="who">Error<span class="actions">
         ${i === list.length - 1 ? `<button data-act="retry" title="Try again">${ICONS.retry} Retry</button>` : ''}
         <button data-act="copy" title="Copy">${ICONS.copy}</button></span></div>
-      <div class="bubble">${esc(m.content)}</div>${m.trace ? `<div class="meta"><details open><summary>What happened</summary>${traceHtml(m)}</details></div>` : ''}</div>`;
+      <div class="bubble">${esc(m.content)}</div>${m.hint ? `<div class="hint">${esc(m.hint)}</div>` : ''}${m.trace ? `<div class="meta"><details open><summary>What happened</summary>${traceHtml(m)}</details></div>` : ''}</div>`;
   }
   return `<div class="msg assistant${m.streaming ? ' streaming' : ''}" data-id="${m.id}"><div class="who">Assistant<span class="actions">
+      ${m.streaming ? `<button data-act="stop" class="stop" title="Stop this reply (Esc)">${ICONS.stop} Stop</button>` : ''}
       <button data-act="copy" title="Copy as Markdown">${ICONS.copy}</button>
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>
       ${lastAssistant && !m.streaming ? `<button data-act="retry" title="Regenerate">${ICONS.retry}</button>` : ''}</span></div>
@@ -381,11 +497,23 @@ function redraw(m) {
       const el = $('log').querySelector(`.msg[data-id="${msg.id}"]`);
       const i = chat.messages.indexOf(msg);
       const html = messageHtml(msg, i, chat.messages);
-      if (el) el.outerHTML = html; else drawLog();
+      if (el) patch(el, html); else drawLog();
     }
     dirty.clear();
     if (stickToBottom) $('log').scrollTop = $('log').scrollHeight;
   });
+}
+// Replace a message's content but keep its button row when that hasn't
+// changed, so a click on Stop isn't lost to a redraw mid-click
+function patch(el, html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const fresh = tmp.firstElementChild;
+  const who = el.firstElementChild, freshWho = fresh.firstElementChild;
+  if (el.className !== fresh.className || !who?.classList.contains('who') || who.innerHTML !== freshWho.innerHTML) return el.replaceWith(fresh);
+  while (el.lastChild !== who) el.lastChild.remove();
+  freshWho.remove();
+  el.append(...fresh.childNodes);
 }
 // keep elapsed times ticking while a reply is pending
 setInterval(() => { for (const { reply } of running.values()) if (chat.messages.includes(reply)) redraw(reply); }, 250);
@@ -407,6 +535,8 @@ $('log').addEventListener('click', async (e) => {
     case 'copy': await copyText(m.content); flashCopied(btn); break;
     case 'speak': speech.current === m.id ? speech.stop() : speech.say(m.content, m.id); break;
     case 'retry': regenerate(); break;
+    case 'stop': running.get(chat.id)?.controller.abort(); break;
+    case 'resend': resendFrom(chat, m); break;
     case 'edit':
       if (running.has(chat.id)) return toast('Stop the current reply first.');
       if (i < chat.messages.length - 1 && !confirm('Edit this message? The replies after it will be removed.')) return;
@@ -467,6 +597,25 @@ function regenerate() {
   runReply(c);
 }
 
+// Send a user message again: stop any reply in progress, drop what came after it
+async function resendFrom(c, m) {
+  const r = running.get(c.id);
+  if (r) { r.controller.abort(); await r.finished; }
+  const i = c.messages.indexOf(m);
+  if (i < 0) return;
+  if (i < c.messages.length - 1 && c.messages.slice(i + 1).some(x => x.role === 'user')
+    && !confirm('Send this message again? The messages after it will be removed.')) return;
+  c.messages.splice(i + 1);
+  saveChat(c);
+  if (chat === c) drawLog();
+  runReply(c);
+}
+
+// Free models often stall or refuse once their daily or per-minute quota is used
+const QUOTA_HINT = 'Free models often stall or refuse once their daily or per-minute quota is used up. Retry, wait a while, or pin another model under Options.';
+const looksLikeQuota = (text) => /\b429\b|rate.?limit|quota|too many requests|exhausted|exceeded|capacity/i.test(text);
+const seconds = (id) => Math.max(0, Number($(id).value) || 0);
+
 async function runReply(c) {
   const reply = { id: uid(), role: 'assistant', content: '', streaming: true, time: Date.now(), trace: { start: Date.now(), chunks: 0 } };
   c.messages.push(reply);
@@ -484,13 +633,27 @@ async function runReply(c) {
   if ($('model').value.trim()) headers['x-harness-model'] = $('model').value.trim();
 
   const controller = new AbortController();
-  running.set(c.id, { controller, reply });
+  let finish;
+  running.set(c.id, { controller, reply, finished: new Promise(r => { finish = r; }) });
   waiting.set(clientId, reply);
   if (chat === c) busy(true);
   drawList();
   speech.beginReply(reply);
 
   const tr = reply.trace;
+  // Give up on a reply that never starts or stops arriving, instead of
+  // waiting forever on a stuck model
+  const first = seconds('timeoutFirst'), stall = seconds('timeoutStall');
+  tr.lastData = Date.now();
+  const watchdog = setInterval(() => {
+    const now = Date.now();
+    if (!tr.gotData) {
+      if (first && now - tr.start > first * 1000) giveUp(`No reply after ${first} s`);
+    } else if (stall && now - tr.lastData > stall * 1000) {
+      giveUp(`The reply stopped arriving for ${stall} s`);
+    }
+  }, 1000);
+  const giveUp = (why) => { reply.timedOut = why; controller.abort(); };
   try {
     const res = await fetch('/v1/chat/completions', { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal });
     // the same facts the live feed sends, from the headers, in case it's not connected
@@ -502,6 +665,7 @@ async function runReply(c) {
       servedBy: res.headers.get('x-litellm-model-group') || tr.answered?.servedBy || null,
       fallbacks: parseInt(res.headers.get('x-litellm-attempted-fallbacks'), 10) || tr.answered?.fallbacks || 0,
     };
+    tr.headerCost = parseFloat(res.headers.get('x-litellm-response-cost')) || 0;
     reply.meta = { model: tr.routed.model, route: routeWhy(tr.routed) };
     redraw(reply);
     if (!res.ok) {
@@ -522,23 +686,28 @@ async function runReply(c) {
     tr.done = Date.now() - tr.start;
   } catch (err) {
     tr.done = Date.now() - tr.start;
-    if (err.name === 'AbortError') {
+    const message = err.name === 'AbortError' && reply.timedOut ? `${reply.timedOut}, so the page stopped waiting.` : err.message;
+    if (err.name === 'AbortError' && !reply.timedOut) {
       reply.content += reply.content ? '\n\n*(stopped)*' : '*(stopped)*';
     } else if (reply.content) {
-      reply.content += `\n\n*(cut off: ${err.message})*`;
+      reply.content += `\n\n*(cut off: ${message})*`;
     } else {
       // keep the trace on the error so it says how far the request got
-      tr.error = err.message.startsWith('HTTP') ? null : err.message;
-      c.messages.splice(c.messages.indexOf(reply), 1, { id: reply.id, role: 'error', content: err.message, trace: tr, time: Date.now() });
+      tr.error = message.startsWith('HTTP') ? null : message;
+      const hint = reply.timedOut || looksLikeQuota(message) ? QUOTA_HINT : '';
+      c.messages.splice(c.messages.indexOf(reply), 1, { id: reply.id, role: 'error', content: message, hint, trace: tr, time: Date.now() });
     }
   } finally {
+    clearInterval(watchdog);
     reply.streaming = false;
+    if (c.messages.includes(reply)) reply.cost = computeCost(reply);
     running.delete(c.id);
     waiting.delete(clientId);
     saveChat(c);
     if (chat === c) { busy(false); drawLog(); }
     drawList();
     speech.endReply(reply);
+    finish();
   }
 }
 
@@ -551,6 +720,7 @@ async function readStream(stream, reply, c) {
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
+    tr.lastData = Date.now(); tr.gotData = true;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop();
@@ -613,13 +783,12 @@ function drawContextSize() {
 
 function drawHint() {
   const bits = ['Enter to send · Shift+Enter for a new line'];
-  const ctx = (chat?.system || '').length + (chat?.notes || '').length + pending.reduce((n, a) => n + (a.text?.length || 0), 0);
-  const hist = (chat?.messages || []).reduce((n, m) => n + String(m.content).length, 0);
-  const total = approxTokens(ctx + hist + $('input').value.length);
+  const total = requestTokens();
   if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${pending.some(a => a.kind === 'image') ? ' plus images' : ''}`);
   if ($('model').value.trim()) bits.push(`model pinned to ${esc($('model').value.trim())}`);
   if ($('handsFree').checked) bits.push('hands-free on');
   $('hint').innerHTML = bits.map(b => `<span>${b}</span>`).join('');
+  drawStats();
 }
 
 // ---------------------------------------------------------------------------
@@ -789,14 +958,22 @@ const serverTTS = {
     this.pump();
   },
 
-  // keep two pieces fetching ahead of the one playing
+  load(item) {
+    if (item.audio) return;
+    item.audio = this.fetchAudio(item.text);
+    item.audio.catch(() => {});
+  },
+
+  // Fetch only the piece playing and the one after it: enough for no gap
+  // between pieces, and stopping wastes at most one piece of speech tokens
   pump() {
-    for (const item of this.items.slice(0, 3)) if (!item.audio) {
-      item.audio = this.fetchAudio(item.text);
-      item.audio.catch(() => {});
-    }
-    if (this.playing || !this.items.length) return;
-    const item = this.playing = this.items.shift();
+    if (!this.playing && this.items.length) this.start(this.items.shift());
+    if (this.items[0]) this.load(this.items[0]);
+  },
+
+  start(item) {
+    this.playing = item;
+    this.load(item);
     const next = () => { this.playing = null; item.done(); this.pump(); };
     item.audio.then((url) => {
       if (this.playing !== item) return URL.revokeObjectURL(url);
@@ -827,20 +1004,31 @@ const speech = {
   get engine() { return $('ttsEngine').value === 'server' && serverTTS.ok ? serverTTS : browserTTS; },
   get ok() { return browserTTS.ok || serverTTS.ok; },
 
+  sent: 0,            // pieces queued for the current read
+  gen: 0,             // bumped by stop(), so pieces cut off then don't count
+  // A short first piece so speech starts quickly, then longer ones (fewer
+  // requests, smoother audio). The server's speech models take the longest.
+  pieceMax() {
+    const sizes = this.engine === serverTTS ? [120, 240, 400] : [120, 220];
+    return sizes[Math.min(this.sent, sizes.length - 1)];
+  },
+
   enqueue(text, id) {
     if (!this.ok || !text.trim()) return;
     const engine = this.engine;
-    // the server takes longer pieces; fewer requests, smoother audio
-    const max = engine === serverTTS ? 400 : 220;
-    const pieces = text.match(/[^.!?\n]+[.!?]*\s*|\n+/g) || [text];
+    // sentences, and long sentences at their commas
+    const pieces = (text.match(/[^.!?\n]+[.!?]*\s*|\n+/g) || [text])
+      .flatMap(p => (p.length > 220 ? p.match(/[^,;:]+[,;:]*\s*/g) || [p] : [p]));
     let chunk = '';
     const flush = () => {
       if (!/[\p{L}\p{N}]/u.test(chunk)) { chunk = ''; return; }
       this.queue++;
-      engine.play(chunk.trim(), () => { if (--this.queue <= 0) this.idle(id); });
+      this.sent++;
+      const gen = this.gen;
+      engine.play(chunk.trim(), () => { if (gen === this.gen && --this.queue <= 0) this.idle(id); });
       chunk = '';
     };
-    for (const p of pieces) { if ((chunk + p).length > max) flush(); chunk += p; }
+    for (const p of pieces) { if (chunk && (chunk + p).length > this.pieceMax()) flush(); chunk += p; }
     flush();
     this.current = id;
     this.mark(id);
@@ -849,13 +1037,17 @@ const speech = {
   say(markdown, id) {
     this.stop();
     dictation.pause();
-    this.enqueue(toSpeech(markdown), id);
+    this.enqueue(speechText(markdown), id);
   },
 
   stop() {
     const was = this.current;
     this.queue = 0;
+    this.sent = 0;
+    this.gen++;
     this.current = null;
+    // stopping mid-reply stops reading that reply, not just this piece
+    if (this.replying) { this.spoken.delete(this.replying.id); this.replying = null; }
     browserTTS.stop();
     serverTTS.stop();
     if (was) this.mark(was);
@@ -865,6 +1057,9 @@ const speech = {
     this.queue = 0;
     if (this.current === id) this.current = null;
     this.mark(id);
+    // caught up with a reply that is still arriving: read what has come since
+    const r = this.replying;
+    if (r?.streaming && this.spoken.has(r.id)) { this.feed(r); if (this.queue) return; }
     // hands-free: wait for the reply to finish streaming before listening again
     if (!running.has(chat.id) && $('handsFree').checked) dictation.resume();
   },
@@ -877,6 +1072,7 @@ const speech = {
   beginReply(reply) {
     if (!$('autoSpeak').checked) return;
     this.stop();
+    this.replying = reply;
     this.spoken.set(reply.id, 0);
   },
 
@@ -898,11 +1094,13 @@ const speech = {
       // never stop inside a code block: wait until its closing fence is in
       const before = text.slice(0, to);
       if ((before.match(/```/g) || []).length % 2) to = before.lastIndexOf('```');
+      // while speech is still playing, gather a longer piece: fewer requests
+      if (this.queue > 0 && to - from < this.pieceMax()) return;
     }
     if (to <= from) return;
     this.spoken.set(reply.id, to);
     dictation.pause();
-    this.enqueue(toSpeech(text.slice(from, to)), reply.id);
+    this.enqueue(speechText(text.slice(from, to)), reply.id);
   },
 
   endReply(reply) {
@@ -910,6 +1108,7 @@ const speech = {
       if (!/\*\((stopped|cut off)/.test(reply.content)) this.feed(reply, true);
       this.spoken.delete(reply.id);
     }
+    if (this.replying === reply) this.replying = null;
     if (!this.queue && $('handsFree').checked) dictation.resume();
   },
 };
@@ -1228,6 +1427,7 @@ fetch('api/models').then(r => r.json()).then(({ models }) => {
 }).catch(() => {});
 
 applyPrefs();
+loadModelInfo();
 let lastOpen = null;
 try { lastOpen = localStorage.getItem('harness-chat-open'); } catch {}
 openChat(index.some(e => e.id === lastOpen) ? lastOpen : index[0]?.id);

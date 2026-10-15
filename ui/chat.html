@@ -10,6 +10,21 @@
 <body class="chat-page">
 <div class="app" id="app">
 
+  <!-- Top bar, across the chats column and the conversation -->
+  <header class="top">
+    <button class="icon only-narrow" id="toggleSide" title="Chats" aria-label="Chats"></button>
+    <nav><h1>Harness Chat</h1><a href="./">Dashboard</a><a href="chat.html" class="here">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a></nav>
+    <input type="text" id="title" class="title" aria-label="Chat title" placeholder="New chat">
+    <div class="stats" id="chatStats" title=""></div>
+    <div class="top-actions">
+      <button class="icon" id="copyChat" title="Copy the chat as Markdown" aria-label="Copy chat"></button>
+      <button class="icon" id="exportChat" title="Export this chat as Markdown" aria-label="Export chat"></button>
+      <button class="icon" id="deleteChat" title="Delete this chat" aria-label="Delete chat"></button>
+      <button class="icon" id="toggleOptions" title="Model, voice and context options" aria-label="Options"></button>
+      <button class="icon" id="toggleActivity" title="Live activity" aria-label="Activity"></button>
+    </div>
+  </header>
+
   <!-- Chats -->
   <aside class="side" id="side">
     <div class="side-top">
@@ -19,23 +34,13 @@
     <ul class="chat-list" id="chatList"></ul>
     <div class="side-foot">
       <button id="exportAll" class="link" title="Every chat in one Markdown file">Export all chats</button>
+      <button id="deleteAll" class="link danger" title="Delete every saved chat in this browser">Delete all chats</button>
       <span class="muted small">Alt+↑/↓ switches chats</span>
     </div>
   </aside>
 
   <!-- Conversation -->
   <main class="convo">
-    <header class="top">
-      <button class="icon only-narrow" id="toggleSide" title="Chats" aria-label="Chats"></button>
-      <nav><h1>Harness Chat</h1><a href="./">Dashboard</a><a href="chat.html" class="here">Chat</a><a href="usage.html">Usage</a></nav>
-      <input type="text" id="title" class="title" aria-label="Chat title" placeholder="New chat">
-      <div class="top-actions">
-        <button class="icon" id="copyChat" title="Copy the chat as Markdown" aria-label="Copy chat"></button>
-        <button class="icon" id="exportChat" title="Export this chat as Markdown" aria-label="Export chat"></button>
-        <button class="icon" id="toggleOptions" title="Model, voice and context options" aria-label="Options"></button>
-        <button class="icon" id="toggleActivity" title="Live activity" aria-label="Activity"></button>
-      </div>
-    </header>
 
     <section class="options" id="options" hidden>
       <div class="opt-grid">
@@ -45,6 +50,10 @@
           <label>Max tokens <input type="number" id="maxTokens" min="1" value="2048"></label>
           <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
           <label class="check"><input type="checkbox" id="stream" checked> Stream the reply</label>
+          <div class="pair">
+            <label title="Give up when no reply has started after this long. 0 waits forever.">Give up with no reply after (s) <input type="number" id="timeoutFirst" min="0" step="10" value="310"></label>
+            <label title="Give up when a reply stops arriving for this long. 0 waits forever.">…or when it stalls for (s) <input type="number" id="timeoutStall" min="0" step="10" value="130"></label>
+          </div>
         </fieldset>
         <fieldset>
           <legend>Context for this chat</legend>
@@ -76,6 +85,7 @@
             <label data-engine="browser">Pitch <input type="range" id="pitch" min="0" max="2" step="0.1" value="1"> <span id="pitchOut">1.0</span></label>
             <label>Volume <input type="range" id="volume" min="0" max="1" step="0.05" value="1"> <span id="volumeOut">100%</span></label>
           </div>
+          <label class="check" title="Says symbols, abbreviations, numbers like 10k and names like max_tokens as words"><input type="checkbox" id="speakClear" checked> Read clearly: symbols, shorthand and code names as words</label>
           <label class="check"><input type="checkbox" id="autoSpeak"> Read replies aloud as they arrive</label>
           <label class="check"><input type="checkbox" id="handsFree"> Hands-free: listen again after each reply</label>
           <div class="muted small" id="voiceNote"></div>

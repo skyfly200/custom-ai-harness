@@ -5,3 +5,4 @@ __pycache__/
 .laya
 harness-settings.json
 harness-usage.json
+mcp-servers.json

@@ -66,6 +66,19 @@
           <div class="muted small" id="contextSize"></div>
         </fieldset>
         <fieldset>
+          <legend>Tools</legend>
+          <label>Git repo for this chat
+            <span class="repo-row">
+              <input type="text" id="repoPath" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false">
+              <button type="button" id="repoLink" class="mini">Link</button>
+            </span>
+          </label>
+          <div class="muted small" id="repoInfo">The model can read the repo's files and history (read-only).</div>
+          <div class="tools-head"><span>MCP servers</span><button type="button" id="mcpReload" class="mini" title="Read mcp-servers.json again and reconnect">Reload</button></div>
+          <ul class="mcp-list" id="mcpList"><li class="muted small">Loading…</li></ul>
+          <label title="Stop a reply after this many rounds of tool calls">Most tool rounds per reply <input type="number" id="maxToolRounds" min="1" max="50" value="12"></label>
+        </fieldset>
+        <fieldset>
           <legend>Voice</legend>
           <label>Dictation language <input type="text" id="sttLang" placeholder="en-US"></label>
           <label class="check"><input type="checkbox" id="autoSend"> Send when I stop talking</label>

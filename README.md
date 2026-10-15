@@ -87,7 +87,10 @@ These settings only last for that window. Other tools such as Cursor, Aider, Con
 - **The dashboard shows the Router or Gateway as down.** Check that window for an error message. Most often a key in `.env` is missing or mistyped.
 - **`litellm` crashes on start with a text-encoding error.** Make sure you ran `$env:PYTHONUTF8 = 1` in that window first.
 - **`litellm` or `python router.py` says a command or module is not found.** Run `.\.venv\Scripts\Activate.ps1` in that window first; each new window needs it.
-- **Requests are slow or fail with "rate limit".** The free tiers have limits per minute and per day. The harness switches to backups on its own; the dashboard shows which ones it tried.
+- **Requests are slow or fail with "rate limit".** The free tiers have limits per minute and per day. The harness switches to backups on its own; the dashboard shows which ones it tried. A red **rate limit** tag in the routing log means every backup was out of quota too, and the text under it is the provider's own message. OpenRouter's free models share one daily allowance across all of them, which Claude Code can use up quickly; it resets daily, and keeping $10 of OpenRouter credit raises it from 50 to 1,000 requests a day (OpenRouter's limits when this was written).
+- **Every request says "Router down".** The Router couldn't classify it, so the request went to the backup model. The text under the tag says why (for example an error from Jev or a missing key).
+- **Every strong request shows fallbacks.** The strong model is the local engine on port 8000 (Tier 1). When it isn't running, each strong request falls through to the OpenRouter models, which is expected but slower.
+- **A request seems stuck.** It now fails with a **timeout** instead of hanging: after 5 minutes with no answer from the Gateway, or 2 minutes of silence in the middle of a reply. Both limits are in the dashboard's Interceptor settings.
 
 ---
 
@@ -244,8 +247,10 @@ $env:OPENROUTER_API_KEY = "your_openrouter_key"
 Defines the LiteLLM model list and fallback chain. The fallback order for every strong-model request is:
 
 ```
-Tier 1 local engine → fallback-openrouter → fallback-groq (GPT-OSS 120B)
+Tier 1 local engine → fast-openrouter (GPT-4o mini, paid) → fallback-openrouter-tools → fallback-openrouter → fallback-groq (GPT-OSS 120B)
 ```
+
+LiteLLM gives each model `request_timeout` (120 s) before it moves to the next one, and `router_settings.num_retries: 0` makes it move on at once after a rate limit instead of waiting to retry a spent quota.
 
 Deprecated Llama 3/3.1 variants are intentionally absent. Groq serves GPT-OSS 120B: its free tier gives it the same limits as the 20B (8K tokens/min, 1K requests/day), so the bigger model costs nothing extra.
 
@@ -423,9 +428,9 @@ The Interceptor routes each request and the Gateway translates the Anthropic Mes
 With the Interceptor running, open <http://localhost:3000/ui>. The dashboard refreshes every 3 seconds and shows:
 
 - **Components**: whether the Router, Gateway, local engine (port 8000), Ollama (11434) and a local Laya (8001) answer, and which classifier the Router is using. The last three are optional and show as "not running" rather than down.
-- **Counters** since the Interceptor started: requests, times the Router couldn't be reached, Gateway fallbacks and errors.
-- **Recent routing decisions**: the model each request went to and why (win rate against threshold, tool requests, a pinned model, or the Router being down), the Gateway's status and time to first byte, how many fallbacks LiteLLM tried and which model group answered (from LiteLLM's `x-litellm-attempted-fallbacks` and `x-litellm-model-group` headers, when your LiteLLM version sends them), and the start of the typed request.
-- **Interceptor settings**: pin every request to one model (skipping the Router), replace the keyword threshold with a fixed one, the output-token cap, the Router timeout, the models used when the Router is down, and switches for the caveman prompt, Headroom and the context anchor. They apply on the next request and are saved to `harness-settings.json` (gitignored); delete it or press "Reset to defaults" to go back.
+- **Counters** since the Interceptor started: requests, times the Router couldn't be reached, Gateway fallbacks, errors, rate-limited requests and timeouts.
+- **Recent routing decisions**: the model each request went to and why (win rate against threshold, tool requests, a pinned model, or the Router being down), the Gateway's status and time to first byte, how many fallbacks LiteLLM tried and which model group answered (from LiteLLM's `x-litellm-attempted-fallbacks` and `x-litellm-model-group` headers, when your LiteLLM version sends them), and the start of the typed request. A failed request shows why: **rate limit** (a 429 or a provider quota message, quoted), **timeout**, **gateway down**, or **stopped** when the client cancelled it.
+- **Interceptor settings**: pin every request to one model (skipping the Router), replace the keyword threshold with a fixed one, the output-token cap, the Router timeout, the Gateway timeout and the stalled-reply timeout (after which a request fails with an error instead of hanging), the models used when the Router is down, and switches for the caveman prompt, Headroom and the context anchor. They apply on the next request and are saved to `harness-settings.json` (gitignored); delete it or press "Reset to defaults" to go back.
 - **Router settings**: the strong, weak, tool and overflow models, the weak model's size limit, the classifier backend and its settings (base URL, model, API key variable name, timeout, and so on). **Apply** lasts until the Router restarts; **Apply and save to file** also writes them to `routellm-config.yaml`, editing only those lines and keeping your comments (a cleared setting is commented out); **Reload from file** picks up edits you made by hand. A change that fails to build the classifier leaves the running one in place.
 
 Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml` when the Gateway is down). The Gateway's own fallback chain still lives in `config.yaml`.

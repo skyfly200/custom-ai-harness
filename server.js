@@ -17,6 +17,7 @@ const settings = require('./utils/settings');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const gatewayConfig = require('./utils/gatewayConfig');
+const gatewayGuard = require('./utils/gatewayGuard');
 const fs = require('fs');
 const path = require('path');
 
@@ -74,7 +75,11 @@ async function routeModel(body, requested) {
             body: JSON.stringify({ prompt: latestUserText(messages), threshold, tokens: estimateTokens(body), tools: hasTools }),
             signal: AbortSignal.timeout(config.routerTimeoutMs),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+            // the Router says why its classifier failed (an HTTP error from Jev, a missing key, ...)
+            const detail = gatewayGuard.errorMessage(await res.text().catch(() => ''));
+            throw new Error(`HTTP ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
+        }
         const { model, win_rate } = await res.json();
         return { model, threshold, winRate: win_rate, tools: hasTools };
     } catch (err) {
@@ -130,8 +135,28 @@ function recordUsage(req, proxyRes) {
     });
 }
 
+// The reason behind a failed answer (a provider's quota or rate-limit message,
+// usually), read from the error body on its way to the client.
+function recordFailure(req, proxyRes) {
+    const event = req.harnessEvent;
+    if (!event || proxyRes.statusCode < 400) return;
+    const chunks = [];
+    let size = 0;
+    proxyRes.on('data', (c) => { if (size < 8192) { chunks.push(c); size += c.length; } });
+    proxyRes.on('end', () => {
+        let text = Buffer.concat(chunks).toString('utf8');
+        if (/gzip/i.test(proxyRes.headers['content-encoding'] || '')) {
+            try { text = require('zlib').gunzipSync(Buffer.concat(chunks)).toString('utf8'); } catch {}
+        }
+        const { kind, message } = gatewayGuard.classify(proxyRes.statusCode, text);
+        console.warn(`${req.path} → ${event.model} failed (${kind}, HTTP ${proxyRes.statusCode}): ${message}`);
+        monitor.recordError(event, new Error(message), kind);
+    });
+}
+
 // Everything goes to the Gateway (LiteLLM), which speaks both the OpenAI and
-// the Anthropic Messages formats and applies the fallback chain.
+// the Anthropic Messages formats and applies the fallback chain. The guard
+// fails a request the Gateway leaves hanging, so clients get an error instead.
 const toGateway = createProxyMiddleware({
     target: GATEWAY_URL,
     changeOrigin: true,
@@ -139,13 +164,38 @@ const toGateway = createProxyMiddleware({
         proxyReq: (proxyReq, req, res) => {
             for (const [name, value] of Object.entries(gatewayAuth)) proxyReq.setHeader(name, value);
             fixRequestBody(proxyReq, req, res);
+            if (!req.harnessEvent) return; // token counting, model listing
+            const { gatewayTimeoutMs, streamIdleTimeoutMs } = settings.get();
+            req.harnessGuard = gatewayGuard.guard({
+                req, res, proxyReq,
+                firstByteMs: gatewayTimeoutMs,
+                idleMs: streamIdleTimeoutMs,
+                onFail: ({ kind, message }) => {
+                    console.warn(`${req.path} → ${req.harnessEvent.model}: ${message}`);
+                    monitor.recordError(req.harnessEvent, new Error(message), kind);
+                },
+            });
+            res.on('close', () => {
+                if (!res.writableFinished && !req.harnessFailed) monitor.recordCancel(req.harnessEvent);
+            });
         },
         proxyRes: (proxyRes, req) => {
+            req.harnessGuard?.response(proxyRes);
             monitor.recordResponse(req.harnessEvent, proxyRes.statusCode, proxyRes.headers);
             recordUsage(req, proxyRes);
+            recordFailure(req, proxyRes);
             proxyRes.on('end', () => monitor.recordFinish(req.harnessEvent));
         },
-        error: (err, req) => monitor.recordError(req.harnessEvent, err),
+        // Replaces http-proxy-middleware's own error answer, so it must answer
+        // the client itself: without that a down Gateway left clients waiting forever.
+        error: (err, req, res) => {
+            req.harnessGuard?.clear();
+            if (req.harnessFailed) return; // the guard already answered
+            req.harnessFailed = true;
+            const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
+            console.warn(`${req.path}: ${message}`);
+            monitor.recordError(req.harnessEvent, new Error(message), kind);
+        },
     }
 });
 
@@ -432,4 +482,4 @@ if (require.main === module) {
     app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
 }
 
-module.exports = { applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking };
+module.exports = { app, applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking };

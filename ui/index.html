@@ -34,6 +34,12 @@
       <label class="field"><span>Router timeout (ms)</span>
         <input type="number" name="routerTimeoutMs" min="100" step="100">
         <small>After this the request goes to the fallback model below.</small></label>
+      <label class="field"><span>Gateway timeout (ms)</span>
+        <input type="number" name="gatewayTimeoutMs" min="1000" step="1000">
+        <small>How long the Gateway may take to start answering, all fallbacks included, before the request fails instead of hanging.</small></label>
+      <label class="field"><span>Stalled reply timeout (ms)</span>
+        <input type="number" name="streamIdleTimeoutMs" min="1000" step="1000">
+        <small>A reply that goes quiet this long mid-stream is ended with an error.</small></label>
       <label class="field"><span>Model when the Router is down</span>
         <input type="text" name="routerDownModel" list="models"></label>
       <label class="field"><span>…for requests with tools</span>
@@ -141,7 +147,7 @@ function renderComponents(components) {
 }
 
 function renderStats(s) {
-  const items = [['Requests', s.requests], ['Router unreachable', s.routerDown], ['Gateway fallbacks', s.fallbacks], ['Errors', s.errors]];
+  const items = [['Requests', s.requests], ['Router unreachable', s.routerDown], ['Gateway fallbacks', s.fallbacks], ['Errors', s.errors], ['Rate limited', s.rateLimited ?? 0], ['Timed out', s.timeouts ?? 0]];
   $('stats').innerHTML = items.map(([k, v]) => `<div class="card stat"><div class="num">${v}</div><div class="sub">${k}</div></div>`).join('')
     + `<div class="card stat"><div class="num" style="font-size:14px">${new Date(s.since).toLocaleString()}</div><div class="sub">Started</div></div>`;
 }
@@ -154,7 +160,12 @@ function why(e) {
 }
 
 function result(e) {
-  if (e.error) return `<span class="tag bad">failed</span> <div class="sub">${esc(e.error)}</div>`;
+  if (e.errorKind === 'stopped') return `<span class="tag">stopped</span> <div class="sub">by the client</div>`;
+  if (e.error) {
+    const fail = `<span class="tag bad">${esc(e.errorKind || 'failed')}</span>` + (e.status ? ` ${e.status}` : '');
+    const tried = e.fallbacks > 0 ? ` <span class="tag warn">${e.fallbacks} fallback${e.fallbacks > 1 ? 's' : ''}</span>` : '';
+    return `${fail}${tried} <div class="sub">${esc(e.error)}</div>`;
+  }
   if (e.status == null) return '<span class="muted">waiting…</span>';
   let out = `<span class="tag ${e.status >= 400 ? 'bad' : ''}">${e.status}</span> ${e.ms} ms`;
   if (e.fallbacks > 0) out += ` <span class="tag warn">${e.fallbacks} fallback${e.fallbacks > 1 ? 's' : ''}</span>`;

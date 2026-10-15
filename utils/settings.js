@@ -15,6 +15,8 @@ const DEFAULTS = Object.freeze({
     fixedThreshold: null,     // number in [0, 1] to replace the keyword-derived threshold
     pinModel: null,           // Gateway model for every request, skipping the Router
     routerTimeoutMs: 10000,   // how long to wait for the Router before falling back
+    gatewayTimeoutMs: 300000, // how long the Gateway may take to start answering (its whole fallback chain) before the request fails
+    streamIdleTimeoutMs: 120000, // how long a reply may go quiet mid-stream before it fails
     routerDownModel: 'fallback-openrouter',             // free tier with no size cap
     routerDownToolsModel: 'fallback-openrouter-tools',  // same, for requests that need tool calls
 });
@@ -50,6 +52,8 @@ const VALIDATORS = {
     },
     pinModel: optionalName('pinModel'),
     routerTimeoutMs: int('routerTimeoutMs', 100, 600000),
+    gatewayTimeoutMs: int('gatewayTimeoutMs', 1000, 3600000),
+    streamIdleTimeoutMs: int('streamIdleTimeoutMs', 1000, 3600000),
     routerDownModel: name('routerDownModel'),
     routerDownToolsModel: name('routerDownToolsModel'),
 };

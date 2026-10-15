@@ -1,0 +1,65 @@
+main.wide { max-width: none; }
+.toolbar { margin: 14px 0 10px; }
+.toolbar .live { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.canvas { position: relative; overflow: auto; height: calc(100vh - 210px); min-height: 420px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 8px; outline: none;
+  background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 20px 20px; }
+.world { position: relative; }
+.wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.wires path { fill: none; }
+.wires .wire { stroke: var(--muted); stroke-width: 2; }
+.wires .wire.fallback { stroke: var(--warn); stroke-dasharray: 6 4; }
+.wires .wire.fallback.faint { opacity: .3; stroke-width: 1.5; }
+.wires .wire.fixed { stroke: var(--off); }
+.wires .wire.dim { opacity: .25; }
+.wires .wire.flash { opacity: 1; }
+.wires .wire.selected { stroke: var(--accent); stroke-width: 3.5; stroke-dasharray: none; }
+.wires .wire.flash { stroke: var(--ok); stroke-width: 3.5; }
+.wires .wire.draft { stroke: var(--accent); stroke-dasharray: 4 4; }
+.wires .hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.wires .order { fill: var(--panel); stroke: var(--warn); }
+.wires .order-text { fill: var(--warn); font: 600 11px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
+
+.node { position: absolute; width: 250px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.08); font-size: 13px; user-select: none; }
+.node.drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.node.dim { opacity: .45; }
+.node.flash { border-color: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 35%, transparent); }
+.node .head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border);
+  font-weight: 600; cursor: grab; touch-action: none; border-radius: 8px 8px 0 0; }
+.node .head:active { cursor: grabbing; }
+.node .kind { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-left: auto; }
+.node.model .head { background: var(--panel); }
+.node.entry .head { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.node.router .head { background: color-mix(in srgb, var(--ok) 12%, var(--panel)); }
+.node .body { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.node .body:empty { display: none; }
+.node .body label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; }
+.node .body small { color: var(--muted); font-weight: 400; }
+.node select, .node input { font: inherit; font-size: 12.5px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text); width: 100%; min-width: 0; }
+.node .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.node .warn { color: var(--warn); font-size: 12px; }
+
+.outs { border-top: 1px solid var(--border); padding: 4px 0; }
+.out { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 4px 18px 4px 10px; min-height: 26px; }
+.out .label { color: var(--muted); font-size: 12px; text-align: right; }
+.out .label b { color: var(--text); font-weight: 600; }
+.out .label .unset { color: var(--bad); }
+.out.required.empty .label { color: var(--bad); }
+.out input { width: 70px; }
+.port { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: var(--panel); border: 2px solid var(--muted);
+  top: 50%; transform: translateY(-50%); touch-action: none; }
+.port.out-port { right: -8px; cursor: crosshair; }
+.port.out-port.fallback { border-color: var(--warn); }
+.port.out-port:hover { background: var(--accent); border-color: var(--accent); }
+.port.in-port { left: -8px; top: 19px; transform: none; pointer-events: none; }
+.port.fixed { cursor: default; }
+
+.chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.chain li { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+.chain li .n { color: var(--warn); font-weight: 600; width: 14px; text-align: right; flex: none; }
+.chain li .name { flex: 1; }
+.chain button { padding: 0 6px; font-size: 12px; line-height: 18px; border-radius: 4px; }
+.chain .none { color: var(--muted); }
+.help { margin-top: 10px; max-width: 980px; line-height: 1.55; }

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Routing</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="routing.css">
+</head>
+<body>
+<main class="wide">
+  <header>
+    <nav><h1>Harness Routing</h1><a href="./">Dashboard</a><a href="chat.html">Chat</a><a href="usage.html">Usage</a><a href="routing.html" class="here">Routing</a></nav>
+    <span class="muted" id="updated">Loading…</span>
+  </header>
+
+  <div class="controls toolbar">
+    <button class="primary" id="save" disabled>Save</button>
+    <button id="discard" disabled>Discard changes</button>
+    <button id="remove" disabled title="Or press Delete">Remove connection</button>
+    <button id="tidy">Tidy layout</button>
+    <label class="live"><input type="checkbox" id="live" checked> Show live requests</label>
+    <span class="note" id="msg"></span>
+  </div>
+
+  <div id="canvas" class="canvas" tabindex="0" aria-label="Routing graph">
+    <div id="world" class="world">
+      <svg id="wires" class="wires" aria-hidden="true"></svg>
+    </div>
+  </div>
+
+  <div class="sub muted help">
+    Drag from a dot on the right of a box to a model to connect it; click a line to select it, then remove it.
+    Each request enters the Interceptor, which sends it to the Router (or straight to a pinned model). The Router's
+    classifier scores it and picks a model; the Gateway (LiteLLM) then tries that model's fallbacks in order when it fails.
+    Save writes the Router's choices to <span id="routerFile">its config file</span>, the Interceptor's to
+    <code>harness-settings.json</code>, and the fallbacks to <code id="gatewayFile">config.yaml</code>. The Router and
+    Interceptor use their changes on the next request; the Gateway needs a restart to use new fallbacks.
+    Models come from <code>config.yaml</code>'s <code>model_list</code>; other classifier settings are on the
+    <a href="./">Dashboard</a>.
+  </div>
+</main>
+<script src="routing.js"></script>
+</body>
+</html>

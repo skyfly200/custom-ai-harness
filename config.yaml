@@ -32,10 +32,13 @@ model_list:
       max_parallel_requests: 3
       additional_drop_params: ["prompt_cache_key"] # LiteLLM adds it for Claude Code; Groq rejects it
 
-  # Tier 3: OpenRouter fast (no request size cap; serves Claude Code)
+  # Tier 3: OpenRouter fast (no request size cap; serves Claude Code).
+  # GPT-4o mini is paid (cents per million tokens) and not bound by the free
+  # tier's daily quota, so it keeps working once the :free models run out.
+  # OpenRouter has no free GPT-4o mini; a made-up id fails every call.
   - model_name: fast-openrouter
     litellm_params:
-      model: openrouter/openrouter/gpt-4o-mini-free   # cheap, fast, no size cap
+      model: openrouter/openai/gpt-4o-mini
       api_key: os.environ/OPENROUTER_API_KEY
       max_parallel_requests: 10
 
@@ -72,6 +75,11 @@ litellm_settings:
   # Drop request fields a provider doesn't support (Claude Code sends Anthropic-only
   # ones like thinking) instead of failing the call.
   drop_params: true
+  # Seconds one model may take before LiteLLM gives up on it and tries the next
+  # fallback. LiteLLM's default is 6000 (100 minutes), so a hung free model
+  # froze the request. The Interceptor also fails a request the whole chain
+  # leaves unanswered (gatewayTimeoutMs in the dashboard, 5 minutes).
+  request_timeout: 120
   fallbacks:
     # Tool-capable first: strong requests are mostly Claude Code, which needs tool calls.
     - {"claude-3-5-sonnet":         ["fast-openrouter", "fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
@@ -79,3 +87,9 @@ litellm_settings:
     - {"fallback-groq":             ["fallback-openrouter"]}
     - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter", "fallback-groq"]}
     - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter"]}
+
+router_settings:
+  # Go straight to the next fallback instead of retrying the same model: a 429
+  # from a spent free-tier quota won't clear on a retry, and LiteLLM waits
+  # between retries, which looked like a frozen request.
+  num_retries: 0

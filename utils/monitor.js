@@ -10,7 +10,7 @@ const PROMPT_PREVIEW_CHARS = 160;
 
 const events = [];
 let nextId = 1;
-const counters = { requests: 0, routerDown: 0, errors: 0, fallbacks: 0 };
+const counters = { requests: 0, routerDown: 0, errors: 0, fallbacks: 0, rateLimited: 0, timeouts: 0 };
 const live = new EventEmitter();
 live.setMaxListeners(0); // one listener per open page
 
@@ -49,6 +49,7 @@ function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, r
         servedBy: null,
         fallbacks: null,
         error: null,
+        errorKind: null, // 'rate limit', 'timeout', 'gateway down', 'error' or 'stopped' (utils/gatewayGuard.js)
         usage: null,   // { input, output, cacheRead, provider, estimated } once the reply ends
         doneMs: null,  // when the last byte of the reply left the Gateway (streams end after `ms`)
         started: Date.now(),
@@ -84,11 +85,25 @@ function recordFinish(event) {
     emit('finish', event);
 }
 
-function recordError(event, err) {
-    if (!event) return;
-    event.ms = Date.now() - event.started;
+// A failed request: the Gateway unreachable, a timeout, or (with `status`) the
+// reason behind a 4xx/5xx answer, which recordResponse already counted.
+function recordError(event, err, kind = null) {
+    if (!event || event.error) return;
+    event.ms ??= Date.now() - event.started;
     event.error = err?.message || String(err);
-    counters.errors++;
+    event.errorKind = kind;
+    if (event.status == null || event.status < 400) counters.errors++;
+    if (kind === 'rate limit') counters.rateLimited++;
+    if (kind === 'timeout') counters.timeouts++;
+    emit('error', event);
+}
+
+// The client went away before the reply ended (the chat page's Stop button)
+function recordCancel(event) {
+    if (!event || event.error || event.doneMs != null) return;
+    event.error = 'stopped by the client';
+    event.errorKind = 'stopped';
+    event.doneMs = Date.now() - event.started;
     emit('error', event);
 }
 
@@ -134,4 +149,4 @@ function checkComponents(urls) {
     ]);
 }
 
-module.exports = { live, recordRouting, recordRoute, recordResponse, recordFinish, recordError, recordUsage, recentEvents, stats, checkComponents, probe };
+module.exports = { live, recordRouting, recordRoute, recordResponse, recordFinish, recordError, recordCancel, recordUsage, recentEvents, stats, checkComponents, probe };

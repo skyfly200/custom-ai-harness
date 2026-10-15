@@ -9,40 +9,40 @@
 <body>
 <main>
   <header>
-    <nav><h1>Harness Control</h1><a href="./" class="here">Dashboard</a><a href="chat.html">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a></nav>
-    <span class="muted" id="updated">Loading…</span>
+    <nav><h1>Harness Control</h1><a href="./" class="here" data-hint="Health of each part, settings, and recent requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a></nav>
+    <span class="muted" id="updated" data-hint="This page refreshes itself every few seconds">Loading…</span>
   </header>
 
-  <h2>Components</h2>
+  <h2 data-hint="Each part of the harness and whether it answers. Optional parts can be off">Components</h2>
   <div class="grid" id="components"></div>
 
-  <h2>Since the Interceptor started</h2>
+  <h2 data-hint="Counts reset when the Interceptor (npm start) restarts">Since the Interceptor started</h2>
   <div class="grid" id="stats"></div>
 
-  <h2>Interceptor settings</h2>
+  <h2 data-hint="How the Interceptor treats each request before routing it">Interceptor settings</h2>
   <div class="card">
     <form id="isettings" class="form" autocomplete="off">
-      <label class="field"><span>Pin every request to a model</span>
+      <label class="field"><span data-hint="Send every request to this model and skip the Router">Pin every request to a model</span>
         <input type="text" name="pinModel" list="models" placeholder="Off: the Router decides">
         <small>Skips the Router entirely. Leave empty for normal routing.</small></label>
-      <label class="field"><span>Fixed threshold</span>
+      <label class="field"><span data-hint="The score a request needs to go to the strong model">Fixed threshold</span>
         <input type="number" name="fixedThreshold" min="0" max="1" step="0.05" placeholder="Off: from keywords">
         <small>0 always strong, 1 almost always weak. Empty uses the keyword rule (0.2 / 0.5 / 0.8).</small></label>
-      <label class="field"><span>Max output tokens</span>
+      <label class="field"><span data-hint="The most output any client may ask for">Max output tokens</span>
         <input type="number" name="maxOutputTokens" min="1" step="1">
         <small>Caps what clients ask for. Groq rejects more than 65,536.</small></label>
-      <label class="field"><span>Router timeout (ms)</span>
+      <label class="field"><span data-hint="How long to wait for the Router's answer">Router timeout (ms)</span>
         <input type="number" name="routerTimeoutMs" min="100" step="100">
         <small>After this the request goes to the fallback model below.</small></label>
-      <label class="field"><span>Gateway timeout (ms)</span>
+      <label class="field"><span data-hint="How long a reply may take to start before it fails">Gateway timeout (ms)</span>
         <input type="number" name="gatewayTimeoutMs" min="1000" step="1000">
         <small>How long the Gateway may take to start answering, all fallbacks included, before the request fails instead of hanging.</small></label>
-      <label class="field"><span>Stalled reply timeout (ms)</span>
+      <label class="field"><span data-hint="How long a streaming reply may pause before it is ended">Stalled reply timeout (ms)</span>
         <input type="number" name="streamIdleTimeoutMs" min="1000" step="1000">
         <small>A reply that goes quiet this long mid-stream is ended with an error.</small></label>
-      <label class="field"><span>Model when the Router is down</span>
+      <label class="field"><span data-hint="Used when the Router doesn't answer in time">Model when the Router is down</span>
         <input type="text" name="routerDownModel" list="models"></label>
-      <label class="field"><span>…for requests with tools</span>
+      <label class="field"><span data-hint="Used when the Router is down and the request carries tools (Claude Code)">…for requests with tools</span>
         <input type="text" name="routerDownToolsModel" list="models"></label>
       <label class="field check"><input type="checkbox" name="caveman">
         <span>Caveman prompt<br><small>Tell the model to be terse, to cut output tokens.</small></span></label>
@@ -52,29 +52,29 @@
         <span>Context anchor<br><small>Replace repeated identical tool results with a pointer.</small></span></label>
     </form>
     <div class="actions">
-      <button class="primary" id="isave">Save</button>
-      <button id="ireset">Reset to defaults</button>
+      <button class="primary" id="isave" data-hint="Use these settings from the next request on, and keep them across restarts">Save</button>
+      <button id="ireset" data-hint="Put every Interceptor setting back to its default">Reset to defaults</button>
       <span class="note" id="imsg"></span>
     </div>
     <div class="sub muted" style="margin-top:8px">Takes effect on the next request and is kept in <code>harness-settings.json</code> across restarts.</div>
   </div>
 
-  <h2>Router settings</h2>
+  <h2 data-hint="Which models the Router picks between, and how it scores requests. The Routing page shows the same as a map">Router settings</h2>
   <div class="card">
     <div id="rdown" class="sub"></div>
     <form id="rsettings" class="form" autocomplete="off">
       <div class="subhead" style="grid-column:1/-1;margin:0">Models it picks between</div>
-      <label class="field"><span>Strong model</span><input type="text" name="strong_model" list="models">
+      <label class="field"><span data-hint="For requests the classifier rates hard">Strong model</span><input type="text" name="strong_model" list="models">
         <small>When the strong model's win rate reaches the threshold.</small></label>
-      <label class="field"><span>Weak model</span><input type="text" name="weak_model" list="models"></label>
-      <label class="field"><span>Weak model for tool requests</span><input type="text" name="weak_model_tools" list="models">
+      <label class="field"><span data-hint="For easy requests without tools">Weak model</span><input type="text" name="weak_model" list="models"></label>
+      <label class="field"><span data-hint="For easy requests that carry tools">Weak model for tool requests</span><input type="text" name="weak_model_tools" list="models">
         <small>Claude Code requests always carry tools. Empty uses the weak model.</small></label>
-      <label class="field"><span>Weak model size limit (tokens)</span><input type="number" name="weak_model_max_tokens" min="1">
+      <label class="field"><span data-hint="Easy requests bigger than this go to the overflow model">Weak model size limit (tokens)</span><input type="number" name="weak_model_max_tokens" min="1">
         <small>Bigger weak requests go to the overflow model. Empty for no limit.</small></label>
-      <label class="field"><span>Overflow model</span><input type="text" name="weak_model_overflow" list="models"></label>
+      <label class="field"><span data-hint="For easy requests over the size limit">Overflow model</span><input type="text" name="weak_model_overflow" list="models"></label>
 
       <div class="subhead" style="grid-column:1/-1;margin:8px 0 0">Classifier</div>
-      <label class="field"><span>Backend</span><select name="backend"></select>
+      <label class="field"><span data-hint="The classifier that scores each request">Backend</span><select name="backend"></select>
         <small id="backendHelp"></small></label>
       <label class="field" data-for="systemone llm"><span>Base URL</span><input type="text" name="base_url"
         placeholder="https://openrouter.ai/api"><small>Jev via OpenRouter, or http://127.0.0.1:8001 for local Laya.</small></label>
@@ -88,9 +88,9 @@
       <label class="field" data-for="custom"><span>Scorer</span><input type="text" name="scorer" placeholder="package.module:factory"></label>
     </form>
     <div class="actions">
-      <button class="primary" id="rapply">Apply</button>
-      <button id="rsave">Apply and save to file</button>
-      <button id="rreload">Reload from file</button>
+      <button class="primary" id="rapply" data-hint="Use these Router settings now, until the Router restarts">Apply</button>
+      <button id="rsave" data-hint="Use them now and write them to the Router's config file">Apply and save to file</button>
+      <button id="rreload" data-hint="Throw away unsaved Router changes and read its config file again">Reload from file</button>
       <span class="note" id="rmsg"></span>
     </div>
     <div class="sub muted" style="margin-top:8px">
@@ -99,11 +99,11 @@
     <div class="sub" id="routerError"></div>
   </div>
 
-  <h2>Recent routing decisions</h2>
+  <h2 data-hint="The latest requests, newest first, with where they went and why">Recent routing decisions</h2>
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th>Time</th><th>Model</th><th>Why</th><th>Result</th><th>Tokens</th><th>Request</th>
+        <th>Time</th><th data-hint="The model the request was sent to">Model</th><th data-hint="Why that model: the Router's score against the threshold, a pin, the client's choice, or the Router being down">Why</th><th data-hint="The Gateway's answer: status, time, fallbacks tried, and the model that finally served it">Result</th><th data-hint="Input and output tokens the reply reported (~ means estimated)">Tokens</th><th>Request</th>
       </tr></thead>
       <tbody id="events"><tr><td colspan="6" class="muted">No requests yet.</td></tr></tbody>
     </table>
@@ -111,6 +111,7 @@
   <datalist id="models"></datalist>
 </main>
 
+<script src="hints.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -135,12 +136,28 @@ function note(id, text, cls) { $(id).textContent = text; $(id).className = 'note
 
 // ---- status and events ---------------------------------------------------
 
+const COMPONENT_HINTS = {
+  'Router': 'Scores each request and picks a model (router.py, port 6060)',
+  'Gateway (LiteLLM)': 'Sends each request to the provider and tries fallbacks when one fails (port 4000)',
+  'Local engine': 'Optional local CLI wrapper serving models on port 8000',
+  'Ollama': 'Optional: models running on this computer',
+  'Laya (local)': 'Optional: a local Laya classifier server for the Router',
+};
+const STAT_HINTS = {
+  'Requests': 'Requests that came through the Interceptor',
+  'Router unreachable': 'Requests sent to the Router-down model because the Router didn’t answer',
+  'Gateway fallbacks': 'Requests the Gateway had to send to a fallback model',
+  'Errors': 'Requests that ended in an error',
+  'Rate limited': 'Requests a provider refused for too many requests or a spent quota',
+  'Timed out': 'Requests that took too long and were failed instead of hanging',
+};
+
 function renderComponents(components) {
   $('components').innerHTML = components.map(c => {
     const state = c.ok ? 'ok' : c.optional ? 'off' : 'bad';
     const label = c.ok ? `Up · ${c.ms} ms` : c.optional ? 'Not running (optional)' : `Down · ${esc(c.error || 'HTTP ' + c.status)}`;
     const extra = c.name === 'Router' && c.ok ? ` · classifier <b>${esc(c.detail?.backend)}</b>` : '';
-    return `<div class="card"><div class="name"><span class="dot ${state}"></span>${esc(c.name)}</div>
+    return `<div class="card"><div class="name" data-hint="${esc(COMPONENT_HINTS[c.name] || '')}"><span class="dot ${state}"></span>${esc(c.name)}</div>
       <div class="sub">${label}${extra}</div><div class="sub"><code>${esc(c.url)}</code></div></div>`;
   }).join('');
   renderRouterForm(components.find(c => c.name === 'Router'));
@@ -148,7 +165,7 @@ function renderComponents(components) {
 
 function renderStats(s) {
   const items = [['Requests', s.requests], ['Router unreachable', s.routerDown], ['Gateway fallbacks', s.fallbacks], ['Errors', s.errors], ['Rate limited', s.rateLimited ?? 0], ['Timed out', s.timeouts ?? 0]];
-  $('stats').innerHTML = items.map(([k, v]) => `<div class="card stat"><div class="num">${v}</div><div class="sub">${k}</div></div>`).join('')
+  $('stats').innerHTML = items.map(([k, v]) => `<div class="card stat" data-hint="${esc(STAT_HINTS[k] || '')}"><div class="num">${v}</div><div class="sub">${k}</div></div>`).join('')
     + `<div class="card stat"><div class="num" style="font-size:14px">${new Date(s.since).toLocaleString()}</div><div class="sub">Started</div></div>`;
 }
 

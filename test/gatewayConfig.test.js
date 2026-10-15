@@ -57,3 +57,50 @@ test('a one-line fallbacks list is reported, not overwritten', () => {
     const text = 'model_list:\n  - model_name: a\nlitellm_settings:\n  fallbacks: [{"a": ["b"]}]\n';
     assert.throws(() => gateway.parse(text), /one line/);
 });
+
+test('lists each model_list entry with its provider model, never a literal key', () => {
+    const { deployments, version } = gateway.parse(config);
+    const groq = deployments.find(d => d.name === 'fallback-groq');
+    assert.equal(groq.model, 'groq/openai/gpt-oss-120b');
+    assert.equal(groq.api_key, 'os.environ/GROQ_API_KEY');
+    assert.equal(deployments.find(d => d.name === 'fallback-ollama').api_key, 'set in config.yaml');
+    assert.equal(version, gateway.version(config));
+});
+
+test('removing an entry drops its lines and comments, adding one appends it', () => {
+    const { deployments, version } = gateway.parse(config);
+    const groq = deployments.find(d => d.name === 'fallback-groq');
+    const { fallbacks } = gateway.parse(config);
+    const cleaned = Object.fromEntries(Object.entries(fallbacks).filter(([s]) => s !== 'fallback-groq')
+        .map(([s, t]) => [s, t.filter(x => x !== 'fallback-groq')]));
+    const out = gateway.update(config, {
+        version,
+        remove: [groq.id],
+        add: [{ name: 'fast-openrouter', model: 'openrouter/google/gemini-2.5-flash', api_key: 'os.environ/OPENROUTER_API_KEY' },
+              { name: 'my-local', model: 'openai/llama3.2', api_base: 'http://localhost:11434/v1', api_key: 'dummy' }],
+        fallbacks: { ...cleaned, 'my-local': ['fallback-openrouter'] },
+    });
+    const after = gateway.parse(out);
+    assert.ok(!after.models.includes('fallback-groq'));
+    assert.doesNotMatch(out, /Tier 2: Groq|gpt-oss-120b/);
+    assert.deepEqual(after.deployments.filter(d => d.name === 'fast-openrouter').map(d => d.model),
+        ['openrouter/openai/gpt-4o-mini', 'openrouter/google/gemini-2.5-flash']);
+    assert.match(out, /\n {2}- model_name: my-local\n {4}litellm_params:\n {6}model: openai\/llama3.2\n {6}api_base: http:\/\/localhost:11434\/v1\n {6}api_key: dummy\n/);
+    assert.deepEqual(after.fallbacks['my-local'], ['fallback-openrouter']);
+    assert.match(out, /# Concurrency: max_parallel_requests/); // the list's own comments stay
+    assert.doesNotMatch(out, /\n\s*\n\s*\n/);                   // no double blank lines left behind
+});
+
+test('a removed model still named in a fallback chain is refused', () => {
+    const { deployments, version } = gateway.parse(config);
+    const groq = deployments.find(d => d.name === 'fallback-groq');
+    assert.throws(() => gateway.update(config, { version, remove: [groq.id], fallbacks: gateway.parse(config).fallbacks }), /not a model/);
+});
+
+test('a stale version or a bad new entry changes nothing', () => {
+    assert.throws(() => gateway.update(config, { version: 'old', remove: [0] }), e => e.status === 409);
+    const { version } = gateway.parse(config);
+    assert.throws(() => gateway.update(config, { version, add: [{ name: 'a b', model: 'x' }] }), /Gateway name/);
+    assert.throws(() => gateway.update(config, { version, add: [{ name: 'a', model: 'x', api_key: 'sk live' }] }), /os.environ/);
+    assert.throws(() => gateway.update(config, { version, remove: [99] }), /no model_list entry/);
+});

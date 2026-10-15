@@ -20,7 +20,7 @@ main.wide { max-width: none; }
 .wires .order { fill: var(--panel); stroke: var(--warn); }
 .wires .order-text { fill: var(--warn); font: 600 11px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; }
 
-.node { position: absolute; width: 250px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+.node { position: absolute; width: 270px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0,0,0,.08); font-size: 13px; user-select: none; }
 .node.drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .node.dim { opacity: .45; }
@@ -63,3 +63,29 @@ main.wide { max-width: none; }
 .chain button { padding: 0 6px; font-size: 12px; line-height: 18px; border-radius: 4px; }
 .chain .none { color: var(--muted); }
 .help { margin-top: 10px; max-width: 980px; line-height: 1.55; }
+
+.guide { margin: 14px 0 0; padding: 0; }
+.guide summary { padding: 10px 12px; font-weight: 600; }
+.guide-body { padding: 0 16px 12px; max-width: 980px; line-height: 1.55; }
+.guide-body ol { padding-left: 20px; margin: 8px 0; }
+.guide-body li { margin: 6px 0; }
+.guide-body p { margin: 8px 0; }
+
+.node .head .close { margin-left: 2px; padding: 0 6px; font-size: 14px; line-height: 18px; border-radius: 4px; cursor: pointer; }
+.node .head .close:hover { color: var(--bad); border-color: var(--bad); }
+.node .sect { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.deps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.deps li { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.deps li .name { flex: 1; }
+.deps li.new .name { color: var(--ok); }
+.deps button, .add-dep { padding: 0 6px; font-size: 12px; line-height: 18px; border-radius: 4px; }
+.add-dep { align-self: flex-start; color: var(--muted); }
+.tag { flex: none; font-size: 10.5px; font-weight: 600; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border); color: var(--muted); }
+
+dialog#addDialog { width: min(440px, calc(100vw - 32px)); padding: 16px; color: var(--text); }
+dialog#addDialog::backdrop { background: rgba(0,0,0,.35); }
+dialog#addDialog h3 { margin: 0 0 4px; font-size: 16px; }
+dialog#addDialog form { display: flex; flex-direction: column; gap: 10px; }
+dialog#addDialog .actions { margin-top: 2px; }
+dialog#addDialog p { margin: 0; }
+dialog#addDialog [hidden] { display: none; }

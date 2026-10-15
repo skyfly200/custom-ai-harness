@@ -54,3 +54,8 @@ input[type=text], input[type=number], textarea { font: inherit; padding: 6px 8px
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
 .note { font-size: 13px; }
 .note.err { color: var(--bad); } .note.ok { color: var(--ok); }
+.hint-tip { position: fixed; z-index: 1000; max-width: 300px; padding: 6px 9px; border-radius: 6px; pointer-events: none;
+  background: var(--text); color: var(--bg); font-size: 12.5px; line-height: 1.4; white-space: pre-line;
+  box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+[data-hint] { cursor: help; }
+button[data-hint], a[data-hint], label[data-hint], input[data-hint], select[data-hint], summary[data-hint] { cursor: pointer; }

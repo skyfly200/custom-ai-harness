@@ -16,6 +16,7 @@ const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
+const gatewayConfig = require('./utils/gatewayConfig');
 const fs = require('fs');
 const path = require('path');
 
@@ -219,6 +220,26 @@ app.post('/ui/api/settings', localJsonOnly, (req, res) => {
     }
 });
 app.post('/ui/api/settings/reset', localJsonOnly, (req, res) => res.json({ settings: settings.reset(), defaults: settings.DEFAULTS }));
+
+// The Gateway's fallback chains, for the routing editor (ui/routing.html).
+// Saving rewrites only the fallbacks block of config.yaml; LiteLLM reads it at start.
+const GATEWAY_CONFIG = process.env.GATEWAY_CONFIG || path.join(__dirname, 'config.yaml');
+app.get('/ui/api/gateway', (req, res) => {
+    try {
+        res.json({ file: GATEWAY_CONFIG, ...gatewayConfig.parse(fs.readFileSync(GATEWAY_CONFIG, 'utf8')) });
+    } catch (err) {
+        res.status(500).json({ error: `${path.basename(GATEWAY_CONFIG)}: ${err.message}` });
+    }
+});
+app.post('/ui/api/gateway/fallbacks', localJsonOnly, (req, res) => {
+    try {
+        const text = gatewayConfig.write(fs.readFileSync(GATEWAY_CONFIG, 'utf8'), req.body?.fallbacks);
+        fs.writeFileSync(GATEWAY_CONFIG, text, 'utf8');
+        res.json({ file: GATEWAY_CONFIG, ...gatewayConfig.parse(text) });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
 
 // Model names the Gateway serves: its /v1/models, else the model_name entries in config.yaml
 app.get('/ui/api/models', async (req, res) => {

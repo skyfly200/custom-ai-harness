@@ -19,6 +19,8 @@ const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
+const { McpManager } = require('./utils/mcp');
+const repoTools = require('./utils/repoTools');
 const fs = require('fs');
 const path = require('path');
 
@@ -440,6 +442,52 @@ app.post('/ui/api/tts', async (req, res) => {
     }
 });
 
+// Tools for the chat page: MCP servers from mcp-servers.json, and read-only
+// tools over a git repo a chat is linked to. The page runs the tool loop: it
+// sends the definitions with each request and calls back here to run a call.
+const mcp = new McpManager();
+
+app.get('/ui/api/tools', async (req, res) => {
+    await mcp.start();
+    const status = mcp.status();
+    const definitions = {};
+    for (const s of status.servers) definitions[s.name] = mcp.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
+    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions() });
+});
+
+app.post('/ui/api/tools/reload', localJsonOnly, async (req, res) => {
+    await mcp.reload();
+    res.json(mcp.status());
+});
+
+app.post('/ui/api/repo', localJsonOnly, async (req, res) => {
+    try {
+        res.json(await repoTools.inspect(req.body?.path));
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// Run one tool call. A failing tool is an answer for the model, not an HTTP error.
+app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
+    const { name, arguments: args, repo } = req.body || {};
+    if (typeof name !== 'string' || !name) return res.status(400).json({ error: 'name is required' });
+    const started = Date.now();
+    try {
+        let result;
+        if (repoTools.isRepoTool(name)) {
+            if (!repo) throw new Error('this chat is not linked to a git repo');
+            result = { text: await repoTools.call(repo, name, args || {}), isError: false };
+        } else {
+            await mcp.start();
+            result = await mcp.call(name, args || {});
+        }
+        res.json({ ...result, ms: Date.now() - started });
+    } catch (err) {
+        res.json({ text: `Error: ${err.message}`, isError: true, ms: Date.now() - started });
+    }
+});
+
 // Context anchor first, on the raw results, then Headroom compression
 function compressToolResults(messages) {
     const { headroom, contextAnchor } = settings.get();
@@ -500,6 +548,10 @@ app.use(toGateway);
 
 if (require.main === module) {
     app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
+    mcp.start().then(() => {
+        for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);
+    });
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => mcp.close().finally(() => process.exit(0)));
 }
 
-module.exports = { app, applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking };
+module.exports = { app, mcp, applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking };

@@ -147,6 +147,7 @@ The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 | `router.py` | Router — local BERT classifier service; picks the strong or weak Gateway model |
 | `routellm-config.yaml` | Router — BERT checkpoint and strong/weak Gateway model names |
 | `.env.example` | Environment variable template — copy to `.env` and fill in keys |
+| `mcp-servers.example.json` | MCP servers for the chat page — copy to `mcp-servers.json` (see [Chat tools](#chat-tools-mcp-servers-and-git-repos)) |
 | `launch-local.sh` | Hardened launcher for llama.cpp / vLLM local engines |
 | `launch-laya.sh` | CPU launcher for the self-hosted Laya server the Router classifies with |
 | `caveman-compress.js` | Standing context trimmer for `CLAUDE.md`, `.qwen/settings.json` |
@@ -446,7 +447,34 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 - **Formatting and copying.** Replies render Markdown (headings, lists, tables, quotes, highlighted code). Every message has a copy button, and so does every code block. Messages can be edited and resent, and the last reply regenerated.
 - **Export.** Download a chat as Markdown, copy it, or export every chat into one file.
 - **Context.** Attach text files and images with the paperclip, by dropping them on the page, or by pasting. Under Options, each chat has a system prompt and notes the model sees with every message. The composer shows a rough token count for the request.
+- **Tools.** A chat can use MCP servers and read a git repo on your computer. See [Chat tools: MCP servers and git repos](#chat-tools-mcp-servers-and-git-repos).
 - **Voice.** The mic button (Ctrl+M) dictates into the message box, optionally sending when you stop talking. Replies can be read aloud on demand or automatically as they stream, with a choice of voice, speed, pitch and volume, and a Test button to hear a voice. Hands-free mode does both in a loop. **Read clearly** (on by default) says symbols, shorthand and code names as words: `->` becomes "to", `e.g.` "for example", `10k` "10 thousand", `max_tokens` "max tokens", and a link becomes "a link to github.com". Dictation uses the browser's speech recognition: it needs Chrome or Edge, they send the audio to their speech service, and the microphone only works on `http://localhost` or https.
+
+#### Chat tools: MCP servers and git repos
+
+The chat page can give the model tools. While it answers, the model can call them, see what they return, and keep going. Each call shows in the reply as a line you can click to see what was sent and what came back.
+
+**Link a chat to a git repo.** Under Options → Tools, type the path of a folder inside a git repo on this computer (for example `C:\Users\you\code\my-project`) and press **Link**. Each chat has its own link. The model then gets read-only tools to list, read and search the repo's files (`git grep`), and to look at `git status`, the log, diffs and single commits. It can't change files, commit or push. Files that `.gitignore` covers are not listed, paths outside the repo and the `.git` folder are refused, and git must be installed.
+
+**MCP servers.** Copy `mcp-servers.example.json` to `mcp-servers.json` next to `server.js` and list your servers. The layout is the same as Claude Code's `.mcp.json`, so you can copy entries from there:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\you\\Documents"] },
+    "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/", "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" } }
+  }
+}
+```
+
+- A server with a `command` is started by the Interceptor and talks over stdio. One with a `url` is reached over HTTP (`"type": "http"`, the default for a `url`) or SSE (`"type": "sse"`).
+- `${NAME}` and `${NAME:-default}` are filled in from your environment and `.env`, so keys can stay in `.env`. `mcp-servers.json` is gitignored anyway.
+- `"disabled": true` keeps a server listed but not started.
+- The Interceptor connects when it starts and prints each server's state. Options → Tools lists them with their tool counts and any start-up error. Untick a server to leave its tools out of your chats. Press **Reload** after editing the file.
+
+Requests carry tools only when a chat is linked to a repo or an MCP server is ticked. Requests with tools go to a model that can call them (the Router's `weak_model_tools`, or the strong model), not to the free wildcard tier. Each round of tool calls is its own request through the Interceptor, so it is routed, logged and counted like any other. The reply's cost and token counts add up all of the rounds. **Most tool rounds per reply** (12 by default) stops a model that keeps calling tools. Tool results pass through Headroom like Claude Code's, so long results are trimmed to about 4,000 characters when Headroom is on.
+
+Tools run only for requests from this computer (`/ui/api/tools/call` refuses others), and only the chat page uses them. Claude Code connects to its own MCP servers (`claude mcp add ...`), and its tool calls pass through the harness unchanged.
 
 #### Usage
 

@@ -52,6 +52,7 @@ let index = store.get(INDEX_KEY, []);   // [{id, title, updated, count}]
 const cache = new Map();                 // id -> chat
 let chat = null;                         // the open chat
 const running = new Map();               // chat id -> { controller, reply }
+let toolInfo = null;                     // MCP servers and tool definitions (GET /ui/api/tools)
 
 function newChatObject() {
   return { id: uid(), title: '', created: Date.now(), updated: Date.now(), system: '', notes: '', messages: [] };
@@ -69,7 +70,7 @@ function saveChat(c, { touch = true } = {}) {
   if (touch) c.updated = Date.now();
   cache.set(c.id, c);
   // an empty chat isn't listed until something is in it
-  if (!c.messages.length && !c.system && !c.notes) return;
+  if (!c.messages.length && !c.system && !c.notes && !c.repo) return;
   store.set(CHAT_KEY(c.id), c);
   const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: c.messages.length };
   const i = index.findIndex(e => e.id === c.id);
@@ -127,7 +128,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree'];
+const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['model', 'maxTokens', 'temperature']) {
@@ -244,7 +245,7 @@ function openChat(id) {
   $('notes').value = chat.notes || '';
   $('input').value = chat.draft || '';
   pending = chat.pendingAttachments || [];
-  drawChips(); autoGrow(); drawContextSize();
+  drawChips(); autoGrow(); drawContextSize(); drawRepo();
   drawList();
   drawLog();
   busy(running.has(chat.id));
@@ -361,7 +362,7 @@ function metaHtml(m) {
     costHtml(m),
   ].filter(Boolean);
   if (!bits.length) return '';
-  return `<div class="meta">${bits.join(' · ')}${tr ? `<details><summary>How this reply was made</summary>${traceHtml(m)}</details>` : ''}</div>`;
+  return `<div class="meta">${bits.join(' · ')}${tr ? `<details data-k="trace"><summary>How this reply was made</summary>${traceHtml(m)}</details>` : ''}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -400,8 +401,10 @@ function requestTokens() {
   const files = (list) => (list || []).reduce((n, a) => n + (a.text?.length || 0), 0);
   const ctx = contextText(chat).length + files(pending);
   const hist = chat.messages.filter(m => m.role === 'user' || m.role === 'assistant')
-    .reduce((n, m) => n + String(m.content).length + files(m.attachments), 0);
-  return approxTokens(ctx + hist + $('input').value.length);
+    .reduce((n, m) => n + String(m.content).length + files(m.attachments)
+      + (m.rounds || []).reduce((k, r) => k + r.calls.reduce((x, t) => x + (t.arguments?.length || 0) + (t.result?.length || 0), 0), 0), 0);
+  const tools = JSON.stringify(activeTools(chat)).length;
+  return approxTokens(ctx + hist + (tools > 2 ? tools : 0) + $('input').value.length);
 }
 
 // Header: tokens and cost so far in this chat, and how full the context is
@@ -467,8 +470,58 @@ function messageHtml(m, i, list) {
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>
       ${lastAssistant && !m.streaming ? `<button data-act="retry" title="Regenerate">${ICONS.retry}</button>` : ''}</span></div>
     <div class="bubble"><div class="live-trace">${m.streaming ? traceHtml(m) : ''}</div>
-      <div class="md${m.streaming && m.content ? ' cursor' : ''}">${m.content ? render(m.content) : m.streaming ? '' : '<span class="muted">(empty reply)</span>'}</div>
+      ${replyBodyHtml(m)}
       <div class="meta-wrap">${m.streaming ? '' : metaHtml(m)}</div></div></div>`;
+}
+
+// Reply text with each round of tool calls where it happened
+function replyBodyHtml(m) {
+  const rounds = m.rounds || [];
+  const last = rounds.length ? rounds[rounds.length - 1].end : 0;
+  const rest = m.content.slice(last);
+  let html = '', from = 0;
+  rounds.forEach((r, k) => {
+    const text = m.content.slice(from, r.end);
+    if (text.trim()) html += `<div class="md">${render(text)}</div>`;
+    html += toolCallsHtml(r, k);
+    from = r.end;
+  });
+  const empty = !m.content && !rounds.length && !m.streaming;
+  return `${html}<div class="md${m.streaming && rest ? ' cursor' : ''}">${rest.trim() ? render(rest) : empty ? '<span class="muted">(empty reply)</span>' : ''}</div>`;
+}
+
+// "mcp__github__search_code" -> ["github", "search_code"]; "repo_read_file" -> ["repo", "read_file"]
+function toolLabel(name) {
+  const m = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (m) return [m[1], m[2]];
+  if (name.startsWith('repo_')) return ['repo', name.slice(5)];
+  return ['', name];
+}
+
+function argsSummary(args) {
+  let text = args || '';
+  try {
+    const j = JSON.parse(args);
+    text = Object.entries(j).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
+  } catch {}
+  return text.length > 120 ? text.slice(0, 117) + '…' : text;
+}
+
+function prettyArgs(args) {
+  try { return JSON.stringify(JSON.parse(args), null, 2); } catch { return args || ''; }
+}
+
+const SHOW_RESULT = 6000;
+function toolCallsHtml(r, k) {
+  return `<div class="tool-calls">${r.calls.map((c, j) => {
+    const [src, name] = toolLabel(c.name);
+    const state = c.result == null ? 'now' : c.isError ? 'bad' : 'ok';
+    const result = c.result == null ? '' : c.result.length > SHOW_RESULT ? `${c.result.slice(0, SHOW_RESULT)}\n… (${(c.result.length - SHOW_RESULT).toLocaleString()} more characters sent to the model)` : c.result;
+    return `<details class="tool-call ${state}" data-k="tool-${k}-${j}"><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
+        ${src ? `<span class="src">${esc(src)}</span>` : ''}<code>${esc(name)}</code><span class="args">${esc(argsSummary(c.arguments))}</span>
+        <span class="t">${c.ms != null ? fmtMs(c.ms) : state === 'now' ? 'running…' : ''}</span></summary>
+      <div class="io"><b>Input</b><pre>${esc(prettyArgs(c.arguments))}</pre>${c.result != null ? `<b>Result</b><pre class="out">${esc(result)}</pre>` : ''}</div></details>`;
+  }).join('')}</div>`;
 }
 
 let stickToBottom = true;
@@ -510,10 +563,17 @@ function patch(el, html) {
   tmp.innerHTML = html;
   const fresh = tmp.firstElementChild;
   const who = el.firstElementChild, freshWho = fresh.firstElementChild;
-  if (el.className !== fresh.className || !who?.classList.contains('who') || who.innerHTML !== freshWho.innerHTML) return el.replaceWith(fresh);
-  while (el.lastChild !== who) el.lastChild.remove();
-  freshWho.remove();
-  el.append(...fresh.childNodes);
+  // keep tool calls and "How this reply was made" open if they were
+  const open = [...el.querySelectorAll('details[data-k]')].filter(d => d.open).map(d => d.dataset.k);
+  if (el.className !== fresh.className || !who?.classList.contains('who') || who.innerHTML !== freshWho.innerHTML) {
+    el.replaceWith(fresh);
+    el = fresh;
+  } else {
+    while (el.lastChild !== who) el.lastChild.remove();
+    freshWho.remove();
+    el.append(...fresh.childNodes);
+  }
+  for (const k of open) { const d = el.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; }
 }
 // keep elapsed times ticking while a reply is pending
 setInterval(() => { for (const { reply } of running.values()) if (chat.messages.includes(reply)) redraw(reply); }, 250);
@@ -556,6 +616,10 @@ function contextText(c) {
   const parts = [];
   if (c.system?.trim()) parts.push(c.system.trim());
   if (c.notes?.trim()) parts.push(`Context notes from the user:\n\n${c.notes.trim()}`);
+  if (c.repo) {
+    parts.push(`This chat is linked to the git repository "${c.repo.name}" at ${c.repo.path}${c.repo.branch ? ` (branch ${c.repo.branch})` : ''}. `
+      + 'Use the repo_ tools to list, read and search its files and to look at its git history before answering questions about it. Paths are relative to the repository root.');
+  }
   return parts.join('\n\n');
 }
 
@@ -573,8 +637,26 @@ function apiMessages(c, upTo) {
     ...(sys ? [{ role: 'system', content: sys }] : []),
     ...c.messages.slice(0, upTo)
       .filter(m => (m.role === 'user' || m.role === 'assistant') && !m.streaming)
-      .map(m => ({ role: m.role, content: m.role === 'user' ? userContent(m) : m.content })),
+      .flatMap(m => (m.role === 'user' ? [{ role: 'user', content: userContent(m) }] : assistantMessages(m, true))),
   ];
+}
+
+// An assistant reply as API messages: each round of tool calls with its
+// results, then the final text (left out while the reply is still running)
+function assistantMessages(m, final) {
+  const out = [];
+  let from = 0;
+  for (const r of m.rounds || []) {
+    out.push({
+      role: 'assistant',
+      content: m.content.slice(from, r.end).trim() || null,
+      tool_calls: r.calls.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments || '{}' } })),
+    });
+    for (const c of r.calls) out.push({ role: 'tool', tool_call_id: c.id, content: c.result ?? 'Stopped before this tool ran.' });
+    from = r.end;
+  }
+  if (final) out.push({ role: 'assistant', content: m.content.slice(from).trim() });
+  return out;
 }
 
 function busy(on) {
@@ -623,29 +705,26 @@ async function runReply(c) {
   if (chat === c) { drawLog(); $('title').placeholder = chatTitle(c); }
 
   const stream = $('stream').checked;
-  const body = { model: 'auto', messages: apiMessages(c, c.messages.length - 1), stream };
-  if (stream) body.stream_options = { include_usage: true };
-  const maxTokens = parseInt($('maxTokens').value, 10);
-  if (maxTokens > 0) body.max_tokens = maxTokens;
-  if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
-  const clientId = reply.id;
-  const headers = { 'content-type': 'application/json', 'x-harness-request-id': clientId };
+  const tools = activeTools(c);
+  const maxRounds = Math.max(1, parseInt($('maxToolRounds').value, 10) || 12);
+  const history = apiMessages(c, c.messages.length - 1);
+  const headers = { 'content-type': 'application/json' };
   if ($('model').value.trim()) headers['x-harness-model'] = $('model').value.trim();
 
   const controller = new AbortController();
   let finish;
   running.set(c.id, { controller, reply, finished: new Promise(r => { finish = r; }) });
-  waiting.set(clientId, reply);
   if (chat === c) busy(true);
   drawList();
   speech.beginReply(reply);
 
-  const tr = reply.trace;
+  let tr = reply.trace;
   // Give up on a reply that never starts or stops arriving, instead of
   // waiting forever on a stuck model
   const first = seconds('timeoutFirst'), stall = seconds('timeoutStall');
   tr.lastData = Date.now();
   const watchdog = setInterval(() => {
+    if (tr.toolsRunning) return; // a tool call is not the model stalling
     const now = Date.now();
     if (!tr.gotData) {
       if (first && now - tr.start > first * 1000) giveUp(`No reply after ${first} s`);
@@ -654,43 +733,97 @@ async function runReply(c) {
     }
   }, 1000);
   const giveUp = (why) => { reply.timedOut = why; controller.abort(); };
+  const clientIds = [];
+  const total = { prompt_tokens: 0, completion_tokens: 0, cost: 0, costKnown: true, any: false };
+  const addUsage = (u, headerCost) => {
+    if (!u) { total.costKnown = false; return; }
+    total.any = true;
+    total.prompt_tokens += u.prompt_tokens || 0;
+    total.completion_tokens += u.completion_tokens || 0;
+    if (typeof u.cost === 'number') total.cost += u.cost;
+    else if (headerCost > 0) total.cost += headerCost;
+    else total.costKnown = false;
+  };
   try {
-    const res = await fetch('/v1/chat/completions', { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal });
-    // the same facts the live feed sends, from the headers, in case it's not connected
-    tr.routed = tr.routed || { model: res.headers.get('x-harness-model'), reason: res.headers.get('x-harness-route') };
-    tr.answered = {
-      ...tr.answered,
-      status: res.status,
-      ms: tr.answered?.ms ?? Date.now() - tr.start,
-      servedBy: res.headers.get('x-litellm-model-group') || tr.answered?.servedBy || null,
-      fallbacks: parseInt(res.headers.get('x-litellm-attempted-fallbacks'), 10) || tr.answered?.fallbacks || 0,
-    };
-    tr.headerCost = parseFloat(res.headers.get('x-litellm-response-cost')) || 0;
-    reply.meta = { model: tr.routed.model, route: routeWhy(tr.routed) };
-    redraw(reply);
-    if (!res.ok) {
-      const errText = await res.text();
-      let msg = errText;
-      try { const j = JSON.parse(errText); msg = j.error?.message || j.error || errText; } catch {}
-      throw new Error(`HTTP ${res.status}: ${String(msg).slice(0, 800)}`);
+    for (let round = 0; ; round++) {
+      // each round of tool calls is a request of its own, routed and logged like any other
+      if (round > 0) {
+        reply.trace = tr = { start: Date.now(), chunks: 0, lastData: Date.now(), round };
+        reply.joinText = true; // a blank line between the text before and after the tools
+      }
+      const clientId = round ? `${reply.id}-${round}` : reply.id;
+      clientIds.push(clientId);
+      waiting.set(clientId, reply);
+      const body = { model: 'auto', messages: [...history, ...assistantMessages(reply, false)], stream };
+      if (stream) body.stream_options = { include_usage: true };
+      if (tools.length) body.tools = tools;
+      const maxTokens = parseInt($('maxTokens').value, 10);
+      if (maxTokens > 0) body.max_tokens = maxTokens;
+      if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
+
+      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, 'x-harness-request-id': clientId }, body: JSON.stringify(body), signal: controller.signal });
+      // the same facts the live feed sends, from the headers, in case it's not connected
+      tr.routed = tr.routed || { model: res.headers.get('x-harness-model'), reason: res.headers.get('x-harness-route') };
+      tr.answered = {
+        ...tr.answered,
+        status: res.status,
+        ms: tr.answered?.ms ?? Date.now() - tr.start,
+        servedBy: res.headers.get('x-litellm-model-group') || tr.answered?.servedBy || null,
+        fallbacks: parseInt(res.headers.get('x-litellm-attempted-fallbacks'), 10) || tr.answered?.fallbacks || 0,
+      };
+      tr.headerCost = parseFloat(res.headers.get('x-litellm-response-cost')) || 0;
+      reply.meta = { model: tr.routed.model, route: routeWhy(tr.routed) };
+      redraw(reply);
+      if (!res.ok) {
+        const errText = await res.text();
+        let msg = errText;
+        try { const j = JSON.parse(errText); msg = j.error?.message || j.error || errText; } catch {}
+        throw new Error(`HTTP ${res.status}: ${String(msg).slice(0, 800)}`);
+      }
+      let calls = [];
+      if (stream && res.body) {
+        calls = await readStream(res.body, reply, c);
+      } else {
+        const j = await res.json();
+        const msg = j.choices?.[0]?.message || {};
+        appendText(reply, msg.content ?? '');
+        calls = (msg.tool_calls || []).map(t => ({ id: t.id, name: t.function?.name || '', arguments: t.function?.arguments || '' }));
+        tr.firstToken = Date.now() - tr.start;
+        tr.usage = j.usage || null;
+        speech.feed(reply);
+      }
+      tr.done = Date.now() - tr.start;
+      addUsage(tr.usage, tr.headerCost);
+      calls = calls.filter(t => t.name);
+      if (!calls.length) break;
+
+      // run the tools, then send their results back for the next round
+      const r = { end: reply.content.length, calls: calls.map(t => ({ ...t, id: t.id || `call_${uid()}` })) };
+      (reply.rounds ||= []).push(r);
+      redraw(reply);
+      tr.toolsRunning = true;
+      for (const call of r.calls) await runTool(call, c, controller.signal, () => redraw(reply));
+      tr.toolsRunning = false;
+      tr.lastData = Date.now();
+      saveChat(c, { touch: false });
+      if (round + 1 >= maxRounds) {
+        reply.content += `${reply.content ? '\n\n' : ''}*(stopped after ${maxRounds} rounds of tool calls; raise the limit under Options to let it go on)*`;
+        break;
+      }
     }
-    if (stream && res.body) {
-      await readStream(res.body, reply, c);
-    } else {
-      const j = await res.json();
-      reply.content = j.choices?.[0]?.message?.content ?? '';
-      tr.firstToken = Date.now() - tr.start;
-      tr.usage = j.usage || null;
-      speech.feed(reply);
+    // one total for the whole reply, whatever number of requests it took
+    if (reply.rounds?.length && total.any) {
+      tr.usage = { prompt_tokens: total.prompt_tokens, completion_tokens: total.completion_tokens, ...(total.costKnown ? { cost: total.cost } : {}) };
+      tr.headerCost = 0;
     }
-    tr.done = Date.now() - tr.start;
   } catch (err) {
     tr.done = Date.now() - tr.start;
+    for (const r of reply.rounds || []) for (const call of r.calls) if (call.result == null) { call.result = 'Stopped before this tool finished.'; call.isError = true; }
     const message = err.name === 'AbortError' && reply.timedOut ? `${reply.timedOut}, so the page stopped waiting.` : err.message;
     if (err.name === 'AbortError' && !reply.timedOut) {
       reply.content += reply.content ? '\n\n*(stopped)*' : '*(stopped)*';
-    } else if (reply.content) {
-      reply.content += `\n\n*(cut off: ${message})*`;
+    } else if (reply.content || reply.rounds?.length) {
+      reply.content += `${reply.content ? '\n\n' : ''}*(cut off: ${message})*`;
     } else {
       // keep the trace on the error so it says how far the request got
       tr.error = message.startsWith('HTTP') ? null : message;
@@ -700,9 +833,11 @@ async function runReply(c) {
   } finally {
     clearInterval(watchdog);
     reply.streaming = false;
+    delete reply.joinText;
+    delete tr.toolsRunning;
     if (c.messages.includes(reply)) reply.cost = computeCost(reply);
     running.delete(c.id);
-    waiting.delete(clientId);
+    for (const id of clientIds) waiting.delete(id);
     saveChat(c);
     if (chat === c) { busy(false); drawLog(); }
     drawList();
@@ -711,11 +846,58 @@ async function runReply(c) {
   }
 }
 
-// OpenAI server-sent events: lines of "data: {json}", ending with "data: [DONE]"
+// Text from the model; the first text after a round of tool calls starts a new paragraph
+function appendText(reply, text) {
+  if (!text) return;
+  if (reply.joinText) {
+    if (reply.content && !reply.content.endsWith('\n\n')) reply.content += reply.content.endsWith('\n') ? '\n' : '\n\n';
+    reply.joinText = false;
+  }
+  reply.content += text;
+}
+
+// Run one tool call through the harness (MCP server or repo tool)
+async function runTool(call, c, signal, onChange) {
+  const started = Date.now();
+  let args = {};
+  try {
+    args = call.arguments?.trim() ? JSON.parse(call.arguments) : {};
+    if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('not an object');
+  } catch (err) {
+    call.result = `Error: the arguments were not a valid JSON object (${err.message}). Call the tool again with valid JSON.`;
+    call.isError = true;
+    call.ms = 0;
+    return onChange();
+  }
+  onChange();
+  try {
+    const res = await fetch('api/tools/call', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: call.name, arguments: args, repo: c.repo?.path }),
+      signal,
+    });
+    const j = await res.json().catch(() => ({ text: `Error: HTTP ${res.status}`, isError: true }));
+    call.result = j.text ?? (j.error ? `Error: ${j.error}` : '');
+    call.isError = !!j.isError || !res.ok;
+    call.ms = j.ms ?? Date.now() - started;
+  } catch (err) {
+    if (err.name === 'AbortError') throw err;
+    call.result = `Error: could not reach the harness to run this tool (${err.message})`;
+    call.isError = true;
+    call.ms = Date.now() - started;
+  }
+  onChange();
+}
+
+// OpenAI server-sent events: lines of "data: {json}", ending with "data: [DONE]".
+// Returns the tool calls the model asked for, if any.
 async function readStream(stream, reply, c) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   const tr = reply.trace;
+  const calls = [];
+  const byIndex = new Map(); // stream index -> call (some providers reuse index 0 for every call)
   let buffer = '', lastSave = Date.now();
   for (;;) {
     const { value, done } = await reader.read();
@@ -731,17 +913,34 @@ async function readStream(stream, reply, c) {
       try { j = JSON.parse(data); } catch { continue; }
       if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
       if (j.usage) tr.usage = j.usage;
-      const delta = j.choices?.[0]?.delta?.content ?? '';
+      const d = j.choices?.[0]?.delta || {};
+      const delta = d.content ?? '';
       if (delta) {
         if (tr.firstToken == null) tr.firstToken = Date.now() - tr.start;
         tr.chunks++;
-        reply.content += delta;
+        appendText(reply, delta);
+      }
+      // tool calls arrive in pieces, matched by index
+      for (const t of d.tool_calls || []) {
+        if (tr.firstToken == null) tr.firstToken = Date.now() - tr.start;
+        const k = t.index ?? 0;
+        let call = byIndex.get(k);
+        if (!call || (t.id && call.id && t.id !== call.id)) {
+          call = { id: '', name: '', arguments: '' };
+          calls.push(call);
+          byIndex.set(k, call);
+        }
+        if (t.id) call.id = t.id;
+        const name = t.function?.name;
+        if (name && name !== call.name) call.name += name;
+        if (t.function?.arguments) call.arguments += t.function.arguments;
       }
     }
     redraw(reply);
     speech.feed(reply);
     if (Date.now() - lastSave > 2000) { saveChat(c, { touch: false }); lastSave = Date.now(); }
   }
+  return calls;
 }
 
 $('compose').addEventListener('submit', (e) => {
@@ -786,6 +985,9 @@ function drawHint() {
   const total = requestTokens();
   if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${pending.some(a => a.kind === 'image') ? ' plus images' : ''}`);
   if ($('model').value.trim()) bits.push(`model pinned to ${esc($('model').value.trim())}`);
+  if (chat?.repo) bits.push(`linked to ${esc(chat.repo.name)}`);
+  const toolCount = chat ? activeTools(chat).length : 0;
+  if (toolCount) bits.push(`${toolCount} tool${toolCount === 1 ? '' : 's'} on`);
   if ($('handsFree').checked) bits.push('hands-free on');
   $('hint').innerHTML = bits.map(b => `<span>${b}</span>`).join('');
   drawStats();
@@ -864,12 +1066,120 @@ window.addEventListener('drop', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Tools: MCP servers from the harness's mcp-servers.json, and read-only git
+// tools for a repo the chat is linked to. Requests carry tools only when one
+// is on, since requests with tools go to models that can call them.
+// ---------------------------------------------------------------------------
+function activeTools(c) {
+  if (!toolInfo) return [];
+  const off = new Set(prefs.mcpOff || []);
+  const list = [];
+  for (const s of toolInfo.servers || []) {
+    if (s.status === 'connected' && !off.has(s.name)) list.push(...(toolInfo.definitions?.[s.name] || []));
+  }
+  if (c?.repo) list.push(...(toolInfo.repoDefinitions || []));
+  return list;
+}
+
+async function loadTools() {
+  try {
+    const res = await fetch('api/tools');
+    toolInfo = await res.json();
+  } catch {
+    toolInfo = null;
+  }
+  drawTools();
+  drawHint();
+}
+
+function drawTools() {
+  const off = new Set(prefs.mcpOff || []);
+  const servers = toolInfo?.servers || [];
+  const rows = servers.map(s => {
+    const dot = s.status === 'connected' ? 'ok' : s.status === 'failed' ? 'bad' : 'off';
+    const detail = s.status === 'connected' ? `${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}`
+      : s.status === 'disabled' ? 'disabled in the file' : s.status;
+    const tip = s.tools.map(t => `${t.title}: ${t.description}`.slice(0, 160)).join('\n');
+    return `<li title="${esc(tip)}"><label><input type="checkbox" data-mcp="${esc(s.name)}" ${s.status !== 'connected' ? 'disabled' : off.has(s.name) ? '' : 'checked'}>
+        <span class="dot ${dot}"></span><span>${esc(s.name)}</span><span class="muted">${esc(detail)}</span></label>
+        ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}</li>`;
+  });
+  if (toolInfo?.error) rows.unshift(`<li class="err">${esc(toolInfo.error)}</li>`);
+  $('mcpList').innerHTML = rows.join('') || (toolInfo
+    ? `<li class="muted small">None yet. List servers in <code>${esc(toolInfo.file?.split(/[\\/]/).pop() || 'mcp-servers.json')}</code> next to server.js, the same way as Claude Code's <code>.mcp.json</code>, then press Reload.</li>`
+    : '<li class="err">Could not reach the harness.</li>');
+}
+
+$('mcpList').addEventListener('change', (e) => {
+  const box = e.target.closest('[data-mcp]');
+  if (!box) return;
+  const off = new Set(prefs.mcpOff || []);
+  if (box.checked) off.delete(box.dataset.mcp); else off.add(box.dataset.mcp);
+  prefs.mcpOff = [...off];
+  store.set(PREF_KEY, prefs);
+  drawHint();
+});
+
+$('mcpReload').addEventListener('click', async () => {
+  $('mcpReload').disabled = true;
+  $('mcpList').innerHTML = '<li class="muted small">Connecting…</li>';
+  try {
+    const res = await fetch('api/tools/reload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    if (!res.ok) toast((await res.json().catch(() => ({}))).error || `Reload failed: HTTP ${res.status}`);
+  } catch (err) {
+    toast(`Reload failed: ${err.message}`);
+  }
+  $('mcpReload').disabled = false;
+  loadTools();
+});
+
+function drawRepo() {
+  const r = chat?.repo;
+  $('repoPath').value = r ? r.path : $('repoPath').dataset.typed || '';
+  $('repoPath').readOnly = !!r;
+  $('repoLink').textContent = r ? 'Unlink' : 'Link';
+  $('repoInfo').innerHTML = r
+    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model can read its files and history (read-only).`
+    : 'Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).';
+}
+
+$('repoPath').addEventListener('input', () => { $('repoPath').dataset.typed = $('repoPath').value; });
+$('repoPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('repoLink').click(); } });
+$('repoLink').addEventListener('click', async () => {
+  const c = chat;
+  if (c.repo) {
+    delete c.repo;
+    saveChat(c, { touch: false });
+    drawRepo(); drawHint(); drawContextSize();
+    return;
+  }
+  const path = $('repoPath').value.trim();
+  if (!path) return toast('Type the path of a folder inside a git repo.');
+  $('repoLink').disabled = true;
+  try {
+    const res = await fetch('api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+    c.repo = { path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote };
+    $('repoPath').dataset.typed = '';
+    saveChat(c, { touch: false });
+    if (chat === c) toast(`Linked to ${j.name}.`);
+  } catch (err) {
+    toast(`Could not link: ${err.message}`);
+  } finally {
+    $('repoLink').disabled = false;
+  }
+  if (chat === c) { drawRepo(); drawHint(); drawContextSize(); }
+});
+
+// ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
 function chatMarkdown(c) {
   const out = [`# ${chatTitle(c)}`, '', `_Exported from Harness Chat on ${new Date().toLocaleString()}_`, ''];
   if (c.system?.trim()) out.push('## System prompt', '', c.system.trim(), '');
   if (c.notes?.trim()) out.push('## Context notes', '', c.notes.trim(), '');
+  if (c.repo) out.push(`_Linked to the git repo ${c.repo.name} (${c.repo.path})_`, '');
   for (const m of c.messages) {
     if (m.role === 'user') {
       out.push('## You', '');
@@ -882,7 +1192,17 @@ function chatMarkdown(c) {
       const tr = m.trace;
       const model = tr?.answered?.servedBy || tr?.routed?.model || m.meta?.model;
       const why = routeWhy(tr?.routed) || m.meta?.route;
-      out.push(`## Assistant${model ? ` (${model}${why ? `, ${why}` : ''})` : ''}`, '', m.content, '');
+      out.push(`## Assistant${model ? ` (${model}${why ? `, ${why}` : ''})` : ''}`, '');
+      let from = 0;
+      for (const r of m.rounds || []) {
+        const text = m.content.slice(from, r.end).trim();
+        if (text) out.push(text, '');
+        for (const t of r.calls) {
+          out.push(`<details><summary>Tool call: ${t.name}${t.isError ? ' (failed)' : ''}</summary>`, '', '```json', prettyArgs(t.arguments), '```', '', '```', t.result ?? '', '```', '', '</details>', '');
+        }
+        from = r.end;
+      }
+      out.push(m.content.slice(from).trim(), '');
     } else if (m.role === 'error') {
       out.push('## Error', '', '```', m.content, '```', '');
     }
@@ -1428,6 +1748,7 @@ fetch('api/models').then(r => r.json()).then(({ models }) => {
 
 applyPrefs();
 loadModelInfo();
+loadTools();
 let lastOpen = null;
 try { lastOpen = localStorage.getItem('harness-chat-open'); } catch {}
 openChat(index.some(e => e.id === lastOpen) ? lastOpen : index[0]?.id);

@@ -42,6 +42,10 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 * ✅ **Non-Breaking Space Validation:** `validate-config.js` enforces valid UTF-8 spacing across configuration directories to prevent silent JSON parser crashes in VS Code extensions.
 * ✅ **Automated Deprecation Fallbacks:** LiteLLM fallback chains substitute deprecated models (such as legacy Llama variants) with active free-tier workhorses like OpenAI GPT-OSS 120B.
 
+## Ideas for Later
+* **Free VPS Hosting:** Run the core on Oracle Cloud Always Free (Ampere A1 ARM, up to 4 CPUs / 24 GB), which fits the Interceptor, Router (RouteLLM BERT needs ~2 GB) and Gateway. 1 GB tiers (Google e2-micro, AWS/Azure free) only fit with the `systemone` Router backend. The local strong engine (:8000) and Ollama won't run there, so strong requests use OpenRouter fallbacks; linked repos and MCP servers live on the VPS.
+  * **Access control first:** the Interceptor has no login and listens on all interfaces, so the `/ui` admin and save endpoints and chat repo reads would be public. Reach it over a private tunnel (Tailscale) or add an optional password before exposing it.
+
 ---
 
 # Add-on: Orchestrator

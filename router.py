@@ -26,7 +26,7 @@ itself, so the Router never has to understand OpenAI or Anthropic request
 formats (RouteLLM's own proxy server rejects tool schemas and needs an OpenAI
 key even for BERT).
 
-Run: python router.py [--config routellm-config.yaml] [--port 6060]
+Run: python router.py [--config routellm-config.yaml] [--port 6060] [--host 127.0.0.1]
 """
 import argparse
 import importlib
@@ -380,6 +380,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="routellm-config.yaml")
     parser.add_argument("--port", type=int, default=6060)
+    # Docker sets 0.0.0.0 so the Interceptor's container can reach it
+    parser.add_argument("--host", default=os.environ.get("ROUTER_HOST", "127.0.0.1"))
     args = parser.parse_args()
     load_config(args.config)
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port)

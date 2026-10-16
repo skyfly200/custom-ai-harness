@@ -1,0 +1,12 @@
+.git
+.env
+.venv
+node_modules
+data
+repos
+harness-settings.json
+harness-usage.json
+mcp-servers.json
+tokenCounterState.json
+**/__pycache__
+.laya

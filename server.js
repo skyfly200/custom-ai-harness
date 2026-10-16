@@ -21,10 +21,14 @@ const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
 const repoTools = require('./utils/repoTools');
+const { requirePassword } = require('./utils/access');
 const fs = require('fs');
 const path = require('path');
 
 const app = express();
+// HARNESS_PASSWORD locks every page and API (see utils/access.js); unset, all stay open
+const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || '';
+app.use(requirePassword(HARNESS_PASSWORD));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -236,11 +240,13 @@ app.get('/ui/api/live', (req, res) => {
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
-// Controls answer only on this machine, and only to JSON: a plain cross-site
-// form can't send that without a CORS preflight, so another web page can't
-// change settings either.
+// Controls answer only on this machine (or, with HARNESS_PASSWORD set, to
+// anyone who gave it), and only to JSON: a plain cross-site form can't send
+// that without a CORS preflight, so another web page can't change settings either.
 function localJsonOnly(req, res, next) {
-    if (!LOOPBACK.has(req.socket.remoteAddress)) return res.status(403).json({ error: 'controls work only from this machine' });
+    if (!LOOPBACK.has(req.socket.remoteAddress) && !req.harnessAuthenticated) {
+        return res.status(403).json({ error: 'controls work only from this machine, or with HARNESS_PASSWORD set' });
+    }
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
     next();
 }

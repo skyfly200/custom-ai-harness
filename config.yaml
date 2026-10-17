@@ -58,6 +58,67 @@ model_list:
       api_key: os.environ/OPENROUTER_API_KEY
       max_parallel_requests: 5
 
+  # More OpenRouter models, ready to wire up on the Routing page (/ui/routing.html):
+  # nothing routes to them until you connect them to the Router or a fallback
+  # line. Ids checked against openrouter.ai/api/v1/models on 2026-10-17; all
+  # take tool calls. Prices are $ per million tokens, input / output. The
+  # Routing page's Add model dialog lists the rest of OpenRouter's catalog.
+  - model_name: or-claude-sonnet-5.5      # $2 / $10
+    litellm_params:
+      model: openrouter/anthropic/claude-sonnet-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-claude-opus-5.5        # $4 / $20
+    litellm_params:
+      model: openrouter/anthropic/claude-opus-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-claude-haiku-5.5       # $0.10 / $0.50
+    litellm_params:
+      model: openrouter/anthropic/claude-haiku-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-gpt-6.1-sol            # $2 / $10
+    litellm_params:
+      model: openrouter/openai/gpt-6.1-sol
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-gpt-6-luna             # $0.10 / $0.50
+    litellm_params:
+      model: openrouter/openai/gpt-6-luna
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-gemini-4-argon         # $2 / $10
+    litellm_params:
+      model: openrouter/google/gemini-4-argon
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-mistral-large-4        # $0.68 / $2.09
+    litellm_params:
+      model: openrouter/mistralai/mistral-large-4-0
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-glm-5.3-prime          # $2.80 / $8.80
+    litellm_params:
+      model: openrouter/z-ai/glm-5.3-prime
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-qwen3.8-max-prime      # $4 / $12
+    litellm_params:
+      model: openrouter/qwen/qwen3.8-max-prime
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-nemotron-3.5-super-free  # free, 1M context, takes images
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3.5-super-vl:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+  - model_name: or-xing4-free             # free, 262K context
+    litellm_params:
+      model: openrouter/xingchen-agi/xing4.0-29b-a4b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+      max_parallel_requests: 5
+
   # Tier 5: Local Ollama — zero API cost, runs on-device.
   # Qwen2.5-Coder 7B has solid tool/function-calling support for coding tasks.
   # Requires `ollama serve` to be running locally.

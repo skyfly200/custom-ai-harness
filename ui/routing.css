@@ -89,3 +89,7 @@ dialog#addDialog form { display: flex; flex-direction: column; gap: 10px; }
 dialog#addDialog .actions { margin-top: 2px; }
 dialog#addDialog p { margin: 0; }
 dialog#addDialog [hidden] { display: none; }
+dialog#addDialog .catalog-filters { display: flex; gap: 8px; align-items: center; }
+dialog#addDialog .catalog-filters input[type="search"] { flex: 1; min-width: 0; }
+dialog#addDialog .catalog-filters label { display: flex; gap: 4px; align-items: center; white-space: nowrap; font-size: 13px; }
+dialog#addDialog #catalogList { width: 100%; font-size: 13px; }

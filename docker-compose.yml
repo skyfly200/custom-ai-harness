@@ -1,0 +1,47 @@
+# The whole harness on one server: docker compose up -d --build
+# Needs .env next to this file with your API keys, HARNESS_PASSWORD and
+# LITELLM_MASTER_KEY.
+# Only the Interceptor (port 3000) is published; the Router and Gateway are
+# reachable only from the other containers.
+services:
+  harness:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HARNESS_PASSWORD: ${HARNESS_PASSWORD:?set HARNESS_PASSWORD in .env before running on a server}
+      ROUTER_URL: http://router:6060
+      GATEWAY_URL: http://gateway:4000
+      HARNESS_SETTINGS_FILE: /app/data/harness-settings.json
+      HARNESS_USAGE_FILE: /app/data/harness-usage.json
+      MCP_CONFIG: /app/data/mcp-servers.json
+    ports:
+      - "${HARNESS_PORT:-3000}:3000"
+    volumes:
+      - ./config.yaml:/app/config.yaml   # the routing page edits it
+      - ./data:/app/data                 # settings, usage, mcp-servers.json
+      - ./repos:/repos                   # clone repos here to link them in chat (/repos/name)
+    depends_on: [router, gateway]
+
+  router:
+    build:
+      context: .
+      dockerfile: docker/router.Dockerfile
+      args:
+        ROUTER_BACKENDS: ${ROUTER_BACKENDS:-}
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./routellm-config.yaml:/app/routellm-config.yaml   # Router settings save here
+
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/gateway.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # LiteLLM won't start without one; the harness sends the same key
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env (any string starting with sk-)}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro

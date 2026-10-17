@@ -43,8 +43,8 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 * ✅ **Automated Deprecation Fallbacks:** LiteLLM fallback chains substitute deprecated models (such as legacy Llama variants) with active free-tier workhorses like OpenAI GPT-OSS 120B.
 
 ## Ideas for Later
-* **Free VPS Hosting:** Run the core on Oracle Cloud Always Free (Ampere A1 ARM, up to 4 CPUs / 24 GB), which fits the Interceptor, Router (RouteLLM BERT needs ~2 GB) and Gateway. 1 GB tiers (Google e2-micro, AWS/Azure free) only fit with the `systemone` Router backend. The local strong engine (:8000) and Ollama won't run there, so strong requests use OpenRouter fallbacks; linked repos and MCP servers live on the VPS.
-  * **Access control first:** the Interceptor has no login and listens on all interfaces, so the `/ui` admin and save endpoints and chat repo reads would be public. Reach it over a private tunnel (Tailscale) or add an optional password before exposing it.
+* ✅ **Free VPS Hosting (Docker):** `docker compose up -d --build` runs the Interceptor, Router and Gateway as containers on a server; README "Run it on a server" walks through Oracle Cloud Always Free with Tailscale. About 450 MB of memory with the `systemone` Router, so 1 GB free tiers fit too; the RouteLLM BERT Router is a build option (`ROUTER_BACKENDS=routellm`, ~2 GB more). The local engine and Ollama don't run there, so strong requests use OpenRouter fallbacks.
+  * ✅ **Access control:** `HARNESS_PASSWORD` locks every page and API (browser login box, or the agent's API key), and the Docker setup won't start without it.
 
 ---
 

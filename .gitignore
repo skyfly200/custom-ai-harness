@@ -6,3 +6,5 @@ __pycache__/
 harness-settings.json
 harness-usage.json
 mcp-servers.json
+data/
+repos/

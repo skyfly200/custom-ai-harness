@@ -96,7 +96,7 @@ These settings only last for that window. Other tools such as Cursor, Aider, Con
 
 You can run the harness on a rented or free cloud server (a VPS) instead of your PC, so it is always on and you can reach it from any of your devices. The server runs all three parts in Docker containers. The local engine and Ollama don't run there, so strong requests use the OpenRouter backups (the same as when your engine is off today).
 
-**Which server.** The three parts use about 450 MB of memory together with the default Router setting (Jev through OpenRouter). Oracle Cloud's Always Free "Ampere A1" server (up to 4 CPUs and 24 GB) is the roomiest free choice. The 1 GB free servers (Google Cloud e2-micro, AWS, Azure) also fit, but building the images is slow on them. The RouteLLM BERT Router setting needs about 2 GB more, so use it only on the bigger server (see the last step).
+**Which server.** The three parts use about 450 MB of memory together with the default Router setting (Jev through OpenRouter). Oracle Cloud's Always Free "Ampere A1" server (up to 4 CPUs and 24 GB) is the roomiest free choice. The 1 GB free servers (Google Cloud e2-micro, AWS, Azure) also fit, but building the images is slow on them and needs swap; see [Google Cloud's free tier instead](#on-google-clouds-free-tier-instead). The RouteLLM BERT Router setting needs about 2 GB more, so use it only on the bigger server (see the last step).
 
 **Keep it private.** With the harness on the internet, anyone who finds its address could use your API credit. The Docker setup won't start without a password (`HARNESS_PASSWORD`), and the steps below reach it through Tailscale, a free private network between your own devices, so the server needs no open ports.
 
@@ -138,6 +138,20 @@ You can run the harness on a rented or free cloud server (a VPS) instead of your
    claude
    ```
    Other tools use `http://SERVER_NAME:3000/v1` with the password as their API key.
+
+### On Google Cloud's free tier instead
+
+The same steps work on Google Cloud's free e2-micro server, with these changes:
+
+- **Step 1:** in Compute Engine, create a VM with machine type **e2-micro** in **us-west1, us-central1 or us-east1** (the only free regions), image **Ubuntu 24.04**, and boot disk **Standard persistent disk, 30 GB or less**. Leave "Allow HTTP/HTTPS traffic" unticked.
+- **Step 2:** use the **SSH** button next to the VM in the Google Cloud console instead of PowerShell.
+- **Before step 5, add swap.** With 1 GB of memory, installing LiteLLM can run out of memory and stop. These lines add 2 GB of swap (disk used as spare memory), and it stays after a reboot:
+  ```bash
+  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+  sudo mkswap /swapfile && sudo swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+  ```
+- **Watch the data allowance.** The free tier includes 1 GB a month of data leaving Google, and every request the harness sends on to OpenRouter counts. Claude Code requests are large (often 100 KB to 1 MB each), so daily use can go over; Google then charges a small amount per GB. Check **Billing** in the console after a week. Oracle's free tier allows 10 TB a month, so it's the better pick for heavy use.
 
 ### Looking after it
 

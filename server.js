@@ -17,6 +17,7 @@ const settings = require('./utils/settings');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
+const openrouterCatalog = require('./utils/openrouterCatalog');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
@@ -391,6 +392,28 @@ async function listTtsModels() {
     if (models.length > 1) ttsModelCache = { at: Date.now(), models }; // don't cache a failed lookup
     return models;
 }
+
+// OpenRouter's chat models for the routing editor's model picker. The catalog
+// is public, so this works without a key; it is kept for an hour.
+let openrouterCache = { at: 0, models: null };
+app.get('/ui/api/openrouter/models', async (req, res) => {
+    if (openrouterCache.models && Date.now() - openrouterCache.at < 60 * 60 * 1000) return res.json({ models: openrouterCache.models });
+    try {
+        const key = process.env.OPENROUTER_API_KEY;
+        const upstream = await fetch(`${OPENROUTER_URL}/models`, {
+            headers: key ? { authorization: `Bearer ${key}` } : {},
+            signal: AbortSignal.timeout(10000),
+        });
+        if (!upstream.ok) throw new Error(`OpenRouter answered HTTP ${upstream.status}`);
+        const models = openrouterCatalog.fromCatalog(await upstream.json());
+        if (!models.length) throw new Error('OpenRouter listed no models');
+        openrouterCache = { at: Date.now(), models };
+        res.json({ models });
+    } catch (err) {
+        if (openrouterCache.models) return res.json({ models: openrouterCache.models, stale: true });
+        res.status(502).json({ error: `Couldn't load OpenRouter's model list: ${err.message}` });
+    }
+});
 
 app.get('/ui/api/tts', async (req, res) => {
     if (!TTS_URL) return res.json({ configured: false });

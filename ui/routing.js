@@ -593,7 +593,71 @@ function showProvider() {
   f.elements.model.placeholder = p.example;
   $('baseField').hidden = !p.askBase;
   $('keyField').hidden = !p.askKey;
+  $('catalog').hidden = f.elements.provider.value !== 'openrouter';
+  if (!$('catalog').hidden) loadCatalog();
 }
+
+// ---- OpenRouter's model list, for picking a model id ----
+
+let catalog = null;  // [{ id, name, context, inputCost, outputCost, free, tools }] once loaded
+let catalogLoading = null;
+
+function loadCatalog() {
+  if (catalog || catalogLoading) return showCatalog();
+  catalogLoading = getJSON('api/openrouter/models')
+    .then((body) => { catalog = body.models || []; })
+    .catch((err) => { $('catalogNote').textContent = `${err.message} Type the id from openrouter.ai/models instead.`; })
+    .finally(() => { catalogLoading = null; if (catalog) showCatalog(); });
+}
+
+// $ per million tokens, short
+function perMillion(cost) {
+  if (cost === null || cost === undefined) return '?';
+  const m = cost * 1e6;
+  return m === 0 ? '0' : m < 0.1 ? m.toFixed(3) : m < 10 ? m.toFixed(2).replace(/\.?0+$/, '') : m.toFixed(0);
+}
+
+function catalogLabel(m) {
+  const price = m.free ? 'free' : `$${perMillion(m.inputCost)} in / $${perMillion(m.outputCost)} out per M`;
+  const context = m.context ? ` · ${m.context >= 1e6 ? `${+(m.context / 1e6).toFixed(1)}M` : `${Math.round(m.context / 1000)}K`}` : '';
+  return `${m.name} · ${price}${context}${m.tools ? ' · tools' : ''}`;
+}
+
+function showCatalog() {
+  if (!catalog) return;
+  const words = $('catalogSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const free = $('catalogFree').checked, tools = $('catalogTools').checked;
+  const shown = catalog.filter(m => (!free || m.free) && (!tools || m.tools)
+    && words.every(w => m.id.toLowerCase().includes(w) || m.name.toLowerCase().includes(w)));
+  const list = $('catalogList');
+  list.innerHTML = shown.slice(0, 300).map(m => `<option value="${esc(m.id)}" title="${esc(m.id)}">${esc(catalogLabel(m))}</option>`).join('');
+  const typed = $('addForm').elements.model.value.trim().replace(/^openrouter\//, '');
+  if (shown.some(m => m.id === typed)) list.value = typed;
+  $('catalogNote').textContent = shown.length
+    ? `${shown.length} of ${catalog.length} models${shown.length > 300 ? ', the 300 newest shown: search to narrow' : ''}, newest first. Picking one fills in the model id.`
+    : `None of OpenRouter's ${catalog.length} models match.`;
+}
+
+$('catalogSearch').addEventListener('input', showCatalog);
+// Enter in the search box picks the top match instead of submitting the dialog
+$('catalogSearch').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const first = $('catalogList').options[0];
+  if (first) { $('catalogList').value = first.value; $('catalogList').dispatchEvent(new Event('change')); }
+});
+$('catalogFree').addEventListener('change', showCatalog);
+$('catalogTools').addEventListener('change', showCatalog);
+$('catalogList').addEventListener('change', () => {
+  const f = $('addForm');
+  const id = $('catalogList').value;
+  if (!id) return;
+  f.elements.model.value = id;
+  // Suggest a Gateway name for a new box from the model's own name
+  if (!f.dataset.name && !f.elements.name.value.trim()) {
+    f.elements.name.value = 'or-' + id.replace(/^[^/]+\//, '').replace(/:free$/, '-free').replace(/[^\w.-]+/g, '-');
+  }
+});
 
 $('addForm').elements.provider.innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('');
 $('addForm').elements.provider.addEventListener('change', showProvider);

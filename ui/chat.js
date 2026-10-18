@@ -30,7 +30,7 @@ const ICONS = {
 const setIcon = (id, name) => { $(id).innerHTML = ICONS[name]; };
 setIcon('copyChat', 'copy'); setIcon('exportChat', 'download'); setIcon('toggleOptions', 'sliders');
 setIcon('toggleActivity', 'pulse'); setIcon('attach', 'clip'); setIcon('mic', 'mic');
-setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('deleteChat', 'trash'); setIcon('kitBtn', 'kit');
+setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('deleteChat', 'trash'); setIcon('exportAll', 'download'); setIcon('deleteAll', 'trash'); setIcon('kitBtn', 'kit');
 
 // ---------------------------------------------------------------------------
 // Storage: an index of chats plus one key per chat, so streaming a reply only

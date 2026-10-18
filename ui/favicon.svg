@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Bright Chat logo (see .logo in bright.css): glowing orb with three orbiting dots -->
+  <defs>
+    <radialGradient id="orb" cx="35%" cy="35%" r="70%">
+      <stop offset="12%" stop-color="#fff"/>
+      <stop offset="28%" stop-color="#ffb547"/>
+      <stop offset="55%" stop-color="#ff5fa2"/>
+      <stop offset="80%" stop-color="#8b6cff"/>
+    </radialGradient>
+  </defs>
+  <circle cx="16" cy="16" r="10" fill="url(#orb)"/>
+  <circle cx="27" cy="9" r="2.2" fill="#3fd0ff"/>
+  <circle cx="5.5" cy="22" r="2.2" fill="#ffb547"/>
+  <circle cx="11" cy="3.6" r="1.7" fill="#fff" stroke="#8b6cff" stroke-width=".6"/>
+</svg>

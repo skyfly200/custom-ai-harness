@@ -59,15 +59,25 @@ The steps below use PowerShell. Mac and Linux commands are in [Installation](#in
 
 ### Every time you want to use it
 
-Open three PowerShell windows, `cd` into the `custom-ai-harness` folder in each, and run one command per window. Leave all three open while you work.
+Open a PowerShell window, `cd` into the `custom-ai-harness` folder and run:
+
+```powershell
+npm run all
+```
+
+This starts all three parts in that one window, each line marked with the part it came from (`[gateway]`, `[router]`, `[interceptor]`). It uses the `.venv` from the setup by itself, so you don't need `Activate.ps1` first. Leave the window open while you work; Ctrl+C stops everything.
+
+Then open Bright Chat, the harness's web app, at <http://localhost:3000/ui>. It opens on the dashboard. When the Router and Gateway show as up, the harness is ready; the Gateway takes a little while to start, so give it a moment. The local engine, Ollama and Laya are optional and normally show as "not running".
+
+**Ollama is off by default.** Run `npm run all:ollama` instead when you want it too, or put `START_OLLAMA=1` in `.env` to always start it. If the Ollama app is already running in the background, it is left alone.
+
+If you'd rather have one window per part (easier to read when something goes wrong), run these in three windows instead:
 
 | Window | Starts | Command |
 |--------|--------|---------|
 | 1 | Gateway | `.\.venv\Scripts\Activate.ps1; $env:PYTHONUTF8 = 1; litellm --config config.yaml` |
 | 2 | Router | `.\.venv\Scripts\Activate.ps1; python router.py` |
 | 3 | Interceptor | `npm start` |
-
-Then open Bright Chat, the harness's web app, at <http://localhost:3000/ui>. It opens on the dashboard. When the Router and Gateway show as up, the harness is ready. The local engine, Ollama and Laya are optional and normally show as "not running". To stop, press Ctrl+C in each window.
 
 ### Connect Claude Code
 
@@ -84,11 +94,12 @@ These settings only last for that window. Other tools such as Cursor, Aider, Con
 
 ### If something goes wrong
 
-- **The dashboard shows the Router or Gateway as down.** Check that window for an error message. Most often a key in `.env` is missing or mistyped.
-- **`litellm` crashes on start with a text-encoding error.** Make sure you ran `$env:PYTHONUTF8 = 1` in that window first.
-- **`litellm` or `python router.py` says a command or module is not found.** Run `.\.venv\Scripts\Activate.ps1` in that window first; each new window needs it.
+- **The dashboard shows the Router or Gateway as down.** Look for an error in the lines marked `[router]` or `[gateway]` (or in that window, if you use three). Most often a key in `.env` is missing or mistyped.
+- **`litellm` crashes on start with a text-encoding error.** `npm run all` sets this for you; with three windows, make sure you ran `$env:PYTHONUTF8 = 1` in the Gateway window first.
+- **`litellm` or `python router.py` says a command or module is not found.** `npm run all` prints a warning when it can't find the `.venv`; redo step 1 of the setup in the `custom-ai-harness` folder. With three windows, run `.\.venv\Scripts\Activate.ps1` in each one first.
 - **Requests are slow or fail with "rate limit".** The free tiers have limits per minute and per day. The harness switches to backups on its own; the dashboard shows which ones it tried. A red **rate limit** tag in the routing log means every backup was out of quota too, and the text under it is the provider's own message. OpenRouter's free models share one daily allowance across all of them, which Claude Code can use up quickly; it resets daily, and keeping $10 of OpenRouter credit raises it from 50 to 1,000 requests a day (OpenRouter's limits when this was written).
 - **Every request says "Router down".** The Router couldn't classify it, so the request went to the backup model. The text under the tag says why (for example an error from Jev or a missing key).
+- **`npm run all:ollama` says `ollama` is not recognized.** Install Ollama from ollama.com, or use plain `npm run all`.
 - **Every strong request shows fallbacks.** The strong model is the local engine on port 8000 (Tier 1). When it isn't running, each strong request falls through to the OpenRouter models, which is expected but slower.
 - **A request seems stuck.** It now fails with a **timeout** instead of hanging: after 5 minutes with no answer from the Gateway, or 2 minutes of silence in the middle of a reply. Both limits are in the dashboard's Interceptor settings.
 
@@ -660,6 +671,10 @@ History is kept in memory (the last 200 requests) and starts fresh when the Inte
 ---
 
 ## Utility scripts
+
+### Start everything
+
+`npm run all` (`scripts/start-all.js`) runs the Gateway, Router and Interceptor together from `.venv` (`.venv\Scripts` on Windows, `.venv/bin` elsewhere; falls back to `PATH`). Ollama starts only with `npm run all:ollama`, `npm run all -- --ollama` or `START_OLLAMA=1` in `.env`, and not when something already answers at `OLLAMA_URL`. `--no-ollama` overrides `START_OLLAMA`. `npm run full` runs `validate` and the tests first, then starts everything.
 
 ### Compress standing context files
 

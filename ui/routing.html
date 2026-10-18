@@ -20,16 +20,27 @@
     <div class="guide-body">
       <p>This page is a map of where every request goes. Boxes are the parts of the harness; lines are the routes between them. Change the lines and boxes, then press <b>Save</b>.</p>
       <ol>
-        <li><b>Follow a request from left to right.</b> It enters at <b>Request</b> (the Interceptor), which hands it to the <b>Router</b>. The Router scores how hard it is and sends it out of one of its outputs (Strong, Weak, Weak with tools, Weak over a size limit) to a <b>model</b> box. A model box is a name the Gateway serves; inside it, <i>Served by</i> lists the provider models that actually answer.</li>
+        <li><b>Follow a request from left to right.</b> It enters at <b>Request</b> (the Interceptor), goes through <b>Compression</b> (tick what should shrink it), then to the <b>Router</b>. The Router scores how hard it is and sends it out of one of its outputs (Strong, Weak, Weak with tools, Weak over a size limit) to a <b>model</b> box. A model box is a name the Gateway serves; inside it, <i>Served by</i> lists the provider models that actually answer.</li>
         <li><b>Change where a route goes</b> by dragging from the dot on the right of an output to a model box. Each output goes to one model, so the new line replaces the old one.</li>
         <li><b>Set fallbacks</b> by dragging a model's <i>If it fails</i> dot to another model. When a model errors, hits a rate limit or times out, the Gateway tries its fallbacks from the top. Reorder them with ↑ ↓, and hover a model to see its fallback lines clearly.</li>
         <li><b>Add a model</b> with <b>Add model</b> above: give it a name, pick where it runs (OpenRouter, Groq, Ollama…) and the model id. For OpenRouter you can search its whole model list in the dialog, filter to free or tool-capable models, and click one to fill in the id. To give an existing model a second provider model, use <i>+ Add provider model</i> in its box; the Gateway then shares requests between them.</li>
         <li><b>Remove things</b>: × in a model's title removes the whole model; × next to a provider model removes just that one; click a line and press Delete (or <b>Remove connection</b>) to remove a route.</li>
+        <li><b>Use different routings for different chats.</b> <b>New routing</b> copies the one shown under a new name; change its lines, compression and tools, then Save. In Bright Chat, pick it per chat in Options or per project in its settings, or choose <i>One model directly</i> to skip routing. Model boxes and fallbacks are shared by every routing. Other clients pick one with the header <code>x-harness-profile</code>.</li>
+        <li><b>Tools</b> lists the MCP servers from <code>mcp-servers.json</code>. Untick one to stop offering it to the model in chats on this routing.</li>
         <li><b>Save</b> writes each change where it belongs and tells you what it saved. The Router and Interceptor use changes on the next request. <b>Restart the Gateway</b> (LiteLLM) after changing models or fallbacks. <b>Discard changes</b> goes back to what is saved.</li>
       </ol>
       <p class="muted">Hover over anything on this page for a short hint. With <b>Show live requests</b> on, each request's path lights up green as it goes through. Box positions are kept in this browser; <b>Tidy layout</b> lines them up again.</p>
     </div>
   </details>
+
+  <div class="profiles" id="profiles">
+    <label class="profile-pick" data-hint="Which routing the boxes below show. Chats and projects can each use a different one">Routing
+      <select id="profileSel" aria-label="Routing to show"></select></label>
+    <button id="profileNew" data-hint="Add a routing, starting as a copy of the one shown">New routing</button>
+    <button id="profileRename" data-hint="Rename the routing shown">Rename</button>
+    <button id="profileDelete" data-hint="Delete the routing shown; its chats go back to the default">Delete</button>
+    <span class="muted small" id="profileNote"></span>
+  </div>
 
   <div class="controls toolbar">
     <button class="primary" id="save" disabled data-hint="Write all changes to the config files">Save</button>
@@ -56,36 +67,52 @@
 
 <dialog id="addDialog" class="card">
   <form id="addForm" autocomplete="off">
-    <h3 id="addTitle">Add a model</h3>
-    <p class="sub muted" id="addIntro"></p>
-    <label class="field" id="nameField"><span>Name in the Gateway</span>
-      <input type="text" name="name" placeholder="e.g. fast-openrouter">
-      <small>What the Router, fallbacks and clients call it.</small></label>
-    <label class="field"><span>Where it runs</span><select name="provider"></select>
-      <small id="providerHelp"></small></label>
-    <div class="field" id="catalog" hidden>
-      <span>Pick from OpenRouter</span>
+    <div class="add-head">
+      <div><h3 id="addTitle">Add a model</h3><p class="sub muted" id="addIntro"></p></div>
+      <button type="button" class="close" id="addClose" aria-label="Close" data-hint="Close without adding">×</button>
+    </div>
+    <div class="add-fields">
+      <label class="field" id="nameField"><span>Name in the Gateway</span>
+        <input type="text" name="name" placeholder="e.g. fast-openrouter">
+        <small>What the Router, fallbacks and clients call it.</small></label>
+      <label class="field"><span>Where it runs</span><select name="provider"></select>
+        <small id="providerHelp"></small></label>
+      <label class="field"><span>Model id</span><input type="text" name="model" required>
+        <small id="modelHelp">Pick one below or type it.</small></label>
+      <label class="field" id="baseField"><span>Server address</span>
+        <input type="text" name="api_base" placeholder="http://localhost:1234/v1">
+        <small>Leave empty for a provider LiteLLM already knows.</small></label>
+      <label class="field" id="keyField"><span>API key variable</span>
+        <input type="text" name="api_key_env" placeholder="MY_PROVIDER_API_KEY">
+        <small>The name of the variable in .env that holds the key, not the key itself. Empty if none.</small></label>
+    </div>
+    <div class="catalog" id="catalog" hidden>
       <div class="catalog-filters">
         <input type="search" id="catalogSearch" placeholder="Search, e.g. claude, qwen coder, gemini" aria-label="Search OpenRouter models">
         <label data-hint="Only models that cost nothing (ids ending in :free). They share a daily request limit"><input type="checkbox" id="catalogFree"> Free</label>
         <label data-hint="Only models that take tool calls. Claude Code needs these"><input type="checkbox" id="catalogTools"> Tools</label>
+        <label data-hint="Only models that think before answering (reasoning tokens)"><input type="checkbox" id="catalogReasoning"> Reasoning</label>
+        <label data-hint="Only models that can read images"><input type="checkbox" id="catalogVision"> Images</label>
+        <select id="catalogProvider" aria-label="Maker" data-hint="Only one maker's models"><option value="">Every maker</option></select>
+        <select id="catalogSort" aria-label="Sort by" data-hint="Order of the list">
+          <option value="new">Newest</option><option value="cheap">Cheapest</option><option value="context">Biggest context</option><option value="name">Name</option>
+        </select>
       </div>
-      <select id="catalogList" size="7" aria-label="OpenRouter models"></select>
+      <div class="catalog-body">
+        <div class="catalog-table" role="listbox" id="catalogList" aria-label="OpenRouter models" tabindex="0">
+          <div class="catalog-row catalog-th" aria-hidden="true"><span>Model</span><span>Context</span><span>Input $/M</span><span>Output $/M</span><span>Can</span></div>
+          <div id="catalogRows"></div>
+        </div>
+        <aside class="catalog-detail" id="catalogDetail"><p class="muted">Click a model to see its details.</p></aside>
+      </div>
       <small id="catalogNote">Loading OpenRouter's models…</small>
     </div>
-    <label class="field"><span>Model id</span><input type="text" name="model" required></label>
-    <label class="field" id="baseField"><span>Server address</span>
-      <input type="text" name="api_base" placeholder="http://localhost:1234/v1">
-      <small>Leave empty for a provider LiteLLM already knows.</small></label>
-    <label class="field" id="keyField"><span>API key variable</span>
-      <input type="text" name="api_key_env" placeholder="MY_PROVIDER_API_KEY">
-      <small>The name of the variable in .env that holds the key, not the key itself. Empty if none.</small></label>
     <div class="note err" id="addMsg"></div>
     <div class="actions">
       <button type="submit" class="primary">Add</button>
       <button type="button" id="addCancel">Cancel</button>
+      <span class="sub muted">Nothing is written until you press Save. Restart the Gateway afterwards.</span>
     </div>
-    <p class="sub muted">Nothing is written until you press Save. Restart the Gateway afterwards.</p>
   </form>
 </dialog>
 <script src="hints.js"></script>

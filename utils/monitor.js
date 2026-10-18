@@ -28,7 +28,7 @@ function recordRouting({ path, clientId, prompt }) {
  * Record a routing decision. Returns the event so the response can be added
  * to it once the Gateway answers.
  */
-function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError, reason, clientId, transforms, routeMs }) {
+function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError, reason, clientId, transforms, routeMs, profile }) {
     const event = {
         id: nextId++,
         time: new Date().toISOString(),
@@ -43,6 +43,7 @@ function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, r
         reason: reason || null,  // set when the Router was skipped (model pinned or chosen by the client)
         clientId: clientId || null, // x-harness-request-id, so a page can find its own request
         transforms: transforms || [],
+        profile: profile || null, // the named routing it used (utils/profiles.js), null for the default
         routeMs: routeMs ?? null,
         status: null,
         ms: null,

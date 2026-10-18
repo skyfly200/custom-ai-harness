@@ -140,12 +140,14 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName'];
+const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
-for (const id of ['model', 'maxTokens', 'temperature']) {
+for (const id of ['maxTokens', 'temperature']) {
   try { const v = localStorage.getItem(`harness-chat-${id}`); if (v !== null && prefs[id] === undefined) prefs[id] = v; } catch {}
 }
+// The model box used to pin every chat; it is per chat now ("One model directly")
+delete prefs.model;
 function applyPrefs() {
   for (const id of PREF_FIELDS) {
     if (prefs[id] === undefined) continue;
@@ -363,7 +365,7 @@ function openChat(id) {
   $('notes').value = chat.notes || '';
   $('input').value = chat.draft || '';
   pending = chat.pendingAttachments || [];
-  drawChips(); autoGrow(); drawContextSize(); drawRepo();
+  drawChips(); autoGrow(); drawContextSize(); drawRepo(); drawRoute(); drawTools();
   drawList();
   drawProjectBits();
   drawLog();
@@ -452,9 +454,10 @@ function attachmentsHtml(list) {
 // Why the Router picked this model, in a few words
 function routeWhy(r) {
   if (!r) return '';
-  if (r.reason) return r.reason;
-  if (r.routerError) return 'Router down';
-  return r.winRate != null ? `win rate ${r.winRate} vs threshold ${r.threshold}` : '';
+  const on = r.profile && !String(r.reason || '').includes(r.profile) ? ` (routing: ${r.profile})` : '';
+  if (r.reason) return r.reason + on;
+  if (r.routerError) return 'Router down' + on;
+  return r.winRate != null ? `win rate ${r.winRate} vs threshold ${r.threshold}${on}` : on.trim();
 }
 
 function traceHtml(m) {
@@ -564,7 +567,7 @@ function drawStats() {
     if (!c) unknown++; else if (c.free) free++; else { paid++; usd += c.usd; }
   }
   const next = requestTokens();
-  const model = $('model').value.trim() || replyModel(replies[replies.length - 1]);
+  const model = routeOf(chat).model || replyModel(replies[replies.length - 1]);
   const max = modelInfo[model]?.maxInput;
   const lastSent = [...replies].reverse().find(m => m.trace?.usage?.prompt_tokens)?.trace.usage.prompt_tokens;
   if (!replies.length && !next) { el.innerHTML = ''; return; }
@@ -881,7 +884,7 @@ async function runReply(c) {
   const maxRounds = Math.max(1, parseInt($('maxToolRounds').value, 10) || 12);
   const history = apiMessages(c, c.messages.length - 1);
   const headers = { 'content-type': 'application/json' };
-  if ($('model').value.trim()) headers['x-harness-model'] = $('model').value.trim();
+  Object.assign(headers, routeHeaders(c));
 
   const controller = new AbortController();
   let finish;
@@ -1164,7 +1167,9 @@ function drawHint() {
   const bits = ['Enter to send · Shift+Enter for a new line'];
   const total = requestTokens();
   if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${pending.some(a => a.kind === 'image') ? ' plus images' : ''}`);
-  if ($('model').value.trim()) bits.push(`model pinned to ${esc($('model').value.trim())}`);
+  const route = chat ? routeOf(chat) : null;
+  if (route?.model) bits.push(`straight to ${esc(route.model)}`);
+  else if (route?.profile) bits.push(`routing: ${esc(route.profile.name)}`);
   if (repoOf(chat)) bits.push(`linked to ${esc(repoOf(chat).name)}`);
   const on = chat ? skillsOf(chat) : [];
   if (on.length) bits.push(`skill${on.length === 1 ? '' : 's'}: ${on.map(k => esc(k.name)).join(', ')}`);
@@ -1254,7 +1259,7 @@ window.addEventListener('drop', (e) => {
 // ---------------------------------------------------------------------------
 function serverTools(c) {
   if (!toolInfo) return [];
-  const off = new Set(prefs.mcpOff || []);
+  const off = new Set([...(prefs.mcpOff || []), ...routingMcpOff(c)]);
   const list = [];
   for (const s of toolInfo.servers || []) {
     if (s.status === 'connected' && !off.has(s.name)) list.push(...(toolInfo.definitions?.[s.name] || []));
@@ -1288,13 +1293,15 @@ async function loadTools() {
 
 function drawTools() {
   const off = new Set(prefs.mcpOff || []);
+  const blocked = new Set(chat ? routingMcpOff(chat) : []);
   const servers = toolInfo?.servers || [];
   const rows = servers.map(s => {
     const dot = s.status === 'connected' ? 'ok' : s.status === 'failed' ? 'bad' : 'off';
-    const detail = s.status === 'connected' ? `${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}`
+    const detail = blocked.has(s.name) ? 'off in this routing'
+      : s.status === 'connected' ? `${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}`
       : s.status === 'disabled' ? 'disabled in the file' : s.status;
     const tip = s.tools.map(t => `${t.title}: ${t.description}`.slice(0, 160)).join('\n');
-    return `<li title="${esc(tip)}"><label><input type="checkbox" data-mcp="${esc(s.name)}" ${s.status !== 'connected' ? 'disabled' : off.has(s.name) ? '' : 'checked'}>
+    return `<li title="${esc(tip)}"><label><input type="checkbox" data-mcp="${esc(s.name)}" ${s.status !== 'connected' || blocked.has(s.name) ? 'disabled' : off.has(s.name) ? '' : 'checked'}>
         <span class="dot ${dot}"></span><span>${esc(s.name)}</span><span class="muted">${esc(detail)}</span></label>
         ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}</li>`;
   });
@@ -1831,7 +1838,7 @@ function onLive(update) {
   const reply = event.clientId && waiting.get(event.clientId);
   if (reply) {
     const tr = reply.trace;
-    if (type === 'route') tr.routed = { model: event.model, reason: event.reason, winRate: event.winRate, threshold: event.threshold, routerError: event.routerError, transforms: event.transforms, routeMs: event.routeMs };
+    if (type === 'route') tr.routed = { model: event.model, profile: event.profile, reason: event.reason, winRate: event.winRate, threshold: event.threshold, routerError: event.routerError, transforms: event.transforms, routeMs: event.routeMs };
     if (type === 'response') tr.answered = { status: event.status, ms: event.ms, servedBy: event.servedBy, fallbacks: event.fallbacks };
     if (type === 'error' && !tr.answered) tr.error = `Gateway: ${event.error}`;
     redraw(reply);
@@ -1981,8 +1988,99 @@ $('projectBadge').addEventListener('click', () => projectOf(chat) && openProject
 $('chatProject').addEventListener('change', () => {
   chat.project = $('chatProject').value || undefined;
   saveChat(chat, { touch: false });
-  drawList(); drawProjectBits(); drawRepo(); drawHint(); drawKit();
+  drawList(); drawProjectBits(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit();
 });
+
+// ---------------------------------------------------------------------------
+// Routing: each chat (or its project) can use a named routing from the Routing
+// page, or skip routing and send everything to one model
+// ---------------------------------------------------------------------------
+let routings = { profiles: [], mcpOff: [] }; // GET api/profiles, plus the default's mcpOff from api/settings
+
+async function loadRoutings() {
+  const [p, st] = await Promise.allSettled([fetch('api/profiles').then(r => r.json()), fetch('api/settings').then(r => r.json())]);
+  routings = { profiles: p.value?.profiles || [], mcpOff: st.value?.settings?.mcpOff || [] };
+  drawRoute(); drawTools(); drawHint();
+}
+
+// Where a chat's messages go: { model } straight to one model, { profile } a
+// named routing, {} the default. `from` says whose choice it is.
+function routeOf(c) {
+  const p = projectOf(c);
+  const own = c?.route && c.route !== 'project';
+  const pick = own ? { route: c.route, model: c.model, from: 'chat' } : p?.route ? { route: p.route, model: p.model, from: 'project' } : { route: 'default', from: '' };
+  if (pick.route === 'model') return pick.model?.trim() ? { model: pick.model.trim(), from: pick.from } : { from: pick.from, empty: true };
+  if (pick.route?.startsWith('p:')) {
+    const profile = routings.profiles.find(x => x.id === pick.route.slice(2));
+    return profile ? { profile, from: pick.from } : { from: pick.from, missing: pick.route.slice(2) };
+  }
+  return { from: pick.from };
+}
+
+function routeHeaders(c) {
+  const r = routeOf(c);
+  if (r.model) return { 'x-harness-model': r.model };
+  if (r.profile) return { 'x-harness-profile': r.profile.id };
+  return {};
+}
+
+// MCP servers the chat's routing doesn't offer (a direct model gets the default's choice)
+const routingMcpOff = (c) => routeOf(c).profile?.mcpOff || routings.mcpOff || [];
+
+function routeChoices(selected, first) {
+  const opt = (v, label) => `<option value="${esc(v)}"${v === selected ? ' selected' : ''}>${esc(label)}</option>`;
+  const missing = selected?.startsWith('p:') && !routings.profiles.some(x => `p:${x.id}` === selected);
+  return (first || '') + opt('default', 'Default routing')
+    + routings.profiles.map(x => opt(`p:${x.id}`, `Routing: ${x.name}`)).join('')
+    + (missing ? opt(selected, `${selected.slice(2)} (deleted: uses the default)`) : '')
+    + opt('model', 'One model directly (no routing)');
+}
+
+function routeLabel(r) {
+  if (r.model) return `straight to ${r.model}`;
+  if (r.profile) return `routing “${r.profile.name}”`;
+  return 'the default routing';
+}
+
+function drawRoute() {
+  if (!chat) return;
+  const p = projectOf(chat);
+  const own = chat.route && chat.route !== 'project' ? chat.route : (p ? 'project' : 'default');
+  const viaProject = p ? `<option value="project"${own === 'project' ? ' selected' : ''}>Same as the project (${esc(routeLabel(routeOf({ project: chat.project })))})</option>` : '';
+  $('routeSel').innerHTML = routeChoices(own, viaProject);
+  $('routeSel').value = own;
+  $('directRow').hidden = own !== 'model';
+  $('model').value = own === 'model' ? chat.model || '' : '';
+  const r = routeOf(chat);
+  $('routeNote').innerHTML = r.empty ? 'Type the model to send every message to.'
+    : r.missing ? `The routing “${esc(r.missing)}” was deleted, so the default is used.`
+    : r.model ? 'Every message goes to this model as is: no Router, no fallback routing choices (the Gateway’s own fallbacks still apply).'
+    : r.profile ? `${r.profile.pin ? `Pinned to ${esc(r.profile.pin)}. ` : ''}Compression: ${['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).length ? ['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).map(k => ({ caveman: 'short replies', headroom: 'shrink tool results', contextAnchor: 'skip repeats' })[k]).join(', ') : 'off'}. <a href="routing.html?routing=${encodeURIComponent(r.profile.id)}">Edit it</a>`
+    : '<a href="routing.html">Make routings</a> on the Routing page to send some chats to other models.';
+}
+
+$('routeSel').addEventListener('change', () => {
+  const v = $('routeSel').value;
+  if (v === 'project') delete chat.route; else chat.route = v;
+  if (v === 'model' && !chat.model) chat.model = replyModel([...chat.messages].reverse().find(m => m.role === 'assistant')) || '';
+  saveChat(chat, { touch: false });
+  drawRoute(); drawTools(); drawHint(); drawStats();
+  if (v === 'model') $('model').focus();
+});
+$('model').addEventListener('change', () => {
+  chat.model = $('model').value.trim();
+  saveChat(chat, { touch: false });
+  drawRoute(); drawHint(); drawStats();
+});
+
+function drawProjectRoute(p) {
+  const v = p?.route || 'default';
+  $('pRoute').innerHTML = routeChoices(v);
+  $('pRoute').value = v;
+  $('pModel').value = p?.model || '';
+  $('pModelRow').hidden = v !== 'model';
+}
+$('pRoute').addEventListener('change', () => { $('pModelRow').hidden = $('pRoute').value !== 'model'; if (!$('pModelRow').hidden) $('pModel').focus(); });
 
 // Tokens and cost of every saved chat in a project
 function projectUsage(id) {
@@ -2016,6 +2114,7 @@ function openProjectDialog(id) {
   $('pName').value = p.name || '';
   $('pInstructions').value = p.instructions || '';
   $('pRepo').value = p.repo?.path || '';
+  drawProjectRoute(editingProject);
   projectColor = p.color || COLORS[projects.length % COLORS.length];
   drawSwatches();
   const on = new Set(p.skills || []);
@@ -2056,6 +2155,9 @@ $('projectForm').addEventListener('submit', async (e) => {
     }
   }
   Object.assign(p, { name, color: projectColor, instructions: $('pInstructions').value, skills: [...$('pSkills').querySelectorAll('input:checked')].map(i => i.value) });
+  const route = $('pRoute').value;
+  if (route === 'default') delete p.route; else p.route = route;
+  if (route === 'model') p.model = $('pModel').value.trim(); else delete p.model;
   if (!editingProject) projects.push(p);
   saveProjects();
   $('projectDialog').close();
@@ -2064,7 +2166,7 @@ $('projectForm').addEventListener('submit', async (e) => {
     setScope(p.id);
     if (!chat.messages.length) { chat.project = p.id; drawProjectBits(); } else openChat(null);
   }
-  drawSide(); drawRepo(); drawHint(); drawKit();
+  drawSide(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit();
 });
 $('pDelete').addEventListener('click', () => {
   const p = editingProject;
@@ -2281,7 +2383,7 @@ function drawUsagePop() {
   const tot = rows.reduce((a, r) => ({ input: a.input + r.input, output: a.output + r.output, usd: a.usd + (r.cost?.usd || 0) }), { input: 0, output: 0, usd: 0 });
   const max = Math.max(1, ...rows.map(r => r.input + r.output));
   const next = requestTokens();
-  const model = $('model').value.trim() || replyModel(replies[replies.length - 1]);
+  const model = routeOf(chat).model || replyModel(replies[replies.length - 1]);
   const ctxMax = modelInfo[model]?.maxInput;
   const p = projectOf(chat);
   const pu = p ? projectUsage(p.id) : null;
@@ -2338,6 +2440,7 @@ fetch('api/models').then(r => r.json()).then(({ models }) => {
 applyPrefs();
 loadModelInfo();
 loadTools();
+loadRoutings();
 let lastOpen = null;
 try { lastOpen = localStorage.getItem('harness-chat-open'); } catch {}
 openChat(index.some(e => e.id === lastOpen) ? lastOpen : index[0]?.id);

@@ -5,6 +5,12 @@
 // config.yaml. Model boxes can be added and removed, and so can the provider
 // models inside them (config.yaml model_list entries). Save writes each change
 // to the file its owner reads.
+//
+// Named routings (profiles) are other sets of route choices, compression and
+// tools, picked per chat or project on the chat page. The picker above the
+// canvas switches which routing the Request, Compression, Router and Tools
+// boxes show; model boxes and fallbacks belong to the Gateway and every
+// routing shares them.
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -65,6 +71,8 @@ const flashing = new Map(); // node or wire id -> time the highlight ends
 let drag = null;     // a node being moved or a wire being drawn
 let focus = null;    // model under the pointer: its fallback lines are drawn in full
 let newKeys = 0;     // keys for provider models added on this page (saved ones use their file id)
+let view = '';       // the routing being shown: '' for the default, else a profile id
+let toolInfo = null; // MCP servers (GET api/tools)
 
 try { positions = JSON.parse(localStorage.getItem(LAYOUT_KEY)) || {}; } catch {}
 
@@ -93,10 +101,21 @@ function graphFrom({ router, settings, gateway }) {
     tools: r.weak_model_tools ?? null,
     overflow: r.weak_model_overflow ?? null,
     maxTokens: r.weak_model_max_tokens ?? null,
+    caveman: settings?.caveman ?? true,
+    headroom: settings?.headroom ?? true,
+    contextAnchor: settings?.contextAnchor ?? true,
+    mcpOff: settings?.mcpOff || [],
     fallbacks: chains(gateway?.fallbacks || {}),
     deployments: (gateway?.deployments || []).map(d => ({ ...d, key: `d${d.id}` })),
+    profiles: clone(info.profiles?.profiles || []),
   };
 }
+
+// The routing being edited: the default (kept on the graph itself) or a profile
+const R = () => (view && graph.profiles.find(p => p.id === view)) || graph;
+const routings = () => [graph, ...graph.profiles];
+const ROUTE_FIELDS = ['pin', 'down', 'downTools', 'threshold', 'strong', 'weak', 'tools', 'overflow', 'maxTokens', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
+const routingName = (r) => (r === graph ? 'the default routing' : `“${r.name}”`);
 
 // Fallbacks without empty chains, sorted, so two can be compared as JSON
 function chains(fallbacks) {
@@ -105,7 +124,7 @@ function chains(fallbacks) {
 
 function models() {
   const names = new Set(graph.deployments.map(d => d.name));
-  for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (graph[o.key]) names.add(graph[o.key]);
+  for (const r of routings()) for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (r[o.key]) names.add(r[o.key]);
   for (const [src, targets] of Object.entries(graph.fallbacks)) { names.add(src); targets.forEach(t => names.add(t)); }
   return [...names];
 }
@@ -126,10 +145,15 @@ function routerChanges() {
 }
 
 function interceptorChanges() {
-  const want = { pinModel: graph.pin, routerDownModel: graph.down, routerDownToolsModel: graph.downTools, fixedThreshold: graph.threshold };
+  const want = {
+    pinModel: graph.pin, routerDownModel: graph.down, routerDownToolsModel: graph.downTools, fixedThreshold: graph.threshold,
+    caveman: graph.caveman, headroom: graph.headroom, contextAnchor: graph.contextAnchor, mcpOff: graph.mcpOff,
+  };
   const have = info.settings || {};
-  return Object.fromEntries(Object.entries(want).filter(([k, v]) => (v ?? null) !== (have[k] ?? null)));
+  return Object.fromEntries(Object.entries(want).filter(([k, v]) => JSON.stringify(v ?? null) !== JSON.stringify(have[k] ?? null)));
 }
+
+const profilesChanged = () => JSON.stringify(graph.profiles) !== JSON.stringify(saved.profiles);
 
 // model_list entries to remove (by file id) and to append
 function deploymentChanges() {
@@ -142,16 +166,21 @@ function deploymentChanges() {
 
 const fallbacksChanged = () => JSON.stringify(chains(graph.fallbacks)) !== JSON.stringify(saved.fallbacks);
 const gatewayChanged = () => { const c = deploymentChanges(); return !!(c.remove.length || c.add.length) || fallbacksChanged(); };
-const dirty = () => !!graph && (Object.keys(routerChanges()).length || Object.keys(interceptorChanges()).length || gatewayChanged());
+const dirty = () => !!graph && (Object.keys(routerChanges()).length || Object.keys(interceptorChanges()).length || gatewayChanged() || profilesChanged());
 
 function problems() {
   const out = [];
-  for (const o of ENTRY_OUTS) if (o.required && !graph[o.key]) out.push(`Connect “${o.label}” to a model.`);
-  if (routerUp()) {
-    for (const o of ROUTER_OUTS) if (o.required && !graph[o.key]) out.push(`Connect the Router's “${o.label}” output to a model.`);
-    if (graph.overflow && !(Number.isInteger(graph.maxTokens) && graph.maxTokens > 0)) out.push('Set the token limit for “Weak, over”.');
+  // The routing on screen first, so its problems are the ones shown
+  for (const r of [R(), ...routings().filter(x => x !== R())]) {
+    const where = r === R() ? '' : ` (in ${routingName(r)})`;
+    for (const o of ENTRY_OUTS) if (o.required && !r[o.key]) out.push(`Connect “${o.label}” to a model${where}.`);
+    // A profile's Router outputs are its own; the default's live in the Router
+    if (r === graph ? routerUp() : !r.pin) {
+      for (const o of ROUTER_OUTS) if (o.required && !r[o.key]) out.push(`Connect the Router's “${o.label}” output to a model${where}.`);
+    }
+    if (r.overflow && !(Number.isInteger(r.maxTokens) && r.maxTokens > 0)) out.push(`Set the token limit for “Weak, over”${where}.`);
+    if (r.threshold !== null && !(r.threshold >= 0 && r.threshold <= 1)) out.push(`The threshold must be from 0 to 1${where}.`);
   }
-  if (graph.threshold !== null && !(graph.threshold >= 0 && graph.threshold <= 1)) out.push('The threshold must be from 0 to 1.');
   if (gatewayEditable()) {
     for (const [src, targets] of Object.entries(graph.fallbacks)) {
       for (const name of [src, ...targets]) if (!served(name)) out.push(`“${name}” has fallback lines but no provider model: add one, or remove its box.`);
@@ -167,7 +196,7 @@ function connect(port, model) {
     if (src === model || chain.includes(model)) return;
     graph.fallbacks[src] = [...chain, model];
   } else {
-    graph[port.split('.')[1]] = model;
+    R()[port.split('.')[1]] = model;
   }
   changed();
 }
@@ -179,14 +208,15 @@ function removeWire(id) {
     graph.fallbacks[src] = (graph.fallbacks[src] || []).filter(t => t !== target);
     if (!graph.fallbacks[src].length) delete graph.fallbacks[src];
   } else {
-    graph[id.split('.')[1]] = null;
+    R()[id.split('.')[1]] = null;
   }
   selected = null;
   changed();
 }
 
 function removeModel(name) {
-  const uses = [...ENTRY_OUTS, ...ROUTER_OUTS].filter(o => graph[o.key] === name).map(o => `“${o.label}”`);
+  const uses = routings().flatMap(r => [...ENTRY_OUTS, ...ROUTER_OUTS].filter(o => r[o.key] === name)
+    .map(o => `“${o.label}”${r === graph ? '' : ` in ${r.name}`}`));
   const count = graph.deployments.filter(d => d.name === name).length;
   const ask = `Remove ${name}?` + (count ? ` Its ${count === 1 ? 'provider model' : `${count} provider models`} and fallback lines go with it.` : '')
     + (uses.length ? `\n\nIt is used for ${uses.join(', ')}. Connect ${uses.length === 1 ? 'that' : 'those'} to another model before saving.` : '')
@@ -198,7 +228,7 @@ function removeModel(name) {
     const kept = targets.filter(t => t !== name);
     if (kept.length) graph.fallbacks[src] = kept; else delete graph.fallbacks[src];
   }
-  for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (graph[o.key] === name) graph[o.key] = null;
+  for (const r of routings()) for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (r[o.key] === name) r[o.key] = null;
   selected = null;
   changed();
 }
@@ -236,7 +266,7 @@ const OUT_HINTS = {
 function outRow(id, o, { model, disabled }) {
   const empty = !model;
   const target = empty ? `<span class="unset">${o.required ? 'not connected' : 'off'}</span>` : '';
-  const tokens = o.tokens ? ` <input type="number" min="1" step="1" data-field="maxTokens" value="${esc(graph.maxTokens ?? '')}" placeholder="tokens"${disabled ? ' disabled' : ''}>` : '';
+  const tokens = o.tokens ? ` <input type="number" min="1" step="1" data-field="maxTokens" value="${esc(R().maxTokens ?? '')}" placeholder="tokens"${disabled ? ' disabled' : ''}>` : '';
   return `<div class="out${o.required ? ' required' : ''}${empty ? ' empty' : ''}" data-hint="${esc(OUT_HINTS[o.key] || '')}">
     <span class="label"><b>${esc(o.label)}</b>${o.help ? ` <span>· ${esc(o.help)}</span>` : ''} ${target}</span>${tokens}
     <span class="port out-port${disabled ? ' fixed' : ''}" data-port="${id}"></span></div>`;
@@ -246,6 +276,8 @@ const KIND_HINTS = {
   Interceptor: 'Every request from Claude Code, the chat page or other clients arrives here first',
   Classifier: 'Scores how hard each request is and picks a model from the outputs below',
   Model: 'A name the Gateway (LiteLLM) serves. Drag the title to move the box',
+  Transforms: 'What the Interceptor does to each request before it goes on, to save tokens',
+  MCP: 'Tool servers from mcp-servers.json that Bright Chat offers the model',
 };
 
 function nodeHTML(id, cls, title, kind, body, outs, hasIn, extra = '') {
@@ -256,22 +288,59 @@ function nodeHTML(id, cls, title, kind, body, outs, hasIn, extra = '') {
 }
 
 function entryNode() {
-  const body = graph.pin ? `<div class="warn">Pinned: every request goes to <b>${esc(graph.pin)}</b> and the Router is skipped.</div>` : '';
-  const outs = `<div class="out" data-hint="Unless a model is pinned, every request is scored by the Router"><span class="label"><b>Router</b> · scores each request</span><span class="port out-port fixed" data-port="entry.router"></span></div>`
-    + ENTRY_OUTS.map(o => outRow(`entry.${o.key}`, o, { model: graph[o.key] })).join('');
+  const r = R();
+  const body = (r.pin ? `<div class="warn">Pinned: every request goes to <b>${esc(r.pin)}</b> and the Router is skipped.</div>` : '');
+  const outs = `<div class="out" data-hint="Every request is compressed first, then scored by the Router unless a model is pinned"><span class="label"><b>Compression</b>, then the Router</span><span class="port out-port fixed" data-port="entry.router"></span></div>`
+    + ENTRY_OUTS.map(o => outRow(`entry.${o.key}`, o, { model: r[o.key] })).join('');
   return nodeHTML('entry', 'entry', 'Request', 'Interceptor', body, outs, false);
+}
+
+const TRANSFORMS = [
+  { key: 'caveman', label: 'Short replies (caveman)', help: 'Adds a line to the system prompt asking for terse answers. Saves output tokens.' },
+  { key: 'headroom', label: 'Shrink tool results (Headroom)', help: 'Cuts long tool output (logs, file dumps) down to the parts that matter. Saves input tokens.' },
+  { key: 'contextAnchor', label: 'Skip repeated tool results', help: 'A tool result identical to an earlier one is replaced by a pointer to it.' },
+];
+
+function compressNode() {
+  const r = R();
+  const on = TRANSFORMS.filter(t => r[t.key]).length;
+  const body = TRANSFORMS.map(t => `<label class="check" data-hint="${esc(t.help)}"><input type="checkbox" data-toggle="${t.key}"${r[t.key] ? ' checked' : ''}> ${esc(t.label)}</label>`).join('')
+    + `<small>${on ? `${on} of 3 on.` : 'Off: requests go on unchanged.'} Runs on every request on this routing, pinned ones too.</small>`;
+  const outs = `<div class="out"><span class="label"><b>Router</b> · scores each request</span><span class="port out-port fixed" data-port="compress.router"></span></div>`;
+  return nodeHTML('compress', 'compress', 'Compression', 'Transforms', body, outs, true);
+}
+
+function toolsNode() {
+  const r = R();
+  const off = new Set(r.mcpOff || []);
+  const servers = toolInfo?.servers || [];
+  const rows = servers.map(s => {
+    const dot = s.status === 'connected' ? 'ok' : s.status === 'failed' ? 'bad' : 'off';
+    const detail = s.status === 'connected' ? `${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}` : s.status === 'disabled' ? 'disabled in the file' : s.status;
+    const tip = s.error || s.tools.map(t => `${t.title || t.name}: ${t.description || ''}`.slice(0, 140)).join('\n');
+    return `<li data-hint="${esc(tip)}"><label class="check"><input type="checkbox" data-mcp="${esc(s.name)}"${off.has(s.name) ? '' : ' checked'}>
+      <span class="dot ${dot}"></span><span class="name">${esc(s.name)}</span><span class="muted">${esc(detail)}</span></label></li>`;
+  });
+  const body = `<ul class="mcp">${rows.join('') || `<li class="muted small">${toolInfo ? `No servers. List them in <code>${esc((toolInfo.file || 'mcp-servers.json').split(/[\\/]/).pop())}</code> next to server.js.` : 'Couldn’t read the tool servers.'}</li>`}</ul>
+    <small>Ticked servers are offered to the model in Bright Chat chats on this routing (each chat can still turn them off in Options). Claude Code brings its own tools.</small>
+    <button class="add-dep" data-act="reloadtools" data-hint="Read mcp-servers.json again and reconnect every server">Reload servers</button>`;
+  return nodeHTML('tools', 'tools', 'Tools', 'MCP', body, '', false);
 }
 
 function routerNode() {
   const up = routerUp();
+  const r = R();
+  // The default's outputs are the Router's own; a profile keeps its outputs here and only borrows the score
+  const editable = r === graph ? up : true;
   const backends = info.router?.backends || (graph.backend ? [graph.backend] : []);
-  const body = (up ? '' : '<div class="warn">The Router is down, so its choices can’t be read or changed. Start it and reload this page.</div>')
-    + `<label data-hint="How requests are scored. Its other settings (address, key, timeout) are on the Dashboard">Classifier<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
+  const body = (up ? '' : r === graph ? '<div class="warn">The Router is down, so its choices can’t be read or changed. Start it and reload this page.</div>'
+      : '<div class="warn">The Router is down: requests on this routing go to “Router down” until it is back.</div>')
+    + `<label data-hint="How requests are scored. Every routing shares it. Its other settings (address, key, timeout) are on the Dashboard">Classifier${view ? ' · shared' : ''}<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
        <small id="backendHelp">${esc(BACKEND_HELP[graph.backend] || '')}</small></label>
-     <label data-hint="Requests scoring at or above this go to Strong. Empty uses the keyword rule">Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(graph.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)">
+     <label data-hint="Requests scoring at or above this go to Strong. Empty uses the keyword rule">Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(r.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)">
        <small>0 always strong, 1 almost always weak.</small></label>`;
-  const outs = ROUTER_OUTS.map(o => outRow(`router.${o.key}`, o, { model: graph[o.key], disabled: !up })).join('');
-  return nodeHTML('router', 'router' + (graph.pin ? ' dim' : ''), 'Router', 'Classifier', body, outs, true);
+  const outs = ROUTER_OUTS.map(o => outRow(`router.${o.key}`, o, { model: r[o.key], disabled: !editable })).join('');
+  return nodeHTML('router', 'router' + (r.pin ? ' dim' : ''), 'Router', 'Classifier', body, outs, true);
 }
 
 function deploymentRow(d, only) {
@@ -310,7 +379,7 @@ function modelNode(name) {
 function render() {
   const world = $('world');
   const keep = $('wires');
-  world.innerHTML = entryNode() + routerNode() + models().map(modelNode).join('');
+  world.innerHTML = entryNode() + compressNode() + routerNode() + toolsNode() + models().map(modelNode).join('');
   world.prepend(keep);
   placeNodes();
   drawWires();
@@ -329,12 +398,13 @@ function placeNodes() {
     const col = p.x < 300 ? 0 : p.x < 650 ? 1 : 2;
     next[col] = Math.max(next[col], p.y + n.offsetHeight + 24);
   }
-  const routed = new Set([...ENTRY_OUTS, ...ROUTER_OUTS].map(o => graph[o.key]).filter(Boolean));
-  const order = ['entry', 'router', ...[...routed].map(m => `m:${m}`), ...models().filter(m => !routed.has(m)).map(m => `m:${m}`)];
+  const routed = new Set([...ENTRY_OUTS, ...ROUTER_OUTS].map(o => R()[o.key]).filter(Boolean));
+  const firstColumn = ['entry', 'compress', 'router', 'tools'];
+  const order = [...firstColumn, ...[...routed].map(m => `m:${m}`), ...models().filter(m => !routed.has(m)).map(m => `m:${m}`)];
   for (const id of order) {
     const n = byId[id];
     if (!n || positions[id]) continue;
-    const col = id === 'entry' || id === 'router' ? 0 : routed.has(id.slice(2)) ? 1 : 2;
+    const col = firstColumn.includes(id) ? 0 : routed.has(id.slice(2)) ? 1 : 2;
     positions[id] = { x: columns[col], y: next[col] };
     next[col] += n.offsetHeight + 24;
   }
@@ -351,9 +421,13 @@ function placeNodes() {
 }
 
 function wireList() {
-  const list = [{ id: 'fixed', from: 'entry.router', to: 'router', cls: 'fixed', dim: !!graph.pin }];
-  for (const o of ENTRY_OUTS) if (graph[o.key]) list.push({ id: `entry.${o.key}`, from: `entry.${o.key}`, to: `m:${graph[o.key]}` });
-  for (const o of ROUTER_OUTS) if (graph[o.key]) list.push({ id: `router.${o.key}`, from: `router.${o.key}`, to: `m:${graph[o.key]}`, dim: !!graph.pin });
+  const r = R();
+  const list = [
+    { id: 'fixed', from: 'entry.router', to: 'compress', cls: 'fixed' },
+    { id: 'fixed2', from: 'compress.router', to: 'router', cls: 'fixed', dim: !!r.pin },
+  ];
+  for (const o of ENTRY_OUTS) if (r[o.key]) list.push({ id: `entry.${o.key}`, from: `entry.${o.key}`, to: `m:${r[o.key]}` });
+  for (const o of ROUTER_OUTS) if (r[o.key]) list.push({ id: `router.${o.key}`, from: `router.${o.key}`, to: `m:${r[o.key]}`, dim: !!r.pin });
   for (const [src, targets] of Object.entries(graph.fallbacks)) {
     // Faint unless their model is under the pointer or selected, so the chains don't hide the routes
     targets.forEach((t, i) => {
@@ -391,7 +465,7 @@ function drawWires() {
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       parts.push(`<circle class="order" cx="${mx}" cy="${my}" r="8"/><text class="order-text" x="${mx}" y="${my}">${w.order}</text>`);
     }
-    if (w.id !== 'fixed') parts.push(`<path class="hit" data-wire="${esc(w.id)}" data-hint="Click to select this line, then press Delete or Remove connection" d="${d}"/>`);
+    if (!w.id.startsWith('fixed')) parts.push(`<path class="hit" data-wire="${esc(w.id)}" data-hint="Click to select this line, then press Delete or Remove connection" d="${d}"/>`);
   }
   if (drag?.draft) parts.push(`<path class="wire draft" d="${curve(drag.draft.a, drag.draft.b)}"/>`);
   $('wires').innerHTML = parts.join('');
@@ -473,6 +547,7 @@ $('world').addEventListener('click', (e) => {
   if (b.dataset.act === 'unmodel') return removeModel(b.dataset.name);
   if (b.dataset.act === 'undeploy') return removeDeployment(b.dataset.key);
   if (b.dataset.act === 'adddep') return openAdd(b.dataset.name);
+  if (b.dataset.act === 'reloadtools') return reloadTools();
   const chain = [...graph.fallbacks[b.dataset.src]];
   const i = Number(b.dataset.i);
   if (b.dataset.act === 'del') chain.splice(i, 1);
@@ -492,6 +567,16 @@ $('world').addEventListener('pointerleave', () => { if (focus) { focus = null; d
 
 // Inputs change the graph without redrawing it, so typing keeps focus
 $('world').addEventListener('input', (e) => {
+  if (e.target.dataset.toggle) {
+    R()[e.target.dataset.toggle] = e.target.checked;
+    return changed();
+  }
+  if (e.target.dataset.mcp) {
+    const off = new Set(R().mcpOff || []);
+    if (e.target.checked) off.delete(e.target.dataset.mcp); else off.add(e.target.dataset.mcp);
+    R().mcpOff = [...off];
+    return changed();
+  }
   const field = e.target.dataset.field;
   if (!field) return;
   const raw = e.target.value.trim();
@@ -499,7 +584,7 @@ $('world').addEventListener('input', (e) => {
     graph.backend = raw;
     $('backendHelp').textContent = BACKEND_HELP[raw] || '';
   } else {
-    graph[field] = raw === '' ? null : Number(raw);
+    R()[field] = raw === '' ? null : Number(raw);
   }
   updateButtons();
 });
@@ -521,6 +606,8 @@ $('tidy').addEventListener('click', () => {
 $('discard').addEventListener('click', () => {
   graph = clone(saved);
   selected = null;
+  if (view && !graph.profiles.some(p => p.id === view)) view = '';
+  drawProfiles();
   changed();
   note('');
 });
@@ -553,10 +640,19 @@ $('save').addEventListener('click', async () => {
       info.settings = (await postJSON('api/settings', ic)).settings;
       done.push('Interceptor');
     }
+    if (profilesChanged()) {
+      note('Saving the routings…');
+      info.profiles = await postJSON('api/profiles', { version: info.profiles.version, profiles: graph.profiles });
+      done.push('named routings');
+    }
     saved = graphFrom(info);
+    graph.profiles = clone(saved.profiles); // as the server cleaned them
+    drawProfiles();
     note(`Saved: ${done.join(', ')}.${restart ? ' Restart the Gateway (LiteLLM) to use the new models and fallbacks.' : ''}`, 'ok');
   } catch (err) {
-    saved = graphFrom(info); // keep whatever did save
+    const editing = graph.profiles;
+    saved = graphFrom(info); // keep whatever did save, and the edits that didn't
+    graph.profiles = editing;
     note(`${done.length ? `Saved ${done.join(', ')}, but ` : ''}${err.message}`, 'err');
   }
   const message = $('msg').textContent, cls = $('msg').className;
@@ -566,6 +662,85 @@ $('save').addEventListener('click', async () => {
 
 window.addEventListener('beforeunload', (e) => { if (dirty()) e.preventDefault(); });
 window.addEventListener('resize', () => graph && drawWires());
+
+// ---- named routings -----------------------------------------------------------
+
+const VIEW_KEY = 'harness-routing-view';
+
+function drawProfiles() {
+  const sel = $('profileSel');
+  sel.innerHTML = `<option value="">Default routing</option>`
+    + graph.profiles.map(p => `<option value="${esc(p.id)}"${p.id === view ? ' selected' : ''}>${esc(p.name)}${saved.profiles.some(x => x.id === p.id) ? '' : ' (new)'}</option>`).join('');
+  sel.value = view;
+  $('profileRename').disabled = $('profileDelete').disabled = !view;
+  const p = view && R();
+  $('profileNote').innerHTML = p
+    ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Models and fallbacks are shared by every routing.`
+    : `What every request uses unless its chat, project or client picks another routing. ${graph.profiles.length ? '' : 'Add a routing to send some chats elsewhere, such as cheaper models or no compression.'}`;
+}
+
+function showRouting(id) {
+  view = id || '';
+  try { localStorage.setItem(VIEW_KEY, view); } catch {}
+  selected = null;
+  drawProfiles();
+  changed();
+}
+
+$('profileSel').addEventListener('change', () => showRouting($('profileSel').value));
+
+const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+
+function askName(title, current) {
+  const name = (prompt(title, current || '') || '').trim().slice(0, 60);
+  if (!name) return null;
+  const taken = graph.profiles.some(p => p.name.toLowerCase() === name.toLowerCase() && p.id !== view);
+  if (!slug(name) || slug(name) === 'default' || taken) { note(`Pick another name than “${name}”.`, 'err'); return null; }
+  return name;
+}
+
+$('profileNew').addEventListener('click', () => {
+  const from = R();
+  const name = askName(`Name the new routing. It starts as a copy of ${from === graph ? 'the default routing' : from.name}.`);
+  if (!name) return;
+  let id = slug(name);
+  for (let n = 2; graph.profiles.some(p => p.id === id); n++) id = `${slug(name)}-${n}`;
+  const copy = Object.fromEntries(ROUTE_FIELDS.map(k => [k, clone(from[k] ?? null)]));
+  copy.mcpOff = copy.mcpOff || [];
+  // The default's Router outputs may be unknown while the Router is down
+  graph.profiles.push({ id, name, note: '', ...copy });
+  showRouting(id);
+  note(`Added “${name}”. Change its lines and boxes, then press Save.`);
+});
+
+$('profileRename').addEventListener('click', () => {
+  const p = R();
+  const name = askName('New name for this routing. Chats using it keep using it.', p.name);
+  if (!name) return;
+  p.name = name;
+  drawProfiles();
+  changed();
+});
+
+$('profileDelete').addEventListener('click', () => {
+  const p = R();
+  if (!confirm(`Delete the routing “${p.name}”? Chats and projects set to it go back to the default routing.\n\nNothing changes until you press Save.`)) return;
+  graph.profiles = graph.profiles.filter(x => x !== p);
+  showRouting('');
+});
+
+// ---- tools ----
+
+async function reloadTools() {
+  note('Reconnecting the tool servers…');
+  try {
+    toolInfo = await postJSON('api/tools/reload', {});
+    note('Tool servers reloaded.', 'ok');
+  } catch (err) {
+    note(`Couldn’t reload the tool servers: ${err.message}`, 'err');
+  }
+  render();
+}
 
 // ---- adding models ----------------------------------------------------------
 
@@ -581,6 +756,8 @@ function openAdd(name) {
   $('nameField').hidden = !!name;
   f.elements.name.required = !name;
   $('addMsg').textContent = '';
+  catalogPick = null;
+  delete f.elements.name.dataset.suggested;
   showProvider();
   $('addDialog').showModal();
   (name ? f.elements.provider : f.elements.name).focus();
@@ -594,18 +771,27 @@ function showProvider() {
   $('baseField').hidden = !p.askBase;
   $('keyField').hidden = !p.askKey;
   $('catalog').hidden = f.elements.provider.value !== 'openrouter';
+  $('addDialog').classList.toggle('narrow', $('catalog').hidden);
+  $('modelHelp').hidden = $('catalog').hidden;
   if (!$('catalog').hidden) loadCatalog();
 }
 
 // ---- OpenRouter's model list, for picking a model id ----
 
-let catalog = null;  // [{ id, name, context, inputCost, outputCost, free, tools }] once loaded
+let catalog = null;  // [{ id, name, context, inputCost, outputCost, free, tools, ... }] once loaded
 let catalogLoading = null;
+let catalogShown = []; // the rows on screen, in order
+let catalogPick = null; // id of the model whose details are shown
+const CATALOG_ROWS = 400;
 
 function loadCatalog() {
   if (catalog || catalogLoading) return showCatalog();
   catalogLoading = getJSON('api/openrouter/models')
-    .then((body) => { catalog = body.models || []; })
+    .then((body) => {
+      catalog = body.models || [];
+      const makers = [...new Set(catalog.map(m => m.provider || m.id.split('/')[0]))].sort();
+      $('catalogProvider').innerHTML = '<option value="">Every maker</option>' + makers.map(p => `<option>${esc(p)}</option>`).join('');
+    })
     .catch((err) => { $('catalogNote').textContent = `${err.message} Type the id from openrouter.ai/models instead.`; })
     .finally(() => { catalogLoading = null; if (catalog) showCatalog(); });
 }
@@ -616,53 +802,121 @@ function perMillion(cost) {
   const m = cost * 1e6;
   return m === 0 ? '0' : m < 0.1 ? m.toFixed(3) : m < 10 ? m.toFixed(2).replace(/\.?0+$/, '') : m.toFixed(0);
 }
+const tokensShort = (n) => (!n ? '?' : n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}K`);
+const vision = (m) => (m.inputs || []).includes('image');
 
-function catalogLabel(m) {
-  const price = m.free ? 'free' : `$${perMillion(m.inputCost)} in / $${perMillion(m.outputCost)} out per M`;
-  const context = m.context ? ` · ${m.context >= 1e6 ? `${+(m.context / 1e6).toFixed(1)}M` : `${Math.round(m.context / 1000)}K`}` : '';
-  return `${m.name} · ${price}${context}${m.tools ? ' · tools' : ''}`;
+function badges(m) {
+  return [m.free && '<span class="badge free">free</span>', m.tools && '<span class="badge">tools</span>',
+    m.reasoning && '<span class="badge">reasoning</span>', vision(m) && '<span class="badge">images</span>'].filter(Boolean).join('');
 }
+
+const SORTS = {
+  new: (a, b) => b.created - a.created || a.id.localeCompare(b.id),
+  cheap: (a, b) => ((a.inputCost ?? 1) + (a.outputCost ?? 1)) - ((b.inputCost ?? 1) + (b.outputCost ?? 1)) || a.id.localeCompare(b.id),
+  context: (a, b) => (b.context || 0) - (a.context || 0) || a.id.localeCompare(b.id),
+  name: (a, b) => a.name.localeCompare(b.name),
+};
 
 function showCatalog() {
   if (!catalog) return;
   const words = $('catalogSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
-  const free = $('catalogFree').checked, tools = $('catalogTools').checked;
-  const shown = catalog.filter(m => (!free || m.free) && (!tools || m.tools)
-    && words.every(w => m.id.toLowerCase().includes(w) || m.name.toLowerCase().includes(w)));
-  const list = $('catalogList');
-  list.innerHTML = shown.slice(0, 300).map(m => `<option value="${esc(m.id)}" title="${esc(m.id)}">${esc(catalogLabel(m))}</option>`).join('');
+  const want = { free: $('catalogFree').checked, tools: $('catalogTools').checked, reasoning: $('catalogReasoning').checked, vision: $('catalogVision').checked };
+  const maker = $('catalogProvider').value;
+  catalogShown = catalog.filter(m => (!want.free || m.free) && (!want.tools || m.tools) && (!want.reasoning || m.reasoning) && (!want.vision || vision(m))
+    && (!maker || (m.provider || m.id.split('/')[0]) === maker)
+    && words.every(w => m.id.toLowerCase().includes(w) || m.name.toLowerCase().includes(w)))
+    .sort(SORTS[$('catalogSort').value] || SORTS.new);
   const typed = $('addForm').elements.model.value.trim().replace(/^openrouter\//, '');
-  if (shown.some(m => m.id === typed)) list.value = typed;
-  $('catalogNote').textContent = shown.length
-    ? `${shown.length} of ${catalog.length} models${shown.length > 300 ? ', the 300 newest shown: search to narrow' : ''}, newest first. Picking one fills in the model id.`
+  if (!catalogPick && catalog.some(m => m.id === typed)) catalogPick = typed;
+  $('catalogRows').innerHTML = catalogShown.slice(0, CATALOG_ROWS).map(m => `<div class="catalog-row${m.id === catalogPick ? ' on' : ''}" role="option" aria-selected="${m.id === catalogPick}" data-id="${esc(m.id)}">
+      <span class="cm"><b>${esc(m.name)}</b><code>${esc(m.id)}</code></span>
+      <span>${tokensShort(m.context)}</span>
+      <span>${m.free ? 'free' : `$${perMillion(m.inputCost)}`}</span>
+      <span>${m.free ? 'free' : `$${perMillion(m.outputCost)}`}</span>
+      <span class="badges">${badges(m)}</span></div>`).join('');
+  $('catalogNote').textContent = catalogShown.length
+    ? `${catalogShown.length} of ${catalog.length} models${catalogShown.length > CATALOG_ROWS ? `, the first ${CATALOG_ROWS} shown: search or filter to narrow` : ''}. Click one to see its details and fill in the model id.`
     : `None of OpenRouter's ${catalog.length} models match.`;
+  showDetail();
 }
 
+function fact(label, value, hint) {
+  return value === null || value === undefined || value === '' ? '' : `<dt${hint ? ` data-hint="${esc(hint)}"` : ''}>${esc(label)}</dt><dd>${value}</dd>`;
+}
+const usd = (cost, unit = 'M') => (cost === null || cost === undefined ? null : cost === 0 ? 'free' : unit === 'M' ? `$${perMillion(cost)} per M tokens` : `$${+cost.toPrecision(3)} ${unit}`);
+
+function showDetail() {
+  const m = catalog?.find(x => x.id === catalogPick);
+  if (!m) { $('catalogDetail').innerHTML = '<p class="muted">Click a model to see its details.</p>'; return; }
+  const released = m.created ? new Date(m.created * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : null;
+  const extra = (m.params || []).filter(p => !['tools', 'tool_choice', 'reasoning', 'include_reasoning'].includes(p));
+  $('catalogDetail').innerHTML = `
+    <h4>${esc(m.name)}</h4>
+    <code class="id">${esc(m.id)}</code>
+    <div class="badges">${badges(m)}${m.structured ? '<span class="badge">structured output</span>' : ''}${m.moderated ? '<span class="badge warn">moderated</span>' : ''}</div>
+    ${m.description ? `<p class="desc">${esc(m.description)}</p>` : ''}
+    <dl class="facts">
+      ${fact('Context', m.context ? `${m.context.toLocaleString()} tokens` : null, 'How much the model can read at once: prompt, history and tools together')}
+      ${fact('Longest reply', m.maxOutput ? `${m.maxOutput.toLocaleString()} tokens` : null, 'The most tokens one reply can have')}
+      ${fact('Input', usd(m.inputCost), 'Price of what you send')}
+      ${fact('Output', usd(m.outputCost), 'Price of what it writes')}
+      ${fact('Cached input', m.free ? null : usd(m.cacheReadCost), 'Price of input it has seen recently (repeated prompts and history)')}
+      ${fact('Reasoning', m.free ? null : usd(m.reasoningCost), 'Price of thinking tokens, when billed apart from output')}
+      ${fact('Images', m.free ? null : usd(m.imageCost, 'per image'))}
+      ${fact('Per request', m.free || !m.requestCost ? null : usd(m.requestCost, 'per request'))}
+      ${fact('Reads', esc((m.inputs || []).join(', ')))}
+      ${fact('Writes', esc((m.outputs || []).join(', ')))}
+      ${fact('Tokenizer', m.tokenizer ? esc(m.tokenizer) : null)}
+      ${fact('Released', released)}
+    </dl>
+    ${extra.length ? `<div class="params" data-hint="Request settings this model accepts">${extra.map(p => `<span>${esc(p)}</span>`).join('')}</div>` : ''}
+    <p class="links"><a href="https://openrouter.ai/${esc(m.id.replace(/:free$/, ''))}" target="_blank" rel="noopener">Open on openrouter.ai ↗</a>${m.huggingFace ? ` · <a href="https://huggingface.co/${esc(m.huggingFace)}" target="_blank" rel="noopener">Hugging Face ↗</a>` : ''}</p>`;
+}
+
+function pickCatalog(id) {
+  const f = $('addForm');
+  catalogPick = id;
+  f.elements.model.value = id;
+  // Suggest a Gateway name for a new box from the model's own name
+  if (!f.dataset.name && (!f.elements.name.value.trim() || f.elements.name.dataset.suggested === f.elements.name.value)) {
+    f.elements.name.value = f.elements.name.dataset.suggested = 'or-' + id.replace(/^[^/]+\//, '').replace(/:free$/, '-free').replace(/[^\w.-]+/g, '-');
+  }
+  for (const row of $('catalogRows').children) {
+    row.classList.toggle('on', row.dataset.id === id);
+    row.setAttribute('aria-selected', row.dataset.id === id);
+  }
+  showDetail();
+}
+
+$('catalogRows').addEventListener('click', (e) => {
+  const row = e.target.closest('.catalog-row[data-id]');
+  if (row) pickCatalog(row.dataset.id);
+});
+// Arrow keys move the pick through the list
+$('catalogList').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  const ids = catalogShown.slice(0, CATALOG_ROWS).map(m => m.id);
+  const i = ids.indexOf(catalogPick);
+  const next = ids[Math.max(0, Math.min(ids.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+  if (!next) return;
+  pickCatalog(next);
+  $('catalogRows').querySelector(`[data-id="${CSS.escape(next)}"]`)?.scrollIntoView({ block: 'nearest' });
+});
 $('catalogSearch').addEventListener('input', showCatalog);
 // Enter in the search box picks the top match instead of submitting the dialog
 $('catalogSearch').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   e.preventDefault();
-  const first = $('catalogList').options[0];
-  if (first) { $('catalogList').value = first.value; $('catalogList').dispatchEvent(new Event('change')); }
+  if (catalogShown[0]) pickCatalog(catalogShown[0].id);
 });
-$('catalogFree').addEventListener('change', showCatalog);
-$('catalogTools').addEventListener('change', showCatalog);
-$('catalogList').addEventListener('change', () => {
-  const f = $('addForm');
-  const id = $('catalogList').value;
-  if (!id) return;
-  f.elements.model.value = id;
-  // Suggest a Gateway name for a new box from the model's own name
-  if (!f.dataset.name && !f.elements.name.value.trim()) {
-    f.elements.name.value = 'or-' + id.replace(/^[^/]+\//, '').replace(/:free$/, '-free').replace(/[^\w.-]+/g, '-');
-  }
-});
+for (const id of ['catalogFree', 'catalogTools', 'catalogReasoning', 'catalogVision', 'catalogProvider', 'catalogSort']) $(id).addEventListener('change', showCatalog);
 
 $('addForm').elements.provider.innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('');
 $('addForm').elements.provider.addEventListener('change', showProvider);
 $('addModel').addEventListener('click', () => openAdd(''));
 $('addCancel').addEventListener('click', () => $('addDialog').close());
+$('addClose').addEventListener('click', () => $('addDialog').close());
 
 $('addForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -706,21 +960,28 @@ $('guide').addEventListener('toggle', () => {
 // ---- loading and live requests -------------------------------------------
 
 async function load() {
-  const [status, settings, gateway] = await Promise.allSettled([getJSON('api/status'), getJSON('api/settings'), getJSON('api/gateway')]);
+  const [status, settings, gateway, profiles, tools] = await Promise.allSettled([
+    getJSON('api/status'), getJSON('api/settings'), getJSON('api/gateway'), getJSON('api/profiles'), getJSON('api/tools')]);
   const router = status.value?.components?.find(c => c.name === 'Router');
   info = {
     router: router?.ok && router.detail?.settings ? router.detail : null,
     settings: settings.value?.settings || null,
     gateway: gateway.value || null,
     gatewayError: gateway.reason?.message || null,
+    profiles: profiles.value || { profiles: [], version: undefined },
   };
+  toolInfo = tools.value || null;
   saved = graphFrom(info);
   graph = clone(saved);
+  try { view = new URLSearchParams(location.search).get('routing') || localStorage.getItem(VIEW_KEY) || ''; } catch {}
+  if (!graph.profiles.some(p => p.id === view)) view = '';
+  drawProfiles();
   $('routerFile').innerHTML = info.router?.config ? `<code>${esc(info.router.config)}</code>` : 'its config file';
   if (info.gateway?.file) $('gatewayFile').textContent = info.gateway.file;
   const issues = [
     !info.settings && `Interceptor settings: ${settings.reason?.message}`,
     !info.router && 'The Router is down or has no admin endpoints, so its choices can’t be changed.',
+    profiles.reason && `Named routings: ${profiles.reason.message}`,
     info.gatewayError && `Models and fallbacks can’t be edited: ${info.gatewayError}`,
   ].filter(Boolean);
   $('updated').textContent = `Loaded ${new Date().toLocaleTimeString()}`;
@@ -746,11 +1007,14 @@ function followLive() {
     try { update = JSON.parse(msg.data); } catch { return; }
     const e = update.event || {};
     if (update.type === 'route' && e.model) {
+      // Only requests on the routing shown light up its lines; any model box still flashes
+      const mine = (e.profile || null) === (view ? R().name : null);
       let wires;
-      if (e.reason === 'pinned in settings') wires = ['entry.pin'];
+      if (!mine) wires = [];
+      else if (e.reason?.startsWith('pinned in')) wires = ['fixed', 'entry.pin'];
       else if (e.reason) wires = [];
-      else if (e.routerError) wires = [e.tools ? 'entry.downTools' : 'entry.down'];
-      else wires = ['fixed', ...ROUTER_OUTS.filter(o => graph[o.key] === e.model).map(o => `router.${o.key}`)];
+      else if (e.routerError) wires = ['fixed', e.tools ? 'entry.downTools' : 'entry.down'];
+      else wires = ['fixed', 'fixed2', ...ROUTER_OUTS.filter(o => R()[o.key] === e.model).map(o => `router.${o.key}`)];
       flash([...wires, `m:${e.model}`]);
     } else if (update.type === 'response' && e.servedBy && e.servedBy !== e.model) {
       flash([['fb', e.model, e.servedBy].join('|'), `m:${e.servedBy}`]);

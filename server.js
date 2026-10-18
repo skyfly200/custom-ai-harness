@@ -14,6 +14,7 @@ const {
 } = require('./utils/messageTransforms');
 const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
+const profiles = require('./utils/profiles');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
@@ -67,20 +68,26 @@ function estimateTokens(body) {
  * Never throws: a down Router degrades to the free tier. Requests with tools
  * (every Claude Code request) tell the Router so, and it picks a weak model
  * that can call tools; the wildcard free tier may answer them with text.
+ * With a named routing (`profile`, utils/profiles.js) the Router only scores
+ * the request and the profile's own outputs pick the model.
  */
-async function routeModel(body, requested) {
+async function routeModel(body, requested, profile) {
     const { messages } = body;
     const config = settings.get();
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
-    const threshold = config.fixedThreshold ?? deriveThreshold(messages);
+    const fixed = profile ? profile.threshold : config.fixedThreshold;
+    const threshold = fixed ?? deriveThreshold(messages);
+    const base = { threshold, winRate: null, tools: hasTools, ...(profile && { profile: profile.name }) };
     // A client can name a model in the x-harness-model header (the chat page does)
-    if (requested) return { model: requested, threshold, winRate: null, tools: hasTools, reason: 'chosen by the client' };
-    if (config.pinModel) return { model: config.pinModel, threshold, winRate: null, tools: hasTools, reason: 'pinned in settings' };
+    if (requested) return { ...base, model: requested, reason: 'chosen by the client' };
+    if (profile?.pin) return { ...base, model: profile.pin, reason: `pinned in routing ${profile.name}` };
+    if (!profile && config.pinModel) return { ...base, model: config.pinModel, reason: 'pinned in settings' };
     try {
+        const tokens = estimateTokens(body);
         const res = await fetch(`${ROUTER_URL}/route`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ prompt: latestUserText(messages), threshold, tokens: estimateTokens(body), tools: hasTools }),
+            body: JSON.stringify({ prompt: latestUserText(messages), threshold, tokens, tools: hasTools }),
             signal: AbortSignal.timeout(config.routerTimeoutMs),
         });
         if (!res.ok) {
@@ -89,11 +96,12 @@ async function routeModel(body, requested) {
             throw new Error(`HTTP ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
         }
         const { model, win_rate } = await res.json();
-        return { model, threshold, winRate: win_rate, tools: hasTools };
+        return { ...base, model: profile ? profiles.pick(profile, win_rate, threshold, tokens, hasTools) : model, winRate: win_rate };
     } catch (err) {
-        const model = hasTools ? config.routerDownToolsModel : config.routerDownModel;
+        const from = profile || { down: config.routerDownModel, downTools: config.routerDownToolsModel };
+        const model = hasTools ? from.downTools : from.down;
         console.warn(`Router unavailable (${err.message}); using ${model}`);
-        return { model, threshold, winRate: null, tools: hasTools, routerError: err.message };
+        return { ...base, model, routerError: err.message };
     }
 }
 
@@ -280,6 +288,18 @@ app.post('/ui/api/settings', localJsonOnly, (req, res) => {
     }
 });
 app.post('/ui/api/settings/reset', localJsonOnly, (req, res) => res.json({ settings: settings.reset(), defaults: settings.DEFAULTS }));
+
+// Named routings (utils/profiles.js): the routing editor saves them, the chat
+// page picks one per chat or project, any client can name one in x-harness-profile.
+app.get('/ui/api/profiles', (req, res) => res.json(profiles.state()));
+// {version, profiles: [...]} replaces the whole list
+app.post('/ui/api/profiles', localJsonOnly, (req, res) => {
+    try {
+        res.json(profiles.replace(req.body?.profiles, req.body?.version));
+    } catch (err) {
+        res.status(err.status || 400).json({ error: err.message });
+    }
+});
 
 // The Gateway's models and fallback chains, for the routing editor (ui/routing.html).
 // Saving removes or appends model_list entries and rewrites fallback lines in
@@ -519,16 +539,30 @@ app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
     }
 });
 
+// The named routing a request asked for with x-harness-profile (null: the default)
+function profileOf(req) {
+    const id = req.get('x-harness-profile');
+    const p = profiles.get(id);
+    if (id && !p) console.warn(`Unknown routing "${id}"; using the default`);
+    return p;
+}
+
+// Which transforms run: the request's routing decides, else the Interceptor settings
+function transformsFor(req) {
+    const { caveman, headroom, contextAnchor } = req.harnessProfile || settings.get();
+    return { caveman, headroom, contextAnchor };
+}
+
 // Context anchor first, on the raw results, then Headroom compression
-function compressToolResults(messages) {
-    const { headroom, contextAnchor } = settings.get();
+function compressToolResults(req, messages) {
+    const { headroom, contextAnchor } = transformsFor(req);
     const anchored = contextAnchor ? applyContextAnchor(messages) : messages;
     return headroom ? applyHeadroom(anchored) : anchored;
 }
 
 // Transforms the Interceptor applied to this request, for the live feed
-function activeTransforms() {
-    const { caveman, headroom, contextAnchor } = settings.get();
+function activeTransforms(req) {
+    const { caveman, headroom, contextAnchor } = transformsFor(req);
     return [caveman && 'caveman', headroom && 'headroom', contextAnchor && 'context anchor'].filter(Boolean);
 }
 
@@ -537,7 +571,7 @@ async function routeAndRecord(req, res) {
     const prompt = latestUserText(req.body.messages);
     monitor.recordRouting({ path: req.path, clientId, prompt });
     const started = Date.now();
-    const route = await routeModel(req.body, req.get('x-harness-model'));
+    const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile);
     req.body.model = route.model;
     logRoute(req.path, route);
     req.harnessClient = usage.clientOf(req);
@@ -546,19 +580,21 @@ async function routeAndRecord(req, res) {
         + Math.ceil(JSON.stringify(req.body.tools || []).length / 4);
     req.harnessEvent = monitor.recordRoute({
         path: req.path, ...route, tokens: estimateTokens(req.body), prompt, clientId,
-        transforms: activeTransforms(), routeMs: Date.now() - started,
+        transforms: activeTransforms(req), routeMs: Date.now() - started,
     });
     // Tell the client where its request went (the chat page shows it)
     res.set('x-harness-event', String(req.harnessEvent.id));
     res.set('x-harness-model', route.model);
     res.set('x-harness-route', route.reason || (route.routerError ? 'router down'
         : `win rate ${route.winRate} vs threshold ${route.threshold}`));
+    if (route.profile) res.set('x-harness-profile', encodeURIComponent(route.profile));
 }
 
 // OpenAI-compatible agents (Cursor, Aider, Continue, ...) and the chat page
 app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) => {
+    req.harnessProfile = profileOf(req);
     const messages = req.body.messages || [];
-    req.body.messages = compressToolResults(settings.get().caveman ? withCavemanOpenAI(messages) : messages);
+    req.body.messages = compressToolResults(req, transformsFor(req).caveman ? withCavemanOpenAI(messages) : messages);
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);
     req.body.max_completion_tokens = capMaxTokens(req.body.max_completion_tokens);
     await routeAndRecord(req, res);
@@ -567,8 +603,9 @@ app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) =
 
 // Anthropic Messages API: Claude Code with ANTHROPIC_BASE_URL=http://localhost:3000
 app.post('/v1/messages', async (req, res, next) => {
-    req.body.messages = compressToolResults(dropUnsignedThinking(req.body.messages || []));
-    if (settings.get().caveman) req.body.system = withCavemanAnthropic(req.body.system);
+    req.harnessProfile = profileOf(req);
+    req.body.messages = compressToolResults(req, dropUnsignedThinking(req.body.messages || []));
+    if (transformsFor(req).caveman) req.body.system = withCavemanAnthropic(req.body.system);
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);
     await routeAndRecord(req, res);
     next();

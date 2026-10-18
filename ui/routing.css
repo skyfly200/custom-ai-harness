@@ -82,14 +82,71 @@ main.wide { max-width: none; }
 .add-dep { align-self: flex-start; color: var(--muted); }
 .tag { flex: none; font-size: 10.5px; font-weight: 600; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border); color: var(--muted); }
 
-dialog#addDialog { width: min(440px, calc(100vw - 32px)); padding: 16px; color: var(--text); }
+dialog#addDialog { width: min(1180px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 18px 20px; color: var(--text); }
+dialog#addDialog.narrow { width: min(560px, calc(100vw - 32px)); }
 dialog#addDialog::backdrop { background: rgba(0,0,0,.35); }
-dialog#addDialog h3 { margin: 0 0 4px; font-size: 16px; }
-dialog#addDialog form { display: flex; flex-direction: column; gap: 10px; }
-dialog#addDialog .actions { margin-top: 2px; }
+dialog#addDialog h3 { margin: 0 0 4px; font-size: 17px; }
+dialog#addDialog form { display: flex; flex-direction: column; gap: 12px; }
+dialog#addDialog .add-head { display: flex; align-items: flex-start; gap: 12px; }
+dialog#addDialog .add-head > div { flex: 1; }
+dialog#addDialog .add-head .close { padding: 0 8px; font-size: 18px; line-height: 26px; border-radius: 6px; }
+dialog#addDialog .add-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 14px; }
+dialog#addDialog.narrow .add-fields { grid-template-columns: 1fr; }
+dialog#addDialog .actions { margin-top: 2px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 dialog#addDialog p { margin: 0; }
 dialog#addDialog [hidden] { display: none; }
-dialog#addDialog .catalog-filters { display: flex; gap: 8px; align-items: center; }
-dialog#addDialog .catalog-filters input[type="search"] { flex: 1; min-width: 0; }
-dialog#addDialog .catalog-filters label { display: flex; gap: 4px; align-items: center; white-space: nowrap; font-size: 13px; }
-dialog#addDialog #catalogList { width: 100%; font-size: 13px; }
+.catalog { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.catalog-filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.catalog-filters input[type="search"] { flex: 1 1 260px; min-width: 0; }
+.catalog-filters label { display: flex; gap: 4px; align-items: center; white-space: nowrap; font-size: 13px; }
+.catalog-filters select { font-size: 13px; }
+.catalog-body { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 12px; height: min(52vh, 520px); min-height: 280px; }
+.catalog-table { overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); outline: none; }
+.catalog-table:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.catalog-row { display: grid; grid-template-columns: minmax(0, 1fr) 62px 76px 80px 190px; gap: 8px; align-items: center;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; cursor: pointer; }
+.catalog-row > span:nth-child(n+2):nth-child(-n+4) { text-align: right; font-variant-numeric: tabular-nums; }
+.catalog-row:hover { background: var(--panel); }
+.catalog-row.on { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+.catalog-th { position: sticky; top: 0; z-index: 1; background: var(--panel); cursor: default; font-size: 11px; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.catalog-th:hover { background: var(--panel); }
+.catalog-row .cm { display: flex; flex-direction: column; min-width: 0; }
+.catalog-row .cm b, .catalog-row .cm code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-row .cm b { font-weight: 600; }
+.catalog-row .cm code { font-size: 11px; color: var(--muted); }
+.badges { display: flex; flex-wrap: wrap; gap: 3px; }
+.badge { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.badge.free { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--border)); }
+.badge.warn { color: var(--warn); }
+.catalog-detail { overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--panel); font-size: 13px; }
+.catalog-detail h4 { margin: 0; font-size: 15px; }
+.catalog-detail .id { display: block; margin: 2px 0 8px; font-size: 12px; color: var(--muted); word-break: break-all; }
+.catalog-detail .desc { margin: 8px 0; line-height: 1.5; color: var(--text); max-height: 9em; overflow: auto; }
+.catalog-detail .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 8px 0; }
+.catalog-detail dt { color: var(--muted); }
+.catalog-detail dd { margin: 0; font-variant-numeric: tabular-nums; }
+.catalog-detail .params { display: flex; flex-wrap: wrap; gap: 3px; margin: 6px 0; }
+.catalog-detail .params span { font: 11px ui-monospace, monospace; padding: 0 5px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); color: var(--muted); }
+.catalog-detail .links { margin-top: 8px; }
+@media (max-width: 760px) {
+  .catalog-body { grid-template-columns: 1fr; height: auto; }
+  .catalog-table { max-height: 45vh; }
+  .catalog-row { grid-template-columns: minmax(0, 1fr) 54px 64px; }
+  .catalog-row > span:nth-child(4), .catalog-row > span:nth-child(5) { display: none; }
+}
+
+.profiles { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; }
+.profile-pick { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.profile-pick select { font: inherit; font-weight: 500; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); min-width: 200px; }
+.profiles .small { font-size: 12.5px; flex: 1 1 320px; }
+.node.compress .head { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); }
+.node.tools .head { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.node .body label.check { flex-direction: row; align-items: center; gap: 6px; font-weight: 500; }
+.node .body label.check input { width: auto; }
+.node .muted.small { font-size: 12px; }
+.mcp { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.mcp label.check { display: flex; font-size: 12px; min-width: 0; }
+.mcp .name { flex: 1; }
+.mcp .dot { width: 8px; height: 8px; }
+.catalog-detail a { color: var(--accent); }

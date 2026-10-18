@@ -1,11 +1,19 @@
 :root {
-  --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5f6b7a; --border: #dde1e6;
-  --ok: #1a7f37; --bad: #cf222e; --warn: #9a6700; --off: #8c959f; --accent: #0969da;
+  --bg: #f5f4fb; --panel: #ffffff; --text: #1a1830; --muted: #625f78; --border: #e2dfee;
+  --ok: #1a7f37; --bad: #cf222e; --warn: #9a6700; --off: #8c959f; --accent: #6a4cf5;
+  /* Bright Chat glow colours: amber, pink, violet, cyan */
+  --glow-a: #f59e0b; --glow-b: #ec4899; --glow-c: #7c5cff; --glow-d: #06b6d4;
+  --glass: rgba(255, 255, 255, .74); --glass-strong: rgba(255, 255, 255, .9);
+  --brand: linear-gradient(115deg, var(--glow-a), var(--glow-b) 38%, var(--glow-c) 68%, var(--glow-d));
+  --shadow: 0 1px 2px rgba(30, 20, 80, .06), 0 6px 24px -8px rgba(60, 40, 160, .14);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1216; --panel: #171b21; --text: #e6e9ed; --muted: #95a0ad; --border: #2a3038;
-    --ok: #3fb950; --bad: #f85149; --warn: #d29922; --off: #6e7681; --accent: #4493f8;
+    --bg: #08070f; --panel: #14131f; --text: #ecebf5; --muted: #9a97b0; --border: #2a2840;
+    --ok: #3fb950; --bad: #f85149; --warn: #d29922; --off: #6e7681; --accent: #9b87ff;
+    --glow-a: #ffb547; --glow-b: #ff5fa2; --glow-c: #8b6cff; --glow-d: #3fd0ff;
+    --glass: rgba(20, 19, 31, .66); --glass-strong: rgba(20, 19, 31, .88);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px -10px rgba(0, 0, 0, .6);
   }
 }
 * { box-sizing: border-box; }
@@ -49,7 +57,7 @@ nav a:hover { color: var(--accent); }
 .field small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .field.check { flex-direction: row; align-items: flex-start; gap: 8px; }
 .field.check input { margin-top: 3px; }
-input[type=text], input[type=number], textarea { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%; min-width: 0; }
+input[type=text], input[type=number], input[type=search], input[type=datetime-local], textarea { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%; min-width: 0; }
 .subhead { font-weight: 600; margin: 16px 0 8px; font-size: 13px; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
 .note { font-size: 13px; }

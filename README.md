@@ -8,13 +8,13 @@ What you get:
 
 - **Lower cost.** Most requests go to free models, and requests are compressed before they are sent.
 - **Fewer failures.** When a model refuses, errors or hits its limit, another one takes over.
-- **A dashboard.** A web page shows what each request did, which model answered and why, and lets you change settings without editing files.
+- **Bright Chat.** A web app with a chat page, projects and costs, plus a dashboard that shows what each request did, which model answered and why, and lets you change settings without editing files.
 
 ### The three parts you run
 
 | Part | What it does | Address |
 |------|--------------|---------|
-| **Interceptor** | The front door. Your coding assistant connects here. It also serves the dashboard and chat page. | http://localhost:3000 |
+| **Interceptor** | The front door. Your coding assistant connects here. It also serves Bright Chat, the web app with the dashboard and chat page. | http://localhost:3000 |
 | **Router** | Looks at each request and answers one question: does this need a strong model, or will a free one do? | http://localhost:6060 |
 | **Gateway** (LiteLLM) | Sends the request to the chosen model and switches to a backup if that one fails. | http://localhost:4000 |
 
@@ -67,7 +67,7 @@ Open three PowerShell windows, `cd` into the `custom-ai-harness` folder in each,
 | 2 | Router | `.\.venv\Scripts\Activate.ps1; python router.py` |
 | 3 | Interceptor | `npm start` |
 
-Then open the dashboard at <http://localhost:3000/ui>. When the Router and Gateway show as up, the harness is ready. The local engine, Ollama and Laya are optional and normally show as "not running". To stop, press Ctrl+C in each window.
+Then open Bright Chat, the harness's web app, at <http://localhost:3000/ui>. It opens on the dashboard. When the Router and Gateway show as up, the harness is ready. The local engine, Ollama and Laya are optional and normally show as "not running". To stop, press Ctrl+C in each window.
 
 ### Connect Claude Code
 
@@ -557,6 +557,8 @@ The Interceptor routes each request and the Gateway translates the Anthropic Mes
 
 ### Control UI
 
+The web app is called **Bright Chat**. Its pages draw a slowly turning "embedding space" in the background: words with similar meanings sit in clusters, and the mouse acts as a query that lights up its nearest neighbours. The dots-and-lines button at the end of the page links turns it off (your choice is kept in the browser), and it stays still when Windows or your browser asks for reduced motion (Windows: Settings → Accessibility → Visual effects → Animation effects).
+
 With the Interceptor running, open <http://localhost:3000/ui>. The dashboard refreshes every 3 seconds and shows:
 
 - **Components**: whether the Router, Gateway, local engine (port 8000), Ollama (11434) and a local Laya (8001) answer, and which classifier the Router is using. The last three are optional and show as "not running" rather than down.
@@ -572,9 +574,12 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 <http://localhost:3000/ui/chat.html> is a chat page that sends through the Interceptor like any other client, so the Router picks the model unless you name one. What it does:
 
 - **Live progress.** Each reply shows its steps as they happen: the Router choosing, the model it picked and why, the transforms applied, the Gateway's answer (with fallbacks and the model that actually served it), time to first token and tokens per second. The **Activity** panel shows every request through the harness live, from this page and from other clients such as Claude Code, plus the health of each part. Both come from `/ui/api/live`, a Server-Sent Events feed of the routing log.
-- **Chats.** Every chat is saved in the browser and listed on the left with search. Alt+↑/↓ moves between chats, Ctrl+Shift+O starts a new one, Ctrl+K searches. Delete a chat with its trash button in the list or the one in the top bar, or all of them with **Delete all chats** under the list.
+- **Chats.** Every chat is saved in the browser and listed on the left under **Recent**, newest first, with search. Alt+↑/↓ moves between chats, Ctrl+Shift+O starts a new one, Ctrl+K searches. A chat that is replying shows what it is doing in the list (routing, thinking, writing with a token count, or the tool it is using), and one that finished while you were elsewhere gets a dot. After the first reply, the model is asked for a short name for the chat (turn this off under Options → Model **Name new chats automatically**; type a title to rename it yourself). Hover a chat to show its × delete button, or use the trash button in the top bar, or **Delete all chats** under the list.
+- **Projects.** The **+** next to *Projects* in the sidebar makes one: a name, a colour, instructions sent with every chat in it, skills that are on for every chat in it, and optionally a git repo its chats can read. Click a project to see only its chats; **New chat** then starts one inside it. Move a chat into or out of a project under Options → Context. The project's settings (the gear on hover, or its badge in the top bar) also show its total tokens and cost. Deleting a project keeps its chats.
+- **Scheduled messages.** The **+** next to *Scheduled* sends a message at a set time, once or every hour, day, weekday or week, into a new chat each time (optionally in a project) or into an existing chat. They run while Bright Chat is open in a browser tab; a run missed while it was closed happens as soon as the page opens. **Run now** in a schedule sends it straight away.
+- **Skills.** A skill is named instructions: a review checklist, a writing style, the steps for a task. The sparkle button in the message box (or typing `/` in an empty box) lists them: tick one to turn it on for this chat. **Manage skills** adds and edits them (three examples are added the first time). **Let the model load other skills when it needs them** gives the model a `use_skill` tool and a list of your skills, so it can read one when a question matches; like any tool, this sends requests to tool-capable models. The same panel lists the MCP tools (see below).
 - **Stop, resend and frozen replies.** A reply in progress has a **Stop** button (or press Esc), and every message you sent has a resend button. The Interceptor already fails a request that gets no answer within 5 minutes or goes quiet for 2 (see `gatewayTimeoutMs` and `streamIdleTimeoutMs`); as a backstop, for example when the Interceptor itself stops answering, the page gives up after 310 and 130 seconds and offers Retry. Change both under Options → Model (0 waits forever). Free models often stall or return HTTP 429 once their daily or per-minute quota is used up, and the error says so.
-- **Costs and context.** Each reply shows what it cost (`free` for free and local models), and the top bar shows the chat's tokens, total cost and how full the model's context window is for the next message (hover for details). Prices and context sizes come from the Gateway's `/v1/model/info` through `/ui/api/model-info`; a provider's own figure (OpenRouter's `usage.cost`, LiteLLM's `x-litellm-response-cost` header) wins when there is one.
+- **Costs and context.** Each reply shows what it cost (`free` for free and local models), and the top bar shows the chat's tokens, total cost and how full the model's context window is for the next message. Click those numbers for a breakdown: a bar per reply (sent and written tokens), tokens and cost by model, the size of the next message against the model's context window, and the project's totals. Prices and context sizes come from the Gateway's `/v1/model/info` through `/ui/api/model-info`; a provider's own figure (OpenRouter's `usage.cost`, LiteLLM's `x-litellm-response-cost` header) wins when there is one.
 - **Formatting and copying.** Replies render Markdown (headings, lists, tables, quotes, highlighted code). Every message has a copy button, and so does every code block. Messages can be edited and resent, and the last reply regenerated.
 - **Export.** Download a chat as Markdown, copy it, or export every chat into one file.
 - **Context.** Attach text files and images with the paperclip, by dropping them on the page, or by pasting. Under Options, each chat has a system prompt and notes the model sees with every message. The composer shows a rough token count for the request.
@@ -613,7 +618,9 @@ Tools run only for requests from this computer (`/ui/api/tools/call` refuses oth
 
 - **Flow through the harness**: clients (Claude Code, the chat page, Aider, other API clients) into the Interceptor, how the model was picked (the Router, a pinned model, the client's choice, or the Router being down), then the Gateway and the service that answered (OpenRouter, Groq, Ollama, the local CLI wrapper...). Line widths follow the tokens.
 - **Sankey diagram**: client → model asked for → model that served it (after any Gateway fallbacks) → service, coloured by service.
-- **Bars and a table** of input, cached input and output tokens and requests by model and by service. A switch shows all tokens, input, output or request counts.
+- **Costs**: spend for the range, the 30-day pace it is on, the cost per request and per million tokens, and how many requests went to free or local models. Prices come from the Gateway's price list (`/v1/model/info`) for the model that answered; models with no listed price show `?` and are left out of the totals. Cached input is counted at the full input price, so the figures can run a little high for Anthropic models.
+- **Over time**: a bar per day, split by the service that answered.
+- **Bars and a table** of input, cached input and output tokens, requests and cost by model and by service. A switch sizes every chart by all tokens, input, output, request counts or cost.
 
 The counts are the ones each reply reports (`usage` in OpenAI replies, `input_tokens`/`output_tokens` in Anthropic ones, streamed or not). Replies without them, such as OpenAI streams that don't ask for `stream_options.include_usage`, are estimated at about 4 characters a token and marked ~. The service for each model comes from its `litellm_params` in `config.yaml`. Totals are kept per day in `harness-usage.json` (gitignored) so they survive a restart; **Clear totals** on the page empties it. The page updates live as requests finish, and the dashboard's routing log shows the same in/out counts per request.
 

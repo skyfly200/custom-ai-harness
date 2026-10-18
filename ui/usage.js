@@ -1,6 +1,7 @@
 // Usage page: token totals from /ui/api/usage drawn as a flow chart, a Sankey
-// diagram, bars and a table. Plain SVG, no libraries. Refreshes live when the
-// Interceptor's feed reports a finished request.
+// diagram, a chart over time, bars and a table, with costs worked out from the
+// Gateway's price list (/ui/api/model-info). Plain SVG, no libraries.
+// Refreshes live when the Interceptor's feed reports a finished request.
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -8,11 +9,30 @@ const SVG = 'http://www.w3.org/2000/svg';
 const fmt = (n) => Math.round(n).toLocaleString();
 const short = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : fmt(n);
 
-const MEASURES = { total: 'tokens', input: 'input tokens', output: 'output tokens', requests: 'requests' };
+const MEASURES = { total: 'tokens', input: 'input tokens', output: 'output tokens', requests: 'requests', cost: 'cost' };
+const usd = (n) => n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : n < 100 ? `$${n.toFixed(2)}` : `$${Math.round(n).toLocaleString()}`;
+// A value of the selected measure, written out
+const showV = (n, m = state.measure) => (m === 'cost' ? usd(n) : `${short(n)} ${MEASURES[m]}`);
+const shortV = (n, m = state.measure) => (m === 'cost' ? usd(n) : short(n));
+
+// Prices per token by Gateway model name; rows get .cost (dollars) and
+// .unpriced (requests on models with no known price)
+let prices = {};
+function price(rows) {
+  for (const r of rows) {
+    const p = prices[r.servedBy];
+    if (p?.free) { r.cost = 0; r.unpriced = 0; r.freeRequests = r.requests; continue; }
+    r.freeRequests = 0;
+    if (!p || p.inputCost == null) { r.cost = 0; r.unpriced = r.requests; continue; }
+    r.cost = r.input * p.inputCost + r.output * (p.outputCost || 0);
+    r.unpriced = 0;
+  }
+  return rows;
+}
 const state = { days: 7, measure: 'total', data: { rows: [] } };
 try { Object.assign(state, JSON.parse(localStorage.getItem('usage-view') || '{}')); } catch {}
 
-const valueOf = (r, m = state.measure) => m === 'total' ? r.input + r.output : r[m];
+const valueOf = (r, m = state.measure) => m === 'total' ? r.input + r.output : r[m] || 0;
 
 // Services keep their colour whatever the filter: known ones have fixed slots,
 // others take the free slots in name order, and past eight share a grey.
@@ -45,7 +65,8 @@ function hoverable(el, html) {
   el.addEventListener('mouseleave', hideTip);
 }
 function tipBody(title, r) {
-  return `<b>${esc(title)}</b><br>${fmt(r.input)} input · ${fmt(r.output)} output<br><span class="muted">${fmt(r.requests)} request${r.requests === 1 ? '' : 's'}${r.cacheRead ? ` · ${fmt(r.cacheRead)} cached input` : ''}${r.estimated ? ` · ${fmt(r.estimated)} estimated` : ''}</span>`;
+  const cost = r.unpriced >= r.requests ? 'no known price' : `${r.cost ? `≈ ${usd(r.cost)}` : 'free'}${r.unpriced ? ` (+${fmt(r.unpriced)} unpriced)` : ''}`;
+  return `<b>${esc(title)}</b><br>${fmt(r.input)} input · ${fmt(r.output)} output · ${cost}<br><span class="muted">${fmt(r.requests)} request${r.requests === 1 ? '' : 's'}${r.cacheRead ? ` · ${fmt(r.cacheRead)} cached input` : ''}${r.estimated ? ` · ${fmt(r.estimated)} estimated` : ''}</span>`;
 }
 
 // ---- helpers ----------------------------------------------------------------
@@ -61,9 +82,10 @@ function text(parent, x, y, str, attrs = {}) {
   return t;
 }
 const fit = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const blank = () => ({ requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
+const SUMS = ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated', 'cost', 'unpriced', 'freeRequests'];
+const blank = () => Object.fromEntries(SUMS.map(k => [k, 0]));
 function add(t, r) {
-  for (const k of ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated']) t[k] += r[k] || 0;
+  for (const k of SUMS) t[k] += r[k] || 0;
   return t;
 }
 function groupBy(rows, key) {
@@ -86,18 +108,76 @@ function emptyChart(svg, msg) {
 }
 
 // ---- tiles ------------------------------------------------------------------
-function renderTiles(rows) {
+// Days the chart spans: the selected range, or since the first day counted
+function rangeDays(daily) {
+  if (state.days) return state.days;
+  if (!daily.length) return 1;
+  return Math.max(1, Math.round((Date.parse(new Date().toISOString().slice(0, 10)) - Date.parse(daily[0].day)) / 86400000) + 1);
+}
+// Days that had a chance to count, for daily averages: a 30-day range that
+// started counting a week ago averages over the week
+const countedDays = (daily) => (daily.length ? Math.min(rangeDays(daily), Math.floor((Date.now() - Date.parse(daily[0].day)) / 86400000) + 1) : 1);
+function renderTiles(rows, daily) {
   const t = rows.reduce(add, blank());
-  const tiles = [
-    ['All tokens', short(t.input + t.output)],
-    ['Input', short(t.input)],
-    ['Output', short(t.output)],
-    ['Cached input', short(t.cacheRead)],
-    ['Requests', fmt(t.requests)],
-    ['Services', new Set(rows.map(r => r.provider)).size],
-  ];
-  $('tiles').innerHTML = tiles.map(([label, v]) => `<div class="card stat"><div class="label">${label}</div><div class="num">${v}</div></div>`).join('')
-    + (t.estimated ? `<div class="card stat"><div class="label">Estimated</div><div class="num">${Math.round(100 * t.estimated / t.requests)}%</div><div class="sub">of requests had no usage in the reply</div></div>` : '');
+  const priced = t.requests - t.unpriced;
+  const perDay = t.cost / Math.max(1, countedDays(daily));
+  const tile = (label, v, sub = '', cls = '') => `<div class="card stat${cls}"><div class="label">${label}</div><div class="num">${v}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+  $('tiles').innerHTML = [
+    tile('Spend', usd(t.cost), t.unpriced ? `+ ${fmt(t.unpriced)} request${t.unpriced === 1 ? '' : 's'} with no known price` : 'from the Gateway’s prices', ' money'),
+    tile('Per 30 days', usd(perDay * 30), `at ${usd(perDay)} a day`, ' money'),
+    tile('Per request', priced ? usd(t.cost / priced) : '–', priced ? `over ${fmt(priced)} priced` : '', ' money'),
+    tile('Per million tokens', t.input + t.output ? usd(t.cost / (t.input + t.output) * 1e6) : '–', 'input and output', ' money'),
+    tile('Free', t.requests ? `${Math.round(100 * t.freeRequests / t.requests)}%` : '–', 'of requests on free or local models'),
+    tile('All tokens', short(t.input + t.output), `${short(t.input)} in · ${short(t.output)} out`),
+    tile('Cached input', short(t.cacheRead), t.input ? `${Math.round(100 * t.cacheRead / t.input)}% of input` : ''),
+    tile('Requests', fmt(t.requests), `${new Set(rows.map(r => r.provider)).size} services`),
+  ].join('') + (t.estimated ? tile('Estimated', `${Math.round(100 * t.estimated / t.requests)}%`, 'of requests had no usage in the reply') : '');
+}
+
+// ---- over time ----------------------------------------------------------------
+// One stacked bar a day, a band per service, sized by the selected measure
+function renderTimeline(daily, colors) {
+  const svg = $('timeline');
+  if (!daily.length) return emptyChart(svg, 'No requests in this range yet.');
+  svg.replaceChildren();
+  const last = new Date().toISOString().slice(0, 10);
+  const n = rangeDays(daily);
+  const days = [];
+  for (let i = n - 1; i >= 0; i--) days.push(new Date(Date.parse(last) - i * 86400000).toISOString().slice(0, 10));
+  const byDay = new Map(days.map(d => [d, new Map()]));
+  for (const r of daily) {
+    const m = byDay.get(r.day);
+    if (m) m.set(r.provider, add(m.get(r.provider) || blank(), r));
+  }
+  const totals = days.map(d => [...byDay.get(d).values()].reduce(add, blank()));
+  const max = Math.max(...totals.map(t => valueOf(t)), 0) || 1;
+  const W = 1120, H = 240, L = 64, B = 26, T = 12;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const step = (W - L - 8) / days.length, bw = Math.max(3, Math.min(42, step * 0.66));
+  const y = (v) => H - B - (v / max) * (H - B - T);
+  for (let k = 0; k <= 4; k++) {
+    const v = (max * k) / 4;
+    el('line', { x1: L, x2: W - 4, y1: y(v), y2: y(v), class: 'grid' }, svg);
+    text(svg, L - 8, y(v) + 4, shortV(v), { 'text-anchor': 'end', class: 'muted' });
+  }
+  const order = [...new Set(daily.map(r => r.provider))].sort();
+  const every = Math.ceil(days.length / 12);
+  days.forEach((d, i) => {
+    const x = L + i * step + (step - bw) / 2;
+    let top = H - B;
+    for (const p of order) {
+      const v = byDay.get(d).get(p);
+      if (!v || !valueOf(v)) continue;
+      const h = (valueOf(v) / max) * (H - B - T);
+      top -= h;
+      const r = el('rect', { x, y: top, width: bw, height: Math.max(0.5, h), rx: 2, fill: colors[p] || 'var(--link-other)', class: 'day-seg' }, svg);
+      hoverable(r, () => tipBody(`${p} · ${new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}`, v));
+    }
+    if (i % every === 0 || i === days.length - 1) {
+      text(svg, x + bw / 2, H - 8, new Date(d + 'T12:00').toLocaleDateString(undefined, n <= 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' }), { 'text-anchor': 'middle', class: 'muted' });
+    }
+  });
+  $('timelineNote').textContent = `${state.measure === 'cost' ? 'Spend' : 'Usage'} per day, by the service that answered. Busiest day: ${shortV(Math.max(...totals.map(t => valueOf(t))))} on ${new Date(days[totals.findIndex(t => valueOf(t) === Math.max(...totals.map(x => valueOf(x))))] + 'T12:00').toLocaleDateString()}.`;
 }
 
 // ---- flow chart -------------------------------------------------------------
@@ -152,7 +232,7 @@ function renderFlow(rows, colors) {
     el('rect', { x: it.x, y: it.y, width: BW, height: BH, rx: 7, class: `box${it.hub ? ' hub' : ''}` }, g);
     if (it.color) el('rect', { x: it.x, y: it.y + 8, width: 4, height: BH - 16, rx: 2, fill: it.color }, g);
     text(g, it.x + 12, it.y + 20, fit(it.label, 22));
-    text(g, it.x + 12, it.y + 38, `${short(valueOf(it.v))} ${MEASURES[state.measure]}${it.sub ? ` · ${it.sub}` : ''}`, { class: 'muted' });
+    text(g, it.x + 12, it.y + 38, `${showV(valueOf(it.v))}${it.sub ? ` · ${it.sub}` : ''}`, { class: 'muted' });
     hoverable(g, () => tipBody(it.label, it.v));
   }
 }
@@ -164,7 +244,7 @@ function renderSankey(rows, colors) {
   const live = rows.filter(r => valueOf(r) > 0);
   $('legend').innerHTML = [...new Set(rows.map(r => r.provider))].sort()
     .map(p => `<span><i class="sw" style="background:${colors[p]}"></i>${esc(p)}</span>`).join('');
-  if (!live.length) return emptyChart(svg, `No ${MEASURES[state.measure]} in this range yet.`);
+  if (!live.length) return emptyChart(svg, state.measure === 'cost' ? 'Nothing with a known price in this range yet.' : `No ${MEASURES[state.measure]} in this range yet.`);
   svg.replaceChildren();
 
   const keys = ['client', 'model', 'servedBy', 'provider'];
@@ -242,7 +322,7 @@ function renderSankey(rows, colors) {
       el('rect', { x: n.x, y: n.y, width: NW, height: n.h, rx: 2, class: 'node', ...(ci === keys.length - 1 && colors[n.name] ? { style: `fill:${colors[n.name]}` } : {}) }, g);
       const lx = left ? n.x - 6 : n.x + NW + 6, anchor = left ? 'end' : 'start', cy = n.y + n.h / 2;
       text(g, lx, cy - 2, fit(n.name, 26), { 'text-anchor': anchor, ...halo });
-      text(g, lx, cy + 12, short(valueOf(n.v)), { 'text-anchor': anchor, class: 'muted', ...halo });
+      text(g, lx, cy + 12, shortV(valueOf(n.v)), { 'text-anchor': anchor, class: 'muted', ...halo });
       hoverable(g, () => tipBody(n.name, n.v));
     }
   });
@@ -252,14 +332,17 @@ function renderSankey(rows, colors) {
 function renderBars(target, rows, key, colors) {
   const groups = [...groupBy(rows, key)].sort((a, b) => valueOf(b[1]) - valueOf(a[1]));
   if (!groups.length) { $(target).innerHTML = '<div class="muted">No requests in this range yet.</div>'; return; }
-  const reqs = state.measure === 'requests';
-  const max = Math.max(...groups.map(([, v]) => (reqs ? v.requests : v.input + v.output)), 1);
+  const reqs = state.measure === 'requests', money = state.measure === 'cost';
+  const max = Math.max(...groups.map(([, v]) => (reqs ? v.requests : money ? v.cost : v.input + v.output)), money ? 1e-9 : 1);
   $(target).replaceChildren(...groups.map(([k, v]) => {
     const div = document.createElement('div');
     div.className = 'bar';
     const dot = key === 'provider' ? `<i class="sw" style="background:${colors[k]};margin-right:6px"></i>` : '';
-    const right = reqs ? `${fmt(v.requests)} request${v.requests === 1 ? '' : 's'}` : `${short(v.input)} in · ${short(v.output)} out`;
+    const right = reqs ? `${fmt(v.requests)} request${v.requests === 1 ? '' : 's'}`
+      : money ? (v.unpriced >= v.requests ? 'no known price' : v.cost ? `${usd(v.cost)} · ${usd(v.cost / Math.max(1, v.requests - v.unpriced))}/request` : 'free')
+      : `${short(v.input)} in · ${short(v.output)} out`;
     const track = reqs ? `<i class="req" style="width:${100 * v.requests / max}%"></i>`
+      : money ? `<i class="cost" style="width:${100 * v.cost / max}%"></i>`
       : `${v.input ? `<i class="in" style="width:${100 * v.input / max}%"></i>` : ''}${v.output ? `<i class="out" style="width:${100 * v.output / max}%"></i>` : ''}`;
     div.innerHTML = `<div class="top"><span class="name">${dot}${esc(k)}</span><span class="v">${right}</span></div><div class="track">${track}</div>`;
     hoverable(div, () => tipBody(k, v));
@@ -268,21 +351,26 @@ function renderBars(target, rows, key, colors) {
 }
 
 function renderTable(rows) {
-  if (!rows.length) { $('rows').innerHTML = '<tr><td colspan="9" class="muted">No requests in this range yet.</td></tr>'; return; }
+  if (!rows.length) { $('rows').innerHTML = '<tr><td colspan="10" class="muted">No requests in this range yet.</td></tr>'; return; }
   const approx = (r) => (r.estimated ? '~' : '');
   $('rows').innerHTML = [...rows].sort((a, b) => valueOf(b) - valueOf(a)).map(r => `<tr>
     <td>${esc(r.client)}</td><td>${esc(r.route)}</td><td><code>${esc(r.model)}</code></td>
     <td><code>${esc(r.servedBy)}</code>${r.servedBy !== r.model ? ' <span class="tag warn">fallback</span>' : ''}</td><td>${esc(r.provider)}</td>
-    <td class="num r">${fmt(r.requests)}</td><td class="num r">${approx(r)}${fmt(r.input)}</td><td class="num r">${fmt(r.cacheRead)}</td><td class="num r">${approx(r)}${fmt(r.output)}</td></tr>`).join('');
+    <td class="num r">${fmt(r.requests)}</td><td class="num r">${approx(r)}${fmt(r.input)}</td><td class="num r">${fmt(r.cacheRead)}</td><td class="num r">${approx(r)}${fmt(r.output)}</td>
+    <td class="num r">${r.unpriced ? '<span class="muted" title="No price for this model in the Gateway’s list">?</span>' : r.freeRequests ? '<span class="free">free</span>' : `${approx(r) || '≈ '}${usd(r.cost)}`}</td></tr>`).join('');
 }
 
 function render() {
-  const rows = state.data.rows || [];
+  const rows = price(state.data.rows || []);
+  const daily = price(state.data.daily || []);
   const colors = providerColors(rows);
   for (const b of $('range').querySelectorAll('button')) b.classList.toggle('on', Number(b.dataset.days) === state.days);
   for (const b of $('measure').querySelectorAll('button')) b.classList.toggle('on', b.dataset.m === state.measure);
-  for (const l of document.querySelectorAll('.legend.io')) l.style.display = state.measure === 'requests' ? 'none' : '';
-  renderTiles(rows);
+  for (const l of document.querySelectorAll('.legend.io')) l.style.display = state.measure === 'requests' || state.measure === 'cost' ? 'none' : '';
+  renderTiles(rows, daily);
+  renderTimeline(daily, colors);
+  $('timeLegend').innerHTML = [...new Set(daily.map(r => r.provider))].sort()
+    .map(p => `<span><i class="sw" style="background:${colors[p]}"></i>${esc(p)}</span>`).join('');
   renderFlow(rows, colors);
   renderSankey(rows, colors);
   renderBars('byModel', rows, 'servedBy', colors);
@@ -290,6 +378,10 @@ function render() {
   renderTable(rows);
   const since = state.data.since ? `counting since ${new Date(state.data.since).toLocaleString()}` : 'nothing counted yet';
   $('updated').textContent = `Updated ${new Date().toLocaleTimeString()} · ${since}`;
+}
+
+async function loadPrices() {
+  try { prices = (await (await fetch('api/model-info')).json()).models || {}; } catch {}
 }
 
 async function refresh() {
@@ -327,4 +419,5 @@ if ('EventSource' in window) {
   live.onmessage = (msg) => { try { if (JSON.parse(msg.data).type === 'usage') soon(); } catch {} };
 }
 setInterval(refresh, 60000);
-refresh();
+setInterval(loadPrices, 5 * 60000);
+loadPrices().then(refresh);

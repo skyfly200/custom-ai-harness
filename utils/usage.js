@@ -255,20 +255,31 @@ function record({ time = new Date(), client, route, model, servedBy, usage, esti
     return { ...row, ...counts, estimated: !usage };
 }
 
+const COUNTS = ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated'];
+
 /**
  * Totals over the last `days` days (0 or missing for all time), one row per
- * client + route + model + servedBy + provider.
+ * client + route + model + servedBy + provider, plus `daily`: one row per
+ * day + servedBy + provider, for charts over time and costs per day.
  */
 function summary(days = 0) {
     const from = days > 0 ? new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10) : '';
     const rows = {};
+    const daily = {};
     for (const r of Object.values(data.rows)) {
         if (r.day < from) continue;
         const key = [r.client, r.route, r.model, r.servedBy, r.provider].join('|');
         const t = rows[key] || (rows[key] = { client: r.client, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
-        for (const k of ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated']) t[k] += r[k] || 0;
+        const dayKey = [r.day, r.servedBy, r.provider].join('|');
+        const d = daily[dayKey] || (daily[dayKey] = { day: r.day, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
+        for (const k of COUNTS) { t[k] += r[k] || 0; d[k] += r[k] || 0; }
     }
-    return { since: data.since, days: days > 0 ? days : null, rows: Object.values(rows) };
+    return {
+        since: data.since,
+        days: days > 0 ? days : null,
+        rows: Object.values(rows),
+        daily: Object.values(daily).sort((a, b) => a.day.localeCompare(b.day)),
+    };
 }
 
 function clear() {

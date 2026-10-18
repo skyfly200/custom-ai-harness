@@ -233,6 +233,26 @@ function removeModel(name) {
   changed();
 }
 
+// Models no route (in any routing) or fallback line touches
+function unconnected() {
+  const used = new Set();
+  for (const r of routings()) for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (r[o.key]) used.add(r[o.key]);
+  for (const [src, targets] of Object.entries(graph.fallbacks)) { used.add(src); targets.forEach(t => used.add(t)); }
+  return models().filter(m => !used.has(m));
+}
+
+function clearUnconnected() {
+  const names = unconnected();
+  if (!names.length) return;
+  const count = graph.deployments.filter(d => names.includes(d.name)).length;
+  if (!confirm(`Remove ${names.length} unconnected model${names.length === 1 ? '' : 's'}${count ? ` and ${count === 1 ? 'its provider model' : `their ${count} provider models`}` : ''}?\n\n${names.join('\n')}\n\nNothing changes in config.yaml until you press Save.`)) return;
+  graph.deployments = graph.deployments.filter(d => !names.includes(d.name));
+  for (const n of names) delete positions[`m:${n}`];
+  selected = null;
+  changed();
+  note(`Removed ${names.length} unconnected model${names.length === 1 ? '' : 's'}. Press Save to write config.yaml, then restart the Gateway.`);
+}
+
 function removeDeployment(key) {
   graph.deployments = graph.deployments.filter(d => d.key !== key);
   changed();
@@ -248,6 +268,9 @@ function updateButtons() {
   $('save').disabled = !d;
   $('discard').disabled = !d;
   $('remove').disabled = !selected;
+  const spare = gatewayEditable() ? unconnected().length : 0;
+  $('clearUnused').disabled = !spare;
+  $('clearUnused').textContent = spare ? `Clear unconnected models (${spare})` : 'Clear unconnected models';
   if (d) note(problems()[0] || 'Unsaved changes.', problems().length ? 'err' : '');
 }
 
@@ -596,6 +619,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 $('remove').addEventListener('click', () => removeWire(selected));
+$('clearUnused').addEventListener('click', clearUnconnected);
 
 $('tidy').addEventListener('click', () => {
   positions = {};

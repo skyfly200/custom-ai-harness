@@ -24,7 +24,7 @@
         <li><b>Change where a route goes</b> by dragging from the dot on the right of an output to a model box. Each output goes to one model, so the new line replaces the old one.</li>
         <li><b>Set fallbacks</b> by dragging a model's <i>If it fails</i> dot to another model. When a model errors, hits a rate limit or times out, the Gateway tries its fallbacks from the top. Reorder them with ↑ ↓, and hover a model to see its fallback lines clearly.</li>
         <li><b>Add a model</b> with <b>Add model</b> above: give it a name, pick where it runs (OpenRouter, Groq, Ollama…) and the model id. For OpenRouter you can search its whole model list in the dialog, filter to free or tool-capable models, and click one to fill in the id. To give an existing model a second provider model, use <i>+ Add provider model</i> in its box; the Gateway then shares requests between them.</li>
-        <li><b>Remove things</b>: × in a model's title removes the whole model; × next to a provider model removes just that one; click a line and press Delete (or <b>Remove connection</b>) to remove a route.</li>
+        <li><b>Remove things</b>: <b>Clear unconnected models</b> removes every model box that no route or fallback line touches in any routing; × in a model's title removes the whole model; × next to a provider model removes just that one; click a line and press Delete (or <b>Remove connection</b>) to remove a route.</li>
         <li><b>Use different routings for different chats.</b> <b>New routing</b> copies the one shown under a new name; change its lines, compression and tools, then Save. In Bright Chat, pick it per chat in Options or per project in its settings, or choose <i>One model directly</i> to skip routing. Model boxes and fallbacks are shared by every routing. Other clients pick one with the header <code>x-harness-profile</code>.</li>
         <li><b>Tools</b> lists the MCP servers from <code>mcp-servers.json</code>. Untick one to stop offering it to the model in chats on this routing.</li>
         <li><b>Save</b> writes each change where it belongs and tells you what it saved. The Router and Interceptor use changes on the next request. <b>Restart the Gateway</b> (LiteLLM) after changing models or fallbacks. <b>Discard changes</b> goes back to what is saved.</li>
@@ -46,6 +46,7 @@
     <button class="primary" id="save" disabled data-hint="Write all changes to the config files">Save</button>
     <button id="discard" disabled data-hint="Undo every change since the last save">Discard changes</button>
     <button id="addModel" data-hint="Add a new model the Gateway serves, with the provider model behind it">Add model</button>
+    <button id="clearUnused" disabled data-hint="Remove every model box with no line to or from it in any routing, with its provider models">Clear unconnected models</button>
     <button id="remove" disabled data-hint="Remove the selected line (or press Delete). Click a line first to select it">Remove connection</button>
     <button id="tidy" data-hint="Put every box back in its default place">Tidy layout</button>
     <label class="live" data-hint="Light up each request's path as it is routed"><input type="checkbox" id="live" checked> Show live requests</label>

@@ -9,11 +9,12 @@ test('model info reads prices and context sizes from the Gateway and marks free 
         { model_name: 'free-or', litellm_params: { model: 'openrouter/meta-llama/llama-3.3-70b-instruct:free' }, model_info: { max_input_tokens: 131072, input_cost_per_token: 1e-7 } },
         { model_name: 'local', litellm_params: { model: 'openai/qwen', api_base: 'http://localhost:11434/v1' }, model_info: {} },
     ]);
-    assert.deepEqual(models.paid, { maxInput: 400000, maxOutput: 128000, inputCost: 1.25e-6, outputCost: 1e-5, free: false });
+    assert.deepEqual(models.paid, { maxInput: 400000, maxOutput: 128000, inputCost: 1.25e-6, outputCost: 1e-5, free: false, upstream: 'openrouter/openai/gpt-5', local: false });
     assert.equal(models['free-or'].free, true);
     assert.equal(models['free-or'].inputCost, 0);
     assert.equal(models['free-or'].maxInput, 131072);
     assert.equal(models.local.free, true);
+    assert.equal(models.local.local, 'ollama');
 });
 
 test('model info falls back to config.yaml for which models are free', () => {
@@ -35,4 +36,6 @@ litellm_settings:
     assert.equal(models['fallback-groq'].inputCost, null);
     assert.equal(models['fallback-openrouter'].free, true);
     assert.equal(models['fallback-ollama'].free, true);
+    assert.equal(models['fallback-ollama'].local, 'ollama');
+    assert.equal(models['fallback-groq'].upstream, 'groq/openai/gpt-oss-120b');
 });

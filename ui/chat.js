@@ -969,6 +969,7 @@ async function runReply(c) {
       }
       tr.done = Date.now() - tr.start;
       addUsage(tr.usage, tr.headerCost);
+      noteCache(c, tr);
       calls = calls.filter(t => t.name);
       if (!calls.length) break;
 
@@ -2411,6 +2412,84 @@ $('chatStats').addEventListener('click', (e) => {
   $('usagePop').hidden = !open;
   if (open) drawUsagePop();
 });
+
+// ---------------------------------------------------------------------------
+// Prompt cache timers: how long each model this chat used keeps its cache
+// ---------------------------------------------------------------------------
+// Each request to a model restarts that model's cache clock, so the last one
+// to each model is kept on the chat: c.caches[model] = { at, read, write, long, prompt }
+function noteCache(c, tr) {
+  const model = tr.answered?.servedBy || tr.routed?.model;
+  const u = CacheTimer.cacheUsage(tr.usage);
+  if (!model || !u) return;
+  (c.caches ||= {})[model] = { at: tr.start, ...u };
+  if (c === chat) drawCacheTimer();
+}
+
+const cacheOf = (c, model) => {
+  const rule = CacheTimer.cacheRule(modelInfo[model]);
+  return { model, rule, entry: c.caches[model], ...CacheTimer.cacheState(c.caches[model], rule) };
+};
+const cacheLeft = (s) => `${s.minimum ? '≥ ' : ''}${CacheTimer.fmtLeft(s.left)}`;
+
+// Top bar: the cache of the model the next message goes to (or the last one used)
+function drawCacheTimer() {
+  const el = $('cacheTimer');
+  const models = Object.keys(chat?.caches || {});
+  if (!models.length) { el.hidden = true; $('cachePop').hidden = true; return; }
+  const replies = chat.messages.filter(m => m.role === 'assistant' && !m.streaming);
+  const pinned = $('model').value.trim();
+  const model = chat.caches[pinned] ? pinned : models.includes(replyModel(replies[replies.length - 1])) ? replyModel(replies[replies.length - 1])
+    : models.sort((a, b) => chat.caches[b].at - chat.caches[a].at)[0];
+  const s = cacheOf(chat, model);
+  const warmOthers = models.filter(m => m !== model && cacheOf(chat, m).state === 'warm').length;
+  el.hidden = false;
+  el.className = `cache-timer ${s.state}${s.state === 'warm' && s.left < 60000 ? ' soon' : ''}`;
+  const text = s.state === 'warm' ? cacheLeft(s) : s.state === 'expired' ? 'expired' : s.state === 'none' ? 'not cached' : 'cache ?';
+  el.innerHTML = `${ICONS.clock}<span>${text}</span>${warmOthers ? `<small>+${warmOthers}</small>` : ''}`;
+  el.title = `Prompt cache for ${model} (${s.rule.provider})\n${
+    s.state === 'warm' ? `Expires in ${cacheLeft(s)} unless you send again; each message restarts the clock.`
+    : s.state === 'expired' ? 'Expired: the next message pays full price for the whole prompt again.'
+    : s.state === 'none' ? s.why : s.rule.note}${warmOthers ? `\n${warmOthers} other model${warmOthers > 1 ? 's' : ''} in this chat still cached.` : ''}\nClick for every model in this chat.`;
+  if (!$('cachePop').hidden) drawCachePop();
+}
+
+function drawCachePop() {
+  const rows = Object.keys(chat?.caches || {}).map(m => cacheOf(chat, m)).sort((a, b) => b.entry.at - a.entry.at);
+  const status = (s) => s.state === 'warm' ? `<b class="ok">${cacheLeft(s)}</b><span class="muted"> left</span>`
+    : s.state === 'expired' ? '<span class="warn">expired</span>'
+    : s.state === 'none' ? '<span class="muted">not cached</span>' : '<span class="muted">unknown</span>';
+  $('cachePop').innerHTML = `
+    <div class="up-head">Prompt cache by model</div>
+    ${rows.map(s => {
+      const pct = s.state === 'warm' ? 100 * s.left / s.ttl : 0;
+      const hit = s.entry.read || s.entry.write
+        ? `last request: ${fmtTok(s.entry.read)} read from cache${s.entry.write ? `, ${fmtTok(s.entry.write)} written` : ''} of ${fmtTok(s.entry.prompt)}`
+        : `last request: ${fmtTok(s.entry.prompt)} tokens, none reported cached`;
+      return `<div class="cp-row ${s.state}">
+        <div class="cp-top"><code>${esc(s.model)}</code><span class="cp-left">${status(s)}</span></div>
+        ${s.ttl ? `<div class="up-meter"><i style="width:${pct}%"></i></div>` : ''}
+        <div class="small muted">${esc(s.rule.provider)} · sent ${fmtAgo(s.entry.at)} · ${hit}</div>
+        <div class="small muted">${esc(s.state === 'none' ? s.why : s.rule.note)}</div>
+      </div>`;
+    }).join('')}
+    <div class="small muted">Timers count from when each request was sent. Sending again before one runs out restarts it.</div>`;
+}
+const fmtAgo = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+
+$('cacheTimer').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('cachePop').hidden = !$('cachePop').hidden;
+  if (!$('cachePop').hidden) { $('usagePop').hidden = true; drawCachePop(); }
+});
+document.addEventListener('click', (e) => {
+  if (!$('cachePop').hidden && !e.target.closest('#cachePop, #cacheTimer')) $('cachePop').hidden = true;
+});
+// before the keyboard handler below, so Esc closes this and doesn't stop a reply
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('cachePop').hidden) { $('cachePop').hidden = true; e.stopImmediatePropagation(); }
+});
+setInterval(drawCacheTimer, 1000);
 
 // ---------------------------------------------------------------------------
 // Keyboard

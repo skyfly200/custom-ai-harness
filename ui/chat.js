@@ -2441,7 +2441,7 @@ function drawCacheTimer() {
   const el = $('cacheTimer');
   const models = Object.keys(chat?.caches || {});
   if (!models.length) { el.hidden = true; $('cachePop').hidden = true; return; }
-  const pinned = $('model').value.trim();
+  const pinned = routeOf(chat).model;
   const model = chat.caches[pinned] ? pinned : latestCache(chat.caches);
   const s = cacheOf(chat.caches, model);
   const warmOthers = models.filter(m => m !== model && cacheOf(chat.caches, m).state === 'warm').length;
@@ -2565,8 +2565,9 @@ function keepAliveFor(c) {
   return { active: true, model, s, why: `${mode === 'auto' ? 'Auto: on' : 'On'}. A tiny request goes to ${model} about 45 s before its cache expires, until ${keepAliveIdleMin()} min after your last message. Each one costs about a cache read of the prompt.` };
 }
 
-// Same messages, tools and model as the chat's next request, plus a short
-// question that isn't kept; the cache restarts from this request
+// Same messages, tools, routing (its transforms shape the prompt) and model
+// as the chat's next request, plus a short question that isn't kept; the
+// cache restarts from this request
 async function keepAlive(c, model) {
   pinging.add(c.id);
   const tr = { start: Date.now(), answered: { servedBy: model } };
@@ -2576,7 +2577,7 @@ async function keepAlive(c, model) {
     if (tools.length) body.tools = tools;
     const res = await fetch('/v1/chat/completions', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-harness-model': model, 'x-harness-cache': 'auto', 'x-harness-request-id': `keepalive-${c.id}-${uid()}` },
+      headers: { 'content-type': 'application/json', ...routeHeaders(c), 'x-harness-model': model, 'x-harness-cache': 'auto', 'x-harness-request-id': `keepalive-${c.id}-${uid()}` },
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

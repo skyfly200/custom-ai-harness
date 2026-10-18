@@ -84,7 +84,7 @@ function saveChat(c, { touch = true } = {}) {
   // an empty chat isn't listed until something is in it
   if (!c.messages.length && !c.system && !c.notes && !c.repo && !c.skills?.length) return;
   store.set(CHAT_KEY(c.id), c);
-  const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: c.messages.length, project: c.project || undefined };
+  const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: c.messages.length, project: c.project || undefined, caches: c.caches };
   const i = index.findIndex(e => e.id === c.id);
   if (i >= 0) index[i] = entry; else index.push(entry);
   index.sort((a, b) => b.updated - a.updated);
@@ -936,7 +936,7 @@ async function runReply(c) {
       if (maxTokens > 0) body.max_tokens = maxTokens;
       if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
 
-      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, 'x-harness-request-id': clientId }, body: JSON.stringify(body), signal: controller.signal });
+      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
       // the same facts the live feed sends, from the headers, in case it's not connected
       tr.routed = tr.routed || { model: res.headers.get('x-harness-model'), reason: res.headers.get('x-harness-route') };
       tr.answered = {
@@ -2426,47 +2426,58 @@ function noteCache(c, tr) {
   if (c === chat) drawCacheTimer();
 }
 
-const cacheOf = (c, model) => {
+const cacheOf = (caches, model) => {
   const rule = CacheTimer.cacheRule(modelInfo[model]);
-  return { model, rule, entry: c.caches[model], ...CacheTimer.cacheState(c.caches[model], rule) };
+  return { model, rule, entry: caches[model], ...CacheTimer.cacheState(caches[model], rule) };
 };
 const cacheLeft = (s) => `${s.minimum ? '≥ ' : ''}${CacheTimer.fmtLeft(s.left)}`;
+// the model a chat used last: the one the next message most likely goes to
+const latestCache = (caches) => Object.keys(caches || {}).sort((a, b) => caches[b].at - caches[a].at)[0];
+// warm, soon (under a minute or a fifth of its time left) or expired, for colours
+const cacheTone = (s) => s.state !== 'warm' ? s.state : s.left < Math.max(60000, s.ttl / 5) ? 'soon' : 'warm';
 
 // Top bar: the cache of the model the next message goes to (or the last one used)
 function drawCacheTimer() {
   const el = $('cacheTimer');
   const models = Object.keys(chat?.caches || {});
   if (!models.length) { el.hidden = true; $('cachePop').hidden = true; return; }
-  const replies = chat.messages.filter(m => m.role === 'assistant' && !m.streaming);
-  const pinned = $('model').value.trim();
-  const model = chat.caches[pinned] ? pinned : models.includes(replyModel(replies[replies.length - 1])) ? replyModel(replies[replies.length - 1])
-    : models.sort((a, b) => chat.caches[b].at - chat.caches[a].at)[0];
-  const s = cacheOf(chat, model);
-  const warmOthers = models.filter(m => m !== model && cacheOf(chat, m).state === 'warm').length;
+  const pinned = routeOf(chat).model;
+  const model = chat.caches[pinned] ? pinned : latestCache(chat.caches);
+  const s = cacheOf(chat.caches, model);
+  const warmOthers = models.filter(m => m !== model && cacheOf(chat.caches, m).state === 'warm').length;
+  const ka = keepAliveFor(chat);
   el.hidden = false;
-  el.className = `cache-timer ${s.state}${s.state === 'warm' && s.left < 60000 ? ' soon' : ''}`;
+  el.className = `cache-timer ${cacheTone(s)}`;
   const text = s.state === 'warm' ? cacheLeft(s) : s.state === 'expired' ? 'expired' : s.state === 'none' ? 'not cached' : 'cache ?';
-  el.innerHTML = `${ICONS.clock}<span>${text}</span>${warmOthers ? `<small>+${warmOthers}</small>` : ''}`;
+  el.innerHTML = `${ICONS.clock}<span>${text}</span>${ka.active ? `<span class="ka" title="Kept warm">${ICONS.retry}</span>` : ''}${warmOthers ? `<small>+${warmOthers}</small>` : ''}`;
   el.title = `Prompt cache for ${model} (${s.rule.provider})\n${
     s.state === 'warm' ? `Expires in ${cacheLeft(s)} unless you send again; each message restarts the clock.`
     : s.state === 'expired' ? 'Expired: the next message pays full price for the whole prompt again.'
-    : s.state === 'none' ? s.why : s.rule.note}${warmOthers ? `\n${warmOthers} other model${warmOthers > 1 ? 's' : ''} in this chat still cached.` : ''}\nClick for every model in this chat.`;
+    : s.state === 'none' ? s.why : s.rule.note}${ka.active ? '\nKept warm: a tiny request goes out before it expires.' : ''}${warmOthers ? `\n${warmOthers} other model${warmOthers > 1 ? 's' : ''} in this chat still cached.` : ''}\nClick for every model in this chat.`;
   if (!$('cachePop').hidden) drawCachePop();
 }
 
 function drawCachePop() {
-  const rows = Object.keys(chat?.caches || {}).map(m => cacheOf(chat, m)).sort((a, b) => b.entry.at - a.entry.at);
-  const status = (s) => s.state === 'warm' ? `<b class="ok">${cacheLeft(s)}</b><span class="muted"> left</span>`
-    : s.state === 'expired' ? '<span class="warn">expired</span>'
+  const rows = Object.keys(chat?.caches || {}).map(m => cacheOf(chat.caches, m)).sort((a, b) => b.entry.at - a.entry.at);
+  const status = (s) => s.state === 'warm' ? `<b class="${cacheTone(s) === 'soon' ? 'warn' : 'ok'}">${cacheLeft(s)}</b><span class="muted"> left</span>`
+    : s.state === 'expired' ? '<span class="bad">expired</span>'
     : s.state === 'none' ? '<span class="muted">not cached</span>' : '<span class="muted">unknown</span>';
+  const ka = keepAliveFor(chat);
+  const st = chat.keepAliveStats;
+  const mode = chat.keepAlive || 'auto';
   $('cachePop').innerHTML = `
+    <div class="up-head">Keep this chat's cache warm</div>
+    <div class="seg" role="group" aria-label="Keep warm">${['auto', 'on', 'off'].map(v => `<button type="button" data-ka="${v}" class="${mode === v ? 'on' : ''}">${{ auto: 'Auto', on: 'On', off: 'Off' }[v]}</button>`).join('')}</div>
+    <div class="small muted">${esc(ka.why)}</div>
+    <label class="small ka-limit">Stop after <select id="kaIdle">${[10, 20, 30, 45, 60].map(n => `<option value="${n}"${n === keepAliveIdleMin() ? ' selected' : ''}>${n} min</option>`).join('')}</select> without a message (every chat)</label>
+    ${st?.count ? `<div class="small muted">${st.count} keep-alive request${st.count > 1 ? 's' : ''} in this chat · ${st.usd ? `${st.estimated ? '≈ ' : ''}${fmtUsd(st.usd)}` : 'free'}</div>` : ''}
     <div class="up-head">Prompt cache by model</div>
     ${rows.map(s => {
       const pct = s.state === 'warm' ? 100 * s.left / s.ttl : 0;
       const hit = s.entry.read || s.entry.write
         ? `last request: ${fmtTok(s.entry.read)} read from cache${s.entry.write ? `, ${fmtTok(s.entry.write)} written` : ''} of ${fmtTok(s.entry.prompt)}`
         : `last request: ${fmtTok(s.entry.prompt)} tokens, none reported cached`;
-      return `<div class="cp-row ${s.state}">
+      return `<div class="cp-row ${cacheTone(s)}">
         <div class="cp-top"><code>${esc(s.model)}</code><span class="cp-left">${status(s)}</span></div>
         ${s.ttl ? `<div class="up-meter"><i style="width:${pct}%"></i></div>` : ''}
         <div class="small muted">${esc(s.rule.provider)} · sent ${fmtAgo(s.entry.at)} · ${hit}</div>
@@ -2482,14 +2493,132 @@ $('cacheTimer').addEventListener('click', (e) => {
   $('cachePop').hidden = !$('cachePop').hidden;
   if (!$('cachePop').hidden) { $('usagePop').hidden = true; drawCachePop(); }
 });
+$('cachePop').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ka]');
+  if (!b) return;
+  chat.keepAlive = b.dataset.ka === 'auto' ? undefined : b.dataset.ka;
+  saveChat(chat, { touch: false });
+  drawCacheTimer();
+});
+$('cachePop').addEventListener('change', (e) => {
+  if (e.target.id === 'kaIdle') { store.set(KEEPALIVE_KEY, Number(e.target.value)); drawCacheTimer(); }
+});
 document.addEventListener('click', (e) => {
-  if (!$('cachePop').hidden && !e.target.closest('#cachePop, #cacheTimer')) $('cachePop').hidden = true;
+  // composedPath: a click on a control the popover just redrew is still inside it
+  if (!$('cachePop').hidden && !e.composedPath().some(n => n === $('cachePop') || n === $('cacheTimer'))) $('cachePop').hidden = true;
 });
 // before the keyboard handler below, so Esc closes this and doesn't stop a reply
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('cachePop').hidden) { $('cachePop').hidden = true; e.stopImmediatePropagation(); }
 });
-setInterval(drawCacheTimer, 1000);
+
+// Sidebar: a dot on each chat with its last model's cache, so the ones about
+// to go cold stand out. Updated in place (the list redraws without it).
+function drawCacheDots() {
+  for (const li of $('chatList').querySelectorAll('li[data-id]')) {
+    const caches = (cache.get(li.dataset.id) || index.find(e => e.id === li.dataset.id))?.caches;
+    const model = latestCache(caches);
+    const s = model ? cacheOf(caches, model) : null;
+    const tone = s && (s.state === 'warm' || s.state === 'expired') ? cacheTone(s) : '';
+    let dot = li.querySelector('.cache-dot');
+    if (!tone) { dot?.remove(); continue; }
+    if (!dot) { dot = document.createElement('i'); li.querySelector('.ct')?.before(dot); }
+    const kept = keepAliveFor(cache.get(li.dataset.id)).active;
+    dot.className = `cache-dot ${tone}${kept ? ' kept' : ''}`;
+    dot.title = s.state === 'warm' ? `${model} cached, ${cacheLeft(s)} left${kept ? ' (kept warm)' : ''}` : `${model} cache expired`;
+  }
+}
+new MutationObserver(drawCacheDots).observe($('chatList'), { childList: true });
+
+// ---------------------------------------------------------------------------
+// Keep-alive: a tiny request to the same model, with the same prompt, shortly
+// before its cache expires, so the next real message reads the cache instead
+// of paying for the whole prompt again. Each one costs a cache read of the
+// prompt (about a tenth of its price on Claude), so it stops after a while
+// without messages. Runs only while a Bright Chat tab is open.
+// ---------------------------------------------------------------------------
+const KEEPALIVE_KEY = 'harness-keepalive-idle';
+const keepAliveIdleMin = () => store.get(KEEPALIVE_KEY, 30);
+const PING = 'Keep-alive: reply with just OK.';
+const pinging = new Set();
+
+// Whether a chat's last model is being kept warm, and why (or why not).
+// Auto starts once a chat has more than one message from you.
+function keepAliveFor(c) {
+  if (!c) return { active: false, why: '' };
+  const mode = c.keepAlive || 'auto';
+  const model = latestCache(c.caches);
+  const s = model ? cacheOf(c.caches, model) : null;
+  const info = modelInfo[model];
+  const asked = c.messages.filter(m => m.role === 'user');
+  const lastAsk = Math.max(0, ...asked.map(m => m.time || 0));
+  const idle = Date.now() - lastAsk > keepAliveIdleMin() * 60000;
+  const no = (why) => ({ active: false, why });
+  if (mode === 'off') return no('Off: the cache expires on its own.');
+  if (!s) return no('Nothing cached yet.');
+  if (s.rule.ttl == null) return no(`${s.rule.provider} doesn't say how long it caches, so there's nothing to time.`);
+  if (info?.free || !info || info.inputCost == null) return no(`${model} ${info?.free ? 'is free' : 'has no known price'}, so keeping it warm saves nothing.`);
+  if (s.state === 'none') return no(s.why);
+  if (s.state === 'expired') return no('The cache already expired; your next message caches it again.');
+  if (mode === 'auto' && asked.length < 2) return no('Auto: starts after your second message in this chat.');
+  if (idle) return no(`Paused: no message from you for ${keepAliveIdleMin()} minutes.`);
+  return { active: true, model, s, why: `${mode === 'auto' ? 'Auto: on' : 'On'}. A tiny request goes to ${model} about 45 s before its cache expires, until ${keepAliveIdleMin()} min after your last message. Each one costs about a cache read of the prompt.` };
+}
+
+// Same messages, tools, routing (its transforms shape the prompt) and model
+// as the chat's next request, plus a short question that isn't kept; the
+// cache restarts from this request
+async function keepAlive(c, model) {
+  pinging.add(c.id);
+  const tr = { start: Date.now(), answered: { servedBy: model } };
+  try {
+    const tools = activeTools(c);
+    const body = { model: 'auto', messages: [...apiMessages(c, c.messages.length), { role: 'user', content: PING }], stream: false, max_tokens: 16 };
+    if (tools.length) body.tools = tools;
+    const res = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...routeHeaders(c), 'x-harness-model': model, 'x-harness-cache': 'auto', 'x-harness-request-id': `keepalive-${c.id}-${uid()}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    tr.usage = (await res.json()).usage || null;
+    const headerCost = parseFloat(res.headers.get('x-litellm-response-cost')) || 0;
+    const st = (c.keepAliveStats ||= { count: 0, usd: 0 });
+    st.count++;
+    const cost = pingCost(tr.usage, headerCost, model);
+    if (cost) { st.usd += cost.usd; st.estimated ||= cost.estimated; }
+    noteCache(c, tr);
+    saveChat(c, { touch: false });
+  } catch (err) {
+    console.warn(`Keep-alive for "${chatTitle(c)}" failed: ${err.message}`);
+    (c.keepAliveStats ||= { count: 0, usd: 0 }).failed = Date.now();
+  } finally {
+    pinging.delete(c.id);
+  }
+}
+
+// What a keep-alive cost: the provider's figure, else cached tokens at a tenth
+function pingCost(u, headerCost, model) {
+  if (typeof u?.cost === 'number') return { usd: u.cost };
+  if (headerCost > 0) return { usd: headerCost };
+  const info = modelInfo[model];
+  const k = CacheTimer.cacheUsage(u);
+  if (!k || info?.inputCost == null) return null;
+  return { usd: (k.prompt - k.read) * info.inputCost + k.read * info.inputCost * 0.1 + (u.completion_tokens || 0) * (info.outputCost || 0), estimated: true };
+}
+
+function checkKeepAlive() {
+  for (const e of index) {
+    if (!e.caches || running.has(e.id) || pinging.has(e.id)) continue;
+    const c = loadChat(e.id);
+    // a failed one waits out its cache rather than retrying every second
+    if (!c || Date.now() - (c.keepAliveStats?.failed || 0) < 5 * 60000) continue;
+    const ka = keepAliveFor(c);
+    if (ka.active && ka.s.left < 45000) keepAlive(c, ka.model);
+  }
+}
+
+setInterval(() => { drawCacheTimer(); drawCacheDots(); checkKeepAlive(); }, 1000);
 
 // ---------------------------------------------------------------------------
 // Keyboard

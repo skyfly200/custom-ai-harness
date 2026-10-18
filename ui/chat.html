@@ -18,6 +18,7 @@
     <button type="button" class="proj-badge" id="projectBadge" hidden></button>
     <input type="text" id="title" class="title" aria-label="Chat title" placeholder="New chat">
     <button type="button" class="stats" id="chatStats" title=""></button>
+    <button type="button" class="cache-timer" id="cacheTimer" hidden></button>
     <div class="top-actions">
       <button class="icon" id="copyChat" title="Copy the chat as Markdown" aria-label="Copy chat"></button>
       <button class="icon" id="exportChat" title="Export this chat as Markdown" aria-label="Export chat"></button>
@@ -167,6 +168,7 @@
 
 <!-- This chat's tokens and costs -->
 <div class="usage-pop" id="usagePop" hidden></div>
+<div class="usage-pop cache-pop" id="cachePop" hidden></div>
 
 <dialog class="dlg" id="projectDialog">
   <form method="dialog" id="projectForm">
@@ -233,6 +235,7 @@
 <datalist id="models"></datalist>
 
 <script src="markdown.js"></script>
+<script src="cachetimer.js"></script>
 <script src="chat.js"></script>
 <script src="bright.js"></script>
 </body>

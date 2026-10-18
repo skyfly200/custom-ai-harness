@@ -10,6 +10,13 @@ function isFree(model = '', apiBase = '') {
         || /^ollama(_chat)?\//.test(model);
 }
 
+// Served from this machine: 'ollama' (its port, host name or provider) or
+// 'engine' (any other local api_base), else false
+function isLocal(model = '', apiBase = '') {
+    if (/^ollama(_chat)?\//.test(model || '') || /:11434\b|ollama/.test(apiBase || '')) return 'ollama';
+    return /localhost|127\.0\.0\.1|host\.docker\.internal/.test(apiBase || '') ? 'engine' : false;
+}
+
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 // LiteLLM /v1/model/info -> { model_name: { maxInput, maxOutput, inputCost, outputCost, free } }
@@ -30,6 +37,10 @@ function fromGatewayInfo(data) {
             inputCost: free ? 0 : inputCost,
             outputCost: free ? 0 : outputCost,
             free,
+            // the provider model behind the name and whether it runs here,
+            // so the chat page knows how long a prompt cache lasts
+            upstream: params.model || null,
+            local: isLocal(params.model, params.api_base),
         };
     }
     return models;
@@ -42,7 +53,8 @@ function fromConfig(text) {
     const finish = () => {
         if (current?.model_name && !models[current.model_name]) {
             const free = isFree(current.model, current.api_base);
-            models[current.model_name] = { maxInput: null, maxOutput: null, inputCost: free ? 0 : null, outputCost: free ? 0 : null, free };
+            models[current.model_name] = { maxInput: null, maxOutput: null, inputCost: free ? 0 : null, outputCost: free ? 0 : null, free,
+                upstream: current.model || null, local: isLocal(current.model, current.api_base) };
         }
     };
     for (const line of String(text).split(/\r?\n/)) {
@@ -56,4 +68,4 @@ function fromConfig(text) {
     return models;
 }
 
-module.exports = { isFree, fromGatewayInfo, fromConfig };
+module.exports = { isFree, isLocal, fromGatewayInfo, fromConfig };

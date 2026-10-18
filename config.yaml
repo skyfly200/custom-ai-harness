@@ -136,6 +136,10 @@ litellm_settings:
   # Drop request fields a provider doesn't support (Claude Code sends Anthropic-only
   # ones like thinking) instead of failing the call.
   drop_params: true
+  # Claude Code's /v1/messages requests to openai/ entries (local engine,
+  # Ollama, any OpenAI-style server) use /chat/completions, which those servers
+  # all have, instead of LiteLLM's default of OpenAI's newer Responses API.
+  use_chat_completions_url_for_anthropic_messages: true
   # Seconds one model may take before LiteLLM gives up on it and tries the next
   # fallback. LiteLLM's default is 6000 (100 minutes), so a hung free model
   # froze the request. The Interceptor also fails a request the whole chain

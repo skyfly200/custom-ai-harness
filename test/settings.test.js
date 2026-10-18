@@ -33,3 +33,24 @@ test('empty optional settings turn off, and reset deletes the file', () => {
     assert.deepEqual(settings.get(), settings.DEFAULTS);
     assert.equal(fs.existsSync(FILE), false);
 });
+
+test('launch settings from the environment win over the saved file', () => {
+    assert.deepEqual(settings.envOverrides({}), {});
+    assert.deepEqual(settings.envOverrides({ HARNESS_MODE: 'passthrough' }),
+        { pinModel: 'passthrough', caveman: false, headroom: false, contextAnchor: false });
+    assert.deepEqual(settings.envOverrides({ HARNESS_MODE: 'passthrough', HARNESS_TRANSFORMS: 'on', PIN_MODEL: 'x' }),
+        { pinModel: 'x', caveman: true, headroom: true, contextAnchor: true });
+    assert.deepEqual(settings.envOverrides({ PIN_MODEL: 'a b', ROUTER_DOWN_TOOLS_MODEL: 'local-qwen' }),
+        { routerDownToolsModel: 'local-qwen' });
+    settings.update({ pinModel: 'saved' });
+    process.env.PIN_MODEL = 'from-env';
+    try {
+        settings.load();
+        assert.equal(settings.get().pinModel, 'from-env');
+        settings.reset();
+        assert.equal(settings.get().pinModel, 'from-env');
+    } finally {
+        delete process.env.PIN_MODEL;
+        settings.reset();
+    }
+});

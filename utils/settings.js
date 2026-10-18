@@ -58,18 +58,41 @@ const VALIDATORS = {
     routerDownToolsModel: name('routerDownToolsModel'),
 };
 
+/**
+ * Launch settings for Docker (see .env.example). They win over the saved file
+ * on every start, so unset them to manage these from the dashboard.
+ * HARNESS_MODE=passthrough sends every request to the Gateway's "passthrough"
+ * model (docker/gateway-start.py) with no Router and no transforms.
+ */
+function envOverrides(env = process.env) {
+    const out = {};
+    if ((env.HARNESS_MODE || '').trim().toLowerCase() === 'passthrough') {
+        Object.assign(out, { pinModel: 'passthrough', caveman: false, headroom: false, contextAnchor: false });
+    }
+    const transforms = (env.HARNESS_TRANSFORMS || '').trim().toLowerCase();
+    if (transforms === 'on' || transforms === 'off') {
+        for (const k of ['caveman', 'headroom', 'contextAnchor']) out[k] = transforms === 'on';
+    }
+    const vars = { PIN_MODEL: 'pinModel', ROUTER_DOWN_MODEL: 'routerDownModel', ROUTER_DOWN_TOOLS_MODEL: 'routerDownToolsModel' };
+    for (const [name, k] of Object.entries(vars)) {
+        const v = (env[name] || '').trim();
+        if (!v) continue;
+        try { out[k] = VALIDATORS[k](v); } catch (err) { console.warn(`${name} ignored: ${err.message}`); }
+    }
+    return out;
+}
+
 let current = { ...DEFAULTS };
 
 function load() {
+    current = { ...DEFAULTS };
     try {
         const saved = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-        current = { ...DEFAULTS };
         for (const [k, v] of Object.entries(saved)) {
             try { if (k in VALIDATORS) current[k] = VALIDATORS[k](v); } catch {} // skip a bad value, keep the default
         }
-    } catch {
-        current = { ...DEFAULTS };
-    }
+    } catch {}
+    Object.assign(current, envOverrides());
 }
 
 function get() {
@@ -89,7 +112,7 @@ function update(changes) {
 }
 
 function reset() {
-    current = { ...DEFAULTS };
+    current = { ...DEFAULTS, ...envOverrides() };
     try { fs.unlinkSync(FILE); } catch {}
     return current;
 }
@@ -100,4 +123,4 @@ function save() {
 
 load();
 
-module.exports = { get, update, reset, load, DEFAULTS, FILE };
+module.exports = { get, update, reset, load, envOverrides, DEFAULTS, FILE };

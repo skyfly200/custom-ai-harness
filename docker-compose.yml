@@ -3,6 +3,18 @@
 # LITELLM_MASTER_KEY.
 # Only the Interceptor (port 3000) is published; the Router and Gateway are
 # reachable only from the other containers.
+#
+# Launch settings, all optional, go in .env too (see .env.example):
+#   HARNESS_MODE        jev (what routellm-config.yaml ships with), laya,
+#                       routellm, llm or passthrough
+#   STRONG_MODEL, WEAK_MODEL, ...   the models the Router picks between
+#   COMPOSE_PROFILES=local and LOCAL_MODELS   run Ollama with these models
+# Change them, then run docker compose up -d --build.
+x-local-urls: &local-urls
+  OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+  # the Tier 1 local engine on this machine (launch-local.sh, listening on 0.0.0.0)
+  LOCAL_ENGINE_URL: ${LOCAL_ENGINE_URL:-http://host.docker.internal:8000}
+
 services:
   harness:
     build: .
@@ -15,6 +27,8 @@ services:
       HARNESS_SETTINGS_FILE: /app/data/harness-settings.json
       HARNESS_USAGE_FILE: /app/data/harness-usage.json
       MCP_CONFIG: /app/data/mcp-servers.json
+      <<: *local-urls
+    extra_hosts: ["host.docker.internal:host-gateway"]
     ports:
       - "${HARNESS_PORT:-3000}:3000"
     volumes:
@@ -28,7 +42,8 @@ services:
       context: .
       dockerfile: docker/router.Dockerfile
       args:
-        ROUTER_BACKENDS: ${ROUTER_BACKENDS:-}
+        # laya and routellm modes need their classifier built in
+        ROUTER_BACKENDS: ${ROUTER_BACKENDS:-${HARNESS_MODE:-}}
     restart: unless-stopped
     env_file: .env
     volumes:
@@ -43,5 +58,27 @@ services:
     environment:
       # LiteLLM won't start without one; the harness sends the same key
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env (any string starting with sk-)}
+      <<: *local-urls
+    extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+
+  # Local models with Ollama, only with COMPOSE_PROFILES=local in .env.
+  # Downloads LOCAL_MODELS on start; the Gateway lists each as local-<name>.
+  ollama:
+    image: ollama/ollama
+    profiles: [local]
+    restart: unless-stopped
+    env_file: .env
+    entrypoint: ["/bin/sh", "/ollama-start.sh"]
+    volumes:
+      - ./docker/ollama-start.sh:/ollama-start.sh:ro
+      - ollama:/root/.ollama
+    # NVIDIA GPU: install the NVIDIA Container Toolkit and uncomment
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+
+volumes:
+  ollama:

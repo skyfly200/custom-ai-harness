@@ -247,7 +247,7 @@ input[type=range] { width: 100%; }
   .msg .actions { opacity: 1; }
   .msg.user .bubble { max-width: 92%; }
 }
-.sliders label[hidden] { display: none; }
+.sliders label[hidden], #directRow[hidden], #pModelRow[hidden] { display: none; }
 .stats .ok { color: var(--ok); }
 @media (max-width: 760px) {
   .app:not(.side-open) .side { box-shadow: none; }

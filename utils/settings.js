@@ -19,6 +19,7 @@ const DEFAULTS = Object.freeze({
     streamIdleTimeoutMs: 120000, // how long a reply may go quiet mid-stream before it fails
     routerDownModel: 'fallback-openrouter',             // free tier with no size cap
     routerDownToolsModel: 'fallback-openrouter-tools',  // same, for requests that need tool calls
+    mcpOff: [],               // MCP servers the chat page doesn't offer on the default routing
 });
 
 // Each setting's check: returns the cleaned value or throws with a readable message.
@@ -56,6 +57,10 @@ const VALIDATORS = {
     streamIdleTimeoutMs: int('streamIdleTimeoutMs', 1000, 3600000),
     routerDownModel: name('routerDownModel'),
     routerDownToolsModel: name('routerDownToolsModel'),
+    mcpOff: (v) => {
+        if (!Array.isArray(v) || v.some(s => typeof s !== 'string' || !s || s.length > 80)) throw new Error('mcpOff must be a list of MCP server names');
+        return [...new Set(v)];
+    },
 };
 
 /**

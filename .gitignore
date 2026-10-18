@@ -4,6 +4,7 @@ node_modules
 __pycache__/
 .laya
 harness-settings.json
+routing-profiles.json
 harness-usage.json
 mcp-servers.json
 data/

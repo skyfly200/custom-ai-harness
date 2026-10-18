@@ -61,7 +61,9 @@
       <div class="opt-grid">
         <fieldset>
           <legend>Model</legend>
-          <label>Model <input type="text" id="model" list="models" placeholder="Auto (Router decides)"></label>
+          <label title="Where this chat's messages go. Routings are made on the Routing page">Routing for this chat <select id="routeSel"></select></label>
+          <label id="directRow" hidden>Model <input type="text" id="model" list="models" placeholder="e.g. fast-openrouter" autocomplete="off"></label>
+          <div class="muted small" id="routeNote"></div>
           <label>Max tokens <input type="number" id="maxTokens" min="1" value="2048"></label>
           <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
           <label class="check"><input type="checkbox" id="stream" checked> Stream the reply</label>
@@ -177,6 +179,10 @@
       <textarea id="pInstructions" rows="5" placeholder="Who the model is helping, house style, facts it should always know…"></textarea></label>
     <label>Git repo <span class="repo-row"><input type="text" id="pRepo" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false"></span>
       <small class="muted">Chats in the project can read it (read-only) unless they link their own.</small></label>
+    <div class="pair">
+      <label title="Where chats in this project send their messages, unless a chat picks its own">Routing <select id="pRoute"></select></label>
+      <label id="pModelRow" hidden>Model <input type="text" id="pModel" list="models" placeholder="e.g. fast-openrouter" autocomplete="off"></label>
+    </div>
     <div class="dlg-skills"><span class="small"><b>Skills for every chat</b></span><div class="pick" id="pSkills"></div></div>
     <div class="proj-usage muted small" id="pUsage"></div>
     <div class="dlg-actions">

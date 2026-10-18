@@ -364,8 +364,6 @@ button.icon.on { color: var(--accent); }
 .cache-timer svg { width: 13px; height: 13px; }
 .cache-timer small { font-size: 10.5px; opacity: .8; }
 .cache-timer.warm { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
-.cache-timer.warm.soon { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-.cache-timer.expired { color: var(--warn); }
 .cache-pop { right: 16px; }
 .cp-row { display: grid; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .cp-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
@@ -404,3 +402,19 @@ button.icon.on { color: var(--accent); }
 @media (max-width: 760px) { .side { background: var(--panel); } }
 @media (max-width: 560px) { button.stats { display: none; } .bg-toggle { display: none; } }
 .cp-left .ok { color: var(--ok); } .cp-left .warn { color: var(--warn); }
+.cp-left .bad { color: var(--bad); }
+.cache-timer.soon { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.cache-timer.expired { color: var(--bad); }
+.cache-timer .ka { display: inline-flex; }
+.cache-timer .ka svg { width: 11px; height: 11px; }
+.cp-row.soon .up-meter i { background: var(--warn); }
+.cache-pop .seg { display: inline-flex; width: max-content; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.cache-pop .seg button { border: 0; border-radius: 0; border-right: 1px solid var(--border); background: none; padding: 4px 14px; font-size: 12.5px; color: var(--text); }
+.cache-pop .seg button:last-child { border-right: 0; }
+.cache-pop .seg button.on { background: linear-gradient(120deg, var(--glow-c), var(--glow-b)); color: #fff; }
+.ka-limit select { font-size: 12px; padding: 1px 4px; }
+/* sidebar: each chat's cache, green while warm, amber near the end, red once gone */
+.cache-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.cache-dot.soon { background: var(--warn); animation: pulse 1.2s infinite; }
+.cache-dot.expired { background: none; box-shadow: inset 0 0 0 1.5px var(--bad); }
+.cache-dot.kept { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 30%, transparent); }

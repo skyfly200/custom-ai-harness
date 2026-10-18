@@ -18,6 +18,7 @@ const profiles = require('./utils/profiles');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
+const cacheMarkers = require('./utils/cacheMarkers');
 const openrouterCatalog = require('./utils/openrouterCatalog');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
@@ -341,21 +342,21 @@ app.get('/ui/api/models', async (req, res) => {
 // Prices and context sizes for the chat page's cost and context readouts:
 // LiteLLM's /v1/model/info, else which models config.yaml says are free
 let modelInfoCache = { at: 0, body: null };
-app.get('/ui/api/model-info', async (req, res) => {
-    if (modelInfoCache.body && Date.now() - modelInfoCache.at < 5 * 60 * 1000) return res.json(modelInfoCache.body);
-    let body;
+async function getModelInfo() {
+    if (modelInfoCache.body && Date.now() - modelInfoCache.at < 5 * 60 * 1000) return modelInfoCache.body;
     try {
         const upstream = await fetch(`${GATEWAY_URL}/v1/model/info`, { headers: gatewayAuth, signal: AbortSignal.timeout(3000) });
         if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
-        body = { source: 'gateway', models: modelInfo.fromGatewayInfo((await upstream.json()).data) };
+        const body = { source: 'gateway', models: modelInfo.fromGatewayInfo((await upstream.json()).data) };
         modelInfoCache = { at: Date.now(), body };
+        return body;
     } catch {
         let text = '';
         try { text = fs.readFileSync(path.join(__dirname, 'config.yaml'), 'utf8'); } catch {}
-        body = { source: 'config.yaml', models: modelInfo.fromConfig(text) };
+        return { source: 'config.yaml', models: modelInfo.fromConfig(text) };
     }
-    res.json(body);
-});
+}
+app.get('/ui/api/model-info', async (req, res) => res.json(await getModelInfo()));
 
 // Read-aloud for the chat page through an OpenAI-compatible speech endpoint
 // (POST {TTS_URL}/audio/speech). With an OpenRouter key and no TTS_URL it uses
@@ -598,6 +599,10 @@ app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) =
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);
     req.body.max_completion_tokens = capMaxTokens(req.body.max_completion_tokens);
     await routeAndRecord(req, res);
+    // the chat page asks for cache markers; only Claude needs them
+    if (req.get('x-harness-cache') && cacheMarkers.isAnthropic((await getModelInfo()).models[req.body.model])) {
+        req.body.messages = cacheMarkers.addCacheMarkers(req.body.messages);
+    }
     next();
 }, toGateway);
 

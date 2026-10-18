@@ -223,6 +223,30 @@ def test_admin_save_keeps_comments_and_layout():
     assert router.config["strong_model"] == "S2" and "weak_model_tools" not in router.config
 
 
+def test_env_overrides_mode_preset_and_models():
+    assert router.env_overrides({}) == {}
+    assert router.env_overrides({"HARNESS_MODE": "passthrough"}) == {}
+    jev = router.env_overrides({"HARNESS_MODE": "Jev", "STRONG_MODEL": "or-claude-sonnet-5.5"})
+    assert jev["backend"] == "systemone" and jev["base_url"] == "https://openrouter.ai/api"
+    assert jev["strong_model"] == "or-claude-sonnet-5.5"
+    llm = router.env_overrides({"HARNESS_MODE": "llm", "ROUTER_MODEL": "deepseek/deepseek-r1", "ROUTER_TIMEOUT": "8"})
+    assert llm["model"] == "deepseek/deepseek-r1" and llm["timeout"] == 8.0
+    assert router.env_overrides({"ROUTER_BACKEND": "laya", "WEAK_MODEL": " "}) == {"backend": "laya"}
+
+
+def test_env_wins_over_the_config_file(tmp_path=None):
+    import tempfile, types
+    sys.modules["stub_env_scorer"] = types.SimpleNamespace(make=lambda cfg: (lambda p: 0.0))
+    path = os.path.join(tempfile.mkdtemp(), "c.yaml")
+    open(path, "w").write("backend: custom\nscorer: stub_env_scorer:make\nstrong_model: S\nweak_model: W\n")
+    os.environ["WEAK_MODEL"] = "local-qwen"
+    try:
+        router.load_config(path)
+    finally:
+        del os.environ["WEAK_MODEL"]
+    assert router.config["weak_model"] == "local-qwen" and router.config["strong_model"] == "S"
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"): f(); print("ok", n)

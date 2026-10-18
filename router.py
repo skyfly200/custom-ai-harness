@@ -182,11 +182,48 @@ def pick_model(win_rate: float, threshold: float, tokens: int, config: dict, too
     return config["weak_model"]
 
 
+# Launch settings for Docker (see .env.example). HARNESS_MODE picks a classifier
+# preset; the variables in ENV_KEYS set single keys. Both win over the config
+# file on every load, so unset them to manage the Router from the dashboard.
+MODE_PRESETS = {
+    "jev": {"backend": "systemone", "base_url": "https://openrouter.ai/api",
+            "api_key_env": "OPENROUTER_API_KEY", "model": "jev-latest"},
+    "laya": {"backend": "laya"},
+    "routellm": {"backend": "routellm"},
+    # a chat model rates difficulty; under the Interceptor's 10 s wait on the Router
+    "llm": {"backend": "llm", "base_url": "https://openrouter.ai/api/v1",
+            "api_key_env": "OPENROUTER_API_KEY", "model": "openai/gpt-4o-mini", "timeout": 9},
+}
+ENV_KEYS = {
+    "ROUTER_BACKEND": "backend", "ROUTER_BASE_URL": "base_url", "ROUTER_MODEL": "model",
+    "ROUTER_API_KEY_ENV": "api_key_env", "ROUTER_TIMEOUT": "timeout",
+    "STRONG_MODEL": "strong_model", "WEAK_MODEL": "weak_model",
+    "WEAK_MODEL_TOOLS": "weak_model_tools", "WEAK_MODEL_OVERFLOW": "weak_model_overflow",
+}
+
+
+def env_overrides(environ) -> dict:
+    """Config keys set by HARNESS_MODE and the ENV_KEYS variables; empty when none are set."""
+    mode = environ.get("HARNESS_MODE", "").strip().lower()
+    if mode and mode not in MODE_PRESETS and mode != "passthrough":  # passthrough skips the Router
+        log.warning("HARNESS_MODE=%s isn't one of %s; using the config file", mode, ", ".join(MODE_PRESETS))
+    out = dict(MODE_PRESETS.get(mode, {}))
+    for var, key in ENV_KEYS.items():
+        value = environ.get(var, "").strip()
+        if value:
+            out[key] = float(value) if key == "timeout" else value
+    return out
+
+
 def load_config(path: str) -> None:
     """Read the YAML config and build the configured backend's scorer."""
     global scorer, config_path, last_error
     with open(path, encoding="utf-8") as f:
         new_config = yaml.safe_load(f)
+    overrides = env_overrides(os.environ)
+    if overrides:
+        log.info("settings from the environment: %s", overrides)
+        new_config.update(overrides)
     # Build the scorer before swapping, so a bad file leaves the running config in place
     new_scorer = BACKENDS[new_config.get("backend", "routellm")](new_config)
     config.clear()

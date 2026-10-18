@@ -94,7 +94,7 @@ These settings only last for that window. Other tools such as Cursor, Aider, Con
 
 ## Run it on a server (Docker)
 
-You can run the harness on a rented or free cloud server (a VPS) instead of your PC, so it is always on and you can reach it from any of your devices. The server runs all three parts in Docker containers. The local engine and Ollama don't run there, so strong requests use the OpenRouter backups (the same as when your engine is off today).
+You can run the harness on a rented or free cloud server (a VPS) instead of your PC, so it is always on and you can reach it from any of your devices. The server runs all three parts in Docker containers. Out of the box the local engine and Ollama don't run there, so strong requests use the OpenRouter backups (the same as when your engine is off today); [Choose how it works](#choose-how-it-works) shows how to add local models or pick other models.
 
 **Which server.** The three parts use about 450 MB of memory together with the default Router setting (Jev through OpenRouter). Oracle Cloud's Always Free "Ampere A1" server (up to 4 CPUs and 24 GB) is the roomiest free choice. The 1 GB free servers (Google Cloud e2-micro, AWS, Azure) also fit, but building the images is slow on them and needs swap; see [Google Cloud's free tier instead](#on-google-clouds-free-tier-instead). The RouteLLM BERT Router setting needs about 2 GB more, so use it only on the bigger server (see the last step).
 
@@ -163,9 +163,59 @@ All of these run on the server, inside the `custom-ai-harness` folder:
 | Apply a model or fallback change from the Routing page | `docker compose restart gateway` |
 | Update to the latest version | `git pull`, then `docker compose up -d --build` |
 | Stop it | `docker compose down` |
-| Use the RouteLLM BERT Router (2 GB or more free) | add `ROUTER_BACKENDS=routellm` to `.env`, run `docker compose up -d --build`, then pick routellm on the dashboard |
+| Apply a change to `.env` | `docker compose up -d --build` |
 
 Your settings, usage numbers and `mcp-servers.json` live in the `data` folder. Chat can link repos you clone into the `repos` folder: clone one there and link it in chat as `/repos/NAME`. MCP servers started with `npx` work; ones that need `uvx` or other programs don't, because the container doesn't include them.
+
+
+### Choose how it works
+
+Lines you add to `.env` decide how the server works. Leave them all out and you get the setup above: Jev through OpenRouter picks between a strong and a cheap model for each request. After changing `.env`, run `docker compose up -d --build`.
+
+**How it decides which model answers** (`HARNESS_MODE`):
+
+| `.env` line | What it does | Memory |
+|---|---|---|
+| _(none)_ or `HARNESS_MODE=jev` | Jev through OpenRouter judges each request (uses `OPENROUTER_API_KEY`) | about 450 MB |
+| `HARNESS_MODE=laya` | Laya judges each request on the server itself, with no outside call. Its model downloads on the first request | 2 GB or more |
+| `HARNESS_MODE=routellm` | RouteLLM's BERT model judges each request on the server | 2 GB or more |
+| `HARNESS_MODE=llm` | A chat model judges each request (GPT-4o mini through OpenRouter; `ROUTER_MODEL=` picks another) | about 450 MB |
+| `HARNESS_MODE=passthrough` | No judging and no prompt changes: every request goes straight to one model, set with `PASSTHROUGH_MODEL=`. Use this to give another app or tool a plain API address | about 450 MB |
+
+**Which models it picks between.** Use any model name from `config.yaml` or the Routing page:
+
+```bash
+STRONG_MODEL=or-claude-sonnet-5.5     # hard requests (default claude-sonnet-5: your local engine, then backups)
+WEAK_MODEL=fast-openrouter            # easy requests
+WEAK_MODEL_TOOLS=or-gpt-6-luna        # easy requests from Claude Code and other tool-using agents
+```
+
+**A plain API address for another app** (passthrough):
+
+```bash
+HARNESS_MODE=passthrough
+PASSTHROUGH_MODEL=or-claude-sonnet-5.5                   # a name from config.yaml, or a provider's own id:
+# PASSTHROUGH_MODEL=openrouter/anthropic/claude-sonnet-5.5
+# PASSTHROUGH_MODEL=openai/my-model                      # any OpenAI-style server, with:
+# PASSTHROUGH_API_BASE=http://my-server:8000/v1
+# PASSTHROUGH_API_KEY=its-key
+```
+
+The app then uses `http://SERVER_NAME:3000/v1` (OpenAI style) or `http://SERVER_NAME:3000` (Anthropic style) with your `HARNESS_PASSWORD` as its API key. Whatever model name the app asks for, the answer comes from `PASSTHROUGH_MODEL`.
+
+**Local models with Ollama.** These run on the server's own processor, so they need a big server: 8 GB of memory or more for a 7B model, and they are slow without a graphics card.
+
+```bash
+COMPOSE_PROFILES=local
+LOCAL_MODELS=qwen2.5-coder:7b gemma3:4b   # downloaded from ollama.com on first start
+WEAK_MODEL_TOOLS=local-qwen2.5-coder:7b   # optional: send easy requests to one of them
+```
+
+Each model shows up as `local-NAME` for the settings above and in the chat page's model list. `fallback-ollama` in `config.yaml` uses the same Ollama. `docker compose logs -f ollama` shows the downloads.
+
+**Your own local engine.** A llama.cpp or vLLM server on the same machine (`launch-local.sh`, changed to listen on `0.0.0.0` instead of `127.0.0.1`) is used as the strong model automatically. Another address goes in `LOCAL_ENGINE_URL=http://ADDRESS:8000`.
+
+Settings in `.env` win over the dashboard and Routing page each time the server starts. Leave a setting out of `.env` to manage it from the dashboard instead.
 
 ---
 
@@ -307,6 +357,8 @@ ANTHROPIC_API_KEY=your_anthropic_key   # optional
 ```bash
 python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
 ```
+
+The Docker launch settings (`HARNESS_MODE`, `STRONG_MODEL`, `PASSTHROUGH_MODEL`, `LOCAL_MODELS`, ...) are described in [Choose how it works](#choose-how-it-works) and `.env.example`. `router.py` and the Interceptor read them outside Docker too (except passthrough, which needs the Docker Gateway): `HARNESS_MODE`, `ROUTER_*`, `STRONG_MODEL` and the `WEAK_MODEL*` variables override `routellm-config.yaml`; `PIN_MODEL`, `HARNESS_TRANSFORMS=on|off` and `ROUTER_DOWN_MODEL`/`ROUTER_DOWN_TOOLS_MODEL` override the dashboard settings. `docker/gateway-start.py` applies `PASSTHROUGH_*`, `LOCAL_MODELS`, `OLLAMA_URL` and `LOCAL_ENGINE_URL` to a copy of `config.yaml` when the Gateway container starts.
 
 Keys can also be set in the shell session if preferred:
 

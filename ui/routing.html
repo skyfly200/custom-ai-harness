@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Harness Routing</title>
+<title>Bright Chat · Routing</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="routing.css">
 </head>
 <body>
 <main class="wide">
   <header>
-    <nav><h1>Harness Routing</h1><a href="./" data-hint="Health of each part, settings, and recent requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" class="here" data-hint="Where requests go, as connected boxes">Routing</a></nav>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Routing</span></h1><a href="./" data-hint="Health of each part, settings, and recent requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" class="here" data-hint="Where requests go, as connected boxes">Routing</a></nav>
     <span class="muted" id="updated">Loading…</span>
   </header>
 
@@ -89,5 +90,6 @@
 </dialog>
 <script src="hints.js"></script>
 <script src="routing.js"></script>
+<script src="bright.js"></script>
 </body>
 </html>

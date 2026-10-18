@@ -1,4 +1,4 @@
-// Harness chat page. Talks to the Interceptor like any other OpenAI client
+// Bright Chat, the chat page. Talks to the Interceptor like any other OpenAI client
 // (POST /v1/chat/completions) and follows its live feed (/ui/api/live) to show
 // what happens to each request. Chats live in this browser's localStorage.
 'use strict';
@@ -22,11 +22,15 @@ const ICONS = {
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M17 7 7 17M7 7l10 10"/></svg>',
+  kit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.5L12 15l-1.8-4.5L5.5 9l4.7-1.4z"/><path d="M19 15l.8 2 2 .8-2 .7-.8 2-.8-2-2-.7 2-.8zM5 16l.6 1.4 1.4.6-1.4.6L5 20l-.6-1.4L3 18l1.4-.6z"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
 const setIcon = (id, name) => { $(id).innerHTML = ICONS[name]; };
 setIcon('copyChat', 'copy'); setIcon('exportChat', 'download'); setIcon('toggleOptions', 'sliders');
 setIcon('toggleActivity', 'pulse'); setIcon('attach', 'clip'); setIcon('mic', 'mic');
-setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('deleteChat', 'trash');
+setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('deleteChat', 'trash'); setIcon('kitBtn', 'kit');
 
 // ---------------------------------------------------------------------------
 // Storage: an index of chats plus one key per chat, so streaming a reply only
@@ -48,7 +52,15 @@ const store = {
   remove(key) { try { localStorage.removeItem(key); } catch {} },
 };
 
-let index = store.get(INDEX_KEY, []);   // [{id, title, updated, count}]
+const PROJECTS_KEY = 'harness-projects';
+const SKILLS_KEY = 'harness-skills';
+const SCHEDULES_KEY = 'harness-schedules';
+
+let index = store.get(INDEX_KEY, []);   // [{id, title, updated, count, project}]
+let projects = store.get(PROJECTS_KEY, []);   // [{id, name, color, instructions, repo, skills, created}]
+let skills = store.get(SKILLS_KEY, []);       // [{id, name, description, body}]
+let schedules = store.get(SCHEDULES_KEY, []); // [{id, name, prompt, repeat, next, target, project, last}]
+const unseen = new Set();                // chats that finished a reply while not open
 const cache = new Map();                 // id -> chat
 let chat = null;                         // the open chat
 const running = new Map();               // chat id -> { controller, reply }
@@ -70,9 +82,9 @@ function saveChat(c, { touch = true } = {}) {
   if (touch) c.updated = Date.now();
   cache.set(c.id, c);
   // an empty chat isn't listed until something is in it
-  if (!c.messages.length && !c.system && !c.notes && !c.repo) return;
+  if (!c.messages.length && !c.system && !c.notes && !c.repo && !c.skills?.length) return;
   store.set(CHAT_KEY(c.id), c);
-  const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: c.messages.length };
+  const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: c.messages.length, project: c.project || undefined };
   const i = index.findIndex(e => e.id === c.id);
   if (i >= 0) index[i] = entry; else index.push(entry);
   index.sort((a, b) => b.updated - a.updated);
@@ -128,7 +140,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds'];
+const PREF_FIELDS = ['model', 'maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['model', 'maxTokens', 'temperature']) {
@@ -209,17 +221,102 @@ function download(name, text) {
 }
 
 // ---------------------------------------------------------------------------
-// Chats sidebar
+// Sidebar: projects, scheduled messages and recent chats, with live status
 // ---------------------------------------------------------------------------
-function drawList() {
+const COLORS = ['#8b6cff', '#ff5fa2', '#ffb547', '#3fd0ff', '#34d399', '#f87171', '#a3e635', '#c084fc'];
+let scope = store.get('harness-chat-scope', '');   // '' = every chat, else a project id
+if (scope && !projects.some(p => p.id === scope)) scope = '';
+const sideOpen = store.get('harness-side-sections', { projects: true, scheduled: true, recent: true });
+
+const projectOf = (c) => (c?.project ? projects.find(p => p.id === c.project) : null);
+const saveProjects = () => store.set(PROJECTS_KEY, projects);
+const saveSkills = () => store.set(SKILLS_KEY, skills);
+const saveSchedules = () => store.set(SCHEDULES_KEY, schedules);
+function setScope(id) {
+  scope = id || '';
+  store.set('harness-chat-scope', scope);
+  drawSide();
+}
+
+// "4m", "3h", "2d", or a date
+function shortAgo(t) {
+  const s = (Date.now() - t) / 1000;
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
+  return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// What a running reply is doing, in a couple of words, for the sidebar
+function liveStatus(id) {
+  const r = running.get(id);
+  if (!r) return '';
+  const m = r.reply, tr = m.trace || {};
+  if (tr.toolsRunning) {
+    const call = (m.rounds || []).flatMap(x => x.calls).find(x => x.result == null);
+    return call ? `tool · ${toolLabel(call.name)[1]}` : 'using tools';
+  }
+  if (tr.firstToken != null) return `writing · ${fmtTok(tr.usage?.completion_tokens ?? tr.chunks ?? 0)}`;
+  if (tr.answered) return 'thinking';
+  if (tr.routed) return 'waiting';
+  return 'routing';
+}
+
+function visibleChats() {
   const q = $('search').value.trim().toLowerCase();
-  const rows = index.filter(e => !q || e.title.toLowerCase().includes(q) ||
-    (loadChat(e.id)?.messages || []).some(m => String(m.content).toLowerCase().includes(q)));
-  $('chatList').innerHTML = rows.map(e => `<li data-id="${e.id}" class="${e.id === chat?.id ? 'active' : ''}" title="${esc(e.title)}">
-      ${running.has(e.id) ? '<span class="busy" title="Replying"></span>' : ''}
-      <div class="ct"><b>${esc(e.title)}</b><span>${ago(e.updated)} · ${e.count} msg${e.count === 1 ? '' : 's'}</span></div>
-      <button class="del" data-del="${e.id}" title="Delete chat" aria-label="Delete chat">${ICONS.trash}</button></li>`).join('')
-    || `<li class="muted small">${q ? 'No chats match.' : 'No saved chats yet.'}</li>`;
+  return index.filter(e => (!scope || e.project === scope) && (!q || e.title.toLowerCase().includes(q) ||
+    (loadChat(e.id)?.messages || []).some(m => String(m.content).toLowerCase().includes(q))));
+}
+
+function drawList() {
+  drawProjects();
+  const rows = visibleChats();
+  const p = projects.find(x => x.id === scope);
+  $('chatsHead').textContent = p ? p.name : 'Recent';
+  $('clearScope').hidden = !p;
+  $('chatList').innerHTML = rows.map(e => {
+    const proj = !scope && e.project ? projects.find(x => x.id === e.project) : null;
+    const live = running.has(e.id);
+    return `<li data-id="${e.id}" class="${e.id === chat?.id ? 'active' : ''}${live ? ' live' : ''}${unseen.has(e.id) ? ' unseen' : ''}" title="${esc(e.title)}${proj ? ` · ${esc(proj.name)}` : ''}">
+      ${proj ? `<i class="pdot" style="background:${proj.color}"></i>` : ''}
+      <span class="ct">${esc(e.title)}</span>
+      <span class="when">${live ? `<span class="busy"></span><span class="ls">${esc(liveStatus(e.id))}</span>` : shortAgo(e.updated)}</span>
+      <button class="del" data-del="${e.id}" title="Delete chat" aria-label="Delete chat">${ICONS.x}</button></li>`;
+  }).join('') || `<li class="muted small empty-row">${$('search').value.trim() ? 'No chats match.' : p ? 'No chats in this project yet. New chat starts one here.' : 'No saved chats yet.'}</li>`;
+}
+
+// Only the status words change while replies run, so update them in place
+function drawLiveStatus() {
+  for (const li of $('chatList').querySelectorAll('li.live')) {
+    const ls = li.querySelector('.ls');
+    if (ls) ls.textContent = liveStatus(li.dataset.id);
+  }
+}
+
+function drawProjects() {
+  const counts = {}, live = {};
+  for (const e of index) if (e.project) { counts[e.project] = (counts[e.project] || 0) + 1; if (running.has(e.id)) live[e.project] = true; }
+  $('projectList').innerHTML = projects.map(p => `<li data-pid="${p.id}" class="${scope === p.id ? 'active' : ''}" title="${esc(p.instructions?.slice(0, 200) || p.name)}">
+      <i class="pdot" style="background:${p.color}"></i><span class="ct">${esc(p.name)}</span>
+      ${live[p.id] ? '<span class="busy" title="A chat in this project is replying"></span>' : ''}<span class="when">${counts[p.id] || 0}</span>
+      <button class="del edit" data-edit="${p.id}" title="Project settings" aria-label="Project settings">${ICONS.gear}</button></li>`).join('')
+    || '<li class="muted small empty-row">Group chats with shared instructions, skills and a repo.</li>';
+}
+
+function drawSchedules() {
+  const list = [...schedules].sort((a, b) => (a.next || Infinity) - (b.next || Infinity));
+  $('schedList').innerHTML = list.map(s => {
+    const when = s.next ? (s.next - Date.now() < 86400000 ? new Date(s.next).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : new Date(s.next).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })) : 'done';
+    return `<li data-sid="${s.id}" title="${esc(s.prompt)}">${ICONS.clock}<span class="ct">${esc(s.name || s.prompt)}</span><span class="when">${s.repeat !== 'once' ? '↻ ' : ''}${esc(when)}</span></li>`;
+  }).join('') || '<li class="muted small empty-row">Send a message on a timer, once or on repeat.</li>';
+}
+
+function drawSide() {
+  for (const sec of document.querySelectorAll('.side-sec')) sec.classList.toggle('closed', sideOpen[sec.dataset.sec] === false);
+  drawSchedules();
+  drawList();
+  drawProjectBits();
 }
 
 $('chatList').addEventListener('click', (e) => {
@@ -233,12 +330,33 @@ $('chatList').addEventListener('click', (e) => {
   const li = e.target.closest('li[data-id]');
   if (li) { openChat(li.dataset.id); $('app').classList.remove('side-open'); }
 });
+$('projectList').addEventListener('click', (e) => {
+  const edit = e.target.closest('[data-edit]');
+  if (edit) { e.stopPropagation(); openProjectDialog(edit.dataset.edit); return; }
+  const li = e.target.closest('li[data-pid]');
+  if (li) setScope(scope === li.dataset.pid ? '' : li.dataset.pid);
+});
+$('schedList').addEventListener('click', (e) => {
+  const li = e.target.closest('li[data-sid]');
+  if (li) openScheduleDialog(li.dataset.sid);
+});
+$('clearScope').addEventListener('click', () => setScope(''));
+for (const btn of document.querySelectorAll('.sec-toggle')) {
+  btn.addEventListener('click', () => {
+    const sec = btn.closest('.side-sec');
+    sideOpen[sec.dataset.sec] = sec.classList.contains('closed');
+    store.set('harness-side-sections', sideOpen);
+    sec.classList.toggle('closed');
+  });
+}
 $('search').addEventListener('input', drawList);
 
 function openChat(id) {
   if (chat && chat.id !== id) saveDraft();
   chat = (id && loadChat(id)) || newChatObject();
+  if (!id && scope) chat.project = scope; // a new chat starts in the project being shown
   cache.set(chat.id, chat);
+  unseen.delete(chat.id);
   $('title').value = chat.title;
   $('title').placeholder = chatTitle(chat);
   $('system').value = chat.system || '';
@@ -247,6 +365,7 @@ function openChat(id) {
   pending = chat.pendingAttachments || [];
   drawChips(); autoGrow(); drawContextSize(); drawRepo();
   drawList();
+  drawProjectBits();
   drawLog();
   busy(running.has(chat.id));
   try { localStorage.setItem('harness-chat-open', chat.id); } catch {}
@@ -261,9 +380,10 @@ function saveDraft() {
 }
 
 function stepChat(dir) {
-  if (!index.length) return;
-  const i = index.findIndex(e => e.id === chat?.id);
-  const next = index[Math.max(0, Math.min(index.length - 1, (i < 0 ? -1 : i) + dir))];
+  const list = visibleChats();
+  if (!list.length) return;
+  const i = list.findIndex(e => e.id === chat?.id);
+  const next = list[Math.max(0, Math.min(list.length - 1, (i < 0 ? -1 : i) + dir))];
   if (next) openChat(next.id);
 }
 
@@ -291,11 +411,35 @@ $('notes').addEventListener('input', drawContextSize);
 // ---------------------------------------------------------------------------
 // Conversation
 // ---------------------------------------------------------------------------
+const SUGGESTIONS = [
+  'Explain embeddings like I’m twelve',
+  'Write a haiku about routing tokens',
+  'Plan a weekend project with a Raspberry Pi',
+  'Review this function for bugs',
+  'What is the difference between a model and a router?',
+  'Give me three names for a cosy café',
+];
 function emptyState() {
-  return `<div class="empty"><h2>Ask anything</h2>
-    <p>Messages go through the Interceptor like any other client, so the Router picks the model unless you name one in Options.
-    Each reply shows, live, where it went and why.</p>
-    <p class="small">Attach files with the paperclip or by dropping them here, dictate with the mic, and add standing context under Options.</p></div>`;
+  const p = projectOf(chat);
+  const picks = [...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 3);
+  return `<div class="empty"><div class="orb" aria-hidden="true"><i></i><i></i><i></i></div>
+    <h2>${p ? `New chat in ${esc(p.name)}` : 'What shall we explore?'}</h2>
+    <p>Messages go through the harness like any other client, so the Router picks the model unless you name one in Options. Each reply shows, live, where it went and why.</p>
+    <div class="suggest">${picks.map(t => `<button type="button" class="chip-btn" data-suggest="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <p class="small">Attach files with the paperclip or by dropping them here, dictate with the mic, and type <kbd>/</kbd> for skills and tools.</p></div>`;
+}
+
+// Something to read while the model gets going; turns over every few seconds
+const THINKING = ['Wandering the latent space…', 'Herding tokens…', 'Consulting the embeddings…', 'Asking the router nicely…',
+  'Warming up the attention heads…', 'Untangling the context…', 'Sampling the good words…', 'Following the gradient…',
+  'Polishing a fresh thought…', 'Lining up the vectors…', 'Brewing a reply…', 'Rounding up the logits…'];
+function thinkingHtml(m) {
+  const elapsed = Date.now() - (m.trace?.start || m.time || Date.now());
+  const seed = [...m.id].reduce((n, ch) => n + ch.charCodeAt(0), 0);
+  const phrase = THINKING[(seed + Math.floor(elapsed / 2600)) % THINKING.length];
+  // negative delays keep the animations running smoothly across redraws
+  const lag = `animation-delay:-${elapsed % 2200}ms`;
+  return `<div class="thinking"><span class="spark" style="animation-delay:-${elapsed % 1600}ms"><i></i><i></i><i></i></span><span class="shimmer" style="${lag}">${phrase}</span></div>`;
 }
 
 function attachmentsHtml(list) {
@@ -448,11 +592,12 @@ function loadModelInfo() {
   }).catch(() => {});
 }
 
+const fresh = (m) => m.time && Date.now() - m.time < 1500;
 function messageHtml(m, i, list) {
   const lastAssistant = m.role === 'assistant' && i === list.length - 1;
   const speaking = speech.current === m.id;
   if (m.role === 'user') {
-    return `<div class="msg user" data-id="${m.id}"><div class="who">You<span class="actions">
+    return `<div class="msg user${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who">You<span class="actions">
         <button data-act="copy" title="Copy">${ICONS.copy}</button>
         <button data-act="edit" title="Edit and resend">${ICONS.edit}</button>
         <button data-act="resend" title="Send this again (replies after it are replaced)">${ICONS.retry}</button></span></div>
@@ -464,12 +609,13 @@ function messageHtml(m, i, list) {
         <button data-act="copy" title="Copy">${ICONS.copy}</button></span></div>
       <div class="bubble">${esc(m.content)}</div>${m.hint ? `<div class="hint">${esc(m.hint)}</div>` : ''}${m.trace ? `<div class="meta"><details open><summary>What happened</summary>${traceHtml(m)}</details></div>` : ''}</div>`;
   }
-  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}" data-id="${m.id}"><div class="who">Assistant<span class="actions">
+  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who">Assistant<span class="actions">
       ${m.streaming ? `<button data-act="stop" class="stop" title="Stop this reply (Esc)">${ICONS.stop} Stop</button>` : ''}
       <button data-act="copy" title="Copy as Markdown">${ICONS.copy}</button>
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>
       ${lastAssistant && !m.streaming ? `<button data-act="retry" title="Regenerate">${ICONS.retry}</button>` : ''}</span></div>
-    <div class="bubble"><div class="live-trace">${m.streaming ? traceHtml(m) : ''}</div>
+    <div class="bubble${m.streaming ? ' working' : ''}"${m.streaming ? ` style="--spin-delay:-${(Date.now() - m.time) % 4000}ms"` : ''}><div class="live-trace">${m.streaming ? traceHtml(m) : ''}</div>
+      ${m.streaming && !m.content && !(m.rounds || []).length ? thinkingHtml(m) : ''}
       ${replyBodyHtml(m)}
       <div class="meta-wrap">${m.streaming ? '' : metaHtml(m)}</div></div></div>`;
 }
@@ -576,9 +722,14 @@ function patch(el, html) {
   for (const k of open) { const d = el.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; }
 }
 // keep elapsed times ticking while a reply is pending
-setInterval(() => { for (const { reply } of running.values()) if (chat.messages.includes(reply)) redraw(reply); }, 250);
+setInterval(() => {
+  for (const { reply } of running.values()) if (chat.messages.includes(reply)) redraw(reply);
+  if (running.size) drawLiveStatus();
+}, 250);
 
 $('log').addEventListener('click', async (e) => {
+  const sug = e.target.closest('[data-suggest]');
+  if (sug) { $('input').value = sug.dataset.suggest; autoGrow(); $('input').focus(); return; }
   const codeBtn = e.target.closest('.copy-code');
   if (codeBtn) {
     await copyText(codeBtn.closest('.code').querySelector('code').textContent);
@@ -612,12 +763,31 @@ $('log').addEventListener('click', async (e) => {
 // ---------------------------------------------------------------------------
 // Sending
 // ---------------------------------------------------------------------------
+// The chat's own repo, else its project's
+const repoOf = (c) => c?.repo || projectOf(c)?.repo || null;
+// Skills on for this chat: its own and its project's
+function skillsOf(c) {
+  const ids = new Set([...(c?.skills || []), ...(projectOf(c)?.skills || [])]);
+  return skills.filter(k => ids.has(k.id));
+}
+// Skills the model may load itself with use_skill
+const loadableSkills = (c) => ($('skillTool').checked ? skills.filter(k => !skillsOf(c).includes(k)) : []);
+
 function contextText(c) {
   const parts = [];
+  const p = projectOf(c);
+  if (p?.instructions?.trim()) parts.push(`Instructions for the project "${p.name}":\n\n${p.instructions.trim()}`);
   if (c.system?.trim()) parts.push(c.system.trim());
   if (c.notes?.trim()) parts.push(`Context notes from the user:\n\n${c.notes.trim()}`);
-  if (c.repo) {
-    parts.push(`This chat is linked to the git repository "${c.repo.name}" at ${c.repo.path}${c.repo.branch ? ` (branch ${c.repo.branch})` : ''}. `
+  for (const k of skillsOf(c)) parts.push(`Skill "${k.name}" is on. Follow it:\n\n${k.body.trim()}`);
+  const more = loadableSkills(c);
+  if (more.length) {
+    parts.push('More skills are available. When a request matches one, call the use_skill tool with its name to read its instructions, then follow them:\n'
+      + more.map(k => `- ${k.name}: ${k.description || k.body.slice(0, 120)}`).join('\n'));
+  }
+  const repo = repoOf(c);
+  if (repo) {
+    parts.push(`This chat is linked to the git repository "${repo.name}" at ${repo.path}${repo.branch ? ` (branch ${repo.branch})` : ''}. `
       + 'Use the repo_ tools to list, read and search its files and to look at its git history before answering questions about it. Paths are relative to the repository root.');
   }
   return parts.join('\n\n');
@@ -667,6 +837,8 @@ function busy(on) {
 
 async function send(text, attachments) {
   const c = chat;
+  const r = $('send').getBoundingClientRect();
+  window.Bright?.pulse(r.left + r.width / 2, r.top + r.height / 2, 1);
   if (text || attachments.length) c.messages.push({ id: uid(), role: 'user', content: text, attachments: attachments.length ? attachments : undefined, time: Date.now() });
   await runReply(c);
 }
@@ -839,8 +1011,9 @@ async function runReply(c) {
     running.delete(c.id);
     for (const id of clientIds) waiting.delete(id);
     saveChat(c);
-    if (chat === c) { busy(false); drawLog(); }
+    if (chat === c) { busy(false); drawLog(); } else if (!c.deleted) unseen.add(c.id);
     drawList();
+    if (reply.content && !reply.timedOut) nameChat(c);
     speech.endReply(reply);
     finish();
   }
@@ -870,11 +1043,18 @@ async function runTool(call, c, signal, onChange) {
     return onChange();
   }
   onChange();
+  if (call.name === 'use_skill') {
+    const k = skills.find(x => x.name === args.name);
+    call.result = k ? k.body : `No skill named "${args.name}". Skills: ${skills.map(x => x.name).join(', ')}`;
+    call.isError = !k;
+    call.ms = Date.now() - started;
+    return onChange();
+  }
   try {
     const res = await fetch('api/tools/call', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: call.name, arguments: args, repo: c.repo?.path }),
+      body: JSON.stringify({ name: call.name, arguments: args, repo: repoOf(c)?.path }),
       signal,
     });
     const j = await res.json().catch(() => ({ text: `Error: HTTP ${res.status}`, isError: true }));
@@ -985,7 +1165,9 @@ function drawHint() {
   const total = requestTokens();
   if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${pending.some(a => a.kind === 'image') ? ' plus images' : ''}`);
   if ($('model').value.trim()) bits.push(`model pinned to ${esc($('model').value.trim())}`);
-  if (chat?.repo) bits.push(`linked to ${esc(chat.repo.name)}`);
+  if (repoOf(chat)) bits.push(`linked to ${esc(repoOf(chat).name)}`);
+  const on = chat ? skillsOf(chat) : [];
+  if (on.length) bits.push(`skill${on.length === 1 ? '' : 's'}: ${on.map(k => esc(k.name)).join(', ')}`);
   const toolCount = chat ? activeTools(chat).length : 0;
   if (toolCount) bits.push(`${toolCount} tool${toolCount === 1 ? '' : 's'} on`);
   if ($('handsFree').checked) bits.push('hands-free on');
@@ -1070,14 +1252,26 @@ window.addEventListener('drop', (e) => {
 // tools for a repo the chat is linked to. Requests carry tools only when one
 // is on, since requests with tools go to models that can call them.
 // ---------------------------------------------------------------------------
-function activeTools(c) {
+function serverTools(c) {
   if (!toolInfo) return [];
   const off = new Set(prefs.mcpOff || []);
   const list = [];
   for (const s of toolInfo.servers || []) {
     if (s.status === 'connected' && !off.has(s.name)) list.push(...(toolInfo.definitions?.[s.name] || []));
   }
-  if (c?.repo) list.push(...(toolInfo.repoDefinitions || []));
+  if (repoOf(c)) list.push(...(toolInfo.repoDefinitions || []));
+  return list;
+}
+function activeTools(c) {
+  const list = serverTools(c);
+  const more = loadableSkills(c);
+  if (more.length) {
+    list.push({ type: 'function', function: {
+      name: 'use_skill',
+      description: 'Read the instructions of one of the user\'s skills. Call it when a request matches a skill listed in the system prompt.',
+      parameters: { type: 'object', properties: { name: { type: 'string', enum: more.map(k => k.name) } }, required: ['name'] },
+    } });
+  }
   return list;
 }
 
@@ -1105,20 +1299,23 @@ function drawTools() {
         ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}</li>`;
   });
   if (toolInfo?.error) rows.unshift(`<li class="err">${esc(toolInfo.error)}</li>`);
-  $('mcpList').innerHTML = rows.join('') || (toolInfo
+  $('mcpList').innerHTML = $('kitTools').innerHTML = rows.join('') || (toolInfo
     ? `<li class="muted small">None yet. List servers in <code>${esc(toolInfo.file?.split(/[\\/]/).pop() || 'mcp-servers.json')}</code> next to server.js, the same way as Claude Code's <code>.mcp.json</code>, then press Reload.</li>`
     : '<li class="err">Could not reach the harness.</li>');
 }
 
-$('mcpList').addEventListener('change', (e) => {
+function onToolToggle(e) {
   const box = e.target.closest('[data-mcp]');
   if (!box) return;
   const off = new Set(prefs.mcpOff || []);
   if (box.checked) off.delete(box.dataset.mcp); else off.add(box.dataset.mcp);
   prefs.mcpOff = [...off];
   store.set(PREF_KEY, prefs);
+  drawTools();
   drawHint();
-});
+}
+$('mcpList').addEventListener('change', onToolToggle);
+$('kitTools').addEventListener('change', onToolToggle);
 
 $('mcpReload').addEventListener('click', async () => {
   $('mcpReload').disabled = true;
@@ -1140,7 +1337,9 @@ function drawRepo() {
   $('repoLink').textContent = r ? 'Unlink' : 'Link';
   $('repoInfo').innerHTML = r
     ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model can read its files and history (read-only).`
-    : 'Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).';
+    : projectOf(chat)?.repo
+      ? `Using the project's repo <b>${esc(projectOf(chat).repo.name)}</b>. Link another folder here to use that instead.`
+      : 'Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).';
 }
 
 $('repoPath').addEventListener('input', () => { $('repoPath').dataset.typed = $('repoPath').value; });
@@ -1176,7 +1375,11 @@ $('repoLink').addEventListener('click', async () => {
 // Export
 // ---------------------------------------------------------------------------
 function chatMarkdown(c) {
-  const out = [`# ${chatTitle(c)}`, '', `_Exported from Harness Chat on ${new Date().toLocaleString()}_`, ''];
+  const out = [`# ${chatTitle(c)}`, '', `_Exported from Bright Chat on ${new Date().toLocaleString()}_`, ''];
+  const p = projectOf(c);
+  if (p) out.push(`_Project: ${p.name}_`, '');
+  if (p?.instructions?.trim()) out.push('## Project instructions', '', p.instructions.trim(), '');
+  if (skillsOf(c).length) out.push(`_Skills: ${skillsOf(c).map(k => k.name).join(', ')}_`, '');
   if (c.system?.trim()) out.push('## System prompt', '', c.system.trim(), '');
   if (c.notes?.trim()) out.push('## Context notes', '', c.notes.trim(), '');
   if (c.repo) out.push(`_Linked to the git repo ${c.repo.name} (${c.repo.path})_`, '');
@@ -1223,7 +1426,7 @@ $('copyChat').addEventListener('click', async () => {
 $('exportAll').addEventListener('click', () => {
   const chats = index.map(e => loadChat(e.id)).filter(Boolean);
   if (!chats.length) return toast('No saved chats yet.');
-  download(`harness-chats-${new Date().toISOString().slice(0, 10)}.md`, chats.map(chatMarkdown).join('\n\n---\n\n'));
+  download(`bright-chats-${new Date().toISOString().slice(0, 10)}.md`, chats.map(chatMarkdown).join('\n\n---\n\n'));
 });
 
 // ---------------------------------------------------------------------------
@@ -1723,6 +1926,391 @@ $('toggleOptions').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Chat names: after the first reply, a short request asks for a title
+// ---------------------------------------------------------------------------
+const naming = new Set();
+async function nameChat(c) {
+  if (c.title || c.named || naming.has(c.id) || !$('autoName').checked || c.deleted) return;
+  const first = c.messages.find(m => m.role === 'user' && m.content);
+  const answer = c.messages.find(m => m.role === 'assistant' && m.content);
+  if (!first || !answer) return;
+  naming.add(c.id);
+  try {
+    const res = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-harness-request-id': `name-${c.id}-${uid()}` },
+      body: JSON.stringify({
+        model: 'auto',
+        stream: false,
+        max_tokens: 30,
+        messages: [
+          { role: 'system', content: 'You name chat conversations. Reply with only a short title of 2 to 6 words in the language of the conversation: no quotes, no full stop, no emoji.' },
+          { role: 'user', content: `Name this chat.\n\nUser: ${first.content.slice(0, 1200)}\n\nAssistant: ${answer.content.slice(0, 600)}` },
+        ],
+      }),
+    });
+    if (!res.ok) return;
+    const j = await res.json();
+    const raw = String(j.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '');
+    const name = raw.split('\n').map(l => l.trim()).find(Boolean)?.replace(/^(title|name)\s*:\s*/i, '').replace(/^["'“”*#\s]+|["'“”*.\s]+$/g, '').slice(0, 60);
+    if (!name || c.title || c.deleted) return;
+    c.title = name;
+    c.named = true;
+    saveChat(c, { touch: false });
+    if (chat === c) { $('title').value = name; $('title').classList.add('renamed'); setTimeout(() => $('title').classList.remove('renamed'), 1200); }
+    drawList();
+  } catch {
+    // keep the first message as the name
+  } finally {
+    naming.delete(c.id);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Projects: chats grouped with shared instructions, skills and a repo
+// ---------------------------------------------------------------------------
+function drawProjectBits() {
+  const p = projectOf(chat);
+  const badge = $('projectBadge');
+  badge.hidden = !p;
+  if (p) { badge.innerHTML = `<i class="pdot" style="background:${p.color}"></i>${esc(p.name)}`; badge.title = 'Project settings'; }
+  $('chatProject').innerHTML = '<option value="">No project</option>'
+    + projects.map(x => `<option value="${x.id}"${x.id === chat?.project ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
+}
+$('projectBadge').addEventListener('click', () => projectOf(chat) && openProjectDialog(chat.project));
+$('chatProject').addEventListener('change', () => {
+  chat.project = $('chatProject').value || undefined;
+  saveChat(chat, { touch: false });
+  drawList(); drawProjectBits(); drawRepo(); drawHint(); drawKit();
+});
+
+// Tokens and cost of every saved chat in a project
+function projectUsage(id) {
+  let chats = 0, input = 0, output = 0, usd = 0, priced = true;
+  for (const e of index.filter(x => x.project === id)) {
+    const c = loadChat(e.id);
+    if (!c) continue;
+    chats++;
+    for (const m of c.messages) {
+      if (m.role !== 'assistant') continue;
+      const u = m.trace?.usage;
+      if (u) { input += u.prompt_tokens || 0; output += u.completion_tokens || 0; }
+      const cost = replyCost(m);
+      if (cost) usd += cost.usd; else if (u) priced = false;
+    }
+  }
+  return { chats, input, output, usd, priced };
+}
+
+let editingProject = null;
+let projectColor = COLORS[0];
+function drawSwatches() {
+  $('pColors').innerHTML = COLORS.map(c => `<button type="button" role="radio" aria-checked="${c === projectColor}" class="sw${c === projectColor ? ' on' : ''}" data-c="${c}" style="--c:${c}" aria-label="Colour ${c}"></button>`).join('');
+}
+$('pColors').addEventListener('click', (e) => { const b = e.target.closest('[data-c]'); if (b) { projectColor = b.dataset.c; drawSwatches(); } });
+
+function openProjectDialog(id) {
+  editingProject = projects.find(p => p.id === id) || null;
+  const p = editingProject || {};
+  $('projectDialogTitle').textContent = editingProject ? 'Project settings' : 'New project';
+  $('pName').value = p.name || '';
+  $('pInstructions').value = p.instructions || '';
+  $('pRepo').value = p.repo?.path || '';
+  projectColor = p.color || COLORS[projects.length % COLORS.length];
+  drawSwatches();
+  const on = new Set(p.skills || []);
+  $('pSkills').innerHTML = skills.map(k => `<label class="check"><input type="checkbox" value="${k.id}"${on.has(k.id) ? ' checked' : ''}> ${esc(k.name)}</label>`).join('')
+    || '<span class="muted small">No skills yet. Add them from the composer’s skills button.</span>';
+  $('pDelete').hidden = !editingProject;
+  if (editingProject) {
+    const u = projectUsage(p.id);
+    $('pUsage').innerHTML = `${u.chats} chat${u.chats === 1 ? '' : 's'} · ${fmtTok(u.input + u.output)} tokens (${fmtTok(u.input)} in, ${fmtTok(u.output)} out) · ${u.usd ? fmtUsd(u.usd) : 'free'}${u.priced ? '' : '+'}`;
+  } else $('pUsage').textContent = '';
+  $('projectDialog').showModal();
+  $('pName').focus();
+}
+$('newProject').addEventListener('click', () => openProjectDialog(null));
+
+$('projectForm').addEventListener('submit', async (e) => {
+  if (e.submitter?.value !== 'save') return;
+  e.preventDefault();
+  const name = $('pName').value.trim();
+  if (!name) return $('pName').focus();
+  const p = editingProject || { id: uid(), created: Date.now() };
+  const path = $('pRepo').value.trim();
+  if (path !== (p.repo?.path || '')) {
+    if (!path) delete p.repo;
+    else {
+      $('pSave').disabled = true;
+      try {
+        const res = await fetch('api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+        p.repo = { path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote };
+      } catch (err) {
+        toast(`Could not link the repo: ${err.message}`);
+        return;
+      } finally {
+        $('pSave').disabled = false;
+      }
+    }
+  }
+  Object.assign(p, { name, color: projectColor, instructions: $('pInstructions').value, skills: [...$('pSkills').querySelectorAll('input:checked')].map(i => i.value) });
+  if (!editingProject) projects.push(p);
+  saveProjects();
+  $('projectDialog').close();
+  if (!editingProject) {
+    // a new project opens with a fresh chat in it
+    setScope(p.id);
+    if (!chat.messages.length) { chat.project = p.id; drawProjectBits(); } else openChat(null);
+  }
+  drawSide(); drawRepo(); drawHint(); drawKit();
+});
+$('pDelete').addEventListener('click', () => {
+  const p = editingProject;
+  if (!p) return;
+  const n = index.filter(e => e.project === p.id).length;
+  if (!confirm(`Delete the project “${p.name}”?${n ? ` Its ${n} chat${n === 1 ? '' : 's'} stay, with no project.` : ''}`)) return;
+  for (const e of index.filter(x => x.project === p.id)) {
+    const c = loadChat(e.id);
+    if (c) { delete c.project; saveChat(c, { touch: false }); }
+  }
+  if (chat?.project === p.id) delete chat.project;
+  projects = projects.filter(x => x.id !== p.id);
+  saveProjects();
+  if (scope === p.id) setScope('');
+  $('projectDialog').close();
+  drawSide(); drawRepo(); drawHint();
+});
+
+// ---------------------------------------------------------------------------
+// Skills: named instructions, turned on per chat or per project
+// ---------------------------------------------------------------------------
+const STARTER_SKILLS = [
+  { name: 'code-reviewer', description: 'Review code or a diff for bugs, risks and unclear parts', body: 'Review the code the user shares. List real problems first, most serious first, each with the line or function, what goes wrong and a fix. Then note smaller style points briefly. Say plainly when the code looks fine.' },
+  { name: 'explain-simply', description: 'Explain a topic to someone new to it', body: 'Explain in plain words for someone new to the topic. Start with a one-sentence answer, then an everyday example, then the details. Define any jargon the first time it appears.' },
+  { name: 'brief', description: 'Short, direct answers', body: 'Answer in as few words as the question allows. Lead with the answer. No preamble, no summary at the end.' },
+];
+let editingSkill = null;
+
+function drawKit() {
+  if (!chat) return;
+  const mine = new Set(chat.skills || []);
+  const fromProject = new Set(projectOf(chat)?.skills || []);
+  $('kitSkills').innerHTML = skills.map(k => `<li><label class="check" title="${esc(k.description || k.body.slice(0, 160))}">
+      <input type="checkbox" data-skill="${k.id}"${mine.has(k.id) || fromProject.has(k.id) ? ' checked' : ''}${fromProject.has(k.id) ? ' disabled' : ''}>
+      <span><b>${esc(k.name)}</b>${fromProject.has(k.id) ? ' <span class="tag">project</span>' : ''}<br><span class="muted small">${esc(k.description || '')}</span></span></label></li>`).join('')
+    || '<li class="muted small">No skills yet. Manage skills to add some.</li>';
+  const repo = repoOf(chat);
+  $('kitRepo').innerHTML = repo ? `Git repo <b>${esc(repo.name)}</b> is linked${chat.repo ? '' : ' through the project'}: the model can read it.` : 'Link a git repo under Options to let the model read it.';
+  $('kitBtn').classList.toggle('on', skillsOf(chat).length > 0);
+}
+$('kitBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleKit(); });
+function toggleKit(open = $('kit').hidden) {
+  $('kit').hidden = !open;
+  if (open) drawKit();
+}
+document.addEventListener('click', (e) => {
+  if (!$('kit').hidden && !e.target.closest('#kit, #kitBtn')) $('kit').hidden = true;
+  if (!$('usagePop').hidden && !e.target.closest('#usagePop, #chatStats')) $('usagePop').hidden = true;
+});
+$('kitSkills').addEventListener('change', (e) => {
+  const box = e.target.closest('[data-skill]');
+  if (!box) return;
+  const on = new Set(chat.skills || []);
+  if (box.checked) on.add(box.dataset.skill); else on.delete(box.dataset.skill);
+  chat.skills = [...on];
+  saveChat(chat, { touch: false });
+  drawKit(); drawHint(); drawList();
+});
+$('skillTool').checked = !!prefs.skillTool;
+$('skillTool').addEventListener('change', () => { prefs.skillTool = $('skillTool').checked; store.set(PREF_KEY, prefs); drawHint(); });
+$('kitReload').addEventListener('click', () => $('mcpReload').click());
+$('input').addEventListener('input', () => {
+  if ($('input').value === '/') { $('input').value = ''; toggleKit(true); }
+});
+
+function drawSkillIndex() {
+  $('skillIndex').innerHTML = skills.map(k => `<li data-kid="${k.id}" class="${k === editingSkill ? 'on' : ''}">${esc(k.name || '(no name)')}</li>`).join('')
+    || '<li class="muted small">No skills yet.</li>';
+  $('skillEdit').hidden = !editingSkill;
+  if (editingSkill) {
+    $('kName').value = editingSkill.name; $('kDesc').value = editingSkill.description || ''; $('kBody').value = editingSkill.body || '';
+  }
+}
+function openSkills() {
+  if (!skills.length) { skills = STARTER_SKILLS.map(k => ({ id: uid(), ...k })); saveSkills(); }
+  editingSkill = skills[0] || null;
+  drawSkillIndex();
+  $('kit').hidden = true;
+  $('skillsDialog').showModal();
+}
+$('manageSkills').addEventListener('click', openSkills);
+$('skillIndex').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-kid]');
+  if (li) { editingSkill = skills.find(k => k.id === li.dataset.kid); drawSkillIndex(); }
+});
+$('skillAdd').addEventListener('click', () => {
+  editingSkill = { id: uid(), name: `skill-${skills.length + 1}`, description: '', body: '' };
+  skills.push(editingSkill);
+  saveSkills(); drawSkillIndex(); $('kName').select();
+});
+for (const [id, key] of [['kName', 'name'], ['kDesc', 'description'], ['kBody', 'body']]) {
+  $(id).addEventListener('input', () => {
+    if (!editingSkill) return;
+    editingSkill[key] = key === 'name' ? $(id).value.trim().replace(/\s+/g, '-') : $(id).value;
+    saveSkills();
+    if (key === 'name') for (const li of $('skillIndex').querySelectorAll('li.on')) li.textContent = editingSkill.name || '(no name)';
+  });
+}
+$('skillDelete').addEventListener('click', () => {
+  if (!editingSkill || !confirm(`Delete the skill “${editingSkill.name}”?`)) return;
+  const id = editingSkill.id;
+  skills = skills.filter(k => k.id !== id);
+  for (const p of projects) if (p.skills) p.skills = p.skills.filter(x => x !== id);
+  saveSkills(); saveProjects();
+  editingSkill = skills[0] || null;
+  drawSkillIndex();
+});
+$('skillsDialog').addEventListener('close', () => { skills = skills.filter(k => k.name || k.body); saveSkills(); drawKit(); drawHint(); });
+
+// ---------------------------------------------------------------------------
+// Scheduled messages: sent while this page is open in a tab; a run missed
+// while it was closed happens when it opens
+// ---------------------------------------------------------------------------
+let editingSchedule = null;
+const pad = (n) => String(n).padStart(2, '0');
+const localInput = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+
+// The next time after `from` that a schedule starting at `start` repeats
+function nextRun(start, repeat, from = Date.now()) {
+  if (repeat === 'once') return start > from ? start : null;
+  let t = start;
+  const d = () => new Date(t);
+  for (let i = 0; t <= from && i < 100000; i++) {
+    if (repeat === 'hourly') t += Math.max(1, Math.ceil((from - t) / 3600000)) * 3600000;
+    else if (repeat === 'weekly') t += Math.max(1, Math.ceil((from - t) / 604800000)) * 604800000;
+    else { const n = d(); n.setDate(n.getDate() + 1); t = n.getTime(); }
+  }
+  if (repeat === 'weekdays') while ([0, 6].includes(d().getDay())) { const n = d(); n.setDate(n.getDate() + 1); t = n.getTime(); }
+  return t;
+}
+
+function openScheduleDialog(id) {
+  editingSchedule = schedules.find(s => s.id === id) || null;
+  const s = editingSchedule || {};
+  $('schedDialogTitle').textContent = editingSchedule ? 'Scheduled message' : 'Schedule a message';
+  $('sName').value = s.name || '';
+  $('sPrompt').value = s.prompt || '';
+  $('sWhen').value = localInput(s.next || s.start || Date.now() + 10 * 60000);
+  $('sRepeat').value = s.repeat || 'daily';
+  const here = index.some(e => e.id === chat?.id) ? chat : null;
+  const opts = ['<option value="new">A new chat each time</option>']
+    .concat(projects.map(p => `<option value="new:${p.id}">A new chat each time, in ${esc(p.name)}</option>`))
+    .concat(index.slice(0, 30).map(e => `<option value="chat:${e.id}">Chat: ${esc(e.title)}</option>`));
+  $('sTarget').innerHTML = opts.join('');
+  $('sTarget').value = s.target || (scope ? `new:${scope}` : here ? 'new' : 'new');
+  $('sDelete').hidden = $('sRunNow').hidden = !editingSchedule;
+  $('schedDialog').showModal();
+  (s.prompt ? $('sName') : $('sPrompt')).focus();
+}
+$('newSchedule').addEventListener('click', () => openScheduleDialog(null));
+$('schedForm').addEventListener('submit', (e) => {
+  if (e.submitter?.value !== 'save') return;
+  e.preventDefault();
+  const prompt = $('sPrompt').value.trim();
+  const start = new Date($('sWhen').value).getTime();
+  if (!prompt) return $('sPrompt').focus();
+  if (!start) return $('sWhen').focus();
+  const s = editingSchedule || { id: uid() };
+  Object.assign(s, { name: $('sName').value.trim(), prompt, repeat: $('sRepeat').value, start, target: $('sTarget').value });
+  s.next = s.repeat === 'once' ? start : nextRun(start, s.repeat, Date.now() - 1);
+  if (!editingSchedule) schedules.push(s);
+  saveSchedules();
+  $('schedDialog').close();
+  drawSchedules();
+  toast(`Scheduled for ${new Date(s.next).toLocaleString()}.`);
+});
+$('sDelete').addEventListener('click', () => {
+  if (!editingSchedule || !confirm('Delete this scheduled message?')) return;
+  schedules = schedules.filter(s => s !== editingSchedule);
+  saveSchedules(); $('schedDialog').close(); drawSchedules();
+});
+$('sRunNow').addEventListener('click', () => { const s = editingSchedule; $('schedDialog').close(); if (s) runSchedule(s, true); });
+
+function runSchedule(s, manual = false) {
+  let c;
+  if (s.target?.startsWith('chat:')) c = loadChat(s.target.slice(5));
+  if (c && running.has(c.id)) return false; // try again on the next check
+  if (!c) {
+    c = newChatObject();
+    if (s.target?.startsWith('new:') && projects.some(p => p.id === s.target.slice(4))) c.project = s.target.slice(4);
+    c.title = `${s.name || 'Scheduled'} · ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+    c.scheduled = s.id;
+    cache.set(c.id, c);
+  }
+  c.messages.push({ id: uid(), role: 'user', content: s.prompt, time: Date.now(), scheduled: true });
+  s.last = Date.now();
+  if (!manual) s.next = nextRun(s.start, s.repeat);
+  saveSchedules();
+  runReply(c);
+  drawSchedules();
+  toast(`Sent the scheduled message${s.name ? ` “${s.name}”` : ''}.`);
+  return true;
+}
+function checkSchedules() {
+  let changed = false;
+  for (const s of schedules) if (s.next && s.next <= Date.now()) changed = runSchedule(s) || changed;
+  if (changed) drawSchedules();
+}
+setInterval(checkSchedules, 15000);
+
+// ---------------------------------------------------------------------------
+// This chat's tokens and cost, opened from the numbers in the top bar
+// ---------------------------------------------------------------------------
+function drawUsagePop() {
+  const replies = chat.messages.filter(m => m.role === 'assistant' && !m.streaming);
+  const rows = replies.map((m, i) => ({ i: i + 1, model: replyModel(m) || '?', input: m.trace?.usage?.prompt_tokens || 0, output: m.trace?.usage?.completion_tokens || 0, cost: replyCost(m) }));
+  const byModel = new Map();
+  for (const r of rows) {
+    const t = byModel.get(r.model) || { n: 0, input: 0, output: 0, usd: 0, free: true, unknown: false };
+    t.n++; t.input += r.input; t.output += r.output;
+    if (!r.cost) t.unknown = true; else if (!r.cost.free) { t.free = false; t.usd += r.cost.usd; }
+    byModel.set(r.model, t);
+  }
+  const tot = rows.reduce((a, r) => ({ input: a.input + r.input, output: a.output + r.output, usd: a.usd + (r.cost?.usd || 0) }), { input: 0, output: 0, usd: 0 });
+  const max = Math.max(1, ...rows.map(r => r.input + r.output));
+  const next = requestTokens();
+  const model = $('model').value.trim() || replyModel(replies[replies.length - 1]);
+  const ctxMax = modelInfo[model]?.maxInput;
+  const p = projectOf(chat);
+  const pu = p ? projectUsage(p.id) : null;
+  $('usagePop').innerHTML = `
+    <div class="up-tiles">
+      <div><b>${fmtTok(tot.input + tot.output)}</b><span>tokens</span></div>
+      <div><b>${fmtTok(tot.input)}</b><span>sent</span></div>
+      <div><b>${fmtTok(tot.output)}</b><span>written</span></div>
+      <div><b>${tot.usd ? fmtUsd(tot.usd) : 'free'}</b><span>cost</span></div>
+    </div>
+    ${rows.length ? `<div class="up-head">Each reply <span class="muted">sent · written</span></div>
+    <div class="up-bars">${rows.map(r => `<div class="up-bar" title="Reply ${r.i} · ${esc(r.model)}\n${r.input.toLocaleString()} in · ${r.output.toLocaleString()} out${r.cost ? ` · ${r.cost.free ? 'free' : fmtUsd(r.cost.usd)}` : ''}">
+      <i class="in" style="height:${100 * r.input / max}%"></i><i class="out" style="height:${100 * r.output / max}%"></i></div>`).join('')}</div>
+    <div class="up-head">By model</div>
+    <table class="up-table"><tbody>${[...byModel].map(([k, t]) => `<tr><td><code>${esc(k)}</code></td><td>${t.n}×</td><td>${fmtTok(t.input)} / ${fmtTok(t.output)}</td><td>${t.free && !t.unknown ? '<span class="ok">free</span>' : `${fmtUsd(t.usd)}${t.unknown ? '+' : ''}`}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">No replies yet.</p>'}
+    <div class="up-head">Next message</div>
+    <div class="small">About ${next.toLocaleString()} tokens${ctxMax ? ` of ${esc(model)}'s ${ctxMax.toLocaleString()}` : ''}.</div>
+    ${ctxMax ? `<div class="up-meter"><i style="width:${Math.min(100, 100 * next / ctxMax)}%"></i></div>` : ''}
+    ${pu ? `<div class="up-head">Project “${esc(p.name)}”</div><div class="small">${pu.chats} chats · ${fmtTok(pu.input + pu.output)} tokens · ${pu.usd ? fmtUsd(pu.usd) : 'free'}${pu.priced ? '' : '+'}</div>` : ''}
+    <a class="small" href="usage.html">Every client's usage and costs →</a>`;
+}
+$('chatStats').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = $('usagePop').hidden;
+  $('usagePop').hidden = !open;
+  if (open) drawUsagePop();
+});
+
+// ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
 document.addEventListener('keydown', (e) => {
@@ -1732,7 +2320,8 @@ document.addEventListener('keydown', (e) => {
   else if (mod && e.key.toLowerCase() === 'm') { e.preventDefault(); $('mic').click(); }
   else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); stepChat(e.key === 'ArrowUp' ? -1 : 1); }
   else if (e.key === 'Escape') {
-    if (speech.current) speech.stop();
+    if (!$('kit').hidden || !$('usagePop').hidden) { $('kit').hidden = $('usagePop').hidden = true; }
+    else if (speech.current) speech.stop();
     else if (running.has(chat.id)) running.get(chat.id).controller.abort();
     else $('app').classList.remove('side-open');
   }
@@ -1752,7 +2341,9 @@ loadTools();
 let lastOpen = null;
 try { lastOpen = localStorage.getItem('harness-chat-open'); } catch {}
 openChat(index.some(e => e.id === lastOpen) ? lastOpen : index[0]?.id);
+drawSide();
+setTimeout(checkSchedules, 1500);
 connectLive();
 loadRecent();
 setActivity(!!prefs.activity);
-setInterval(drawList, 60000);
+setInterval(() => { drawList(); drawSchedules(); }, 60000);

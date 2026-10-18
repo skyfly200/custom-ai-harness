@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Harness Usage</title>
+<title>Bright Chat · Usage</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="usage.css">
 </head>
 <body>
 <main>
   <header>
-    <nav><h1>Harness Usage</h1><a href="./" data-hint="Health of each part, settings, and recent requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" class="here" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a></nav>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Usage</span></h1><a href="./" data-hint="Health of each part, settings, and recent requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" class="here" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a></nav>
     <span class="muted" id="updated">Loading…</span>
   </header>
 
@@ -19,13 +20,20 @@
       <button data-days="1" data-hint="Since midnight">Today</button><button data-days="7" data-hint="The last 7 days">7 days</button><button data-days="30" data-hint="The last 30 days">30 days</button><button data-days="0" data-hint="Everything kept in harness-usage.json">All time</button>
     </div>
     <div class="seg" id="measure" role="group" aria-label="Measure">
-      <button data-m="total" data-hint="Size the charts by input plus output tokens">All tokens</button><button data-m="input" data-hint="Size the charts by tokens sent to models">Input</button><button data-m="output" data-hint="Size the charts by tokens models wrote">Output</button><button data-m="requests" data-hint="Size the charts by number of requests">Requests</button>
+      <button data-m="total" data-hint="Size the charts by input plus output tokens">All tokens</button><button data-m="input" data-hint="Size the charts by tokens sent to models">Input</button><button data-m="output" data-hint="Size the charts by tokens models wrote">Output</button><button data-m="requests" data-hint="Size the charts by number of requests">Requests</button><button data-m="cost" data-hint="Size the charts by money spent, from the Gateway's price list">Cost</button>
     </div>
     <span class="spacer"></span>
     <button id="clear" data-hint="Delete every usage total (empties harness-usage.json)">Clear totals</button>
   </div>
 
   <div class="grid" id="tiles"></div>
+
+  <h2>Over time</h2>
+  <div class="card chart-card">
+    <div class="legend" id="timeLegend"></div>
+    <div class="chart-scroll"><svg id="timeline" class="chart" role="img" aria-label="Usage per day by service"></svg></div>
+    <div class="sub muted" id="timelineNote"></div>
+  </div>
 
   <h2>Flow through the harness</h2>
   <div class="card chart-card">
@@ -54,14 +62,15 @@
   <h2>Table</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th data-hint="The program that sent the requests">Client</th><th data-hint="How the model was picked: Router, pinned, client's choice or Router down">Route</th><th data-hint="The model the Router or client picked">Asked for</th><th data-hint="The model that answered, after any fallbacks">Served by</th><th data-hint="Who ran the model: OpenRouter, Groq, Ollama…">Service</th><th class="r">Requests</th><th class="r">Input</th><th class="r" data-hint="Input the provider read from its cache, usually cheaper">Cached input</th><th class="r">Output</th></tr></thead>
-      <tbody id="rows"><tr><td colspan="9" class="muted">No requests yet.</td></tr></tbody>
+      <thead><tr><th data-hint="The program that sent the requests">Client</th><th data-hint="How the model was picked: Router, pinned, client's choice or Router down">Route</th><th data-hint="The model the Router or client picked">Asked for</th><th data-hint="The model that answered, after any fallbacks">Served by</th><th data-hint="Who ran the model: OpenRouter, Groq, Ollama…">Service</th><th class="r">Requests</th><th class="r">Input</th><th class="r" data-hint="Input the provider read from its cache, usually cheaper">Cached input</th><th class="r">Output</th><th class="r" data-hint="Tokens times the Gateway's price for the model that answered. Cached input is counted at the full input price, so this can run a little high">Cost</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="10" class="muted">No requests yet.</td></tr></tbody>
     </table>
   </div>
-  <div class="sub muted" style="margin-top:8px">Counts come from the usage each reply reports. Values marked ~ are estimates (about 4 characters a token) for replies that had none, such as OpenAI streams without <code>stream_options.include_usage</code>. Totals are kept in <code>harness-usage.json</code> across restarts.</div>
+  <div class="sub muted" style="margin-top:8px">Counts come from the usage each reply reports. Values marked ~ are estimates (about 4 characters a token) for replies that had none, such as OpenAI streams without <code>stream_options.include_usage</code>. Costs are worked out from the Gateway's price list (LiteLLM's <code>/v1/model/info</code>) for the model that answered; free and local models cost nothing, and models with no listed price show ?. Totals are kept in <code>harness-usage.json</code> across restarts.</div>
 </main>
 <div id="tip" class="tip" hidden></div>
 <script src="hints.js"></script>
 <script src="usage.js"></script>
+<script src="bright.js"></script>
 </body>
 </html>

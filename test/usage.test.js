@@ -76,6 +76,13 @@ test('totals add up by client, model and service and are saved to the file', () 
     assert.deepEqual([chat.input, chat.output, chat.estimated, chat.servedBy, chat.provider], [30, 11, 1, 'fallback-groq', 'Groq']);
     assert.equal(week.length, 2);
     assert.equal(usage.summary(0).rows.length, 3);
+    // per day and served model, oldest first
+    const daily = usage.summary(0).daily;
+    assert.equal(daily.length, 3);
+    assert.equal(daily[0].input, 1);
+    const today = daily.find(d => d.servedBy === 'fallback-openrouter-tools');
+    assert.deepEqual([today.requests, today.input, today.output, today.provider], [2, 150, 15, 'OpenRouter']);
+    assert.equal(usage.summary(7).daily.length, 2);
 
     usage.clear(); // writes the empty file; then a record is saved after a short delay
     usage.record({ ...base, usage: { input: 5, output: 5, cacheRead: 0, cacheWrite: 0 } });

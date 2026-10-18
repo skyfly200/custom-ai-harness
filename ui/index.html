@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Harness Control</title>
+<title>Bright Chat · Dashboard</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
 </head>
 <body>
 <main>
   <header>
-    <nav><h1>Harness Control</h1><a href="./" class="here" data-hint="Health of each part, settings, and recent requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a></nav>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Dashboard</span></h1><a href="./" class="here" data-hint="Health of each part, settings, and recent requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a></nav>
     <span class="muted" id="updated" data-hint="This page refreshes itself every few seconds">Loading…</span>
   </header>
 
@@ -331,5 +332,6 @@ loadInterceptorSettings();
 refresh();
 setInterval(refresh, 3000);
 </script>
+<script src="bright.js"></script>
 </body>
 </html>

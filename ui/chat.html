@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Harness Chat</title>
+<title>Bright Chat</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="chat.css">
 </head>
 <body class="chat-page">
@@ -13,9 +14,10 @@
   <!-- Top bar, across the chats column and the conversation -->
   <header class="top">
     <button class="icon only-narrow" id="toggleSide" title="Chats" aria-label="Chats"></button>
-    <nav><h1>Harness Chat</h1><a href="./">Dashboard</a><a href="chat.html" class="here">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a></nav>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span></h1><a href="./">Dashboard</a><a href="chat.html" class="here">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a></nav>
+    <button type="button" class="proj-badge" id="projectBadge" hidden></button>
     <input type="text" id="title" class="title" aria-label="Chat title" placeholder="New chat">
-    <div class="stats" id="chatStats" title=""></div>
+    <button type="button" class="stats" id="chatStats" title=""></button>
     <div class="top-actions">
       <button class="icon" id="copyChat" title="Copy the chat as Markdown" aria-label="Copy chat"></button>
       <button class="icon" id="exportChat" title="Export this chat as Markdown" aria-label="Export chat"></button>
@@ -25,13 +27,26 @@
     </div>
   </header>
 
-  <!-- Chats -->
+  <!-- Projects, schedules and recent chats -->
   <aside class="side" id="side">
     <div class="side-top">
       <button class="primary wide" id="newChat" title="New chat (Ctrl+Shift+O)">+ New chat</button>
-      <input type="text" id="search" placeholder="Search chats (Ctrl+K)" autocomplete="off">
+      <input type="search" id="search" placeholder="Search chats (Ctrl+K)" autocomplete="off">
     </div>
-    <ul class="chat-list" id="chatList"></ul>
+    <div class="side-scroll">
+      <section class="side-sec" data-sec="projects">
+        <div class="sec-head"><button type="button" class="sec-toggle">Projects</button><button type="button" class="sec-add" id="newProject" title="New project" aria-label="New project">+</button></div>
+        <ul class="project-list" id="projectList"></ul>
+      </section>
+      <section class="side-sec" data-sec="scheduled">
+        <div class="sec-head"><button type="button" class="sec-toggle">Scheduled</button><button type="button" class="sec-add" id="newSchedule" title="Schedule a message" aria-label="Schedule a message">+</button></div>
+        <ul class="sched-list" id="schedList"></ul>
+      </section>
+      <section class="side-sec" data-sec="recent">
+        <div class="sec-head"><button type="button" class="sec-toggle" id="chatsHead">Recent</button><button type="button" class="sec-add scope-clear" id="clearScope" title="Show every chat" hidden>All chats</button></div>
+        <ul class="chat-list" id="chatList"></ul>
+      </section>
+    </div>
     <div class="side-foot">
       <button id="exportAll" class="link" title="Every chat in one Markdown file">Export all chats</button>
       <button id="deleteAll" class="link danger" title="Delete every saved chat in this browser">Delete all chats</button>
@@ -50,6 +65,7 @@
           <label>Max tokens <input type="number" id="maxTokens" min="1" value="2048"></label>
           <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
           <label class="check"><input type="checkbox" id="stream" checked> Stream the reply</label>
+          <label class="check" title="After the first reply, ask the model for a short name for the chat"><input type="checkbox" id="autoName" checked> Name new chats automatically</label>
           <div class="pair">
             <label title="Give up when no reply has started after this long. 0 waits forever.">Give up with no reply after (s) <input type="number" id="timeoutFirst" min="0" step="10" value="310"></label>
             <label title="Give up when a reply stops arriving for this long. 0 waits forever.">…or when it stalls for (s) <input type="number" id="timeoutStall" min="0" step="10" value="130"></label>
@@ -57,6 +73,7 @@
         </fieldset>
         <fieldset>
           <legend>Context for this chat</legend>
+          <label>Project <select id="chatProject"></select></label>
           <label>System prompt
             <textarea id="system" rows="3" placeholder="Optional. The Interceptor still adds its caveman line unless it's off in the dashboard."></textarea>
           </label>
@@ -110,12 +127,26 @@
 
     <form class="compose" id="compose">
       <div class="chips" id="chips"></div>
-      <div class="compose-row">
+      <div class="compose-row glow-edge" id="composeRow">
         <button type="button" class="icon" id="attach" title="Attach files or images (or drop / paste them)" aria-label="Attach"></button>
         <input type="file" id="fileInput" multiple hidden>
+        <button type="button" class="icon" id="kitBtn" title="Skills and tools (or type / in an empty box)" aria-label="Skills and tools"></button>
         <textarea id="input" rows="1" placeholder="Message (Enter to send, Shift+Enter for a new line)"></textarea>
         <button type="button" class="icon" id="mic" title="Dictate (Ctrl+M)" aria-label="Dictate"></button>
         <button class="primary" id="send" type="submit">Send</button>
+        <div class="kit" id="kit" hidden>
+          <div class="kit-sec">
+            <div class="kit-head"><b>Skills</b><button type="button" class="mini" id="manageSkills">Manage skills</button></div>
+            <p class="muted small">Instructions the model follows in this chat. Project skills apply to every chat in the project.</p>
+            <ul class="kit-list" id="kitSkills"></ul>
+            <label class="check small" title="Lists your other skills to the model with a use_skill tool, so it can load one when a question needs it. Requests with tools go to models that can call them."><input type="checkbox" id="skillTool"> Let the model load other skills when it needs them</label>
+          </div>
+          <div class="kit-sec">
+            <div class="kit-head"><b>Tools</b><button type="button" class="mini" id="kitReload" title="Read mcp-servers.json again and reconnect">Reload</button></div>
+            <ul class="mcp-list" id="kitTools"></ul>
+            <div class="muted small" id="kitRepo"></div>
+          </div>
+        </div>
       </div>
       <div class="compose-hint muted small" id="hint"></div>
     </form>
@@ -134,11 +165,75 @@
   </aside>
 </div>
 
+<!-- This chat's tokens and costs -->
+<div class="usage-pop" id="usagePop" hidden></div>
+
+<dialog class="dlg" id="projectDialog">
+  <form method="dialog" id="projectForm">
+    <h3 id="projectDialogTitle">New project</h3>
+    <label>Name <input type="text" id="pName" required maxlength="60" placeholder="e.g. Website rebuild"></label>
+    <div class="swatches" id="pColors" role="radiogroup" aria-label="Colour"></div>
+    <label>Instructions for every chat in this project
+      <textarea id="pInstructions" rows="5" placeholder="Who the model is helping, house style, facts it should always know…"></textarea></label>
+    <label>Git repo <span class="repo-row"><input type="text" id="pRepo" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false"></span>
+      <small class="muted">Chats in the project can read it (read-only) unless they link their own.</small></label>
+    <div class="dlg-skills"><span class="small"><b>Skills for every chat</b></span><div class="pick" id="pSkills"></div></div>
+    <div class="proj-usage muted small" id="pUsage"></div>
+    <div class="dlg-actions">
+      <button type="button" class="link danger" id="pDelete">Delete project</button>
+      <span class="spacer"></span>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button class="primary" id="pSave" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="dlg" id="schedDialog">
+  <form method="dialog" id="schedForm">
+    <h3 id="schedDialogTitle">Schedule a message</h3>
+    <label>Name <input type="text" id="sName" maxlength="60" placeholder="e.g. Morning news digest"></label>
+    <label>Message to send <textarea id="sPrompt" rows="4" required placeholder="What should the model be asked each time?"></textarea></label>
+    <div class="pair">
+      <label>First run <input type="datetime-local" id="sWhen" required></label>
+      <label>Repeat <select id="sRepeat">
+        <option value="once">Once</option><option value="hourly">Every hour</option><option value="daily">Every day</option>
+        <option value="weekdays">Weekdays</option><option value="weekly">Every week</option></select></label>
+    </div>
+    <label>Send it to <select id="sTarget"></select></label>
+    <p class="muted small">Scheduled messages run while Bright Chat is open in a browser tab. A run that was missed while it was closed happens as soon as you open it again.</p>
+    <div class="dlg-actions">
+      <button type="button" class="link danger" id="sDelete">Delete</button>
+      <button type="button" class="link" id="sRunNow">Run now</button>
+      <span class="spacer"></span>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button class="primary" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="dlg wide" id="skillsDialog">
+  <form method="dialog" id="skillsForm">
+    <h3>Skills</h3>
+    <p class="muted small">A skill is a set of instructions with a name: a reviewing checklist, a writing style, steps for a task. Turn skills on per chat or per project from the composer's skills button.</p>
+    <div class="skills-grid">
+      <div><ul class="skill-index" id="skillIndex"></ul><button type="button" class="mini" id="skillAdd">+ New skill</button></div>
+      <div class="skill-edit" id="skillEdit">
+        <label>Name <input type="text" id="kName" maxlength="40" placeholder="e.g. code-reviewer"></label>
+        <label>When to use it <input type="text" id="kDesc" maxlength="200" placeholder="One line the model reads to decide whether to load it"></label>
+        <label>Instructions <textarea id="kBody" rows="10" placeholder="What the model should do when this skill is on"></textarea></label>
+        <div class="dlg-actions"><button type="button" class="link danger" id="skillDelete">Delete skill</button></div>
+      </div>
+    </div>
+    <div class="dlg-actions"><span class="spacer"></span><button class="primary" value="close">Done</button></div>
+  </form>
+</dialog>
+
 <div class="drop" id="drop" hidden><div>Drop files to attach them</div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <datalist id="models"></datalist>
 
 <script src="markdown.js"></script>
 <script src="chat.js"></script>
+<script src="bright.js"></script>
 </body>
 </html>

@@ -358,7 +358,7 @@ function routerNode() {
   const backends = info.router?.backends || (graph.backend ? [graph.backend] : []);
   const body = (up ? '' : r === graph ? '<div class="warn">The Router is down, so its choices can’t be read or changed. Start it and reload this page.</div>'
       : '<div class="warn">The Router is down: requests on this routing go to “Router down” until it is back.</div>')
-    + `<label data-hint="How requests are scored. Every routing shares it. Its other settings (address, key, timeout) are on the Dashboard">Classifier${view ? ' · shared' : ''}<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
+    + `<label data-hint="How requests are scored. Every routing shares it. Its other settings (address, key, timeout) are on the Settings page">Classifier${view ? ' · shared' : ''}<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
        <small id="backendHelp">${esc(BACKEND_HELP[graph.backend] || '')}</small></label>
      <label data-hint="Requests scoring at or above this go to Strong. Empty uses the keyword rule">Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(r.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)">
        <small>0 always strong, 1 almost always weak.</small></label>`;

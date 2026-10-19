@@ -8,7 +8,7 @@ What you get:
 
 - **Lower cost.** Most requests go to free models, and requests are compressed before they are sent.
 - **Fewer failures.** When a model refuses, errors or hits its limit, another one takes over.
-- **Bright Chat.** A web app with a chat page, projects and costs, plus a dashboard that shows what each request did, which model answered and why, and lets you change settings without editing files.
+- **Bright Chat.** A web app with a chat page, projects and costs, plus a dashboard with your recent chats, a usage summary and what each request did, and a Settings page for changing settings without editing files.
 
 ### The three parts you run
 
@@ -101,7 +101,7 @@ These settings only last for that window. Other tools such as Cursor, Aider, Con
 - **Every request says "Router down".** The Router couldn't classify it, so the request went to the backup model. The text under the tag says why (for example an error from Jev or a missing key).
 - **`npm run all:ollama` says `ollama` is not recognized.** Install Ollama from ollama.com, or use plain `npm run all`.
 - **Every strong request shows fallbacks.** The strong model is the local engine on port 8000 (Tier 1). When it isn't running, each strong request falls through to the OpenRouter models, which is expected but slower.
-- **A request seems stuck.** It now fails with a **timeout** instead of hanging: after 5 minutes with no answer from the Gateway, or 2 minutes of silence in the middle of a reply. Both limits are in the dashboard's Interceptor settings.
+- **A request seems stuck.** It now fails with a **timeout** instead of hanging: after 5 minutes with no answer from the Gateway, or 2 minutes of silence in the middle of a reply. Both limits are in the Interceptor settings on the Settings page.
 
 ## Run it on a server (Docker)
 
@@ -226,7 +226,7 @@ Each model shows up as `local-NAME` for the settings above and in the chat page'
 
 **Your own local engine.** A llama.cpp or vLLM server on the same machine (`launch-local.sh`, changed to listen on `0.0.0.0` instead of `127.0.0.1`) is used as the strong model automatically. Another address goes in `LOCAL_ENGINE_URL=http://ADDRESS:8000`.
 
-Settings in `.env` win over the dashboard and Routing page each time the server starts. Leave a setting out of `.env` to manage it from the dashboard instead.
+Settings in `.env` win over the Settings and Routing pages each time the server starts. Leave a setting out of `.env` to manage it from the Settings page instead.
 
 ---
 
@@ -361,7 +361,7 @@ OPENROUTER_API_KEY=your_openrouter_key
 ANTHROPIC_API_KEY=your_anthropic_key   # optional
 ```
 
-`HARNESS_PASSWORD` is optional on your own PC and required by the Docker setup. When set, every page and API asks for it: browsers show a login box (any user name), and agents send it as their API key (`Authorization: Bearer`, `x-api-key`) or in an `x-harness-password` header. The harness doesn't pass it on to the Gateway. It also lets the dashboard's controls work from other machines, which otherwise answer only on the machine the harness runs on.
+`HARNESS_PASSWORD` is optional on your own PC and required by the Docker setup. When set, every page and API asks for it: browsers show a login box (any user name), and agents send it as their API key (`Authorization: Bearer`, `x-api-key`) or in an `x-harness-password` header. The harness doesn't pass it on to the Gateway. It also lets the Settings page's controls work from other machines, which otherwise answer only on the machine the harness runs on.
 
 `LITELLM_MASTER_KEY` is optional. Set it to require a key on the Gateway and to log in to LiteLLM's admin UI at http://localhost:4000/ui (username `admin`, the key as the password). LiteLLM reads it from `.env` too, as long as LiteLLM is installed in this repo's `.venv` as shown above (LiteLLM looks for `.env` in the folders above its own install, not the folder you start it from). If LiteLLM is installed somewhere else, set the variable in the shell before starting it. The harness then sends the master key on every call it forwards to LiteLLM, so clients such as Claude Code keep working with whatever key they already use. Generate one with:
 
@@ -369,7 +369,7 @@ ANTHROPIC_API_KEY=your_anthropic_key   # optional
 python -c "import secrets; print('sk-' + secrets.token_urlsafe(32))"
 ```
 
-The Docker launch settings (`HARNESS_MODE`, `STRONG_MODEL`, `PASSTHROUGH_MODEL`, `LOCAL_MODELS`, ...) are described in [Choose how it works](#choose-how-it-works) and `.env.example`. `router.py` and the Interceptor read them outside Docker too (except passthrough, which needs the Docker Gateway): `HARNESS_MODE`, `ROUTER_*`, `STRONG_MODEL` and the `WEAK_MODEL*` variables override `routellm-config.yaml`; `PIN_MODEL`, `HARNESS_TRANSFORMS=on|off` and `ROUTER_DOWN_MODEL`/`ROUTER_DOWN_TOOLS_MODEL` override the dashboard settings. `docker/gateway-start.py` applies `PASSTHROUGH_*`, `LOCAL_MODELS`, `OLLAMA_URL` and `LOCAL_ENGINE_URL` to a copy of `config.yaml` when the Gateway container starts.
+The Docker launch settings (`HARNESS_MODE`, `STRONG_MODEL`, `PASSTHROUGH_MODEL`, `LOCAL_MODELS`, ...) are described in [Choose how it works](#choose-how-it-works) and `.env.example`. `router.py` and the Interceptor read them outside Docker too (except passthrough, which needs the Docker Gateway): `HARNESS_MODE`, `ROUTER_*`, `STRONG_MODEL` and the `WEAK_MODEL*` variables override `routellm-config.yaml`; `PIN_MODEL`, `HARNESS_TRANSFORMS=on|off` and `ROUTER_DOWN_MODEL`/`ROUTER_DOWN_TOOLS_MODEL` override the Settings page. `docker/gateway-start.py` applies `PASSTHROUGH_*`, `LOCAL_MODELS`, `OLLAMA_URL` and `LOCAL_ENGINE_URL` to a copy of `config.yaml` when the Gateway container starts.
 
 Keys can also be set in the shell session if preferred:
 
@@ -574,7 +574,12 @@ With the Interceptor running, open <http://localhost:3000/ui>. The dashboard ref
 
 - **Components**: whether the Router, Gateway, local engine (port 8000), Ollama (11434) and a local Laya (8001) answer, and which classifier the Router is using. The last three are optional and show as "not running" rather than down.
 - **Counters** since the Interceptor started: requests, times the Router couldn't be reached, Gateway fallbacks, errors, rate-limited requests and timeouts.
+- **Recent chats**: the latest chats saved in this browser, with their project; click one to open it on the chat page.
+- **Usage, last 7 days**: spend, requests (and how many were free), tokens, and the models that used the most, from the same totals as the Usage page.
 - **Recent routing decisions**: the model each request went to and why (win rate against threshold, tool requests, a pinned model, or the Router being down), the Gateway's status and time to first byte, how many fallbacks LiteLLM tried and which model group answered (from LiteLLM's `x-litellm-attempted-fallbacks` and `x-litellm-model-group` headers, when your LiteLLM version sends them), and the start of the typed request. A failed request shows why: **rate limit** (a 429 or a provider quota message, quoted), **timeout**, **gateway down**, or **stopped** when the client cancelled it.
+
+<http://localhost:3000/ui/settings.html> (**Settings** in the menu) holds the settings that used to sit on the dashboard:
+
 - **Interceptor settings**: pin every request to one model (skipping the Router), replace the keyword threshold with a fixed one, the output-token cap, the Router timeout, the Gateway timeout and the stalled-reply timeout (after which a request fails with an error instead of hanging), the models used when the Router is down, and switches for the caveman prompt, Headroom and the context anchor. They apply on the next request and are saved to `harness-settings.json` (gitignored); delete it or press "Reset to defaults" to go back.
 - **Router settings**: the strong, weak, tool and overflow models, the weak model's size limit, the classifier backend and its settings (base URL, model, API key variable name, timeout, and so on). **Apply** lasts until the Router restarts; **Apply and save to file** also writes them to `routellm-config.yaml`, editing only those lines and keeping your comments (a cleared setting is commented out); **Reload from file** picks up edits you made by hand. A change that fails to build the classifier leaves the running one in place.
 
@@ -648,7 +653,7 @@ The counts are the ones each reply reports (`usage` in OpenAI replies, `input_to
 - **Models:** **Add model** creates a new name in the Gateway with the provider model behind it (OpenRouter, Groq, Ollama, the local CLI wrapper, another OpenAI-compatible server, or any LiteLLM id). With OpenRouter picked, the dialog opens wide and lists OpenRouter's whole live model catalog as a table of context size, input and output price and what each model can do (tools, reasoning, images). Search it, filter by **Free**, **Tools**, **Reasoning**, **Images** or maker, sort by newest, cheapest, biggest context or name, and click a model to fill in its id (and a name for a new box) and see its details: description, longest reply, cached-input, image and reasoning prices, what it reads and writes, tokenizer, release date and accepted parameters, with a link to its OpenRouter page. **+ Add provider model** adds another one to an existing model, and the Gateway shares requests between them. × in a model's title removes it with its provider models and fallback lines; × next to a provider model removes just that one. **Clear unconnected models** removes, after asking, every model box that no route or fallback line touches in any routing (such as the ready-to-wire `or-*` models), with their `model_list` entries.
 - **Live:** with **Show live requests** on, the path of each request lights up as it is routed.
 
-**Save** writes each change where its owner reads it: the Router's choices to `routellm-config.yaml` (as the dashboard's "Apply and save" does), the Interceptor's to `harness-settings.json`, named routings to `routing-profiles.json`, and models and fallback chains to `config.yaml`. In `config.yaml` it only removes or appends whole `model_list` entries and rewrites the fallback lines that changed, so comments and other settings stay; a new entry gets `model`, `api_base` and `api_key` (as `os.environ/NAME`, never a literal key), and options like `max_parallel_requests` can be added by hand afterwards. If the file changed since the page loaded, Save refuses and asks you to reload. The Router and Interceptor use their changes on the next request; **restart the Gateway** (LiteLLM) for model and fallback changes. Box positions are kept in the browser; **Tidy layout** resets them.
+**Save** writes each change where its owner reads it: the Router's choices to `routellm-config.yaml` (as "Apply and save" on the Settings page does), the Interceptor's to `harness-settings.json`, named routings to `routing-profiles.json`, and models and fallback chains to `config.yaml`. In `config.yaml` it only removes or appends whole `model_list` entries and rewrites the fallback lines that changed, so comments and other settings stay; a new entry gets `model`, `api_base` and `api_key` (as `os.environ/NAME`, never a literal key), and options like `max_parallel_requests` can be added by hand afterwards. If the file changed since the page loaded, Save refuses and asks you to reload. The Router and Interceptor use their changes on the next request; **restart the Gateway** (LiteLLM) for model and fallback changes. Box positions are kept in the browser; **Tidy layout** resets them.
 
 #### Read-aloud voices
 

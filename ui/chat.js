@@ -2649,9 +2649,12 @@ applyPrefs();
 loadModelInfo();
 loadTools();
 loadRoutings();
+// chat.html#chat=ID (the Dashboard's recent chats) opens that chat
+const linked = decodeURIComponent((location.hash.match(/^#chat=(.+)$/) || [])[1] || '');
+if (linked) history.replaceState(null, '', location.pathname + location.search);
 let lastOpen = null;
 try { lastOpen = localStorage.getItem('harness-chat-open'); } catch {}
-openChat(index.some(e => e.id === lastOpen) ? lastOpen : index[0]?.id);
+openChat([linked, lastOpen].find(id => id && index.some(e => e.id === id)) || index[0]?.id);
 drawSide();
 setTimeout(checkSchedules, 1500);
 connectLive();

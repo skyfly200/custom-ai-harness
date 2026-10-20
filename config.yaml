@@ -4,20 +4,15 @@ general_settings:
 
 model_list:
   # Concurrency: max_parallel_requests caps in-flight calls per deployment;
-  # extra requests queue instead of tripping provider rate limits. The cap is
-  # per entry, so the two CLI wrapper aliases share its budget (1+1).
-  # Tier 1: Local CLI Wrapper (Zero API Cost)
-  - model_name: claude-3-5-sonnet
+  # extra requests queue instead of tripping provider rate limits.
+  # Tier 1: your local engine (launch-local.sh: llama.cpp or vLLM on port 8000,
+  # running Qwen Coder, Gemma or whichever model you loaded). It is not a Claude
+  # model; llama.cpp and vLLM answer with the loaded model whatever id is sent.
+  # The old names for it, claude-sonnet-5 and claude-3-5-sonnet, still reach it
+  # (the Interceptor and Router rename them).
+  - model_name: local-engine
     litellm_params:
-      model: openai/claude-3-5-sonnet-20240620
-      api_base: http://localhost:8000/v1
-      api_key: dummy-key-not-needed
-      max_parallel_requests: 1
-
-  # Map Claude Code's default request directly to your Tier 1 wrapper
-  - model_name: claude-sonnet-5
-    litellm_params:
-      model: openai/claude-3-5-sonnet-20240620
+      model: openai/local-model
       api_base: http://localhost:8000/v1
       api_key: dummy-key-not-needed
       max_parallel_requests: 1
@@ -42,19 +37,22 @@ model_list:
       api_key: os.environ/OPENROUTER_API_KEY
       max_parallel_requests: 10
 
-  # Tier 4: OpenRouter auto-free (no request size cap; serves Claude Code)
+  # Tier 4: OpenRouter free chat model (no request size cap). A named model,
+  # not openrouter/free: that one picks a free model at random, and its pool
+  # includes NVIDIA's content-safety classifier, which answers "User Safety:
+  # safe / Response Safety:" instead of replying, plus embedding models.
   - model_name: fallback-openrouter
     litellm_params:
-      model: openrouter/openrouter/free
+      model: openrouter/xingchen-agi/xing4.0-29b-a4b:free
       api_key: os.environ/OPENROUTER_API_KEY
       max_parallel_requests: 5
 
-  # Tier 4b: OpenRouter free model with reliable tool/function-calling support.
-  # Llama 3.3 70B supports the full tool_use spec and handles Claude Code's
-  # multi-tool agentic loops without falling back to text instructions.
+  # Tier 4b: OpenRouter free model with tool/function-calling support, for
+  # Claude Code's agentic loops. (Llama 3.3 70B :free, used before, has no
+  # provider serving it on OpenRouter any more, so every call failed.)
   - model_name: fallback-openrouter-tools
     litellm_params:
-      model: openrouter/meta-llama/llama-3.3-70b-instruct:free
+      model: openrouter/nvidia/nemotron-3.5-super-vl:free
       api_key: os.environ/OPENROUTER_API_KEY
       max_parallel_requests: 5
 
@@ -86,8 +84,7 @@ litellm_settings:
   request_timeout: 120
   fallbacks:
     # Tool-capable first: strong requests are mostly Claude Code, which needs tool calls.
-    - {"claude-3-5-sonnet":         ["fast-openrouter", "fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
-    - {"claude-sonnet-5":           ["fast-openrouter", "fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
+    - {"local-engine":              ["fast-openrouter", "fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
     - {"fallback-groq":             ["fallback-openrouter"]}
     - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter", "fallback-groq"]}
     - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter"]}

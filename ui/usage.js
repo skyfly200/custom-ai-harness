@@ -36,7 +36,7 @@ const valueOf = (r, m = state.measure) => m === 'total' ? r.input + r.output : r
 
 // Services keep their colour whatever the filter: known ones have fixed slots,
 // others take the free slots in name order, and past eight share a grey.
-const FIXED = ['OpenRouter', 'Groq', 'Local CLI wrapper', 'Ollama', 'Anthropic', 'OpenAI', 'Laya (local)', 'Google'];
+const FIXED = ['OpenRouter', 'Groq', 'Local engine', 'Ollama', 'Anthropic', 'OpenAI', 'Laya (local)', 'Google'];
 function providerColors(rows) {
   const colors = {};
   const free = [];

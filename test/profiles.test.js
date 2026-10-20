@@ -31,11 +31,15 @@ test('a routing is cleaned: id from its name, models required unless pinned, dup
     assert.throws(() => profiles.clean({ ...CHEAP, threshold: 2 }), /threshold/);
     assert.throws(() => profiles.clean({ ...CHEAP, overflow: 'big' }), /token limit/);
     assert.throws(() => profiles.clean({ ...CHEAP, weak: 'bad name!' }), /model name/);
+    // the local engine's old Claude-like names become its real one
+    assert.equal(profiles.clean({ ...CHEAP, strong: 'claude-sonnet-5' }).strong, 'local-engine');
 });
 
 test('a routing picks like the Router does', () => {
     const p = profiles.clean({ ...CHEAP, overflow: 'big', maxTokens: 100 });
     assert.equal(profiles.pick(p, 0.96, 0.95, 10, false), 'mid');
+    assert.equal(profiles.pick(p, 0.96, 0.95, 10, true), 'mid');
+    assert.equal(profiles.pick({ ...p, strongTools: 'free-tools' }, 0.96, 0.95, 10, true), 'free-tools');
     assert.equal(profiles.pick(p, 0.5, 0.95, 10, true), 'tiny-tools');
     assert.equal(profiles.pick(p, 0.5, 0.95, 500, false), 'big');
     assert.equal(profiles.pick(p, 0.5, 0.95, 10, false), 'tiny');

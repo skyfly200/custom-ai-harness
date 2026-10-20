@@ -56,13 +56,13 @@ test('services come from config.yaml', () => {
     assert.equal(map['fallback-groq'], 'Groq');
     assert.equal(map['fallback-openrouter-tools'], 'OpenRouter');
     assert.equal(map['fallback-ollama'], 'Ollama');
-    assert.equal(map['claude-sonnet-5'], 'Local CLI wrapper');
+    assert.equal(map['local-engine'], 'Local engine');
     assert.equal(usage.providerOf('groq/llama-3.1-8b'), 'Groq');
 });
 
 test('totals add up by client, model and service and are saved to the file', () => {
     usage.clear();
-    const base = { client: 'Claude Code', route: 'Router', model: 'claude-sonnet-5' };
+    const base = { client: 'Claude Code', route: 'Router', model: 'local-engine' };
     usage.record({ ...base, servedBy: 'fallback-openrouter-tools', usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0 } });
     usage.record({ ...base, servedBy: 'fallback-openrouter-tools', usage: { input: 50, output: 5, cacheRead: 20, cacheWrite: 0 } });
     usage.record({ ...base, client: 'Chat page', route: 'Chosen by client', model: 'fallback-groq', usage: null, estimate: { input: 30, outputChars: 41 } });

@@ -226,7 +226,7 @@ function routeOf(event) {
  * input comes from the request size and output from the reply text (about 4
  * characters a token), and the row is marked estimated.
  */
-function record({ time = new Date(), client, route, model, servedBy, usage, estimate, saved }) {
+function record({ time = new Date(), client, route, model, servedBy, upstream, usage, estimate, saved }) {
     const counts = usage || {
         input: estimate?.input ?? 0,
         output: Math.ceil((estimate?.outputChars ?? 0) / 4),
@@ -245,6 +245,8 @@ function record({ time = new Date(), client, route, model, servedBy, usage, esti
     const key = [row.day, row.client, row.route, row.model, row.servedBy, row.provider].join('|');
     const t = data.rows[key] || (data.rows[key] = { ...row, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
     t.requests++;
+    // the provider's own name for the model (from the reply), for pricing models the Gateway doesn't list
+    if (typeof upstream === 'string' && upstream) t.upstream = upstream.slice(0, 200);
     // Input tokens the Interceptor's compression took out before sending
     if (saved?.anchor) t.savedAnchor = (t.savedAnchor || 0) + saved.anchor;
     if (saved?.headroom) t.savedHeadroom = (t.savedHeadroom || 0) + saved.headroom;
@@ -276,6 +278,7 @@ function summary(days = 0) {
         const dayKey = [r.day, r.route, r.model, r.servedBy, r.provider].join('|');
         const d = daily[dayKey] || (daily[dayKey] = { day: r.day, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0, savedAnchor: 0, savedHeadroom: 0 });
         for (const k of COUNTS) { t[k] += r[k] || 0; d[k] += r[k] || 0; }
+        if (r.upstream) t.upstream = r.upstream;
     }
     return {
         since: data.since,

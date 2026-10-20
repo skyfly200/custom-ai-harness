@@ -3,7 +3,7 @@
 // when it can't be reached, config.yaml still says which models are free.
 
 // Free: OpenRouter ":free" models and its free router, and anything served
-// from this machine (the CLI wrapper, Laya, Ollama), Docker's names for it included
+// from this machine (the local engine, Laya, Ollama), Docker's names for it included
 function isFree(model = '', apiBase = '') {
     return /:free\b|^openrouter\/(openrouter\/)?free$|-free\b/.test(model)
         || isLocal(model, apiBase) !== false;

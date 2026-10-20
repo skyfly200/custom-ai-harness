@@ -3,7 +3,11 @@ checkpoint: routellm/bert_gpt4_augmented
 
 # Gateway (config.yaml) model names the Router picks between.
 # The Interceptor sends the request to the Gateway, which applies the fallback chain.
-strong_model: claude-sonnet-5
+strong_model: local-engine
+# Hard requests that carry tools (Claude Code, agents) can go to their own
+# model; unset sends them to strong_model. fallback-openrouter-tools is free
+# (NVIDIA Nemotron 3.5 Super VL) and calls tools.
+# strong_model_tools: fallback-openrouter-tools
 weak_model: fallback-groq
 
 # Groq's free tier allows 8K tokens per minute, counting requested output.

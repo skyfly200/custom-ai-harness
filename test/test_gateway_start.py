@@ -31,16 +31,16 @@ def test_local_urls_and_models(monkeypatch):
     c = build(monkeypatch, OLLAMA_URL="http://ollama:11434", LOCAL_ENGINE_URL="http://host.docker.internal:8000",
               LOCAL_MODELS="qwen2.5-coder:7b, gemma3:4b")
     assert model(c, "fallback-ollama")["api_base"] == "http://ollama:11434/v1"
-    assert model(c, "claude-sonnet-5")["api_base"] == "http://host.docker.internal:8000/v1"
+    assert model(c, "local-engine")["api_base"] == "http://host.docker.internal:8000/v1"
     assert model(c, "local-gemma3:4b") == {"model": "openai/gemma3:4b", "api_base": "http://ollama:11434/v1",
                                           "api_key": "dummy", "max_parallel_requests": 2}
     assert c["litellm_settings"]["fallbacks"] == CONFIG["litellm_settings"]["fallbacks"]
 
 
 def test_passthrough_to_a_config_model(monkeypatch):
-    c = build(monkeypatch, HARNESS_MODE="passthrough", PASSTHROUGH_MODEL="or-claude-haiku-5.5")
+    c = build(monkeypatch, HARNESS_MODE="passthrough", PASSTHROUGH_MODEL="fast-openrouter")
     assert [e["model_name"] for e in c["model_list"]] == ["passthrough"]
-    assert model(c, "passthrough")["model"] == "openrouter/anthropic/claude-haiku-5.5"
+    assert model(c, "passthrough")["model"] == "openrouter/openai/gpt-4o-mini"
     assert "fallbacks" not in c["litellm_settings"]
     assert c["general_settings"]["master_key"] == "os.environ/LITELLM_MASTER_KEY"
 

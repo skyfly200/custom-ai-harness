@@ -5,7 +5,7 @@ const { isAnthropic, addCacheMarkers } = require('../utils/cacheMarkers');
 test('cache markers are only for Claude served by a provider', () => {
     assert.equal(isAnthropic({ upstream: 'openrouter/anthropic/claude-sonnet-5.5' }), true);
     assert.equal(isAnthropic({ upstream: 'anthropic/claude-opus-5-5' }), true);
-    assert.equal(isAnthropic({ upstream: 'openai/claude-3-5-sonnet-20240620', local: 'engine' }), false);
+    assert.equal(isAnthropic({ upstream: 'openai/local-model', local: 'engine' }), false);
     assert.equal(isAnthropic({ upstream: 'openrouter/openai/gpt-4o-mini' }), false);
     assert.equal(isAnthropic(undefined), false);
 });

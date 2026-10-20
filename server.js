@@ -609,6 +609,7 @@ async function routeAndRecord(req, res) {
     monitor.recordRouting({ path: req.path, clientId, prompt });
     const started = Date.now();
     const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile);
+    route.model = profiles.currentName(route.model);
     req.body.model = route.model;
     logRoute(req.path, route);
     req.harnessClient = usage.clientOf(req);

@@ -11,6 +11,11 @@ const path = require('path');
 
 const FILE = process.env.HARNESS_PROFILES_FILE || path.join(__dirname, '..', 'routing-profiles.json');
 const MODEL_RE = /^[\w.:/@-]+$/;
+// Old Gateway names for the local engine, which config.yaml once named after
+// a Claude model it never was. Saved routings, settings and Router configs
+// that still use them reach local-engine.
+const RENAMED = { 'claude-sonnet-5': 'local-engine', 'claude-3-5-sonnet': 'local-engine' };
+const currentName = (m) => RENAMED[m] || m;
 
 let profiles = [];
 let version = 0;
@@ -22,7 +27,7 @@ function model(p, k, required) {
         return null;
     }
     if (typeof v !== 'string' || !MODEL_RE.test(v)) throw new Error(`${p.name || 'A routing'}: ${k} must be a model name`);
-    return v;
+    return currentName(v);
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
@@ -44,6 +49,7 @@ function clean(p) {
         downTools: model(p, 'downTools', true),
         threshold,
         strong: model(p, 'strong', !p.pin),
+        strongTools: model(p, 'strongTools'),
         weak: model(p, 'weak', !p.pin),
         tools: model(p, 'tools'),
         overflow: model(p, 'overflow'),
@@ -98,7 +104,7 @@ function replace(next, expected) {
  * rule as router.py's pick_model, with this profile's outputs.
  */
 function pick(p, winRate, threshold, tokens, tools) {
-    if (winRate >= threshold) return p.strong;
+    if (winRate >= threshold) return (tools && p.strongTools) || p.strong;
     if (tools && p.tools) return p.tools;
     if (p.overflow && p.maxTokens && tokens > p.maxTokens) return p.overflow;
     return p.weak;
@@ -106,4 +112,4 @@ function pick(p, winRate, threshold, tokens, tools) {
 
 load();
 
-module.exports = { list, get, state, replace, clean, pick, load, slug, FILE };
+module.exports = { list, get, state, replace, clean, pick, load, slug, currentName, FILE };

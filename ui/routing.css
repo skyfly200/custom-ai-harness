@@ -150,3 +150,32 @@ dialog#addDialog [hidden] { display: none; }
 .mcp .name { flex: 1; }
 .mcp .dot { width: 8px; height: 8px; }
 .catalog-detail a { color: var(--accent); }
+
+/* Problems that stop a save: a red box, the reasons inside it, and a toast */
+.node.bad { border-color: var(--bad); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 45%, transparent); }
+.node .errs { list-style: none; margin: 0; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px;
+  color: var(--bad); font-size: 12px; background: color-mix(in srgb, var(--bad) 8%, var(--bg)); border-bottom: 1px solid var(--border); }
+.out.bad { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.out.bad .port { border-color: var(--bad); }
+.toast-box { position: fixed; right: 16px; bottom: 16px; z-index: 40; width: min(420px, calc(100vw - 32px)); max-height: 50vh; overflow: auto;
+  padding: 10px 14px; border-left: 4px solid var(--bad); box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 13px; }
+/* Lines can still be dropped on a box under it; only its buttons take clicks */
+.toast-box { pointer-events: none; }
+.toast-box button { pointer-events: auto; }
+.toast-box[hidden] { display: none; }
+.toast-head { display: flex; align-items: center; gap: 8px; color: var(--bad); }
+.toast-head b { flex: 1; }
+.toast-close { padding: 0 7px; font-size: 15px; line-height: 20px; border-radius: 4px; }
+.toast-box ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; line-height: 1.4; }
+.toast-box li button { padding: 0 7px; font-size: 12px; line-height: 18px; border-radius: 4px; margin-left: 4px; }
+
+/* Hold × to remove: the fill shows how long is left */
+.node .head .close.hold { position: relative; overflow: hidden; }
+.node .head .close.hold::before { content: ''; position: absolute; inset: 0; background: var(--bad); opacity: .35; transform: scaleX(0); transform-origin: left; }
+.node .head .close.hold.holding { color: var(--bad); border-color: var(--bad); }
+.node .head .close.hold.holding::before { transform: scaleX(1); transition: transform var(--hold, .8s) linear; }
+
+/* No route in any routing reaches it */
+.node.model.unreached { opacity: .6; border-style: dashed; }
+.node.model.unreached:hover, .node.model.unreached.bad { opacity: 1; }
+.node .unreach { color: var(--muted); font-size: 12px; }

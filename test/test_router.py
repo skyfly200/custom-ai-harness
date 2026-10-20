@@ -36,6 +36,12 @@ def test_weak_tool_request_goes_to_tool_model():
     assert c.post("/route", json={"prompt": "x", "threshold": 0.5, "tools": True}).json()["model"] == "S"
 
 
+def test_strong_tool_request_goes_to_strong_tool_model():
+    c = client(0.9); router.config["strong_model_tools"] = "ST"
+    assert c.post("/route", json={"prompt": "x", "threshold": 0.5, "tools": True}).json()["model"] == "ST"
+    assert c.post("/route", json={"prompt": "x", "threshold": 0.5, "tools": False}).json()["model"] == "S"
+
+
 def test_low_threshold_pushes_strong():
     assert client(0.3).post("/route", json={"prompt": "x", "threshold": 0.2}).json()["model"] == "S"
 
@@ -245,6 +251,15 @@ def test_env_wins_over_the_config_file(tmp_path=None):
     finally:
         del os.environ["WEAK_MODEL"]
     assert router.config["weak_model"] == "local-qwen" and router.config["strong_model"] == "S"
+
+
+def test_old_local_engine_names_are_renamed(tmp_path=None):
+    import tempfile, types
+    sys.modules["stub_env_scorer"] = types.SimpleNamespace(make=lambda cfg: (lambda p: 0.0))
+    path = os.path.join(tempfile.mkdtemp(), "c.yaml")
+    open(path, "w").write("backend: custom\nscorer: stub_env_scorer:make\nstrong_model: claude-sonnet-5\nweak_model: W\n")
+    router.load_config(path)
+    assert router.config["strong_model"] == "local-engine" and router.config["weak_model"] == "W"
 
 
 if __name__ == "__main__":

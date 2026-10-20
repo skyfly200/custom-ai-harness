@@ -18,7 +18,7 @@ function modelNames(text) {
     return [...new Set([...text.matchAll(/^\s*-\s*model_name:\s*["']?([^"'\s#]+)/gm)].map(m => m[1]))];
 }
 
-// One flow-style item, e.g. {"claude-sonnet-5": ["a", "b"]}; bare names are quoted first.
+// One flow-style item, e.g. {"local-engine": ["a", "b"]}; bare names are quoted first.
 function parseItem(flow) {
     const json = flow.replace(/#.*$/, '').trim().replace(/([{[,]\s*)([\w.:/@-]+)(?=\s*[:,\]}])/g, '$1"$2"');
     const value = JSON.parse(json);

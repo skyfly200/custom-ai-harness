@@ -49,7 +49,7 @@ function scheduleSave() {
 // Who actually serves a Gateway model, from its litellm_params in config.yaml
 function providerFor({ model = '', api_base: apiBase = '' }) {
     if (/:11434\b/.test(apiBase)) return 'Ollama';
-    if (/:8000\b/.test(apiBase)) return 'Local CLI wrapper';
+    if (/:8000\b/.test(apiBase)) return 'Local engine';
     if (/:8001\b/.test(apiBase)) return 'Laya (local)';
     if (/localhost|127\.0\.0\.1/.test(apiBase)) return `Local (${apiBase.replace(/^https?:\/\//, '')})`;
     const prefix = model.split('/')[0].toLowerCase();

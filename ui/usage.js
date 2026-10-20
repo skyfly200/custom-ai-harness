@@ -467,7 +467,9 @@ function renderBars(target, rows, key, colors) {
 function priceNote(name) {
   const p = prices[name];
   const perM = (v) => `$${+(v * 1e6).toPrecision(3)}`;
-  if (!p) return 'The Gateway doesn’t list this model, so it has no price';
+  if (!p) return priceStatus.gatewayError
+    ? `No price: the Gateway’s price list couldn’t be read (${priceStatus.gatewayError}) and config.yaml doesn’t list this model`
+    : 'No price: neither the Gateway nor config.yaml lists this model, and its replies didn’t name an OpenRouter model';
   if (p.free) return p.local ? 'Runs on this machine: free' : 'A free model';
   if (p.inputCost == null) return `No price: the Gateway has none for it${p.upstream?.startsWith('openrouter/') ? ' and OpenRouter’s list ' + (priceStatus.ok ? 'doesn’t have it' : 'couldn’t be loaded') : ''}`;
   const cached = p.cacheReadCost != null ? ` · cached input ${perM(p.cacheReadCost)}` : '';
@@ -513,7 +515,7 @@ async function loadPrices() {
   try {
     const body = await (await fetch('api/model-info')).json();
     prices = body.models || {};
-    priceStatus = body.openrouter || { ok: true };
+    priceStatus = { ...(body.openrouter || { ok: true }), gatewayError: body.gatewayError || '' };
   } catch {}
 }
 

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { fromGatewayInfo, fromConfig, withOpenrouterPrices } = require('../utils/modelInfo');
+const { fromGatewayInfo, fromConfig, withOpenrouterPrices, catalogIdFor } = require('../utils/modelInfo');
 
 test('model info reads prices and context sizes from the Gateway and marks free models', () => {
     const models = fromGatewayInfo([
@@ -92,4 +92,12 @@ test('zero prices from the Gateway mean unknown, and OpenRouter prices a paid mo
     assert.equal(priced['or-claude-sonnet-5.5'].free, false);
     assert.equal(priced['or-claude-sonnet-5.5'].inputCost, 2e-6);
     assert.equal(priced['free-or'].free, true);
+});
+
+test('model names are matched to OpenRouter ids only when one model fits', () => {
+    const catalog = [{ id: 'anthropic/claude-sonnet-5.5' }, { id: 'anthropic/claude-sonnet-5.5:batch' }, { id: 'a/twin' }, { id: 'b/twin' }];
+    assert.equal(catalogIdFor('or-claude-sonnet-5.5', catalog), 'anthropic/claude-sonnet-5.5');
+    assert.equal(catalogIdFor('claude-sonnet-5.5', catalog), 'anthropic/claude-sonnet-5.5');
+    assert.equal(catalogIdFor('or-twin', catalog), null);
+    assert.equal(catalogIdFor('or-nothing', catalog), null);
 });

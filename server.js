@@ -160,12 +160,13 @@ function logTokens(req, label) {
 function recordUsage(req, proxyRes) {
     const event = req.harnessEvent;
     if (!event || proxyRes.statusCode >= 400) return;
-    usage.tap(proxyRes, ({ usage: counts, outputChars }) => {
+    usage.tap(proxyRes, ({ usage: counts, outputChars, model: upstream }) => {
         const row = usage.record({
             client: req.harnessClient,
             route: usage.routeOf(event),
             model: event.model,
             servedBy: event.servedBy,
+            upstream,
             usage: counts,
             estimate: { input: req.harnessInputEstimate, outputChars },
             saved: req.harnessSaved,
@@ -366,17 +367,36 @@ app.get('/ui/api/models', async (req, res) => {
 let modelInfoCache = { at: 0, body: null };
 async function getModelInfo() {
     if (modelInfoCache.body && Date.now() - modelInfoCache.at < 5 * 60 * 1000) return modelInfoCache.body;
+    let text = '';
+    try { text = fs.readFileSync(GATEWAY_CONFIG, 'utf8'); } catch {}
+    const fromConfig = modelInfo.fromConfig(text);
     try {
-        const upstream = await fetch(`${GATEWAY_URL}/v1/model/info`, { headers: gatewayAuth, signal: AbortSignal.timeout(3000) });
+        const upstream = await fetch(`${GATEWAY_URL}/v1/model/info`, { headers: gatewayAuth, signal: AbortSignal.timeout(10000) });
         if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
-        const body = { source: 'gateway', models: modelInfo.fromGatewayInfo((await upstream.json()).data) };
+        // config.yaml fills in models the Gateway's list leaves out
+        const body = { source: 'gateway', models: { ...fromConfig, ...modelInfo.fromGatewayInfo((await upstream.json()).data) } };
         modelInfoCache = { at: Date.now(), body };
         return body;
-    } catch {
-        let text = '';
-        try { text = fs.readFileSync(path.join(__dirname, 'config.yaml'), 'utf8'); } catch {}
-        return { source: 'config.yaml', models: modelInfo.fromConfig(text) };
+    } catch (err) {
+        return { source: 'config.yaml', gatewayError: err.message, models: fromConfig };
     }
+}
+
+// Models the Usage page has counted that neither list names, priced by the
+// provider model their replies reported (OpenRouter ids). Rows saved before
+// replies were kept have no such model; for OpenRouter ones the name is
+// matched instead, when exactly one OpenRouter model fits it
+// (or-claude-sonnet-5.5 is anthropic/claude-sonnet-5.5).
+function usageModels(models, catalog) {
+    if (!catalog?.length) return models;
+    const ids = new Set(catalog.map(m => m.id));
+    const out = { ...models };
+    for (const r of usage.summary(0).rows) {
+        if (out[r.servedBy]) continue;
+        const id = r.upstream ? r.upstream.replace(/^openrouter\//, '') : r.provider === 'OpenRouter' ? modelInfo.catalogIdFor(r.servedBy, catalog) : null;
+        if (id && ids.has(id)) out[r.servedBy] = { maxInput: null, maxOutput: null, inputCost: null, outputCost: null, free: false, upstream: `openrouter/${id}`, local: false };
+    }
+    return out;
 }
 // OpenRouter's own prices replace the Gateway's for openrouter/ models, so the
 // pages count what OpenRouter actually bills
@@ -385,7 +405,7 @@ app.get('/ui/api/model-info', async (req, res) => {
     const catalog = await getOpenrouterCatalog({ waitMs: 10000 });
     res.json({
         ...info,
-        models: modelInfo.withOpenrouterPrices(info.models, catalog),
+        models: modelInfo.withOpenrouterPrices(usageModels(info.models, catalog), catalog),
         // whether OpenRouter's prices are in, so the pages can say why a price is missing
         openrouter: catalog ? { ok: true, at: new Date(openrouterCache.at).toISOString() } : { ok: false, error: openrouterError || 'not loaded yet' },
     });

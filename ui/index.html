@@ -12,7 +12,7 @@
 <body>
 <main>
   <header>
-    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Dashboard</span></h1><a href="./" class="here" data-hint="Health of each part, recent chats, usage and requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a><a href="settings.html" data-hint="Interceptor and Router settings">Settings</a></nav>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Dashboard</span></h1><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a><a href="settings.html" data-hint="Interceptor and Router settings">Settings</a></nav>
     <span class="muted" id="updated" data-hint="This page refreshes itself every few seconds">Loading…</span>
   </header>
 
@@ -61,7 +61,7 @@ async function getJSON(url, opts) {
 const COMPONENT_HINTS = {
   'Router': 'Scores each request and picks a model (router.py, port 6060)',
   'Gateway (LiteLLM)': 'Sends each request to the provider and tries fallbacks when one fails (port 4000)',
-  'Local engine': 'Optional local CLI wrapper serving models on port 8000',
+  'Local engine': 'Optional: your llama.cpp or vLLM server on port 8000 (launch-local.sh)',
   'Ollama': 'Optional: models running on this computer',
   'Laya (local)': 'Optional: a local Laya classifier server for the Router',
 };

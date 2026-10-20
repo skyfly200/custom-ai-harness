@@ -8,9 +8,9 @@ const config = fs.readFileSync(path.join(__dirname, '..', 'config.yaml'), 'utf8'
 
 test('reads the model names and fallback chains from config.yaml', () => {
     const { models, fallbacks } = gateway.parse(config);
-    assert.ok(models.includes('claude-sonnet-5') && models.includes('fallback-ollama'));
+    assert.ok(models.includes('local-engine') && models.includes('fallback-ollama'));
     assert.deepEqual(fallbacks['fallback-groq'], ['fallback-openrouter']);
-    assert.equal(fallbacks['claude-sonnet-5'][0], 'fast-openrouter');
+    assert.equal(fallbacks['local-engine'][0], 'fast-openrouter');
 });
 
 test('writing the same chains changes nothing', () => {

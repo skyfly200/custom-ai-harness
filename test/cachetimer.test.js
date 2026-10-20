@@ -9,8 +9,8 @@ test('cache rules come from the provider model behind a name', () => {
     assert.equal(cacheRule({ upstream: 'anthropic/claude-opus-5-5' }).ttl, 5 * MIN);
     assert.equal(cacheRule({ upstream: 'openrouter/openai/gpt-4o-mini' }).provider, 'OpenAI');
     assert.equal(cacheRule({ upstream: 'openai/qwen2.5-coder:7b', local: 'ollama' }).provider, 'Ollama');
-    // the local engine that answers as claude-3-5-sonnet is not Anthropic
-    assert.equal(cacheRule({ upstream: 'openai/claude-3-5-sonnet-20240620', local: 'engine' }).ttl, null);
+    // the local engine that on port 8000 is not Anthropic
+    assert.equal(cacheRule({ upstream: 'openai/local-model', local: 'engine' }).ttl, null);
     const groq = cacheRule({ upstream: 'groq/openai/gpt-oss-120b' });
     assert.equal(groq.ttl, null);
     assert.equal(groq.provider, 'Groq');

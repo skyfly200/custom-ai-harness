@@ -32,8 +32,8 @@ const PROVIDERS = {
     help: 'A model id from console.groq.com/docs/models. Uses GROQ_API_KEY from .env.' },
   ollama: { label: 'Ollama on this computer', prefix: 'openai/', base: 'http://localhost:11434/v1', key: 'dummy', example: 'qwen2.5-coder:7b',
     help: 'A model you downloaded with "ollama pull". Ollama must be running.' },
-  local: { label: 'Local CLI wrapper (port 8000)', prefix: 'openai/', base: 'http://localhost:8000/v1', key: 'dummy-key-not-needed', example: 'claude-3-5-sonnet-20240620',
-    help: 'The model name your local wrapper serves.' },
+  local: { label: 'Local engine (port 8000)', prefix: 'openai/', base: 'http://localhost:8000/v1', key: 'dummy-key-not-needed', example: 'local-model',
+    help: 'Your llama.cpp or vLLM server (launch-local.sh). It answers with whatever model it loaded, so any name works.' },
   openai: { label: 'Other OpenAI-compatible server', prefix: 'openai/', askBase: true, askKey: true, example: 'my-model',
     help: 'Any server with /v1/chat/completions, such as LM Studio, vLLM or llama.cpp.' },
   litellm: { label: 'Any LiteLLM provider (full id)', prefix: '', askBase: true, askKey: true, example: 'anthropic/claude-sonnet-4-5',
@@ -57,6 +57,7 @@ const ENTRY_OUTS = [
 ];
 const ROUTER_OUTS = [
   { key: 'strong', label: 'Strong', help: 'win rate ≥ threshold', required: true },
+  { key: 'strongTools', label: 'Strong, with tools', help: 'unset: strong' },
   { key: 'weak', label: 'Weak', required: true },
   { key: 'tools', label: 'Weak, with tools', help: 'unset: weak' },
   { key: 'overflow', label: 'Weak, over', tokens: true },
@@ -97,6 +98,7 @@ function graphFrom({ router, settings, gateway }) {
     threshold: settings?.fixedThreshold ?? null,
     backend: r.backend ?? null,
     strong: r.strong_model ?? null,
+    strongTools: r.strong_model_tools ?? null,
     weak: r.weak_model ?? null,
     tools: r.weak_model_tools ?? null,
     overflow: r.weak_model_overflow ?? null,
@@ -114,7 +116,7 @@ function graphFrom({ router, settings, gateway }) {
 // The routing being edited: the default (kept on the graph itself) or a profile
 const R = () => (view && graph.profiles.find(p => p.id === view)) || graph;
 const routings = () => [graph, ...graph.profiles];
-const ROUTE_FIELDS = ['pin', 'down', 'downTools', 'threshold', 'strong', 'weak', 'tools', 'overflow', 'maxTokens', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
+const ROUTE_FIELDS = ['pin', 'down', 'downTools', 'threshold', 'strong', 'strongTools', 'weak', 'tools', 'overflow', 'maxTokens', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
 const routingName = (r) => (r === graph ? 'the default routing' : `“${r.name}”`);
 
 // Fallbacks without empty chains, sorted, so two can be compared as JSON
@@ -136,7 +138,7 @@ const served = (name) => graph.deployments.some(d => d.name === name);
 function routerChanges() {
   if (!routerUp()) return {};
   const want = {
-    strong_model: graph.strong, weak_model: graph.weak, weak_model_tools: graph.tools,
+    strong_model: graph.strong, strong_model_tools: graph.strongTools, weak_model: graph.weak, weak_model_tools: graph.tools,
     weak_model_overflow: graph.overflow, weak_model_max_tokens: graph.overflow ? graph.maxTokens : null,
     backend: graph.backend,
   };
@@ -366,6 +368,7 @@ const OUT_HINTS = {
   down: 'Where requests go when the Router doesn’t answer in time',
   downTools: 'Same, for requests that carry tools (all Claude Code requests)',
   strong: 'Hard requests: the classifier’s score is at or above the threshold',
+  strongTools: 'Hard requests that carry tools (all Claude Code requests). Unset sends them to Strong. fallback-openrouter-tools is a free model that calls tools',
   weak: 'Easy requests without tools',
   tools: 'Easy requests that carry tools (all Claude Code requests). Unset sends them to Weak',
   overflow: 'Easy requests bigger than this many tokens (e.g. over a free tier’s limit). Unset means no limit',

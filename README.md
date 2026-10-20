@@ -635,7 +635,7 @@ Add it to Claude Code (use the full path to your copy of the repo):
 claude mcp add jev-files -- node /path/to/custom-ai-harness/scripts/jev-files-mcp.js
 ```
 
-The chat page can use it too: copy the `jev-files` entry from `mcp-servers.example.json` into `mcp-servers.json` and turn off `disabled`.
+The chat page can use it too: copy `mcp-servers.example.json` to `mcp-servers.json`; its `jev-files` entry is already on.
 
 How it behaves:
 
@@ -693,14 +693,15 @@ The chat page can give the model tools. While it answers, the model can call the
 ```json
 {
   "mcpServers": {
-    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\you\\Documents"] },
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "${HOME}/Documents"] },
     "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/", "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" } }
   }
 }
 ```
 
 - A server with a `command` is started by the Interceptor and talks over stdio. One with a `url` is reached over HTTP (`"type": "http"`, the default for a `url`) or SSE (`"type": "sse"`).
-- `${NAME}` and `${NAME:-default}` are filled in from your environment and `.env`, so keys can stay in `.env`. `mcp-servers.json` is gitignored anyway.
+- `${NAME}` and `${NAME:-default}` are filled in from your environment and `.env`, so keys can stay in `.env`. `${HOME}` is your home folder (also on Windows) and `${HARNESS_DIR}` is this repo's folder. A `${NAME}` with no value and no default stops that server with a message naming it. `mcp-servers.json` is gitignored anyway.
+- The example file works as it is: `filesystem` (your `Documents` folder; change the path, and the folder must exist) and `jev-files` (needs the harness running) are on, `fetch` (needs [uv](https://docs.astral.sh/uv/)) and `github` (needs `GITHUB_TOKEN` in `.env`) are off until you remove `"disabled"`. Servers start in the repo folder, so `scripts/jev-files-mcp.js` needs no full path, and they get your whole environment (proxy and npm settings included). If a program such as `npx` or `uvx` isn't installed, the error says which one to install.
 - `"disabled": true` keeps a server listed but not started.
 - The Interceptor connects when it starts and prints each server's state. Options → Tools lists them with their tool counts and any start-up error. Untick a server to leave its tools out of your chats. Press **Reload** after editing the file.
 

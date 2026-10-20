@@ -18,6 +18,7 @@ const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
 const tiers = require('./utils/tiers');
 const guard = require('./utils/guard');
+const { askText, DEFAULT_WINDOW } = require('./utils/jevAsk');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
@@ -431,6 +432,36 @@ app.post('/v1/guard', async (req, res) => {
     const result = await guard.check(req.body || {}, { ask: askRouter, jev: guardJev, askAt: guardAskAt, denyAt: guardDenyAt });
     monitor.live.emit('update', { type: 'guard', event: result });
     res.json(result);
+});
+
+// How much text the Router's classifier reads at once: the tail it keeps of each prompt
+let windowCache = { at: 0, size: DEFAULT_WINDOW };
+async function classifierWindow() {
+    if (Date.now() - windowCache.at < 60000) return windowCache.size;
+    try {
+        const res = await fetch(`${ROUTER_URL}/health`, { signal: AbortSignal.timeout(2000) });
+        const { backend, settings: s = {} } = await res.json();
+        const size = Number(backend === 'laya' ? s.laya_max_chars : s.max_chars);
+        windowCache = { at: Date.now(), size: Number.isFinite(size) && size >= 200 ? size : DEFAULT_WINDOW };
+    } catch {
+        windowCache = { at: Date.now() - 50000, size: windowCache.size };
+    }
+    return windowCache.size;
+}
+
+// Ask Jev a question about a text (a file an agent doesn't want in its context)
+app.post('/v1/jev/ask', async (req, res) => {
+    const { text, question, mode, threshold, maxWindows } = req.body || {};
+    try {
+        const result = await askText({
+            text, question, mode, ask: askRouter, window: await classifierWindow(),
+            ...(Number.isFinite(threshold) ? { threshold } : {}), ...(Number.isFinite(maxWindows) ? { maxWindows } : {}),
+        });
+        res.json(result);
+    } catch (err) {
+        const bad = /required|mode must/.test(err.message);
+        res.status(bad ? 400 : 502).json({ error: err.message });
+    }
 });
 app.get('/ui/api/guard', (req, res) => res.json({ log: guard.recent(Number(req.query.limit) || 50), rules: guard.counts(), file: guard.FILE }));
 app.post('/ui/api/guard/reload', localJsonOnly, (req, res) => { guard.load(); res.json({ rules: guard.counts() }); });

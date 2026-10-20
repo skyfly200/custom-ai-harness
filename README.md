@@ -294,6 +294,7 @@ The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 | `docker-compose.yml`, `Dockerfile`, `docker/` | The three parts as containers, for a server (see [Run it on a server](#run-it-on-a-server-docker)) |
 | `utils/access.js` | The optional `HARNESS_PASSWORD` login |
 | `guard-rules.json`, `utils/guard.js`, `.claude/hooks/guard.js` | The command guard (see [Command guard](#command-guard-jev-checks-commands-before-they-run)) |
+| `scripts/jev-files-mcp.js`, `utils/jevFiles.js`, `utils/jevAsk.js` | The `ask_jev_file` tools (see [Ask Jev about a file](#ask-jev-about-a-file-ask_jev_file-tools)) |
 
 ---
 
@@ -604,6 +605,32 @@ Every decision shows in the Dashboard's **Command guard** table. To turn the hoo
 curl -s localhost:3000/v1/guard -H 'content-type: application/json' -d '{"tool":"Bash","command":"git push --force origin main"}'
 # {"decision":"deny","reason":"Force push to a protected branch","rule":"force-push-main",...}
 ```
+
+### Ask Jev about a file (`ask_jev_file` tools)
+
+Agents often open a big file just to learn one fact about it. `scripts/jev-files-mcp.js` is an MCP server that lets them ask Jev instead: it reads the file on your machine, has Jev answer, and returns one line, so the file never enters the agent's context.
+
+| Tool | Use it for | Answer |
+|---|---|---|
+| `ask_jev_filebool` | "Does this file read environment variables?" | `yes` or `no`, Jev's confidence, roughly which line |
+| `ask_jev_filescale` | "This code is hard to follow" (a statement to rate) | a number from 0 to 1 |
+| `ask_jev_files` | the same yes/no question about up to 20 files | only the files that say yes, strongest first |
+
+Add it to Claude Code (use the full path to your copy of the repo):
+
+```bash
+claude mcp add jev-files -- node /path/to/custom-ai-harness/scripts/jev-files-mcp.js
+```
+
+The chat page can use it too: copy the `jev-files` entry from `mcp-servers.example.json` into `mcp-servers.json` and turn off `disabled`.
+
+How it behaves:
+
+- **It needs the Router on `systemone` (Jev) or `laya`.** Other backends can't answer questions and the tools return an error.
+- **Long files are read in parts.** Jev reads as much at once as the Router's `max_chars` setting (2,000 characters by default), so a file is cut into parts of that size, each part is asked the same question, and the strongest answer wins, so one hit anywhere counts. At most 12 parts are read; the reply says when a file was only partly read. Raise `max_chars` on the Settings page if your Jev takes more.
+- **Only some files can be sent.** The tool server reads files only inside the folder it was started in, or the folders in `HARNESS_FILE_ROOTS` (separated by `:`, or `;` on Windows). It refuses `.env` and other secrets files, SSH keys, binaries and files over `HARNESS_FILE_MAX_BYTES` (2 MB), because the text goes to Jev's host.
+- **It costs one Jev call per part.** Nothing is cached yet.
+- `HARNESS_URL` (default `http://localhost:3000`) and `HARNESS_PASSWORD` tell the tool server where the harness is. Other programs can call `POST /v1/jev/ask` directly with `{"text", "question", "mode": "bool" | "scale"}`.
 
 ### Control UI
 

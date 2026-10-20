@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const tiers = require('./tiers');
+const auto = require('./autoRoute');
 
 const FILE = process.env.HARNESS_PROFILES_FILE || path.join(__dirname, '..', 'routing-profiles.json');
 const MODEL_RE = /^[\w.:/@-]+$/;
@@ -39,12 +40,15 @@ function clean(p) {
     const name = typeof p.name === 'string' ? p.name.trim().slice(0, 60) : '';
     if (!name) throw new Error('Every routing needs a name');
     const id = slug(p.id || name);
-    if (!id || id === 'default') throw new Error(`“${name}” needs a different name`);
+    if (!id || id === 'default' || id === auto.AUTO) throw new Error(`“${name}” needs a different name`);
     const threshold = p.threshold === null || p.threshold === undefined || p.threshold === '' ? null : Number(p.threshold);
     if (threshold !== null && !(threshold >= 0 && threshold <= 1)) throw new Error(`${name}: the threshold must be from 0 to 1`);
     const out = {
         id, name,
         note: typeof p.note === 'string' ? p.note.slice(0, 200) : '',
+        // when Auto (utils/autoRoute.js) should pick this routing
+        description: typeof p.description === 'string' ? p.description.trim().slice(0, 300) : '',
+        rules: auto.cleanRules(p.rules, name),
         pin: model(p, 'pin'),
         down: model(p, 'down', true),
         downTools: model(p, 'downTools', true),

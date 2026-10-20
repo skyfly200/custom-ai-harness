@@ -202,3 +202,13 @@ dialog#addDialog [hidden], dialog#statsDialog [hidden] { display: none; }
 .chip-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
 dialog#statsDialog { width: min(560px, calc(100vw - 32px)); padding: 18px 20px; color: var(--text); }
 .ladder-warn { margin: 6px 10px 0; }
+
+.auto-box { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 14px; margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--line, #d8dde6); border-radius: 12px; }
+.auto-box[hidden] { display: none; }
+.auto-box > b { flex: 1 1 100%; }
+.auto-box label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; flex: 1 1 160px; }
+.auto-box .auto-wide { flex: 1 1 100%; }
+.auto-box .auto-size { display: flex; gap: 6px; }
+.auto-box .auto-size input { width: 50%; min-width: 0; }
+.auto-box input, .auto-box select { font-size: 13px; }
+.auto-box .small { flex: 1 1 100%; }

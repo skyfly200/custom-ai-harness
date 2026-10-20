@@ -109,6 +109,10 @@ function renderStats(s) {
 }
 
 function why(e) {
+  const auto = e.auto ? `<div class="sub">Auto: ${esc(e.profile || 'default routing')} · ${esc(e.auto.how)}: ${esc(e.auto.why)}</div>` : '';
+  return why1(e) + auto;
+}
+function why1(e) {
   if (e.reason) return `<span class="tag">${esc(e.reason)}</span>`;
   if (e.routerError) return `<span class="tag bad">Router down</span> fallback model <div class="sub">${esc(e.routerError)}</div>`;
   const score = e.winRate != null ? Math.round((e.winRate + (e.effort || 0)) * 1000) / 1000 : null;

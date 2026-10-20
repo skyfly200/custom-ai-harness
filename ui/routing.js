@@ -1138,8 +1138,34 @@ function drawProfiles() {
   const p = view && R();
   $('profileNote').innerHTML = p
     ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Models and fallbacks are shared by every routing.`
-    : `What every request uses unless its chat, project or client picks another routing. ${graph.profiles.length ? '' : 'Add a routing to send some chats elsewhere, such as cheaper models or no compression.'}`;
+    : `What every request uses unless its chat, project or client picks another routing, and what Auto falls back to. ${graph.profiles.length ? '' : 'Add a routing to send some chats elsewhere, such as cheaper models or no compression.'}`;
+  drawAuto();
 }
+
+// Auto's rules and description for the routing shown (the default has none: it is Auto's fallback)
+const emptyRules = () => ({ words: [], tools: 'any', clients: [], minTokens: null, maxTokens: null });
+const csv = (v) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+function drawAuto() {
+  $('autoBox').hidden = !view;
+  const p = view && R();
+  if (!p) return;
+  const r = p.rules || (p.rules = emptyRules());
+  $('autoDesc').value = p.description || '';
+  $('autoWords').value = r.words.join(', ');
+  $('autoTools').value = r.tools;
+  $('autoClients').value = r.clients.join(', ');
+  $('autoMin').value = r.minTokens ?? '';
+  $('autoMax').value = r.maxTokens ?? '';
+}
+function readAuto() {
+  const p = R();
+  if (!view || !p) return;
+  const num = (id) => ($(id).value === '' ? null : Number($(id).value));
+  p.description = $('autoDesc').value;
+  p.rules = { words: csv($('autoWords').value), tools: $('autoTools').value, clients: csv($('autoClients').value), minTokens: num('autoMin'), maxTokens: num('autoMax') };
+  updateButtons();
+}
+for (const id of ['autoDesc', 'autoWords', 'autoTools', 'autoClients', 'autoMin', 'autoMax']) $(id).addEventListener('input', readAuto);
 
 function showRouting(id) {
   view = id || '';
@@ -1170,7 +1196,7 @@ $('profileNew').addEventListener('click', () => {
   const copy = Object.fromEntries(ROUTE_FIELDS.map(k => [k, clone(from[k] ?? null)]));
   copy.mcpOff = copy.mcpOff || [];
   // The default's Router outputs may be unknown while the Router is down
-  graph.profiles.push({ id, name, note: '', ...copy });
+  graph.profiles.push({ id, name, note: '', description: '', rules: emptyRules(), ...copy });
   showRouting(id);
   note(`Added “${name}”. Change its lines and boxes, then press Save.`);
 });

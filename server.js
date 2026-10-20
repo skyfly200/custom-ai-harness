@@ -16,6 +16,7 @@ const {
 const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
+const autoRoute = require('./utils/autoRoute');
 const tiers = require('./utils/tiers');
 const guard = require('./utils/guard');
 const { askText, DEFAULT_WINDOW } = require('./utils/jevAsk');
@@ -714,9 +715,24 @@ app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
     }
 });
 
-// The named routing a request asked for with x-harness-profile (null: the default)
-function profileOf(req) {
+// The named routing a request asked for with x-harness-profile (null: the
+// default). "auto" lets the harness choose per request (utils/autoRoute.js);
+// req.harnessAuto then says how, for the routing log.
+async function profileOf(req) {
     const id = req.get('x-harness-profile');
+    if (id && id.trim().toLowerCase() === autoRoute.AUTO) {
+        const { autoJev, autoAskAt } = settings.get();
+        const picked = await autoRoute.pick(profiles.list(), {
+            text: latestUserText(req.body.messages || []),
+            tools: Array.isArray(req.body.tools) && req.body.tools.length > 0,
+            client: usage.clientOf(req),
+            tokens: estimateTokens(req.body),
+            ask: askRouter, jev: autoJev, askAt: autoAskAt,
+        });
+        req.harnessAuto = { how: picked.how, why: picked.why };
+        console.log(`Auto routing: ${picked.profile ? picked.profile.name : 'the default routing'} (${picked.how}: ${picked.why})`);
+        return picked.profile;
+    }
     const p = profiles.get(id);
     if (id && !p) console.warn(`Unknown routing "${id}"; using the default`);
     return p;
@@ -767,7 +783,7 @@ async function routeAndRecord(req, res) {
         + Math.ceil(JSON.stringify(req.body.tools || []).length / 4);
     req.harnessEvent = monitor.recordRoute({
         path: req.path, ...route, tokens: estimateTokens(req.body), prompt, clientId,
-        transforms: activeTransforms(req), routeMs: Date.now() - started,
+        transforms: activeTransforms(req), routeMs: Date.now() - started, auto: req.harnessAuto,
     });
     // Tell the client where its request went (the chat page shows it)
     res.set('x-harness-event', String(req.harnessEvent.id));
@@ -776,11 +792,12 @@ async function routeAndRecord(req, res) {
         : `${route.tier ? `${route.tier}: ` : ''}win rate ${route.winRate} vs threshold ${route.threshold}${route.effort ? `, effort ${route.effort > 0 ? '+' : ''}${route.effort}` : ''}`));
     if (route.tier) res.set('x-harness-tier', encodeURIComponent(route.tier));
     if (route.profile) res.set('x-harness-profile', encodeURIComponent(route.profile));
+    if (req.harnessAuto) res.set('x-harness-auto', encodeURIComponent(`${req.harnessAuto.how}: ${req.harnessAuto.why}`));
 }
 
 // OpenAI-compatible agents (Cursor, Aider, Continue, ...) and the chat page
 app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) => {
-    req.harnessProfile = profileOf(req);
+    req.harnessProfile = await profileOf(req);
     const messages = req.body.messages || [];
     req.body.messages = compressToolResults(req, transformsFor(req).caveman ? withCavemanOpenAI(messages) : messages);
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);
@@ -795,7 +812,7 @@ app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) =
 
 // Anthropic Messages API: Claude Code with ANTHROPIC_BASE_URL=http://localhost:3000
 app.post('/v1/messages', async (req, res, next) => {
-    req.harnessProfile = profileOf(req);
+    req.harnessProfile = await profileOf(req);
     req.body.messages = compressToolResults(req, dropUnsignedThinking(req.body.messages || []));
     if (transformsFor(req).caveman) req.body.system = withCavemanAnthropic(req.body.system);
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);

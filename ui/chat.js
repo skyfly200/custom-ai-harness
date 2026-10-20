@@ -456,6 +456,7 @@ function quickStat(m) {
 function quickNote(c) {
   const r = routeOf(c);
   if (r.model) return 'Every message goes to this one model. Change it any time in Options.';
+  if (r.auto) return 'Each message goes to the routing whose rules or description fit it, else the default routing.';
   const tiers = (r.profile ? r.profile.tiers : routings.tiers) || [];
   return `The Router scores each message and picks ${tiers.length ? `one of ${tiers.length + 2} tiers` : 'a strong or a weak model'}. The Effort button by Send leans it cheaper or better.`;
 }
@@ -466,7 +467,7 @@ function quickPicker() {
   const models = [...new Set([...gatewayModels, ...(v.startsWith('m:') ? [v.slice(2)] : [])])];
   const missing = v.startsWith('p:') && !routings.profiles.some(x => `p:${x.id}` === v);
   return `<div class="quick-pick"><label>Answer with <select id="quickRoute" aria-label="Routing or model for this chat">
-      <optgroup label="Routings">${p ? opt('project', `Same as the project (${routeLabel(routeOf({ project: chat.project }))})`) : ''}${opt('default', 'Default routing')}${routings.profiles.map(x => opt(`p:${x.id}`, x.name)).join('')}${missing ? opt(v, `${v.slice(2)} (deleted)`) : ''}</optgroup>
+      <optgroup label="Routings">${p ? opt('project', `Same as the project (${routeLabel(routeOf({ project: chat.project }))})`) : ''}${opt('default', 'Default routing')}${opt('auto', 'Auto (picks a routing per message)')}${routings.profiles.map(x => opt(`p:${x.id}`, x.name)).join('')}${missing ? opt(v, `${v.slice(2)} (deleted)`) : ''}</optgroup>
       ${models.length ? `<optgroup label="One model directly">${models.map(m => opt(`m:${m}`, m + quickStat(m))).join('')}</optgroup>` : ''}
     </select></label><small id="quickNote">${esc(quickNote(chat))}</small></div>`;
 }
@@ -500,7 +501,8 @@ function attachmentsHtml(list) {
 // Why the Router picked this model, in a few words
 function routeWhy(r) {
   if (!r) return '';
-  const on = r.profile && !String(r.reason || '').includes(r.profile) ? ` (routing: ${r.profile})` : '';
+  const via = r.auto ? `Auto: ${r.auto.how === 'default' ? 'default routing' : r.profile}, ${r.auto.why}` : '';
+  const on = r.auto ? ` (${via})` : r.profile && !String(r.reason || '').includes(r.profile) ? ` (routing: ${r.profile})` : '';
   if (r.reason) return r.reason + on;
   if (r.routerError) return 'Router down' + on;
   const effort = r.effort ? `, effort ${r.effort > 0 ? '+' : ''}${r.effort}` : '';
@@ -1232,6 +1234,7 @@ function drawHint() {
   if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${pending.some(a => a.kind === 'image') ? ' plus images' : ''}`);
   const route = chat ? routeOf(chat) : null;
   if (route?.model) bits.push(`straight to ${esc(route.model)}`);
+  else if (route?.auto) bits.push('routing: Auto');
   else if (route?.profile) bits.push(`routing: ${esc(route.profile.name)}`);
   if (repoOf(chat)) bits.push(`linked to ${esc(repoOf(chat).name)}`);
   const on = chat ? skillsOf(chat) : [];
@@ -1927,7 +1930,7 @@ function onLive(update) {
   const reply = event.clientId && waiting.get(event.clientId);
   if (reply) {
     const tr = reply.trace;
-    if (type === 'route') tr.routed = { model: event.model, profile: event.profile, reason: event.reason, winRate: event.winRate, threshold: event.threshold, routerError: event.routerError, transforms: event.transforms, routeMs: event.routeMs, tier: event.tier, effort: event.effort };
+    if (type === 'route') tr.routed = { model: event.model, profile: event.profile, reason: event.reason, winRate: event.winRate, threshold: event.threshold, routerError: event.routerError, transforms: event.transforms, routeMs: event.routeMs, tier: event.tier, effort: event.effort, auto: event.auto };
     if (type === 'response') tr.answered = { status: event.status, ms: event.ms, servedBy: event.servedBy, fallbacks: event.fallbacks };
     if (type === 'error' && !tr.answered) tr.error = `Gateway: ${event.error}`;
     redraw(reply);
@@ -2099,6 +2102,7 @@ function routeOf(c) {
   const own = c?.route && c.route !== 'project';
   const pick = own ? { route: c.route, model: c.model, from: 'chat' } : p?.route ? { route: p.route, model: p.model, from: 'project' } : { route: 'default', from: '' };
   if (pick.route === 'model') return pick.model?.trim() ? { model: pick.model.trim(), from: pick.from } : { from: pick.from, empty: true };
+  if (pick.route === 'auto') return { auto: true, from: pick.from };
   if (pick.route?.startsWith('p:')) {
     const profile = routings.profiles.find(x => x.id === pick.route.slice(2));
     return profile ? { profile, from: pick.from } : { from: pick.from, missing: pick.route.slice(2) };
@@ -2111,6 +2115,7 @@ function routeHeaders(c) {
   if (r.model) return { 'x-harness-model': r.model };
   const effort = c?.effort && c.effort !== 'auto' ? { 'x-harness-effort': c.effort } : {};
   if (r.profile) return { 'x-harness-profile': r.profile.id, ...effort };
+  if (r.auto) return { 'x-harness-profile': 'auto', ...effort };
   return effort;
 }
 
@@ -2151,7 +2156,7 @@ const routingMcpOff = (c) => routeOf(c).profile?.mcpOff || routings.mcpOff || []
 function routeChoices(selected, first) {
   const opt = (v, label) => `<option value="${esc(v)}"${v === selected ? ' selected' : ''}>${esc(label)}</option>`;
   const missing = selected?.startsWith('p:') && !routings.profiles.some(x => `p:${x.id}` === selected);
-  return (first || '') + opt('default', 'Default routing')
+  return (first || '') + opt('default', 'Default routing') + opt('auto', 'Auto: pick a routing for each message')
     + routings.profiles.map(x => opt(`p:${x.id}`, `Routing: ${x.name}`)).join('')
     + (missing ? opt(selected, `${selected.slice(2)} (deleted: uses the default)`) : '')
     + opt('model', 'One model directly (no routing)');
@@ -2159,6 +2164,7 @@ function routeChoices(selected, first) {
 
 function routeLabel(r) {
   if (r.model) return `straight to ${r.model}`;
+  if (r.auto) return 'Auto routing';
   if (r.profile) return `routing “${r.profile.name}”`;
   return 'the default routing';
 }
@@ -2176,6 +2182,7 @@ function drawRoute() {
   $('routeNote').innerHTML = r.empty ? 'Type the model to send every message to.'
     : r.missing ? `The routing “${esc(r.missing)}” was deleted, so the default is used.`
     : r.model ? 'Every message goes to this model as is: no Router, no fallback routing choices (the Gateway’s own fallbacks still apply).'
+    : r.auto ? 'Each message goes to the routing whose rules or description fit it best (set them on the <a href="routing.html">Routing page</a>), else the default routing. The reply says which one it chose.'
     : r.profile ? `${r.profile.pin ? `Pinned to ${esc(r.profile.pin)}. ` : ''}Compression: ${['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).length ? ['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).map(k => ({ caveman: 'short replies', headroom: 'shrink tool results', contextAnchor: 'skip repeats' })[k]).join(', ') : 'off'}. <a href="routing.html?routing=${encodeURIComponent(r.profile.id)}">Edit it</a>`
     : '<a href="routing.html">Make routings</a> on the Routing page to send some chats to other models.';
 }

@@ -2,14 +2,17 @@
 // turning embedding space (words grouped by meaning, the pointer acting as a
 // query that lights up its nearest neighbours), and the edge glow that
 // follows the pointer around cards.
-// Still when the system asks for reduced motion; can be switched off.
+// Still when the system asks for reduced motion; can be switched off. A page
+// whose body has data-bg="off" (the chat page, for speed) starts with it off
+// and remembers its own choice.
 'use strict';
 
 (() => {
-  const BG_KEY = 'bright-bg';
+  const offByDefault = document.body.dataset.bg === 'off';
+  const BG_KEY = offByDefault ? 'bright-bg-chat' : 'bright-bg';
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-  let enabled = true;
-  try { enabled = localStorage.getItem(BG_KEY) !== 'off'; } catch {}
+  let enabled = !offByDefault;
+  try { const v = localStorage.getItem(BG_KEY); if (v) enabled = v !== 'off'; } catch {}
 
   // Word clusters: things that mean similar things sit close together
   const CLUSTERS = [

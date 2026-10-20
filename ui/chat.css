@@ -199,6 +199,8 @@ input[type=range] { width: 100%; }
 .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip img { height: 20px; border-radius: 3px; }
 .chip button { border: none; background: none; padding: 0 4px; color: var(--muted); }
+#handsFreeBtn.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+#handsFreeBtn.live { animation: pulse 2.4s infinite; }
 #mic.listening { color: #fff; background: var(--bad); border-color: var(--bad); animation: pulse 1.4s infinite; }
 .speaking { color: var(--accent) !important; }
 

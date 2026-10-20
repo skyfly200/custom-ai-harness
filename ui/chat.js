@@ -19,6 +19,7 @@ const ICONS = {
   sliders: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>',
   pulse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
   clip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>',
+  headset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
@@ -29,7 +30,7 @@ const ICONS = {
 };
 const setIcon = (id, name) => { $(id).innerHTML = ICONS[name]; };
 setIcon('copyChat', 'copy'); setIcon('exportChat', 'download'); setIcon('toggleOptions', 'sliders');
-setIcon('toggleActivity', 'pulse'); setIcon('attach', 'clip'); setIcon('mic', 'mic');
+setIcon('toggleActivity', 'pulse'); setIcon('attach', 'clip'); setIcon('mic', 'mic'); setIcon('handsFreeBtn', 'headset');
 setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('deleteChat', 'trash'); setIcon('exportAll', 'download'); setIcon('deleteAll', 'trash'); setIcon('kitBtn', 'kit');
 
 // ---------------------------------------------------------------------------
@@ -167,6 +168,7 @@ for (const id of PREF_FIELDS) {
     prefs[id] = el.type === 'checkbox' ? el.checked : el.value;
     store.set(PREF_KEY, prefs);
     if (id === 'handsFree' && el.checked) { $('autoSend').checked = $('autoSpeak').checked = true; prefs.autoSend = prefs.autoSpeak = true; store.set(PREF_KEY, prefs); }
+    if (id === 'handsFree') drawHandsFree();
     if (id === 'autoSpeak' && !el.checked) speech.stop();
     if (id === 'ttsEngine') { speech.stop(); drawEngine(); }
     if (id === 'serverModel') { speech.stop(); drawServerVoices(); prefs.serverVoice = $('serverVoice').value; store.set(PREF_KEY, prefs); drawEngine(); }
@@ -1821,10 +1823,36 @@ const dictation = {
     const on = this.want && !this.paused;
     $('mic').classList.toggle('listening', on);
     $('mic').title = !SR ? 'Dictation needs Chrome or Edge' : on ? 'Stop dictating (Ctrl+M)' : 'Dictate (Ctrl+M)';
+    drawHandsFree();
   },
 };
 $('mic').addEventListener('click', () => (dictation.want && !dictation.paused ? dictation.stop() : dictation.start()));
 if (!SR) $('mic').disabled = true;
+
+// The composer's hands-free button is the Options checkbox plus the mic:
+// turning it on starts listening now, turning it off stops listening and reading
+function setHandsFree(on) {
+  const box = $('handsFree');
+  if (box.checked !== on) { box.checked = on; box.dispatchEvent(new Event('change')); }
+  if (on) { if (!dictation.want || dictation.paused) dictation.start(); toast('Hands-free on: talk, pause to send, and it reads the reply.'); }
+  else { dictation.stop(); speech.stop(); }
+  drawHandsFree();
+}
+function drawHandsFree() {
+  const btn = $('handsFreeBtn');
+  const on = $('handsFree').checked;
+  btn.classList.toggle('on', on);
+  btn.classList.toggle('live', on && dictation.want);
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = !SR ? 'Hands-free needs Chrome or Edge'
+    : on && !dictation.want ? 'Hands-free is on but not listening. Click to start listening'
+    : on ? 'Hands-free is on. Click to stop listening and reading'
+    : 'Hands-free: talk, it sends when you pause, reads the reply, then listens again';
+}
+// on but idle (after a reload, or the mic was stopped): a click starts listening
+$('handsFreeBtn').addEventListener('click', () => setHandsFree(!$('handsFree').checked || !dictation.want));
+if (!SR) $('handsFreeBtn').disabled = true;
+drawHandsFree();
 loadServerTTS();
 
 // ---------------------------------------------------------------------------
@@ -2645,7 +2673,7 @@ fetch('api/models').then(r => r.json()).then(({ models }) => {
   $('models').innerHTML = models.map(m => `<option value="${esc(m)}">`).join('');
 }).catch(() => {});
 
-applyPrefs();
+applyPrefs(); drawHandsFree();
 loadModelInfo();
 loadTools();
 loadRoutings();

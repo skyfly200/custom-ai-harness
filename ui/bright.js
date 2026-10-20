@@ -242,10 +242,38 @@
     },
   };
 
+  // ---- installable app: a service worker, and an Install button where the browser offers one ----
+  // Chrome and Edge fire beforeinstallprompt when the app can be installed; Safari never does
+  // (Share, then Add to Home Screen). Service workers need https or localhost.
+  let installEvent = null;
+  function drawInstall() {
+    const nav = document.querySelector('nav');
+    let b = document.getElementById('installBtn');
+    if (!installEvent) { b?.remove(); return; }
+    if (!nav || b) return;
+    b = document.createElement('button');
+    b.id = 'installBtn';
+    b.type = 'button';
+    b.className = 'install-btn';
+    b.textContent = 'Install app';
+    b.dataset.hint = b.title = 'Add Bright Chat to this device as an app';
+    b.addEventListener('click', async () => {
+      const event = installEvent;
+      installEvent = null;
+      drawInstall();
+      try { await event.prompt(); } catch {}
+    });
+    nav.appendChild(b);
+  }
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; drawInstall(); });
+  window.addEventListener('appinstalled', () => { installEvent = null; drawInstall(); });
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
   function init() {
     document.body.prepend(canvas);
     canvas.hidden = !enabled;
     decorate();
+    drawInstall();
     resize();
     start();
   }

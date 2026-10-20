@@ -42,6 +42,8 @@ nav a.here::after { content: ''; position: absolute; left: 0; right: 0; bottom: 
 .bg-toggle svg { width: 17px; height: 17px; }
 .bg-toggle.on { color: var(--accent); }
 .bg-toggle:hover { border-color: var(--border); }
+.install-btn { align-self: center; padding: 3px 10px; font-size: 12px; border-radius: 999px; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
 /* ---- glass surfaces ---- */
 .card, .table-wrap, fieldset { background: var(--glass); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2);

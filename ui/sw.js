@@ -1,0 +1,47 @@
+// Service worker for the installed app. It keeps the pages, scripts and icons
+// so the app opens when the harness is slow or unreachable, but always asks the
+// harness first, so an update to the harness shows up the next time you open
+// it. Nothing under /ui/api/ or /v1/ is ever kept, and neither is anything
+// that isn't a plain GET: chats, answers and keys are never stored here.
+'use strict';
+
+const CACHE = 'bright-chat-v1';
+
+function keepable(request) {
+  if (request.method !== 'GET') return false;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return false;
+  if (!url.pathname.startsWith('/ui/')) return false;
+  return !url.pathname.startsWith('/ui/api/');
+}
+
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  // Fetched with the page's credentials, so a harness behind HARNESS_PASSWORD still works
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat.html', 'bright.css', 'style.css', 'chat.css', 'bright.js', 'chat.js', 'favicon.svg'])).catch(() => {}));
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (!keepable(request)) return;
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    try {
+      const response = await fetch(request);
+      // Only a good answer is kept: a login prompt or an error page must not replace the app
+      if (response.ok && response.type === 'basic') cache.put(request, response.clone()).catch(() => {});
+      return response;
+    } catch (err) {
+      const kept = await cache.match(request, { ignoreSearch: true });
+      if (kept) return kept;
+      throw err;
+    }
+  })());
+});

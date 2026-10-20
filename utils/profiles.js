@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const tiers = require('./tiers');
 
 const FILE = process.env.HARNESS_PROFILES_FILE || path.join(__dirname, '..', 'routing-profiles.json');
 const MODEL_RE = /^[\w.:/@-]+$/;
@@ -54,6 +55,8 @@ function clean(p) {
         tools: model(p, 'tools'),
         overflow: model(p, 'overflow'),
         maxTokens: null,
+        images: model(p, 'images'),
+        tiers: tiers.clean(p.tiers, name).map(t => ({ ...t, model: currentName(t.model), tools: t.tools && currentName(t.tools) })),
         caveman: p.caveman !== false,
         headroom: p.headroom !== false,
         contextAnchor: p.contextAnchor !== false,

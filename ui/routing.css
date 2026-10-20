@@ -84,17 +84,17 @@ main.wide { max-width: none; }
 
 dialog#addDialog { width: min(1180px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 18px 20px; color: var(--text); }
 dialog#addDialog.narrow { width: min(560px, calc(100vw - 32px)); }
-dialog#addDialog::backdrop { background: rgba(0,0,0,.35); }
-dialog#addDialog h3 { margin: 0 0 4px; font-size: 17px; }
-dialog#addDialog form { display: flex; flex-direction: column; gap: 12px; }
-dialog#addDialog .add-head { display: flex; align-items: flex-start; gap: 12px; }
-dialog#addDialog .add-head > div { flex: 1; }
-dialog#addDialog .add-head .close { padding: 0 8px; font-size: 18px; line-height: 26px; border-radius: 6px; }
-dialog#addDialog .add-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 14px; }
+dialog#addDialog::backdrop, dialog#statsDialog::backdrop { background: rgba(0,0,0,.35); }
+dialog#addDialog h3, dialog#statsDialog h3 { margin: 0 0 4px; font-size: 17px; }
+dialog#addDialog form, dialog#statsDialog form { display: flex; flex-direction: column; gap: 12px; }
+dialog#addDialog .add-head, dialog#statsDialog .add-head { display: flex; align-items: flex-start; gap: 12px; }
+dialog#addDialog .add-head > div, dialog#statsDialog .add-head > div { flex: 1; }
+dialog#addDialog .add-head .close, dialog#statsDialog .add-head .close { padding: 0 8px; font-size: 18px; line-height: 26px; border-radius: 6px; }
+dialog#addDialog .add-fields, dialog#statsDialog .add-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 14px; }
 dialog#addDialog.narrow .add-fields { grid-template-columns: 1fr; }
-dialog#addDialog .actions { margin-top: 2px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-dialog#addDialog p { margin: 0; }
-dialog#addDialog [hidden] { display: none; }
+dialog#addDialog .actions, dialog#statsDialog .actions { margin-top: 2px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+dialog#addDialog p, dialog#statsDialog p { margin: 0; }
+dialog#addDialog [hidden], dialog#statsDialog [hidden] { display: none; }
 .catalog { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .catalog-filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .catalog-filters input[type="search"] { flex: 1 1 260px; min-width: 0; }
@@ -179,3 +179,26 @@ dialog#addDialog [hidden] { display: none; }
 .node.model.unreached { opacity: .6; border-style: dashed; }
 .node.model.unreached:hover, .node.model.unreached.bad { opacity: 1; }
 .node .unreach { color: var(--muted); font-size: 12px; }
+
+/* Extra tiers on the Router: name, cut-off and remove, above their two outputs */
+.tier { display: flex; align-items: center; gap: 6px; padding: 6px 18px 0 10px; margin-top: 4px; border-top: 1px dashed var(--border); font-size: 12px; color: var(--muted); }
+.tier .tier-name { flex: 1; min-width: 0; font-weight: 600; }
+.tier label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tier input[type="number"] { width: 64px; }
+.tier button { padding: 0 6px; font-size: 12px; line-height: 18px; border-radius: 4px; }
+.add-tier { margin: 6px 10px 2px; }
+.out .stat { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+/* Model numbers and strengths */
+.node .sect .link { float: right; border: 0; background: none; color: var(--accent); padding: 0; font-size: 11px; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; margin: 0; font-size: 12px; }
+.stats div { display: flex; justify-content: space-between; gap: 6px; min-width: 0; }
+.stats div.wide { grid-column: 1 / -1; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strengths { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: 11px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); line-height: 18px; }
+.strength-picks { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
+dialog#statsDialog { width: min(560px, calc(100vw - 32px)); padding: 18px 20px; color: var(--text); }
+.ladder-warn { margin: 6px 10px 0; }

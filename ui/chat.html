@@ -140,7 +140,14 @@
         <textarea id="input" rows="1" placeholder="Message (Enter to send, Shift+Enter for a new line)"></textarea>
         <button type="button" class="icon" id="mic" title="Dictate (Ctrl+M)" aria-label="Dictate"></button>
         <button type="button" class="icon" id="handsFreeBtn" title="Hands-free: talk, it sends when you pause, reads the reply, then listens again" aria-label="Hands-free mode" aria-pressed="false"></button>
+        <button type="button" class="effort-btn" id="effortBtn" title="Effort: how hard the routing should try. Lower is cheaper, higher sends more to the better tiers" aria-haspopup="true">Auto</button>
         <button class="primary" id="send" type="submit">Send</button>
+        <div class="effort-pop" id="effortPop" hidden>
+          <div class="kit-head"><b>Effort</b><span class="muted small" id="effortName">Auto</span></div>
+          <input type="range" id="effort" min="0" max="4" step="1" value="2" aria-label="Effort" list="effortStops">
+          <div class="effort-ends muted small"><span>Cheaper</span><span>Better</span></div>
+          <p class="muted small" id="effortNote"></p>
+        </div>
         <div class="kit" id="kit" hidden>
           <div class="kit-sec">
             <div class="kit-head"><b>Skills</b><button type="button" class="mini" id="manageSkills">Manage skills</button></div>

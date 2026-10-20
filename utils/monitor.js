@@ -28,7 +28,7 @@ function recordRouting({ path, clientId, prompt }) {
  * Record a routing decision. Returns the event so the response can be added
  * to it once the Gateway answers.
  */
-function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError, reason, clientId, transforms, routeMs, profile }) {
+function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError, reason, clientId, transforms, routeMs, profile, tier, effort }) {
     const event = {
         id: nextId++,
         time: new Date().toISOString(),
@@ -44,6 +44,8 @@ function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, r
         clientId: clientId || null, // x-harness-request-id, so a page can find its own request
         transforms: transforms || [],
         profile: profile || null, // the named routing it used (utils/profiles.js), null for the default
+        tier: tier || null,       // the tier the score landed in: Strong, Weak, Images or an extra tier (utils/tiers.js)
+        effort: effort || 0,      // how far x-harness-effort moved the score
         routeMs: routeMs ?? null,
         status: null,
         ms: null,

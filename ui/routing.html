@@ -23,6 +23,8 @@
       <p>This page is a map of where every request goes. Boxes are the parts of the harness; lines are the routes between them. Change the lines and boxes, then press <b>Save</b>.</p>
       <ol>
         <li><b>Follow a request from left to right.</b> It enters at <b>Request</b> (the Interceptor), goes through <b>Compression</b> (tick what should shrink it), then to the <b>Router</b>. The Router scores how hard it is and sends it out of one of its outputs (Strong, Strong with tools, Weak, Weak with tools, Weak over a size limit) to a <b>model</b> box. A model box is a name the Gateway serves; inside it, <i>Served by</i> lists the provider models that actually answer.</li>
+        <li><b>Add more tiers.</b> Strong and Weak are two tiers; <b>+ Add tier</b> on the Router adds another with its own model and a score it starts from. Requests scoring at or above it, and below the next tier up, go to it: one above the threshold catches the hardest requests (a frontier model), one below it the middling ones. Each tier can have its own model for requests with tools. <b>Has an image</b> sends pictures to a model that reads them. In chats, the <b>Effort</b> button next to Send moves requests toward cheaper or better tiers; other clients send the header <code>x-harness-effort</code> (min, low, high or max).</li>
+        <li><b>Compare models.</b> Each model box shows its quality (0 to 100), price per million tokens, speed and strengths. With <code>ARTIFICIAL_ANALYSIS_API_KEY</code> in .env they come from Artificial Analysis’s benchmarks; otherwise type them with <b>Edit</b>. The Router warns when a higher tier’s model scores lower than the one below it.</li>
         <li><b>Change where a route goes</b> by dragging from the dot on the right of an output to a model box. Each output goes to one model, so the new line replaces the old one.</li>
         <li><b>Set fallbacks</b> by dragging a model's <i>If it fails</i> dot to another model. When a model errors, hits a rate limit or times out, the Gateway tries its fallbacks from the top. Reorder them with ↑ ↓, and hover a model to see its fallback lines clearly.</li>
         <li><b>Add a model</b> with <b>Add model</b> above: give it a name, pick where it runs (OpenRouter, Groq, Ollama…) and the model id. For OpenRouter you can search its whole model list in the dialog, filter to free or tool-capable models, and click one to fill in the id. To give an existing model a second provider model, use <i>+ Add provider model</i> in its box; the Gateway then shares requests between them.</li>
@@ -65,6 +67,7 @@
     Save writes the Router's choices to <span id="routerFile">its config file</span>, the Interceptor's to
     <code>harness-settings.json</code>, and models and fallbacks to <code id="gatewayFile">config.yaml</code>, keeping
     its comments. Other classifier settings are on the <a href="settings.html">Settings</a> page.
+    <span id="benchNote"></span>
   </div>
 </main>
 
@@ -120,6 +123,30 @@
       <button type="submit" class="primary">Add</button>
       <button type="button" id="addCancel">Cancel</button>
       <span class="sub muted">Nothing is written until you press Save. Restart the Gateway afterwards.</span>
+    </div>
+  </form>
+</dialog>
+<dialog id="statsDialog" class="card">
+  <form id="statsForm" autocomplete="off">
+    <div class="add-head">
+      <div><h3>Numbers for <span id="statsTitle"></span></h3>
+        <p class="sub muted">Leave a box empty to use the benchmark. These are saved straight away to <code>model-stats.json</code>.</p></div>
+      <button type="button" class="close" id="statsCancel" aria-label="Close" data-hint="Close without saving">×</button>
+    </div>
+    <div class="add-fields">
+      <label class="field"><span>Quality (0 to 100)</span><input type="number" name="quality" min="0" max="100" step="0.1">
+        <small>How capable it is overall. Tiers higher up should get higher numbers.</small></label>
+      <label class="field"><span>Coding (0 to 100)</span><input type="number" name="coding" min="0" max="100" step="0.1"></label>
+      <label class="field"><span>Speed (tokens a second)</span><input type="number" name="speed" min="0" step="1"></label>
+      <label class="field" id="benchField"><span>Benchmark model</span><select name="benchmark"></select>
+        <small>Pick the Artificial Analysis entry if the automatic match is wrong or missing.</small></label>
+    </div>
+    <div class="field"><span>Strengths</span><div class="strength-picks" id="statsTags"></div>
+      <input type="text" name="more" placeholder="Other strengths, comma separated (e.g. long documents, Spanish)"></div>
+    <div class="note err" id="statsMsg"></div>
+    <div class="actions">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" id="statsReset" data-hint="Forget what you typed and use the benchmark and catalog again">Use looked-up numbers</button>
     </div>
   </form>
 </dialog>

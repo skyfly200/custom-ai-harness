@@ -4,6 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const tiers = require('./tiers');
 
 const FILE = process.env.HARNESS_SETTINGS_FILE || path.join(__dirname, '..', 'harness-settings.json');
 
@@ -20,6 +21,8 @@ const DEFAULTS = Object.freeze({
     routerDownModel: 'fallback-openrouter',             // free tier with no size cap
     routerDownToolsModel: 'fallback-openrouter-tools',  // same, for requests that need tool calls
     mcpOff: [],               // MCP servers the chat page doesn't offer on the default routing
+    tiers: [],                // extra tiers of the default routing beside the Router's strong and weak (utils/tiers.js)
+    imagesModel: null,        // Gateway model for requests whose latest user turn carries an image
 });
 
 // Each setting's check: returns the cleaned value or throws with a readable message.
@@ -61,6 +64,8 @@ const VALIDATORS = {
         if (!Array.isArray(v) || v.some(s => typeof s !== 'string' || !s || s.length > 80)) throw new Error('mcpOff must be a list of MCP server names');
         return [...new Set(v)];
     },
+    tiers: (v) => tiers.clean(v, 'The default routing'),
+    imagesModel: optionalName('imagesModel'),
 };
 
 /**

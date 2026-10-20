@@ -36,6 +36,20 @@ function latestUserText(messages) {
     return '';
 }
 
+/**
+ * Whether the latest user turn carries an image (OpenAI image_url or Anthropic
+ * image blocks). Images inside tool results don't count: those are the
+ * agent's own screenshots, not something the user asked a model to look at.
+ */
+function latestUserHasImage(messages) {
+    for (let i = (messages || []).length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg.role !== 'user') continue;
+        return Array.isArray(msg.content) && msg.content.some(b => b?.type === 'image_url' || b?.type === 'image');
+    }
+    return false;
+}
+
 // Claude Code wraps harness context (reminders, skill listings) in
 // <system-reminder> tags inside user turns; none of it was typed by the user.
 function stripInjectedContext(text) {
@@ -187,6 +201,7 @@ function applyContextAnchor(messages) {
 
 module.exports = {
     latestUserText,
+    latestUserHasImage,
     deriveThreshold,
     withCavemanOpenAI,
     withCavemanAnthropic,

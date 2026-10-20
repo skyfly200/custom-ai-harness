@@ -367,7 +367,7 @@ function openChat(id) {
   $('notes').value = chat.notes || '';
   $('input').value = chat.draft || '';
   pending = chat.pendingAttachments || [];
-  drawChips(); autoGrow(); drawContextSize(); drawRepo(); drawRoute(); drawTools();
+  drawChips(); autoGrow(); drawContextSize(); drawRepo(); drawRoute(); drawTools(); drawEffort();
   drawList();
   drawProjectBits();
   drawLog();
@@ -459,7 +459,8 @@ function routeWhy(r) {
   const on = r.profile && !String(r.reason || '').includes(r.profile) ? ` (routing: ${r.profile})` : '';
   if (r.reason) return r.reason + on;
   if (r.routerError) return 'Router down' + on;
-  return r.winRate != null ? `win rate ${r.winRate} vs threshold ${r.threshold}${on}` : on.trim();
+  const effort = r.effort ? `, effort ${r.effort > 0 ? '+' : ''}${r.effort}` : '';
+  return r.winRate != null ? `${r.tier ? `${r.tier} tier: ` : ''}win rate ${r.winRate} vs threshold ${r.threshold}${effort}${on}` : on.trim();
 }
 
 function traceHtml(m) {
@@ -473,7 +474,7 @@ function traceHtml(m) {
   step('ok', 'Sent to the Interceptor', '');
   if (tr.routed) {
     const r = tr.routed;
-    const why = r.reason || (r.routerError ? `Router down (${esc(r.routerError)}), used the fallback` : r.winRate != null ? `strong win rate ${r.winRate} vs threshold ${r.threshold}` : '');
+    const why = r.reason || (r.routerError ? `Router down (${esc(r.routerError)}), used the fallback` : r.winRate != null ? `${r.tier ? `${r.tier} tier, ` : ''}strong win rate ${r.winRate} vs threshold ${r.threshold}${r.effort ? `, effort ${r.effort > 0 ? '+' : ''}${r.effort}` : ''}` : '');
     step('ok', `Routed to <code>${esc(r.model)}</code>${why ? ` · ${esc(why)}` : ''}${r.transforms?.length ? ` · ${esc(r.transforms.join(', '))}` : ''}`, fmtMs(r.routeMs));
   } else if (live) {
     step('now', 'Router is choosing a model…', fmtMs(now - tr.start));
@@ -1872,7 +1873,7 @@ function onLive(update) {
   const reply = event.clientId && waiting.get(event.clientId);
   if (reply) {
     const tr = reply.trace;
-    if (type === 'route') tr.routed = { model: event.model, profile: event.profile, reason: event.reason, winRate: event.winRate, threshold: event.threshold, routerError: event.routerError, transforms: event.transforms, routeMs: event.routeMs };
+    if (type === 'route') tr.routed = { model: event.model, profile: event.profile, reason: event.reason, winRate: event.winRate, threshold: event.threshold, routerError: event.routerError, transforms: event.transforms, routeMs: event.routeMs, tier: event.tier, effort: event.effort };
     if (type === 'response') tr.answered = { status: event.status, ms: event.ms, servedBy: event.servedBy, fallbacks: event.fallbacks };
     if (type === 'error' && !tr.answered) tr.error = `Gateway: ${event.error}`;
     redraw(reply);
@@ -2022,7 +2023,7 @@ $('projectBadge').addEventListener('click', () => projectOf(chat) && openProject
 $('chatProject').addEventListener('change', () => {
   chat.project = $('chatProject').value || undefined;
   saveChat(chat, { touch: false });
-  drawList(); drawProjectBits(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit();
+  drawList(); drawProjectBits(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit(); drawEffort();
 });
 
 // ---------------------------------------------------------------------------
@@ -2054,9 +2055,41 @@ function routeOf(c) {
 function routeHeaders(c) {
   const r = routeOf(c);
   if (r.model) return { 'x-harness-model': r.model };
-  if (r.profile) return { 'x-harness-profile': r.profile.id };
-  return {};
+  const effort = c?.effort && c.effort !== 'auto' ? { 'x-harness-effort': c.effort } : {};
+  if (r.profile) return { 'x-harness-profile': r.profile.id, ...effort };
+  return effort;
 }
+
+// Effort per chat: moves the Router's score, so the routing reaches for
+// cheaper or better tiers (utils/tiers.js). Sent as x-harness-effort.
+const EFFORTS = [
+  { id: 'min', name: 'Cheapest', note: 'Every message goes to the routing’s cheapest model (Weak).' },
+  { id: 'low', name: 'Lower', note: 'Leans cheaper: only clearly hard messages reach the better tiers.' },
+  { id: 'auto', name: 'Auto', note: 'The Router decides from how hard each message looks.' },
+  { id: 'high', name: 'Higher', note: 'Leans better: middling messages move up a tier.' },
+  { id: 'max', name: 'Best', note: 'Every message goes to the routing’s top tier.' },
+];
+function drawEffort() {
+  if (!chat) return;
+  const i = Math.max(0, EFFORTS.findIndex(e => e.id === (chat.effort || 'auto')));
+  const e = EFFORTS[i];
+  const direct = !!routeOf(chat).model;
+  $('effort').value = String(i);
+  $('effortName').textContent = e.name;
+  $('effortNote').textContent = direct ? 'This chat goes to one model directly, so effort has no effect. Pick a routing in Options to use it.' : e.note;
+  $('effortBtn').textContent = direct ? 'Direct' : e.name;
+  $('effortBtn').classList.toggle('on', !direct && e.id !== 'auto');
+}
+$('effortBtn').addEventListener('click', (e) => { e.stopPropagation(); drawEffort(); $('effortPop').hidden = !$('effortPop').hidden; });
+$('effort').addEventListener('input', () => {
+  chat.effort = EFFORTS[Number($('effort').value)].id;
+  if (chat.effort === 'auto') delete chat.effort;
+  saveChat(chat, { touch: false });
+  drawEffort();
+});
+document.addEventListener('click', (e) => {
+  if (!$('effortPop').hidden && !e.target.closest('#effortPop, #effortBtn')) $('effortPop').hidden = true;
+});
 
 // MCP servers the chat's routing doesn't offer (a direct model gets the default's choice)
 const routingMcpOff = (c) => routeOf(c).profile?.mcpOff || routings.mcpOff || [];
@@ -2098,7 +2131,7 @@ $('routeSel').addEventListener('change', () => {
   if (v === 'project') delete chat.route; else chat.route = v;
   if (v === 'model' && !chat.model) chat.model = replyModel([...chat.messages].reverse().find(m => m.role === 'assistant')) || '';
   saveChat(chat, { touch: false });
-  drawRoute(); drawTools(); drawHint(); drawStats();
+  drawRoute(); drawTools(); drawHint(); drawStats(); drawEffort();
   if (v === 'model') $('model').focus();
 });
 $('model').addEventListener('change', () => {
@@ -2200,7 +2233,7 @@ $('projectForm').addEventListener('submit', async (e) => {
     setScope(p.id);
     if (!chat.messages.length) { chat.project = p.id; drawProjectBits(); } else openChat(null);
   }
-  drawSide(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit();
+  drawSide(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit(); drawEffort();
 });
 $('pDelete').addEventListener('click', () => {
   const p = editingProject;

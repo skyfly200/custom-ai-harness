@@ -75,3 +75,21 @@ test("OpenRouter's own prices replace the Gateway's for its models", () => {
     assert.equal(out.varies.inputCost, null); // no price beats a made-up one
     assert.equal(withOpenrouterPrices(models, null), models);
 });
+
+test('zero prices from the Gateway mean unknown, and OpenRouter prices a paid model', () => {
+    // LiteLLM lists 0 for models it has no price for
+    const models = fromGatewayInfo([
+        { model_name: 'or-claude-sonnet-5.5', litellm_params: { model: 'openrouter/anthropic/claude-sonnet-5.5' }, model_info: { input_cost_per_token: 0, output_cost_per_token: 0 } },
+        { model_name: 'free-or', litellm_params: { model: 'openrouter/meta-llama/llama-3.3-70b-instruct:free' }, model_info: { input_cost_per_token: 0, output_cost_per_token: 0 } },
+    ]);
+    assert.equal(models['or-claude-sonnet-5.5'].free, false);
+    assert.equal(models['or-claude-sonnet-5.5'].inputCost, null);
+    assert.equal(models['free-or'].free, true);
+    const priced = withOpenrouterPrices(models, [
+        { id: 'anthropic/claude-sonnet-5.5', inputCost: 2e-6, outputCost: 1e-5, cacheReadCost: 2e-7, free: false },
+        { id: 'meta-llama/llama-3.3-70b-instruct:free', inputCost: 0, outputCost: 0, free: true },
+    ]);
+    assert.equal(priced['or-claude-sonnet-5.5'].free, false);
+    assert.equal(priced['or-claude-sonnet-5.5'].inputCost, 2e-6);
+    assert.equal(priced['free-or'].free, true);
+});

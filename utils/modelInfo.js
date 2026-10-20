@@ -30,14 +30,17 @@ function fromGatewayInfo(data) {
         const params = d.litellm_params || {};
         const inputCost = num(info.input_cost_per_token);
         const outputCost = num(info.output_cost_per_token);
-        const free = isFree(params.model, params.api_base) || (inputCost === 0 && outputCost === 0);
+        // LiteLLM reports 0 for models missing from its price list, so zero
+        // prices mean "unknown", not free; only the name or a local server says free
+        const free = isFree(params.model, params.api_base);
+        const unlisted = inputCost === 0 && outputCost === 0;
         models[name] = {
             maxInput: num(info.max_input_tokens) ?? num(info.max_tokens),
             maxOutput: num(info.max_output_tokens),
-            inputCost: free ? 0 : inputCost,
-            outputCost: free ? 0 : outputCost,
-            cacheReadCost: free ? 0 : num(info.cache_read_input_token_cost),
-            cacheWriteCost: free ? 0 : num(info.cache_creation_input_token_cost),
+            inputCost: free ? 0 : unlisted ? null : inputCost,
+            outputCost: free ? 0 : unlisted ? null : outputCost,
+            cacheReadCost: free ? 0 : unlisted ? null : num(info.cache_read_input_token_cost),
+            cacheWriteCost: free ? 0 : unlisted ? null : num(info.cache_creation_input_token_cost),
             free,
             // the provider model behind the name and whether it runs here,
             // so the chat page knows how long a prompt cache lasts
@@ -81,7 +84,8 @@ function withOpenrouterPrices(models, catalog) {
     for (const [name, info] of Object.entries(models)) {
         const id = /^openrouter\//.test(info.upstream || '') ? info.upstream.replace(/^openrouter\//, '') : null;
         const m = id && byId.get(id);
-        if (!m || info.local || (!m.free && m.inputCost == null)) { out[name] = info; continue; }
+        // a local server or a :free name stays free whatever OpenRouter lists
+        if (!m || info.local || info.free || (!m.free && m.inputCost == null)) { out[name] = info; continue; }
         out[name] = {
             ...info,
             maxInput: info.maxInput ?? m.context,
@@ -89,7 +93,7 @@ function withOpenrouterPrices(models, catalog) {
             outputCost: m.outputCost ?? 0,
             cacheReadCost: m.cacheReadCost,
             cacheWriteCost: m.cacheWriteCost ?? null,
-            free: m.free || info.free,
+            free: m.free,
             priceFrom: 'openrouter',
         };
     }

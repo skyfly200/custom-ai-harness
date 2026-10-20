@@ -463,6 +463,17 @@ function renderBars(target, rows, key, colors) {
   }));
 }
 
+// Where a model's price came from, for the cost cell's tooltip
+function priceNote(name) {
+  const p = prices[name];
+  const perM = (v) => `$${+(v * 1e6).toPrecision(3)}`;
+  if (!p) return 'The Gateway doesn’t list this model, so it has no price';
+  if (p.free) return p.local ? 'Runs on this machine: free' : 'A free model';
+  if (p.inputCost == null) return `No price: the Gateway has none for it${p.upstream?.startsWith('openrouter/') ? ' and OpenRouter’s list ' + (priceStatus.ok ? 'doesn’t have it' : 'couldn’t be loaded') : ''}`;
+  const cached = p.cacheReadCost != null ? ` · cached input ${perM(p.cacheReadCost)}` : '';
+  return `${perM(p.inputCost)} in · ${perM(p.outputCost || 0)} out per million${cached}, from ${p.priceFrom === 'openrouter' ? 'OpenRouter’s price list' : 'the Gateway’s price list'}`;
+}
+
 function renderTable(rows) {
   if (!rows.length) { $('rows').innerHTML = '<tr><td colspan="10" class="muted">No requests in this range yet.</td></tr>'; $('rowsTotal').innerHTML = ''; return; }
   const approx = (r) => (r.estimated ? '~' : '');
@@ -470,7 +481,7 @@ function renderTable(rows) {
     <td>${esc(r.client)}</td><td>${esc(r.route)}</td><td><code>${esc(r.model)}</code></td>
     <td><code>${esc(r.servedBy)}</code>${r.servedBy !== r.model ? ' <span class="tag warn">fallback</span>' : ''}</td><td>${esc(r.provider)}</td>
     <td class="num r">${fmt(r.requests)}</td><td class="num r">${approx(r)}${fmt(r.input)}</td><td class="num r">${fmt(r.cacheRead)}</td><td class="num r">${approx(r)}${fmt(r.output)}</td>
-    <td class="num r">${r.unpriced ? '<span class="muted" title="No price for this model in the Gateway’s list">?</span>' : r.freeRequests ? '<span class="free">free</span>' : `${approx(r) || '≈ '}${usd(r.cost)}`}</td></tr>`).join('');
+    <td class="num r" title="${esc(priceNote(r.servedBy))}">${r.unpriced ? '<span class="muted">?</span>' : r.freeRequests ? '<span class="free">free</span>' : `${approx(r) || '≈ '}${usd(r.cost)}`}</td></tr>`).join('');
   const t = rows.reduce(add, blank());
   $('rowsTotal').innerHTML = `<tr><td colspan="5">Total</td><td class="num r">${fmt(t.requests)}</td><td class="num r">${fmt(t.input)}</td><td class="num r">${fmt(t.cacheRead)}</td><td class="num r">${fmt(t.output)}</td><td class="num r">${usd(t.cost)}${t.unpriced ? ' <span class="muted">+ ?</span>' : ''}</td></tr>`;
 }
@@ -493,11 +504,17 @@ function render() {
   renderBars('byProvider', rows, 'provider', colors);
   renderTable(rows);
   const since = state.data.since ? `counting since ${new Date(state.data.since).toLocaleString()}` : 'nothing counted yet';
-  $('updated').textContent = `Updated ${new Date().toLocaleTimeString()} · ${since}`;
+  const noPrices = priceStatus.ok ? '' : ` · OpenRouter prices unavailable (${priceStatus.error}), so its models may show ?`;
+  $('updated').textContent = `Updated ${new Date().toLocaleTimeString()} · ${since}${noPrices}`;
 }
 
+let priceStatus = { ok: true };
 async function loadPrices() {
-  try { prices = (await (await fetch('api/model-info')).json()).models || {}; } catch {}
+  try {
+    const body = await (await fetch('api/model-info')).json();
+    prices = body.models || {};
+    priceStatus = body.openrouter || { ok: true };
+  } catch {}
 }
 
 async function refresh() {

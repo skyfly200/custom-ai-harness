@@ -45,7 +45,7 @@ tr:last-child td { border-bottom: none; }
 td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .prompt { color: var(--muted); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
-.tag.bad { color: var(--bad); border-color: var(--bad); } .tag.warn { color: var(--warn); border-color: var(--warn); }
+.tag.bad { color: var(--bad); border-color: var(--bad); } .tag.warn { color: var(--warn); border-color: var(--warn); } .tag.ok { color: var(--ok); border-color: var(--ok); }
 code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
 nav { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
 @media (max-width: 560px) { nav h1.brand { flex-basis: 100%; } }

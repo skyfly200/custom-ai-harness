@@ -265,3 +265,23 @@ def test_old_local_engine_names_are_renamed(tmp_path=None):
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"): f(); print("ok", n)
+
+
+def test_ask_answers_yes_no_questions_with_the_classifier():
+    c = client(0.5)
+    def score(prompt): return 0.5
+    score.ask = lambda text, qs: {name: (0.9 if "rm -rf" in text else 0.1) for name in qs}
+    router.scorer = score
+    r = c.post("/ask", json={"text": "rm -rf /", "questions": {"destructive": "Does it delete data?"}})
+    assert r.status_code == 200 and r.json() == {"answers": {"destructive": 0.9}}
+    assert c.post("/ask", json={"text": "x", "questions": {}}).status_code == 422
+
+
+def test_ask_needs_a_backend_that_takes_questions():
+    c = client(0.5)  # a plain scorer, like RouteLLM's BERT
+    r = c.post("/ask", json={"text": "ls", "questions": {"destructive": "?"}})
+    assert r.status_code == 501 and "systemone" in r.json()["error"]
+
+
+def test_yes_no_builds_the_jev_questions_block():
+    assert router.yes_no({"a": "Is it?"}) == {"a": {"type": "noul", "instructions": "Is it?"}}

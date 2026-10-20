@@ -293,6 +293,7 @@ The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 | `validate-config.js` | UTF-8 / non-breaking space validator for config directories |
 | `docker-compose.yml`, `Dockerfile`, `docker/` | The three parts as containers, for a server (see [Run it on a server](#run-it-on-a-server-docker)) |
 | `utils/access.js` | The optional `HARNESS_PASSWORD` login |
+| `guard-rules.json`, `utils/guard.js`, `.claude/hooks/guard.js` | The command guard (see [Command guard](#command-guard-jev-checks-commands-before-they-run)) |
 
 ---
 
@@ -574,6 +575,35 @@ claude
 The Interceptor routes each request and the Gateway translates the Anthropic Messages format for whichever model serves it, including tool use and streaming. The Interceptor log shows each routing decision.
 
 **Auto mode.** Claude Code's auto mode asks Anthropic's server to run its safety checks inside each request, but the harness rewrites requests and sends them to non-Anthropic models, so those checks never reach the session. `CLAUDE_CODE_AUTO_MODE_SERVER=0` tells Claude Code to use its own classifier requests from the start instead of stopping at the first checked action with an "isn't eligible" notice. Those classifier requests also go through the Interceptor and are routed like any other request, so the Gateway model that serves them judges whether an action is safe. See [Auto mode classifier request charges](https://code.claude.com/docs/en/auto-mode-classifier-billing).
+
+### Command guard (Jev checks commands before they run)
+
+The harness can check each shell command and file write an agent is about to run. `.claude/hooks/guard.js` is a Claude Code `PreToolUse` hook that sends the command to `POST /v1/guard` and passes the answer back:
+
+- **Rules first.** `guard-rules.json` lists patterns that block a command (`rm -rf /`, a force push to `main`, writing to a disk, sending `.env` to the internet, editing `.git/` or SSH keys) or make the agent ask you first (any recursive delete, other force pushes, `git reset --hard`, `curl … | sh`, overwriting `.env`, `DROP TABLE`). No model is called for these. To change them, copy the file to `guard-rules.local.json` (gitignored), edit it, then reload with `POST /ui/api/guard/reload` or restart the Interceptor.
+- **Read-only commands pass.** `ls`, `cat`, `git status`, `git diff` and the like skip the check, unless something is redirected into a file.
+- **Jev for the rest.** Other commands go to the Router's `POST /ask`, which asks Jev (the `systemone` or `laya` backend) two yes/no questions: is it destructive or hard to undo, and does it send secrets out. At 50% or more the agent has to ask you. Jev never blocks on its own unless you set **Guard: block from** on the Settings page. If Jev can't be reached the command goes ahead and your normal Claude Code permissions still apply.
+- **"Allow" never approves.** The hook stays silent then, so your usual permission settings decide.
+
+Every decision shows in the Dashboard's **Command guard** table. To turn the hook on for every project, add this to `~/.claude/settings.json` (use the full path to your copy of the repo; on Windows write it with forward slashes):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [{ "type": "command", "command": "node C:/path/to/custom-ai-harness/.claude/hooks/guard.js" }] }
+    ]
+  }
+}
+```
+
+`HARNESS_GUARD_URL` points the hook at another harness (default `http://localhost:3000/v1/guard`), and `HARNESS_PASSWORD` is sent when set. If the harness isn't running the hook lets commands through; set `HARNESS_GUARD_STRICT=1` to have Claude Code ask you instead. Other agents can call the endpoint directly:
+
+```bash
+curl -s localhost:3000/v1/guard -H 'content-type: application/json' -d '{"tool":"Bash","command":"git push --force origin main"}'
+# {"decision":"deny","reason":"Force push to a protected branch","rule":"force-push-main",...}
+```
 
 ### Control UI
 

@@ -23,6 +23,9 @@ const DEFAULTS = Object.freeze({
     mcpOff: [],               // MCP servers the chat page doesn't offer on the default routing
     tiers: [],                // extra tiers of the default routing beside the Router's strong and weak (utils/tiers.js)
     imagesModel: null,        // Gateway model for requests whose latest user turn carries an image
+    guardJev: true,           // command guard (utils/guard.js): ask Jev about commands the rules don't cover
+    guardAskAt: 0.5,          // Jev's confidence that a command is risky at which the agent must ask you
+    guardDenyAt: null,        // ...at which it is blocked outright; null: Jev alone never blocks
 });
 
 // Each setting's check: returns the cleaned value or throws with a readable message.
@@ -66,6 +69,18 @@ const VALIDATORS = {
     },
     tiers: (v) => tiers.clean(v, 'The default routing'),
     imagesModel: optionalName('imagesModel'),
+    guardJev: bool('guardJev'),
+    guardAskAt: (v) => {
+        const n = Number(v);
+        if (v === null || v === '' || !Number.isFinite(n) || n < 0 || n > 1) throw new Error('guardAskAt must be from 0 to 1');
+        return n;
+    },
+    guardDenyAt: (v) => {
+        if (v === null || v === '') return null;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || n > 1) throw new Error('guardDenyAt must be from 0 to 1');
+        return n;
+    },
 };
 
 /**

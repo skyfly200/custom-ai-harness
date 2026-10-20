@@ -47,6 +47,14 @@
         <span>Headroom<br><small>Compress tool results over 4,000 characters.</small></span></label>
       <label class="field check"><input type="checkbox" name="contextAnchor">
         <span>Context anchor<br><small>Replace repeated identical tool results with a pointer.</small></span></label>
+      <label class="field check"><input type="checkbox" name="guardJev">
+        <span>Command guard asks Jev<br><small>Commands the guard rules don't cover are rated by Jev. Off: only the rules apply.</small></span></label>
+      <label class="field"><span data-hint="How sure Jev must be that a command is risky before the agent has to ask you">Guard: ask you from</span>
+        <input type="number" name="guardAskAt" min="0" max="1" step="0.05">
+        <small>0.5: a command Jev rates 50% likely risky needs your OK.</small></label>
+      <label class="field"><span data-hint="How sure Jev must be before a command is blocked outright. Empty: Jev alone never blocks">Guard: block from</span>
+        <input type="number" name="guardDenyAt" min="0" max="1" step="0.05" placeholder="Off: Jev never blocks">
+        <small>Rules in guard-rules.json still block. Try 0.95.</small></label>
     </form>
     <div class="actions">
       <button class="primary" id="isave" data-hint="Use these settings from the next request on, and keep them across restarts">Save</button>

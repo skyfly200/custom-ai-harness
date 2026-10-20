@@ -16,6 +16,10 @@ strong model's win rate in [0, 1]:
 
     POST /route {"prompt": str, "threshold": float, "tokens": int}
       -> {"model": str, "win_rate": float}
+    POST /ask {"text": str, "questions": {name: yes/no question}}
+      -> {"answers": {name: P(yes)}}   other yes/no questions, for the
+                                       Interceptor's command guard; Jev
+                                       (systemone) and laya only
     POST /admin/reload               re-read the config file
     POST /admin/backend {"backend"}  switch classifier until the next reload
     POST /admin/config {"changes"}   change settings until the next reload
@@ -46,7 +50,7 @@ from pydantic import BaseModel, Field
 
 config = {}
 config_path = None  # file load_config read, for /admin/reload
-scorer = None  # callable: prompt -> strong win rate in [0, 1]
+scorer = None  # callable: prompt -> strong win rate in [0, 1]; .ask(text, questions) when the backend takes other questions
 last_error = None  # most recent classifier failure, shown on /health
 app = FastAPI()
 
@@ -58,6 +62,11 @@ LAYA_QUESTION = {
                         "a small edit, a simple question or an explanation?",
     }
 }
+
+
+def yes_no(asked: dict) -> dict:
+    """{name: question} -> the Jev / Laya questions block, each a yes/no ("noul") question."""
+    return {name: {"type": "noul", "instructions": q} for name, q in asked.items()}
 
 
 def make_routellm_scorer(config: dict):
@@ -79,6 +88,11 @@ def make_laya_scorer(config: dict):
         result = laya.predict(prompt[-max_chars:], questions)
         return float(result["answers"]["hard"]["noul"])  # P(yes) = needs strong
 
+    def ask(text: str, asked: dict) -> dict:
+        result = laya.predict(text[-max_chars:], yes_no(asked))
+        return {name: float(result["answers"][name]["noul"]) for name in asked}
+
+    score.ask = ask
     return score
 
 
@@ -109,6 +123,14 @@ def make_systemone_scorer(config: dict):
         res.raise_for_status()
         return float(res.json()["answers"]["hard"]["noul"])
 
+    def ask(text: str, asked: dict) -> dict:
+        body = {"state": {"body": text[-max_chars:]}, "questions": yes_no(asked), **extra}
+        res = client.post(url, json=body)
+        res.raise_for_status()
+        answers = res.json()["answers"]
+        return {name: float(answers[name]["noul"]) for name in asked}
+
+    score.ask = ask
     return score
 
 
@@ -248,6 +270,28 @@ def route(req: RouteRequest):
         log.error("classifier (%s) failed: %s", config.get("backend", "routellm"), detail)
         return JSONResponse(status_code=502, content={"error": detail})
     return {"model": pick_model(win_rate, req.threshold, req.tokens, config, req.tools), "win_rate": round(win_rate, 3)}
+
+
+class AskRequest(BaseModel):
+    text: str
+    questions: dict[str, str] = Field(min_length=1, max_length=8)
+
+
+@app.post("/ask")
+def ask(req: AskRequest):
+    """Other yes/no questions about a text, with the configured classifier (one call for all of them)."""
+    asker = getattr(scorer, "ask", None)
+    backend = config.get("backend", "routellm")
+    if asker is None:
+        return JSONResponse(status_code=501, content={"error": f"the {backend} classifier only scores difficulty; "
+                                                               "use systemone (Jev) or laya to answer other questions"})
+    try:
+        answers = asker(req.text, req.questions)
+    except Exception as err:
+        detail = describe_error(err)
+        log.error("classifier (%s) failed on /ask: %s", backend, detail)
+        return JSONResponse(status_code=502, content={"error": detail})
+    return {"answers": {name: round(p, 3) for name, p in answers.items()}}
 
 
 def describe_error(err: Exception) -> str:

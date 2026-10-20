@@ -17,6 +17,7 @@ const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
 const tiers = require('./utils/tiers');
+const guard = require('./utils/guard');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
@@ -390,6 +391,29 @@ app.get('/ui/api/model-info', async (req, res) => {
         openrouter: catalog ? { ok: true, at: new Date(openrouterCache.at).toISOString() } : { ok: false, error: openrouterError || 'not loaded yet' },
     });
 });
+
+// Command guard (utils/guard.js): an agent asks before running a shell command
+// or writing a file; .claude/hooks/guard.js does this for Claude Code. Rules
+// first, then Jev through the Router's /ask for commands no rule covers.
+async function askRouter(text, questions) {
+    const res = await fetch(`${ROUTER_URL}/ask`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, questions }),
+        signal: AbortSignal.timeout(settings.get().routerTimeoutMs),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `Router answered HTTP ${res.status}`);
+    return body.answers;
+}
+app.post('/v1/guard', async (req, res) => {
+    const { guardJev, guardAskAt, guardDenyAt } = settings.get();
+    const result = await guard.check(req.body || {}, { ask: askRouter, jev: guardJev, askAt: guardAskAt, denyAt: guardDenyAt });
+    monitor.live.emit('update', { type: 'guard', event: result });
+    res.json(result);
+});
+app.get('/ui/api/guard', (req, res) => res.json({ log: guard.recent(Number(req.query.limit) || 50), rules: guard.counts(), file: guard.FILE }));
+app.post('/ui/api/guard/reload', localJsonOnly, (req, res) => { guard.load(); res.json({ rules: guard.counts() }); });
 
 // Benchmarks from Artificial Analysis's free API (1,000 requests a day), kept
 // for a day. Off unless ARTIFICIAL_ANALYSIS_API_KEY is set.

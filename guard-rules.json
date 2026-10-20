@@ -1,0 +1,26 @@
+{
+  "_about": "Command guard rules (utils/guard.js). A command or file path matching a rule gets its decision with no model call: deny blocks it, ask makes the agent ask you first. Patterns are JavaScript regular expressions, matched case-insensitively. Copy this file to guard-rules.local.json to change the rules; that file wins and is gitignored.",
+  "bash": [
+    { "id": "rm-root", "decision": "deny", "pattern": "\\brm\\s+(-[a-z]*\\s+)*-[a-z]*[rf][a-z]*\\s+(-[a-z]*\\s+)*(/|~|\\$HOME|\\*|\\.\\.?)(\\s|/?$|/\\*)", "reason": "Recursive delete of the root, home, current or parent folder" },
+    { "id": "rm-recursive", "decision": "ask", "pattern": "\\brm\\s+(-[a-z]*\\s+)*-[a-z]*r", "reason": "Recursive delete" },
+    { "id": "force-push-main", "decision": "deny", "pattern": "\\bgit\\s+push\\b.*(--force\\b|--force-with-lease\\b|\\s-f\\b|\\s\\+).*\\b(main|master|release|prod|production)\\b", "reason": "Force push to a protected branch" },
+    { "id": "force-push", "decision": "ask", "pattern": "\\bgit\\s+push\\b.*(--force|\\s-f\\b|\\s\\+\\S)", "reason": "Force push rewrites the remote's history" },
+    { "id": "git-reset-hard", "decision": "ask", "pattern": "\\bgit\\s+(reset\\s+--hard|clean\\s+-[a-z]*f|checkout\\s+--\\s+\\.|restore\\s+\\.)", "reason": "Throws away uncommitted work" },
+    { "id": "git-history", "decision": "ask", "pattern": "\\bgit\\s+(filter-branch|filter-repo|branch\\s+-D|push\\s+\\S+\\s+--delete|push\\s+\\S+\\s+:)", "reason": "Rewrites history or deletes a branch" },
+    { "id": "disk", "decision": "deny", "pattern": "\\b(mkfs(\\.\\w+)?|fdisk|parted|wipefs)\\b|\\bdd\\b.*\\bof=/dev/|>\\s*/dev/(sd|nvme|hd)", "reason": "Writes to a disk device" },
+    { "id": "pipe-to-shell", "decision": "ask", "pattern": "\\b(curl|wget|iwr|invoke-webrequest)\\b[^|]*\\|\\s*(sudo\\s+)?(ba|z|da)?sh\\b|\\b(iex|invoke-expression)\\b", "reason": "Runs a script straight from the internet" },
+    { "id": "secrets-out", "decision": "deny", "pattern": "(\\.env|id_rsa|id_ed25519|\\.aws/credentials|\\.npmrc|\\.netrc)\\b.*\\|\\s*(curl|wget|nc|ncat)\\b|\\b(curl|wget)\\b.*(-d|--data|-F|--upload-file|-T)\\s*@?\\S*(\\.env|id_rsa|id_ed25519|credentials)", "reason": "Sends a secrets file to another machine" },
+    { "id": "shutdown", "decision": "ask", "pattern": "\\b(shutdown|reboot|halt|poweroff|stop-computer|restart-computer)\\b", "reason": "Shuts down or restarts the machine" },
+    { "id": "chmod-world", "decision": "ask", "pattern": "\\bchmod\\s+(-R\\s+)?(777|a\\+rwx)\\b", "reason": "Makes files writable by everyone" },
+    { "id": "publish", "decision": "ask", "pattern": "\\b(npm|pnpm|yarn)\\s+publish\\b|\\btwine\\s+upload\\b|\\bcargo\\s+publish\\b|\\bgh\\s+release\\s+create\\b", "reason": "Publishes a package or release" },
+    { "id": "windows-delete", "decision": "deny", "pattern": "\\b(remove-item|rd|rmdir|del)\\b.*(-recurse|/s)\\b.*\\b([a-z]:\\\\?\\s*$|[a-z]:\\\\\\*|\\$env:userprofile|~)", "reason": "Recursive delete of a drive or the home folder" },
+    { "id": "drop-database", "decision": "ask", "pattern": "\\b(drop\\s+(database|schema|table)|truncate\\s+table)\\b", "reason": "Deletes database tables or data" }
+  ],
+  "write": [
+    { "id": "env-file", "decision": "ask", "pattern": "(^|[\\\\/])\\.env(\\.[\\w-]+)?$", "reason": "Overwrites a file of secrets (.env)" },
+    { "id": "git-internals", "decision": "deny", "pattern": "(^|[\\\\/])\\.git[\\\\/]", "reason": "Edits git's own files" },
+    { "id": "ssh-keys", "decision": "deny", "pattern": "(^|[\\\\/])\\.ssh[\\\\/]|(^|[\\\\/])(id_rsa|id_ed25519)(\\.pub)?$", "reason": "Changes SSH keys or config" },
+    { "id": "credentials", "decision": "deny", "pattern": "(^|[\\\\/])(\\.aws[\\\\/]credentials|\\.npmrc|\\.netrc|\\.pypirc)$", "reason": "Changes a credentials file" },
+    { "id": "claude-settings", "decision": "ask", "pattern": "(^|[\\\\/])\\.claude[\\\\/]settings(\\.local)?\\.json$", "reason": "Changes Claude Code's own permissions or hooks" }
+  ]
+}

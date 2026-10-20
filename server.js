@@ -383,15 +383,18 @@ async function getModelInfo() {
 }
 
 // Models the Usage page has counted that neither list names, priced by the
-// provider model their replies reported (OpenRouter ids)
+// provider model their replies reported (OpenRouter ids). Rows saved before
+// replies were kept have no such model; for OpenRouter ones the name is
+// matched instead, when exactly one OpenRouter model fits it
+// (or-claude-sonnet-5.5 is anthropic/claude-sonnet-5.5).
 function usageModels(models, catalog) {
     if (!catalog?.length) return models;
     const ids = new Set(catalog.map(m => m.id));
     const out = { ...models };
     for (const r of usage.summary(0).rows) {
-        if (out[r.servedBy] || !r.upstream) continue;
-        const id = r.upstream.replace(/^openrouter\//, '');
-        if (ids.has(id)) out[r.servedBy] = { maxInput: null, maxOutput: null, inputCost: null, outputCost: null, free: false, upstream: `openrouter/${id}`, local: false };
+        if (out[r.servedBy]) continue;
+        const id = r.upstream ? r.upstream.replace(/^openrouter\//, '') : r.provider === 'OpenRouter' ? modelInfo.catalogIdFor(r.servedBy, catalog) : null;
+        if (id && ids.has(id)) out[r.servedBy] = { maxInput: null, maxOutput: null, inputCost: null, outputCost: null, free: false, upstream: `openrouter/${id}`, local: false };
     }
     return out;
 }

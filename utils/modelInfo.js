@@ -100,4 +100,13 @@ function withOpenrouterPrices(models, catalog) {
     return out;
 }
 
-module.exports = { isFree, isLocal, fromGatewayInfo, fromConfig, withOpenrouterPrices };
+// The OpenRouter id a model name stands for, when exactly one catalog model
+// has that name after its provider (an "or-" prefix ignored), else null
+function catalogIdFor(name, catalog) {
+    const want = String(name || '').toLowerCase().replace(/^or-/, '');
+    if (!want) return null;
+    const hits = (catalog || []).filter(m => m.id.toLowerCase().split('/').pop() === want);
+    return hits.length === 1 ? hits[0].id : null;
+}
+
+module.exports = { isFree, isLocal, fromGatewayInfo, fromConfig, withOpenrouterPrices, catalogIdFor };

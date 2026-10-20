@@ -46,6 +46,11 @@ test.before(async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-mi-'));
     process.env.HARNESS_SETTINGS_FILE = path.join(dir, 'settings.json');
     process.env.HARNESS_USAGE_FILE = path.join(dir, 'usage.json');
+    // an old usage row: no provider model kept, just its name and service
+    const day = new Date().toISOString().slice(0, 10);
+    fs.writeFileSync(process.env.HARNESS_USAGE_FILE, JSON.stringify({ since: null, rows: { old: {
+        day, client: 'Chat page', route: 'Chosen by client', model: 'or-claude-haiku-5.5', servedBy: 'or-claude-haiku-5.5', provider: 'OpenRouter',
+        requests: 1, input: 100, output: 10, cacheRead: 0, cacheWrite: 0, estimated: 0 } } }));
     // a model only config.yaml names (the Gateway's list leaves it out)
     process.env.GATEWAY_CONFIG = path.join(dir, 'config.yaml');
     fs.writeFileSync(process.env.GATEWAY_CONFIG, 'model_list:\n  - model_name: or-haiku\n    litellm_params:\n      model: openrouter/anthropic/claude-haiku-5.5\n');
@@ -77,6 +82,11 @@ test('a model neither list names is priced by the model its replies reported', {
     await new Promise((r) => setTimeout(r, 50));
     const m = (await modelInfo()).models['or-unlisted'];
     assert.deepEqual([m.free, m.inputCost, m.outputCost, m.upstream], [false, 4e-6, 2e-5, 'openrouter/anthropic/claude-opus-5.5']);
+});
+
+test('rows saved before replies were kept are matched by name', { skip: !openrouterUp }, async () => {
+    const m = (await modelInfo()).models['or-claude-haiku-5.5'];
+    assert.deepEqual([m.inputCost, m.upstream], [1e-7, 'openrouter/anthropic/claude-haiku-5.5']);
 });
 
 test('with OpenRouter down a paid model has no price, not free, and the page is told why', { skip: openrouterUp }, async () => {

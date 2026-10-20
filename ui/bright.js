@@ -2,7 +2,8 @@
 // turning embedding space (words grouped by meaning, the pointer acting as a
 // query that lights up its nearest neighbours), and the edge glow that
 // follows the pointer around cards.
-// Still when the system asks for reduced motion; can be switched off.
+// Still when the system asks for reduced motion; can be switched off, and is
+// left out on pages whose body has data-no-bg.
 'use strict';
 
 (() => {
@@ -60,6 +61,9 @@
     el.style.setProperty('--mx', `${e.clientX - r.left}px`);
     el.style.setProperty('--my', `${e.clientY - r.top}px`);
   }, { passive: true });
+
+  // Pages that need the speed (the chat page) opt out of the background
+  if (document.body.hasAttribute('data-no-bg')) { window.Bright = { pulse() {} }; return; }
 
   // ---- the embedding space ----------------------------------------------------
   const canvas = document.createElement('canvas');

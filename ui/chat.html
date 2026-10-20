@@ -10,13 +10,13 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="chat.css">
 </head>
-<body class="chat-page">
+<body class="chat-page" data-no-bg>
 <div class="app" id="app">
 
   <!-- Top bar, across the chats column and the conversation -->
   <header class="top">
     <button class="icon only-narrow" id="toggleSide" title="Chats" aria-label="Chats"></button>
-    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span></h1><a href="./">Dashboard</a><a href="chat.html" class="here">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a><a href="settings.html">Settings</a></nav>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span></h1><a href="./">Dashboard</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a><a href="settings.html">Settings</a></nav>
     <button type="button" class="proj-badge" id="projectBadge" hidden></button>
     <input type="text" id="title" class="title" aria-label="Chat title" placeholder="New chat">
     <button type="button" class="stats" id="chatStats" title=""></button>
@@ -71,6 +71,7 @@
           <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
           <label class="check"><input type="checkbox" id="stream" checked> Stream the reply</label>
           <label class="check" title="After the first reply, ask the model for a short name for the chat"><input type="checkbox" id="autoName" checked> Name new chats automatically</label>
+          <label class="check" title="Keep the newest text in view while a reply arrives. Off, the chat stays where you scrolled; it still jumps to the end when you send or open a chat."><input type="checkbox" id="autoScroll" checked> Scroll with the reply as it arrives</label>
           <div class="pair">
             <label title="Give up when no reply has started after this long. 0 waits forever.">Give up with no reply after (s) <input type="number" id="timeoutFirst" min="0" step="10" value="310"></label>
             <label title="Give up when a reply stops arriving for this long. 0 waits forever.">…or when it stalls for (s) <input type="number" id="timeoutStall" min="0" step="10" value="130"></label>

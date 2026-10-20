@@ -140,7 +140,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName'];
+const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['maxTokens', 'temperature']) {
@@ -702,7 +702,7 @@ function redraw(m) {
       if (el) patch(el, html); else drawLog();
     }
     dirty.clear();
-    if (stickToBottom) $('log').scrollTop = $('log').scrollHeight;
+    if (stickToBottom && $('autoScroll').checked) $('log').scrollTop = $('log').scrollHeight;
   });
 }
 // Replace a message's content but keep its button row when that hasn't

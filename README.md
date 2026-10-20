@@ -196,16 +196,19 @@ Lines you add to `.env` decide how the server works. Leave them all out and you 
 **Which models it picks between.** Use any model name from `config.yaml` or the Routing page:
 
 ```bash
-STRONG_MODEL=or-claude-sonnet-5.5     # hard requests (default local-engine: your local engine, then backups)
-WEAK_MODEL=fast-openrouter            # easy requests
-WEAK_MODEL_TOOLS=or-gpt-6-luna        # easy requests from Claude Code and other tool-using agents
+STRONG_MODEL=fast-openrouter                   # hard requests (default local-engine: your local engine, then backups)
+STRONG_MODEL_TOOLS=fallback-openrouter-tools   # hard requests from Claude Code and other tool-using agents (default: STRONG_MODEL)
+WEAK_MODEL=fallback-groq                       # easy requests
+WEAK_MODEL_TOOLS=fallback-openrouter-tools     # easy requests from tool-using agents
 ```
+
+`fallback-openrouter-tools` is NVIDIA Nemotron 3.5 Super VL on OpenRouter: free, and it calls tools. Setting both `*_TOOLS` lines to it sends every Claude Code and agent request to a free model.
 
 **A plain API address for another app** (passthrough):
 
 ```bash
 HARNESS_MODE=passthrough
-PASSTHROUGH_MODEL=or-claude-sonnet-5.5                   # a name from config.yaml, or a provider's own id:
+PASSTHROUGH_MODEL=fast-openrouter                        # a name from config.yaml, or a provider's own id:
 # PASSTHROUGH_MODEL=openrouter/anthropic/claude-sonnet-5.5
 # PASSTHROUGH_MODEL=openai/my-model                      # any OpenAI-style server, with:
 # PASSTHROUGH_API_BASE=http://my-server:8000/v1
@@ -629,7 +632,7 @@ The chat page can give the model tools. While it answers, the model can call the
 - `"disabled": true` keeps a server listed but not started.
 - The Interceptor connects when it starts and prints each server's state. Options → Tools lists them with their tool counts and any start-up error. Untick a server to leave its tools out of your chats. Press **Reload** after editing the file.
 
-Requests carry tools only when a chat is linked to a repo or an MCP server is ticked. Requests with tools go to a model that can call them (the Router's `weak_model_tools`, or the strong model), not to the free chat model. Each round of tool calls is its own request through the Interceptor, so it is routed, logged and counted like any other. The reply's cost and token counts add up all of the rounds. **Most tool rounds per reply** (12 by default) stops a model that keeps calling tools. Tool results pass through Headroom like Claude Code's, so long results are trimmed to about 4,000 characters when Headroom is on.
+Requests carry tools only when a chat is linked to a repo or an MCP server is ticked. Requests with tools go to a model that can call them (the Router's `strong_model_tools` or `weak_model_tools`, falling back to the strong model), not to the free chat model. Each round of tool calls is its own request through the Interceptor, so it is routed, logged and counted like any other. The reply's cost and token counts add up all of the rounds. **Most tool rounds per reply** (12 by default) stops a model that keeps calling tools. Tool results pass through Headroom like Claude Code's, so long results are trimmed to about 4,000 characters when Headroom is on.
 
 Tools run only for requests from this computer (`/ui/api/tools/call` refuses others), and only the chat page uses them. Claude Code connects to its own MCP servers (`claude mcp add ...`), and its tool calls pass through the harness unchanged.
 
@@ -712,7 +715,7 @@ npm run validate:fix      # auto-correct in place
 
 ## How routing decisions are made
 
-The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the routing of the request that started them. Requests that define tools (every Claude Code request) go to the strong model or, when weak, to `weak_model_tools` (`fallback-openrouter-tools`), because a model without tool support answers them with text instead of tool calls:
+The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the routing of the request that started them. Requests that define tools (every Claude Code request) go to `strong_model_tools` when hard (unset: the strong model) or `weak_model_tools` when easy (`fallback-openrouter-tools`, the free NVIDIA Nemotron model), because a model without tool support answers them with text instead of tool calls. On the Routing page these are the Router's **Strong, with tools** and **Weak, with tools** outputs:
 
 | Signal type | Examples | Threshold | Effect |
 |-------------|----------|-----------|--------|

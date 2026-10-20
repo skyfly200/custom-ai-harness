@@ -49,6 +49,7 @@ function clean(p) {
         downTools: model(p, 'downTools', true),
         threshold,
         strong: model(p, 'strong', !p.pin),
+        strongTools: model(p, 'strongTools'),
         weak: model(p, 'weak', !p.pin),
         tools: model(p, 'tools'),
         overflow: model(p, 'overflow'),
@@ -103,7 +104,7 @@ function replace(next, expected) {
  * rule as router.py's pick_model, with this profile's outputs.
  */
 function pick(p, winRate, threshold, tokens, tools) {
-    if (winRate >= threshold) return p.strong;
+    if (winRate >= threshold) return (tools && p.strongTools) || p.strong;
     if (tools && p.tools) return p.tools;
     if (p.overflow && p.maxTokens && tokens > p.maxTokens) return p.overflow;
     return p.weak;

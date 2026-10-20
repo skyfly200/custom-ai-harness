@@ -38,6 +38,8 @@ test('a routing is cleaned: id from its name, models required unless pinned, dup
 test('a routing picks like the Router does', () => {
     const p = profiles.clean({ ...CHEAP, overflow: 'big', maxTokens: 100 });
     assert.equal(profiles.pick(p, 0.96, 0.95, 10, false), 'mid');
+    assert.equal(profiles.pick(p, 0.96, 0.95, 10, true), 'mid');
+    assert.equal(profiles.pick({ ...p, strongTools: 'free-tools' }, 0.96, 0.95, 10, true), 'free-tools');
     assert.equal(profiles.pick(p, 0.5, 0.95, 10, true), 'tiny-tools');
     assert.equal(profiles.pick(p, 0.5, 0.95, 500, false), 'big');
     assert.equal(profiles.pick(p, 0.5, 0.95, 10, false), 'tiny');

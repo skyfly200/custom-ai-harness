@@ -36,6 +36,12 @@ def test_weak_tool_request_goes_to_tool_model():
     assert c.post("/route", json={"prompt": "x", "threshold": 0.5, "tools": True}).json()["model"] == "S"
 
 
+def test_strong_tool_request_goes_to_strong_tool_model():
+    c = client(0.9); router.config["strong_model_tools"] = "ST"
+    assert c.post("/route", json={"prompt": "x", "threshold": 0.5, "tools": True}).json()["model"] == "ST"
+    assert c.post("/route", json={"prompt": "x", "threshold": 0.5, "tools": False}).json()["model"] == "S"
+
+
 def test_low_threshold_pushes_strong():
     assert client(0.3).post("/route", json={"prompt": "x", "threshold": 0.2}).json()["model"] == "S"
 

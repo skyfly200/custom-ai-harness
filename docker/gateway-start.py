@@ -51,7 +51,7 @@ def passthrough(config: dict) -> dict:
     target = env("PASSTHROUGH_MODEL")
     if not target:
         sys.exit("HARNESS_MODE=passthrough needs PASSTHROUGH_MODEL in .env: a model name from "
-                 "config.yaml (e.g. or-claude-sonnet-5.5) or a provider id (e.g. openrouter/anthropic/claude-sonnet-5.5)")
+                 "config.yaml (e.g. fast-openrouter) or a provider id (e.g. openrouter/anthropic/claude-sonnet-5.5)")
     known = {e.get("model_name"): e for e in config.get("model_list") or []}
     if target in known:
         params = dict(known[target]["litellm_params"])

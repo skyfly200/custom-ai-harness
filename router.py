@@ -171,6 +171,9 @@ class RouteRequest(BaseModel):
 def pick_model(win_rate: float, threshold: float, tokens: int, config: dict, tools: bool = False) -> str:
     # RouteLLM rule: strong model when the strong model's win rate >= threshold
     if win_rate >= threshold:
+        # Hard tool requests can go to their own model (e.g. a free one that calls tools)
+        if tools and config.get("strong_model_tools"):
+            return config["strong_model_tools"]
         return config["strong_model"]
     # A weak model that can't call tools answers a tool request with text instead of tool calls
     if tools and config.get("weak_model_tools"):
@@ -197,7 +200,7 @@ MODE_PRESETS = {
 ENV_KEYS = {
     "ROUTER_BACKEND": "backend", "ROUTER_BASE_URL": "base_url", "ROUTER_MODEL": "model",
     "ROUTER_API_KEY_ENV": "api_key_env", "ROUTER_TIMEOUT": "timeout",
-    "STRONG_MODEL": "strong_model", "WEAK_MODEL": "weak_model",
+    "STRONG_MODEL": "strong_model", "STRONG_MODEL_TOOLS": "strong_model_tools", "WEAK_MODEL": "weak_model",
     "WEAK_MODEL_TOOLS": "weak_model_tools", "WEAK_MODEL_OVERFLOW": "weak_model_overflow",
 }
 
@@ -289,7 +292,7 @@ def switch_backend(req: BackendRequest):
 # Settings the control UI may change, each with its type. The model names only
 # affect pick_model; the rest build the scorer, so changing them rebuilds it.
 EDITABLE = {
-    "strong_model": str, "weak_model": str, "weak_model_tools": str, "weak_model_overflow": str,
+    "strong_model": str, "strong_model_tools": str, "weak_model": str, "weak_model_tools": str, "weak_model_overflow": str,
     "weak_model_max_tokens": int,
     "backend": str, "checkpoint": str, "base_url": str, "model": str, "api_key_env": str,
     "auth_header": str, "timeout": float, "max_chars": int, "max_tokens": int,
@@ -298,7 +301,7 @@ EDITABLE = {
 # Old Gateway names for the local engine, which config.yaml once named after a
 # Claude model it never was; a config that still uses them reaches local-engine.
 RENAMED = {"claude-sonnet-5": "local-engine", "claude-3-5-sonnet": "local-engine"}
-MODEL_KEYS = {"strong_model", "weak_model", "weak_model_tools", "weak_model_overflow", "weak_model_max_tokens"}
+MODEL_KEYS = {"strong_model", "strong_model_tools", "weak_model", "weak_model_tools", "weak_model_overflow", "weak_model_max_tokens"}
 REQUIRED = {"strong_model", "weak_model", "backend"}
 
 

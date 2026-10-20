@@ -92,6 +92,18 @@ claude
 
 These settings only last for that window. Other tools such as Cursor, Aider, Continue or Cline connect to `http://localhost:3000/v1` as an "OpenAI-compatible" endpoint.
 
+### Install Bright Chat as an app
+
+Bright Chat can be installed so it opens in its own window, with its own icon, like any other app. It needs the page to be opened at `http://localhost:3000/ui/chat.html` or over `https://` (a server behind a tunnel or Tailscale `serve`); a plain `http://` address on your network can't be installed.
+
+| Where | How |
+|---|---|
+| Chrome or Edge on a computer | Click the **Install app** button in the top bar, or the install icon at the right end of the address bar |
+| Chrome on Android | Menu (⋮) → **Install app** (or **Add to Home screen**) |
+| Safari on iPhone or iPad | Share → **Add to Home Screen** |
+
+The installed app opens the chat page, and the Dashboard, Usage, Routing and Settings pages are shortcuts on its icon. It still needs the harness running: the app keeps a copy of the pages so it opens when the harness is slow or off, but chats and answers come from the harness and are never stored by the app. If you set `HARNESS_PASSWORD`, the app asks for it the same way the browser does.
+
 ### If something goes wrong
 
 - **The dashboard shows the Router or Gateway as down.** Look for an error in the lines marked `[router]` or `[gateway]` (or in that window, if you use three). Most often a key in `.env` is missing or mistyped.
@@ -295,6 +307,7 @@ The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 | `utils/access.js` | The optional `HARNESS_PASSWORD` login |
 | `guard-rules.json`, `utils/guard.js`, `.claude/hooks/guard.js` | The command guard (see [Command guard](#command-guard-jev-checks-commands-before-they-run)) |
 | `scripts/jev-files-mcp.js`, `utils/jevFiles.js`, `utils/jevAsk.js` | The `ask_jev_file` tools (see [Ask Jev about a file](#ask-jev-about-a-file-ask_jev_file-tools)) |
+| `ui/manifest.webmanifest`, `ui/sw.js`, `ui/icon*.svg`, `ui/icon-*.png` | The installable app: manifest, offline copy of the pages, icons (re-render the PNGs from the SVGs if the logo changes) |
 
 ---
 

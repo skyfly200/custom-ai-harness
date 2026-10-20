@@ -721,13 +721,13 @@ app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
 async function profileOf(req) {
     const id = req.get('x-harness-profile');
     if (id && id.trim().toLowerCase() === autoRoute.AUTO) {
-        const { autoJev, autoAskAt } = settings.get();
+        const { autoJev, autoAskAt, autoFirst } = settings.get();
         const picked = await autoRoute.pick(profiles.list(), {
             text: latestUserText(req.body.messages || []),
             tools: Array.isArray(req.body.tools) && req.body.tools.length > 0,
             client: usage.clientOf(req),
             tokens: estimateTokens(req.body),
-            ask: askRouter, jev: autoJev, askAt: autoAskAt,
+            ask: askRouter, jev: autoJev, askAt: autoAskAt, first: autoFirst,
         });
         req.harnessAuto = { how: picked.how, why: picked.why };
         console.log(`Auto routing: ${picked.profile ? picked.profile.name : 'the default routing'} (${picked.how}: ${picked.why})`);

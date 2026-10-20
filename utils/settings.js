@@ -24,6 +24,7 @@ const DEFAULTS = Object.freeze({
     tiers: [],                // extra tiers of the default routing beside the Router's strong and weak (utils/tiers.js)
     imagesModel: null,        // Gateway model for requests whose latest user turn carries an image
     autoJev: true,            // Auto routing (utils/autoRoute.js): ask Jev which routing fits when no routing's rules do
+    autoFirst: 'jev',         // which Auto tries first: 'jev' (rules only if Jev finds no fit) or 'rules'
     autoAskAt: 0.5,           // Jev's confidence that a routing fits at which Auto picks it
     guardJev: true,           // command guard (utils/guard.js): ask Jev about commands the rules don't cover
     guardAskAt: 0.5,          // Jev's confidence that a command is risky at which the agent must ask you
@@ -72,6 +73,7 @@ const VALIDATORS = {
     tiers: (v) => tiers.clean(v, 'The default routing'),
     imagesModel: optionalName('imagesModel'),
     autoJev: bool('autoJev'),
+    autoFirst: (v) => { if (v !== 'jev' && v !== 'rules') throw new Error('autoFirst must be jev or rules'); return v; },
     autoAskAt: (v) => {
         const n = Number(v);
         if (v === null || v === '' || !Number.isFinite(n) || n < 0 || n > 1) throw new Error('autoAskAt must be from 0 to 1');

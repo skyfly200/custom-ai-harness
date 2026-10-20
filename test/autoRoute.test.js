@@ -38,19 +38,19 @@ test('the first routing whose rules all hold wins', async () => {
         make('Code', { rules: { words: ['refactor', 'bug'], tools: 'yes', clients: ['claude'] } }),
         make('Also code', { rules: { words: ['refactor'] } }),
     ];
-    const got = await auto.pick(list, req);
+    const got = await auto.pick(list, { ...req, first: 'rules' });
     assert.equal(got.profile.name, 'Code');
     assert.equal(got.how, 'rule');
     assert.match(got.why, /“refactor” in the request, has tools, from Claude Code/);
-    assert.equal((await auto.pick(list, { ...req, tools: false })).profile.name, 'Chat only');
-    assert.equal((await auto.pick(list, { ...req, text: 'hello', client: 'Cursor' })).profile, null);
+    assert.equal((await auto.pick(list, { ...req, tools: false, first: 'rules' })).profile.name, 'Chat only');
+    assert.equal((await auto.pick(list, { ...req, text: 'hello', client: 'Cursor', first: 'rules' })).profile, null);
 });
 
 test('size rules compare the request size', async () => {
     const list = [make('Big', { rules: { minTokens: 1000 } }), make('Small', { rules: { maxTokens: 100 } })];
-    assert.equal((await auto.pick(list, { ...req, tokens: 5000 })).profile.name, 'Big');
-    assert.equal((await auto.pick(list, { ...req, tokens: 50 })).profile.name, 'Small');
-    assert.equal((await auto.pick(list, req)).profile, null);
+    assert.equal((await auto.pick(list, { ...req, tokens: 5000, first: 'rules' })).profile.name, 'Big');
+    assert.equal((await auto.pick(list, { ...req, tokens: 50, first: 'rules' })).profile.name, 'Small');
+    assert.equal((await auto.pick(list, { ...req, first: 'rules' })).profile, null);
 });
 
 test('without a rule match Jev rates each description and the best one at or above the threshold wins', async () => {
@@ -72,11 +72,11 @@ test('without a rule match Jev rates each description and the best one at or abo
     assert.equal((await auto.pick(list, { ...req, ask: async () => ({ q0: 0.2, q1: 0.4 }), askAt: 0.3 })).profile.name, 'Code');
 });
 
-test('rules win over Jev; Jev off, failing or without descriptions means the default', async () => {
+test('with first: rules, rules win over Jev; Jev off, failing or without descriptions means the default', async () => {
     const list = [make('Docs', { description: 'writing docs' }), make('Code', { rules: { words: ['refactor'] } })];
     let calls = 0;
     const ask = async () => { calls++; return { q0: 0.99 }; };
-    assert.equal((await auto.pick(list, { ...req, ask })).profile.name, 'Code');
+    assert.equal((await auto.pick(list, { ...req, ask, first: 'rules' })).profile.name, 'Code');
     assert.equal(calls, 0);
     const none = { ...req, text: 'hello' };
     assert.equal((await auto.pick(list, { ...none, ask, jev: false })).profile, null);
@@ -85,6 +85,23 @@ test('rules win over Jev; Jev off, failing or without descriptions means the def
     assert.match(down.why, /Jev unavailable \(Router down\)/);
     assert.equal((await auto.pick([make('Code', { rules: { words: ['zzz'] } })], { ...none, ask })).profile, null);
     assert.equal(calls, 0, 'Jev is only asked when a routing has a description to rate');
+});
+
+test('by default Jev is asked first and the rules only apply when it finds no fit', async () => {
+    const list = [make('Docs', { description: 'writing docs' }), make('Code', { rules: { words: ['refactor'] } })];
+    const hit = await auto.pick(list, { ...req, ask: async () => ({ q0: 0.9 }) });
+    assert.equal(hit.profile.name, 'Docs');
+    assert.equal(hit.how, 'jev');
+    const miss = await auto.pick(list, { ...req, ask: async () => ({ q0: 0.1 }) });
+    assert.equal(miss.profile.name, 'Code');
+    assert.equal(miss.how, 'rule');
+    const down = await auto.pick(list, { ...req, ask: async () => { throw new Error('Router down'); } });
+    assert.equal(down.profile.name, 'Code', 'rules still work with Jev down');
+    const off = await auto.pick(list, { ...req, jev: false, ask: async () => { throw new Error('never asked'); } });
+    assert.equal(off.profile.name, 'Code');
+    const none = await auto.pick(list, { ...req, text: 'hello', ask: async () => ({ q0: 0.1 }) });
+    assert.equal(none.profile, null);
+    assert.match(none.why, /best was 10%/);
 });
 
 // ---- through the Interceptor ----
@@ -136,7 +153,7 @@ async function send(content, headers = { 'x-harness-profile': 'auto' }) {
     return res;
 }
 
-test('Auto picks a routing by rule, then by Jev, else the default, and the log says how', async () => {
+test('Auto picks a routing by Jev, then by rule, else the default, and the log says how', async () => {
     profiles.replace([
         { ...BASE, name: 'Quick', weak: 'quick-model', threshold: 1, rules: { words: ['quick'] } },
         { ...BASE, name: 'Poems', weak: 'poem-model', threshold: 1, description: 'poetry' },
@@ -147,7 +164,7 @@ test('Auto picks a routing by rule, then by Jev, else the default, and the log s
     assert.equal(lastBody.model, 'quick-model');
     assert.equal(decodeURIComponent(res.headers.get('x-harness-profile')), 'Quick');
     assert.match(decodeURIComponent(res.headers.get('x-harness-auto')), /^rule: “quick” in the request/);
-    assert.equal(asks, 0, 'rules answered, Jev not asked');
+    assert.equal(asks, 1, 'Jev was asked first and found no fit');
     assert.equal(monitor.recentEvents(1)[0].auto.how, 'rule');
 
     res = await send('poetry about the sea');
@@ -173,6 +190,11 @@ test('Auto honours the autoJev setting', async () => {
     await send('poetry about the sea');
     assert.equal(lastBody.model, 'router-strong');
     assert.equal(asks, before);
-    settings.update({ autoJev: true });
+    settings.update({ autoJev: true, autoFirst: 'rules' });
+    await send('a quick question');
+    assert.equal(lastBody.model, 'quick-model');
+    assert.equal(asks, before, 'rules first: a rule held, Jev not asked');
+    settings.update({ autoFirst: 'jev' });
+    assert.throws(() => settings.update({ autoFirst: 'both' }), /autoFirst/);
     assert.throws(() => settings.update({ autoAskAt: 2 }), /autoAskAt/);
 });

@@ -147,6 +147,7 @@ function recordUsage(req, proxyRes) {
             servedBy: event.servedBy,
             usage: counts,
             estimate: { input: req.harnessInputEstimate, outputChars },
+            saved: req.harnessSaved,
         });
         monitor.recordUsage(event, row);
     });
@@ -356,7 +357,13 @@ async function getModelInfo() {
         return { source: 'config.yaml', models: modelInfo.fromConfig(text) };
     }
 }
-app.get('/ui/api/model-info', async (req, res) => res.json(await getModelInfo()));
+// OpenRouter's own prices replace the Gateway's for openrouter/ models, so the
+// pages count what OpenRouter actually bills
+app.get('/ui/api/model-info', async (req, res) => {
+    const info = await getModelInfo();
+    const catalog = await getOpenrouterCatalog({ waitMs: 4000 });
+    res.json({ ...info, models: modelInfo.withOpenrouterPrices(info.models, catalog) });
+});
 
 // Read-aloud for the chat page through an OpenAI-compatible speech endpoint
 // (POST {TTS_URL}/audio/speech). With an OpenRouter key and no TTS_URL it uses
@@ -417,19 +424,37 @@ async function listTtsModels() {
 // OpenRouter's chat models for the routing editor's model picker. The catalog
 // is public, so this works without a key; it is kept for an hour.
 let openrouterCache = { at: 0, models: null };
+async function fetchOpenrouterCatalog(timeoutMs = 10000) {
+    const key = process.env.OPENROUTER_API_KEY;
+    const upstream = await fetch(`${OPENROUTER_URL}/models`, {
+        headers: key ? { authorization: `Bearer ${key}` } : {},
+        signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!upstream.ok) throw new Error(`OpenRouter answered HTTP ${upstream.status}`);
+    const models = openrouterCatalog.fromCatalog(await upstream.json());
+    if (!models.length) throw new Error('OpenRouter listed no models');
+    openrouterCache = { at: Date.now(), models };
+    return models;
+}
+
+// The catalog for prices: the hour's copy, else a fresh one. A failed fetch
+// isn't retried for 10 minutes, so pages don't wait on an unreachable OpenRouter.
+let openrouterFailedAt = 0;
+async function getOpenrouterCatalog({ waitMs }) {
+    if (openrouterCache.models && Date.now() - openrouterCache.at < 60 * 60 * 1000) return openrouterCache.models;
+    if (Date.now() - openrouterFailedAt < 10 * 60 * 1000) return openrouterCache.models;
+    try {
+        return await fetchOpenrouterCatalog(waitMs);
+    } catch {
+        openrouterFailedAt = Date.now();
+        return openrouterCache.models;
+    }
+}
+
 app.get('/ui/api/openrouter/models', async (req, res) => {
     if (openrouterCache.models && Date.now() - openrouterCache.at < 60 * 60 * 1000) return res.json({ models: openrouterCache.models });
     try {
-        const key = process.env.OPENROUTER_API_KEY;
-        const upstream = await fetch(`${OPENROUTER_URL}/models`, {
-            headers: key ? { authorization: `Bearer ${key}` } : {},
-            signal: AbortSignal.timeout(10000),
-        });
-        if (!upstream.ok) throw new Error(`OpenRouter answered HTTP ${upstream.status}`);
-        const models = openrouterCatalog.fromCatalog(await upstream.json());
-        if (!models.length) throw new Error('OpenRouter listed no models');
-        openrouterCache = { at: Date.now(), models };
-        res.json({ models });
+        res.json({ models: await fetchOpenrouterCatalog() });
     } catch (err) {
         if (openrouterCache.models) return res.json({ models: openrouterCache.models, stale: true });
         res.status(502).json({ error: `Couldn't load OpenRouter's model list: ${err.message}` });
@@ -554,11 +579,22 @@ function transformsFor(req) {
     return { caveman, headroom, contextAnchor };
 }
 
-// Context anchor first, on the raw results, then Headroom compression
+// Context anchor first, on the raw results, then Headroom compression.
+// req.harnessSaved keeps the tokens each one took out (about 4 characters a
+// token), for the Usage page's savings.
 function compressToolResults(req, messages) {
     const { headroom, contextAnchor } = transformsFor(req);
+    const size = (m) => JSON.stringify(m).length;
+    const before = headroom || contextAnchor ? size(messages) : 0;
     const anchored = contextAnchor ? applyContextAnchor(messages) : messages;
-    return headroom ? applyHeadroom(anchored) : anchored;
+    const middle = contextAnchor ? size(anchored) : before;
+    const out = headroom ? applyHeadroom(anchored) : anchored;
+    const after = headroom ? size(out) : middle;
+    req.harnessSaved = {
+        anchor: Math.max(0, Math.round((before - middle) / 4)),
+        headroom: Math.max(0, Math.round((middle - after) / 4)),
+    };
+    return out;
 }
 
 // Transforms the Interceptor applied to this request, for the live feed

@@ -29,7 +29,8 @@
     </section>
     <section>
       <h2 data-hint="Totals from harness-usage.json for the last 7 days. The Usage page has the full breakdown"><a href="usage.html">Usage, last 7 days</a></h2>
-      <div class="grid tiles" id="usageTiles"></div>
+      <div class="grid tiles four" id="usageTiles"></div>
+      <div class="card list" id="usageSavings" hidden></div>
       <div class="card list" id="usageModels"></div>
     </section>
   </div>
@@ -46,6 +47,7 @@
 </main>
 
 <script src="hints.js"></script>
+<script src="costs.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -163,15 +165,8 @@ function renderChats() {
 // The same totals as the Usage page, priced from the Gateway's list
 
 let prices = null;
-const usd = (n) => n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : n < 100 ? `$${n.toFixed(2)}` : `$${Math.round(n).toLocaleString()}`;
+const usd = Costs.usd;
 const short = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : Math.round(n).toLocaleString();
-
-function costOf(r) {
-  const p = prices?.[r.servedBy];
-  if (p?.free) return { cost: 0, free: true };
-  if (!p || p.inputCost == null) return { cost: 0, unpriced: true };
-  return { cost: r.input * p.inputCost + r.output * (p.outputCost || 0) };
-}
 
 async function loadUsage() {
   try {
@@ -183,31 +178,42 @@ async function loadUsage() {
   }
 }
 
+const LAYER_COLORS = { compression: '#1baf7a', router: '#2a78d6', pinned: '#6250d6', down: '#eda100', fallback: '#eb6834', caching: '#e87ba4' };
+
 function renderUsage({ rows = [] }) {
+  Costs.priceRows(rows, prices);
   const t = { requests: 0, input: 0, output: 0, cost: 0, unpriced: 0, free: 0 };
   const byModel = new Map();
   for (const r of rows) {
-    const c = costOf(r);
-    t.requests += r.requests; t.input += r.input; t.output += r.output; t.cost += c.cost;
-    if (c.unpriced) t.unpriced += r.requests;
-    if (c.free) t.free += r.requests;
+    t.requests += r.requests; t.input += r.input; t.output += r.output; t.cost += r.cost;
+    t.unpriced += r.unpriced; t.free += r.freeRequests;
     const m = byModel.get(r.servedBy) || { name: r.servedBy, provider: r.provider, requests: 0, tokens: 0, cost: 0 };
-    m.requests += r.requests; m.tokens += r.input + r.output; m.cost += c.cost;
+    m.requests += r.requests; m.tokens += r.input + r.output; m.cost += r.cost;
     byModel.set(r.servedBy, m);
   }
-  const tile = (label, v, sub = '') => `<div class="card stat"><div class="num">${v}</div><div class="sub">${label}${sub ? ` · ${sub}` : ''}</div></div>`;
+  const s = Costs.savings(rows);
+  const tile = (label, v, sub = '', hint = '') => `<div class="card stat"${hint ? ` data-hint="${esc(hint)}"` : ''}><div class="num">${v}</div><div class="sub">${label}${sub ? ` · ${sub}` : ''}</div></div>`;
   $('usageTiles').innerHTML = [
     tile('Spend', usd(t.cost), t.unpriced ? `+${t.unpriced} unpriced` : ''),
+    tile(`Saved vs ${Costs.SONNET.name}`, s.requests ? usd(s.saved) : '–', s.baseline > 0 ? `${Math.round(100 * s.saved / s.baseline)}% of ${usd(s.baseline)}` : '',
+      `What the same requests would have cost sent straight to ${Costs.SONNET.name}, minus what they cost here`),
     tile('Requests', t.requests.toLocaleString(), t.requests ? `${Math.round(100 * t.free / t.requests)}% free` : ''),
     tile('Tokens', short(t.input + t.output), `${short(t.input)} in · ${short(t.output)} out`),
   ].join('');
+  const layers = s.layers.filter(l => l.saved > 0);
+  const top = layers.length ? Math.max(...layers.map(l => l.saved)) : 1;
+  $('usageSavings').innerHTML = layers.length ? `<div class="list-head">Savings by part of the harness</div>` + layers.map(l => `<div class="bar-row" title="${esc(l.what)}">
+      <span class="title">${esc(l.label)}</span><span class="meta">${usd(l.saved)} · ${Math.round(100 * l.saved / (s.saved || 1))}%</span>
+      <span class="bar"><i style="width:${Math.max(2, 100 * l.saved / top).toFixed(1)}%;background:${LAYER_COLORS[l.id]}"></i></span></div>`).join('')
+    : '';
+  $('usageSavings').hidden = !layers.length;
   if (!rows.length) { $('usageModels').innerHTML = '<div class="sub muted">No requests in the last 7 days.</div>'; return; }
-  const top = [...byModel.values()].sort((a, b) => b.tokens - a.tokens);
-  const max = top[0].tokens || 1;
-  $('usageModels').innerHTML = top.slice(0, 5).map(m => `<div class="bar-row" title="${esc(m.provider)}">
+  const models = [...byModel.values()].sort((a, b) => b.tokens - a.tokens);
+  const max = models[0].tokens || 1;
+  $('usageModels').innerHTML = models.slice(0, 5).map(m => `<div class="bar-row" title="${esc(m.provider)}">
       <span class="title"><code>${esc(m.name)}</code></span><span class="meta">${short(m.tokens)} tokens · ${m.requests} req${m.cost ? ` · ${usd(m.cost)}` : ''}</span>
       <span class="bar"><i style="width:${Math.max(2, 100 * m.tokens / max).toFixed(1)}%"></i></span></div>`).join('')
-    + `<a class="more" href="usage.html">${top.length > 5 ? `${top.length - 5} more models · ` : ''}Full usage and costs →</a>`;
+    + `<a class="more" href="usage.html">${models.length > 5 ? `${models.length - 5} more models · ` : ''}Full usage, costs and savings →</a>`;
 }
 
 // ---- loop ------------------------------------------------------------------

@@ -531,7 +531,12 @@ function computeCost(m) {
   const info = modelInfo[replyModel(m)];
   if (info?.free) return { usd: 0, free: true };
   if (!info || info.inputCost == null || !u) return null;
-  return { usd: (u.prompt_tokens || 0) * info.inputCost + (u.completion_tokens || 0) * (info.outputCost || 0), free: false, estimated: true };
+  return { usd: tokensCost(u, info), free: false, estimated: true };
+}
+// Tokens times the price list, cached input at the provider's cache price (ui/costs.js)
+function tokensCost(u, info) {
+  const k = CacheTimer.cacheUsage(u);
+  return Costs.rowCost({ input: k.prompt, output: u.completion_tokens ?? u.output_tokens ?? 0, cacheRead: k.read, cacheWrite: k.write }, info).cost;
 }
 const replyCost = (m) => (m.cost !== undefined && !m.streaming ? m.cost : computeCost(m));
 
@@ -2597,14 +2602,13 @@ async function keepAlive(c, model) {
   }
 }
 
-// What a keep-alive cost: the provider's figure, else cached tokens at a tenth
+// What a keep-alive cost: the provider's figure, else tokens at the price list's cache prices
 function pingCost(u, headerCost, model) {
   if (typeof u?.cost === 'number') return { usd: u.cost };
   if (headerCost > 0) return { usd: headerCost };
   const info = modelInfo[model];
-  const k = CacheTimer.cacheUsage(u);
-  if (!k || info?.inputCost == null) return null;
-  return { usd: (k.prompt - k.read) * info.inputCost + k.read * info.inputCost * 0.1 + (u.completion_tokens || 0) * (info.outputCost || 0), estimated: true };
+  if (!u || info?.inputCost == null) return null;
+  return { usd: tokensCost(u, info), estimated: true };
 }
 
 function checkKeepAlive() {

@@ -85,7 +85,10 @@ button[data-hint], a[data-hint], label[data-hint], input[data-hint], select[data
 .list .more:hover { text-decoration: underline; }
 .tiles { grid-template-columns: repeat(3, 1fr); margin-bottom: 10px; }
 .tiles .stat .num { font-size: 20px; }
+.tiles.four { grid-template-columns: repeat(2, 1fr); }
+#usageSavings { margin-bottom: 10px; }
+.list .list-head { padding: 4px 8px 2px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .bar-row { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 6px 8px; }
 .bar-row .bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 18%, transparent); overflow: hidden; }
 .bar-row .bar i { display: block; height: 100%; border-radius: 3px; background: var(--brand); }
-@media (max-width: 520px) { .tiles { grid-template-columns: 1fr 1fr 1fr; gap: 6px; } .tiles .stat { padding: 8px; } .tiles .stat .num { font-size: 16px; } }
+@media (max-width: 520px) { .tiles { grid-template-columns: 1fr 1fr 1fr; gap: 6px; } .tiles.four { grid-template-columns: 1fr 1fr; } .tiles .stat { padding: 8px; } .tiles .stat .num { font-size: 16px; } }

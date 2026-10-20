@@ -37,6 +37,7 @@ function fromCatalog(body) {
             description: typeof m.description === 'string' ? m.description.slice(0, 1200) : '',
             maxOutput: num(m.top_provider?.max_completion_tokens),
             cacheReadCost: price(m.pricing?.input_cache_read),
+            cacheWriteCost: price(m.pricing?.input_cache_write),
             reasoningCost: price(m.pricing?.internal_reasoning),
             imageCost: price(m.pricing?.image),
             requestCost: price(m.pricing?.request),

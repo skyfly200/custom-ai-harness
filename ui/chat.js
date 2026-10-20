@@ -359,6 +359,7 @@ function openChat(id) {
   if (chat && chat.id !== id) saveDraft();
   chat = (id && loadChat(id)) || newChatObject();
   if (!id && scope) chat.project = scope; // a new chat starts in the project being shown
+  if (!id && !chat.project) { try { applyQuick(chat, localStorage.getItem(NEW_ROUTE_KEY)); } catch {} }
   cache.set(chat.id, chat);
   unseen.delete(chat.id);
   $('title').value = chat.title;
@@ -423,15 +424,58 @@ const SUGGESTIONS = [
   'What is the difference between a model and a router?',
   'Give me three names for a cosy café',
 ];
+const suggestionPicks = new Map(); // chat id -> its three suggestions, so a redraw doesn't reshuffle them
 function emptyState() {
   const p = projectOf(chat);
-  const picks = [...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 3);
+  if (!suggestionPicks.has(chat.id)) suggestionPicks.set(chat.id, [...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 3));
+  const picks = suggestionPicks.get(chat.id);
   return `<div class="empty"><div class="orb" aria-hidden="true"><i></i><i></i><i></i></div>
     <h2>${p ? `New chat in ${esc(p.name)}` : 'What shall we explore?'}</h2>
-    <p>Messages go through the harness like any other client, so the Router picks the model unless you name one in Options. Each reply shows, live, where it went and why.</p>
+    <p>Messages go through the harness like any other client, so a routing picks the model unless you choose one below. Each reply shows, live, where it went and why.</p>
+    ${quickPicker()}
     <div class="suggest">${picks.map(t => `<button type="button" class="chip-btn" data-suggest="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <p class="small">Attach files with the paperclip or by dropping them here, dictate with the mic, and type <kbd>/</kbd> for skills and tools.</p></div>`;
 }
+
+// Quick pick on a new chat: a routing, or one model directly. Outside projects
+// the last pick is remembered for the next new chat.
+const NEW_ROUTE_KEY = 'harness-new-chat-route';
+let gatewayModels = [];  // GET api/models
+let quickStats = {};     // GET api/model-stats: quality and price per model, for the picker's labels
+function quickValue(c) {
+  const own = c.route && c.route !== 'project' ? c.route : (projectOf(c) ? 'project' : 'default');
+  return own === 'model' ? (c.model ? `m:${c.model}` : 'default') : own;
+}
+function quickStat(m) {
+  const s = quickStats[m];
+  if (!s) return '';
+  const price = s.blended === null || s.blended === undefined ? null : s.blended === 0 ? 'free' : `$${s.blended < 0.1 ? +s.blended.toPrecision(2) : +s.blended.toFixed(2)}/M`;
+  const bits = [s.quality !== null && s.quality !== undefined && `quality ${Math.round(s.quality)}`, price].filter(Boolean);
+  return bits.length ? ` · ${bits.join(' · ')}` : '';
+}
+function quickNote(c) {
+  const r = routeOf(c);
+  if (r.model) return 'Every message goes to this one model. Change it any time in Options.';
+  const tiers = (r.profile ? r.profile.tiers : routings.tiers) || [];
+  return `The Router scores each message and picks ${tiers.length ? `one of ${tiers.length + 2} tiers` : 'a strong or a weak model'}. The Effort button by Send leans it cheaper or better.`;
+}
+function quickPicker() {
+  const p = projectOf(chat);
+  const v = quickValue(chat);
+  const opt = (val, label) => `<option value="${esc(val)}"${val === v ? ' selected' : ''}>${esc(label)}</option>`;
+  const models = [...new Set([...gatewayModels, ...(v.startsWith('m:') ? [v.slice(2)] : [])])];
+  const missing = v.startsWith('p:') && !routings.profiles.some(x => `p:${x.id}` === v);
+  return `<div class="quick-pick"><label>Answer with <select id="quickRoute" aria-label="Routing or model for this chat">
+      <optgroup label="Routings">${p ? opt('project', `Same as the project (${routeLabel(routeOf({ project: chat.project }))})`) : ''}${opt('default', 'Default routing')}${routings.profiles.map(x => opt(`p:${x.id}`, x.name)).join('')}${missing ? opt(v, `${v.slice(2)} (deleted)`) : ''}</optgroup>
+      ${models.length ? `<optgroup label="One model directly">${models.map(m => opt(`m:${m}`, m + quickStat(m))).join('')}</optgroup>` : ''}
+    </select></label><small id="quickNote">${esc(quickNote(chat))}</small></div>`;
+}
+function applyQuick(c, v) {
+  if (!v) return;
+  if (v.startsWith('m:')) { c.route = 'model'; c.model = v.slice(2); } else if (v === 'project') delete c.route; else c.route = v;
+}
+// A routing list or model list that arrives late redraws an empty chat's picker
+const redrawQuick = () => { if (chat && !chat.messages.length && $('quickRoute')) drawLog(); };
 
 // Something to read while the model gets going; turns over every few seconds
 const THINKING = ['Wandering the latent space…', 'Herding tokens…', 'Consulting the embeddings…', 'Asking the router nicely…',
@@ -737,6 +781,16 @@ setInterval(() => {
   for (const { reply } of running.values()) if (chat.messages.includes(reply)) redraw(reply);
   if (running.size) drawLiveStatus();
 }, 250);
+
+$('log').addEventListener('change', (e) => {
+  if (e.target.id !== 'quickRoute') return;
+  const v = e.target.value;
+  applyQuick(chat, v);
+  if (!chat.project) { try { localStorage.setItem(NEW_ROUTE_KEY, v); } catch {} }
+  saveChat(chat, { touch: false });
+  $('quickNote').textContent = quickNote(chat);
+  drawRoute(); drawTools(); drawHint(); drawStats(); drawEffort();
+});
 
 $('log').addEventListener('click', async (e) => {
   const sug = e.target.closest('[data-suggest]');
@@ -2034,8 +2088,8 @@ let routings = { profiles: [], mcpOff: [] }; // GET api/profiles, plus the defau
 
 async function loadRoutings() {
   const [p, st] = await Promise.allSettled([fetch('api/profiles').then(r => r.json()), fetch('api/settings').then(r => r.json())]);
-  routings = { profiles: p.value?.profiles || [], mcpOff: st.value?.settings?.mcpOff || [] };
-  drawRoute(); drawTools(); drawHint();
+  routings = { profiles: p.value?.profiles || [], mcpOff: st.value?.settings?.mcpOff || [], tiers: st.value?.settings?.tiers || [] };
+  drawRoute(); drawTools(); drawHint(); drawEffort(); redrawQuick();
 }
 
 // Where a chat's messages go: { model } straight to one model, { profile } a
@@ -2708,7 +2762,10 @@ window.addEventListener('beforeunload', saveDraft);
 // ---------------------------------------------------------------------------
 fetch('api/models').then(r => r.json()).then(({ models }) => {
   $('models').innerHTML = models.map(m => `<option value="${esc(m)}">`).join('');
+  gatewayModels = models;
+  redrawQuick();
 }).catch(() => {});
+fetch('api/model-stats').then(r => r.json()).then(({ models }) => { quickStats = models || {}; redrawQuick(); }).catch(() => {});
 
 applyPrefs(); drawHandsFree();
 loadModelInfo();

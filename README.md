@@ -686,7 +686,7 @@ Optional `.env` settings:
 
 Any client can skip the Router for one request the same way: send the model name in an `x-harness-model` header, or use a named routing with `x-harness-profile`. Every routed response carries `x-harness-model` and `x-harness-route` headers saying where it went, `x-harness-tier` with the tier it landed in, plus `x-harness-profile` when a named routing was used.
 
-**Effort.** The `x-harness-effort` header moves a request's score before tiers are matched: `low` and `high` by 0.2, `min` sends it to Weak and `max` to the top tier (a number from -1 to 1 works too). In Bright Chat it is the **Effort** button next to Send, saved per chat. Claude Code: `ANTHROPIC_CUSTOM_HEADERS="x-harness-effort: low"`.
+**Effort.** The `x-harness-effort` header moves a request's score before tiers are matched: `low` and `high` by 0.2, `min` sends it to Weak and `max` to the top tier (a number from -1 to 1 works too). In Bright Chat it is the **Effort** button next to Send, saved per chat. A new chat also has an **Answer with** menu on its start screen: pick a routing or one Gateway model directly (with its quality and price when known); outside projects the next new chat starts with the same pick. Claude Code: `ANTHROPIC_CUSTOM_HEADERS="x-harness-effort: low"`.
 
 History is kept in memory (the last 200 requests) and starts fresh when the Interceptor restarts. Override the probed addresses with `LOCAL_ENGINE_URL`, `OLLAMA_URL` and `LAYA_URL` in `.env`. The pages have no login. The Interceptor listens on every network interface, so other machines that can reach port 3000 can view them and chat, but settings only change from requests made on this machine.
 

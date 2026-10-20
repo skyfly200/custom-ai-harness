@@ -436,3 +436,9 @@ button.icon.on { color: var(--accent); }
 @media (max-width: 560px) {
   .effort-btn { position: absolute; top: -11px; right: 14px; padding: 1px 9px; font-size: 11px; background: var(--panel); z-index: 2; }
 }
+
+/* new chat: pick a routing or one model */
+.quick-pick { display: grid; gap: 4px; justify-items: center; margin: 14px auto 4px; max-width: 420px; }
+.quick-pick label { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; width: 100%; }
+.quick-pick select { flex: 1; min-width: 0; }
+.quick-pick small { color: var(--muted); }

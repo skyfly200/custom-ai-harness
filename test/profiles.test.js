@@ -143,3 +143,12 @@ test('the routing editor reads and replaces routings over the API', async () => 
     assert.equal(ok.status, 200);
     assert.deepEqual((await ok.json()).profiles, []);
 });
+
+test('Claude Code model aliases are not Gateway models', () => {
+    for (const m of ['Haiku', 'haiku', 'sonnet', 'Opus', 'claude-haiku-5.5', 'opus[1m]', 'Claude Sonnet 5.5']) {
+        assert.equal(profiles.isClaudeAlias(m), true, m);
+    }
+    for (const m of ['local-engine', 'fast-openrouter', 'or-haiku', 'or-claude-haiku-5.5', '', null]) {
+        assert.equal(profiles.isClaudeAlias(m), false, String(m));
+    }
+});

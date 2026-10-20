@@ -13,6 +13,15 @@ test('reads the model names and fallback chains from config.yaml', () => {
     assert.equal(fallbacks['local-engine'][0], 'fast-openrouter');
 });
 
+test('a rate-limited free group has its own chain ending at a paid model', () => {
+    const { fallbacks } = gateway.parse(config);
+    // LiteLLM answers "No fallback model group found" for a group without a chain
+    for (const group of fallbacks['local-engine'].filter((m) => m !== 'fast-openrouter')) {
+        assert.ok(fallbacks[group]?.length, `${group} has no fallback chain`);
+    }
+    assert.equal(fallbacks['fallback-openrouter'].at(-1), 'fast-openrouter');
+});
+
 test('writing the same chains changes nothing', () => {
     assert.equal(gateway.write(config, gateway.parse(config).fallbacks), config);
 });

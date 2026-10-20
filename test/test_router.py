@@ -247,6 +247,15 @@ def test_env_wins_over_the_config_file(tmp_path=None):
     assert router.config["weak_model"] == "local-qwen" and router.config["strong_model"] == "S"
 
 
+def test_old_local_engine_names_are_renamed(tmp_path=None):
+    import tempfile, types
+    sys.modules["stub_env_scorer"] = types.SimpleNamespace(make=lambda cfg: (lambda p: 0.0))
+    path = os.path.join(tempfile.mkdtemp(), "c.yaml")
+    open(path, "w").write("backend: custom\nscorer: stub_env_scorer:make\nstrong_model: claude-sonnet-5\nweak_model: W\n")
+    router.load_config(path)
+    assert router.config["strong_model"] == "local-engine" and router.config["weak_model"] == "W"
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"): f(); print("ok", n)

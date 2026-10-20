@@ -4,10 +4,10 @@ const http = require('node:http');
 const monitor = require('../utils/monitor');
 
 test('a routing decision records the Gateway result and fallbacks', () => {
-    const event = monitor.recordRoute({ path: '/v1/messages', model: 'claude-sonnet-5', threshold: 0.2, winRate: 0.7, tools: true, tokens: 900, prompt: 'refactor the parser' });
+    const event = monitor.recordRoute({ path: '/v1/messages', model: 'local-engine', threshold: 0.2, winRate: 0.7, tools: true, tokens: 900, prompt: 'refactor the parser' });
     monitor.recordResponse(event, 200, { 'x-litellm-attempted-fallbacks': '1', 'x-litellm-model-group': 'fallback-openrouter-tools' });
     const [latest] = monitor.recentEvents(1);
-    assert.equal(latest.model, 'claude-sonnet-5');
+    assert.equal(latest.model, 'local-engine');
     assert.equal(latest.status, 200);
     assert.equal(latest.fallbacks, 1);
     assert.equal(latest.servedBy, 'fallback-openrouter-tools');

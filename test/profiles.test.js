@@ -31,6 +31,8 @@ test('a routing is cleaned: id from its name, models required unless pinned, dup
     assert.throws(() => profiles.clean({ ...CHEAP, threshold: 2 }), /threshold/);
     assert.throws(() => profiles.clean({ ...CHEAP, overflow: 'big' }), /token limit/);
     assert.throws(() => profiles.clean({ ...CHEAP, weak: 'bad name!' }), /model name/);
+    // the local engine's old Claude-like names become its real one
+    assert.equal(profiles.clean({ ...CHEAP, strong: 'claude-sonnet-5' }).strong, 'local-engine');
 });
 
 test('a routing picks like the Router does', () => {

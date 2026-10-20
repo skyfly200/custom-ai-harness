@@ -196,7 +196,7 @@ Lines you add to `.env` decide how the server works. Leave them all out and you 
 **Which models it picks between.** Use any model name from `config.yaml` or the Routing page:
 
 ```bash
-STRONG_MODEL=or-claude-sonnet-5.5     # hard requests (default claude-sonnet-5: your local engine, then backups)
+STRONG_MODEL=or-claude-sonnet-5.5     # hard requests (default local-engine: your local engine, then backups)
 WEAK_MODEL=fast-openrouter            # easy requests
 WEAK_MODEL_TOOLS=or-gpt-6-luna        # easy requests from Claude Code and other tool-using agents
 ```
@@ -390,14 +390,18 @@ $env:OPENROUTER_API_KEY = "your_openrouter_key"
 Defines the LiteLLM model list and fallback chain. The fallback order for every strong-model request is:
 
 ```
-Tier 1 local engine → fast-openrouter (GPT-4o mini, paid) → fallback-openrouter-tools → fallback-openrouter → fallback-groq (GPT-OSS 120B)
+local-engine → fast-openrouter (GPT-4o mini, paid) → fallback-openrouter-tools (Nemotron 3.5 Super VL, free) → fallback-openrouter (Xing 4.0, free) → fallback-groq (GPT-OSS 120B)
 ```
+
+`local-engine` is your own llama.cpp or vLLM server on port 8000 (`launch-local.sh`), running whichever model you loaded. It used to be called `claude-sonnet-5` and `claude-3-5-sonnet`, though it was never a Claude model; saved routings, settings and Router configs that still use those names reach `local-engine`.
+
+The OpenRouter backups are named free models, not `openrouter/free`. That one picks a free model at random for each request, and its pool includes NVIDIA's content-safety classifier, which answers "User Safety: safe / Response Safety: ..." instead of replying. Free models come and go on OpenRouter (Llama 3.3 70B `:free` lost its last provider in October 2026), so if a backup starts failing every call, pick another in the routing page's **Add model** list with the **Free** filter.
 
 LiteLLM gives each model `request_timeout` (120 s) before it moves to the next one, and `router_settings.num_retries: 0` makes it move on at once after a rate limit instead of waiting to retry a spent quota.
 
 Deprecated Llama 3/3.1 variants are intentionally absent. Groq serves GPT-OSS 120B: its free tier gives it the same limits as the 20B (8K tokens/min, 1K requests/day), so the bigger model costs nothing extra.
 
-Each deployment sets `max_parallel_requests` (CLI wrapper 1, Groq 3, OpenRouter 5), so bursts queue in the Gateway instead of tripping provider rate limits. The cap is per entry, so the two CLI wrapper aliases add up to 2.
+Each deployment sets `max_parallel_requests` (local engine 1, Groq 3, OpenRouter 5), so bursts queue in the Gateway instead of tripping provider rate limits.
 
 ### `routellm-config.yaml`
 
@@ -625,7 +629,7 @@ The chat page can give the model tools. While it answers, the model can call the
 - `"disabled": true` keeps a server listed but not started.
 - The Interceptor connects when it starts and prints each server's state. Options → Tools lists them with their tool counts and any start-up error. Untick a server to leave its tools out of your chats. Press **Reload** after editing the file.
 
-Requests carry tools only when a chat is linked to a repo or an MCP server is ticked. Requests with tools go to a model that can call them (the Router's `weak_model_tools`, or the strong model), not to the free wildcard tier. Each round of tool calls is its own request through the Interceptor, so it is routed, logged and counted like any other. The reply's cost and token counts add up all of the rounds. **Most tool rounds per reply** (12 by default) stops a model that keeps calling tools. Tool results pass through Headroom like Claude Code's, so long results are trimmed to about 4,000 characters when Headroom is on.
+Requests carry tools only when a chat is linked to a repo or an MCP server is ticked. Requests with tools go to a model that can call them (the Router's `weak_model_tools`, or the strong model), not to the free chat model. Each round of tool calls is its own request through the Interceptor, so it is routed, logged and counted like any other. The reply's cost and token counts add up all of the rounds. **Most tool rounds per reply** (12 by default) stops a model that keeps calling tools. Tool results pass through Headroom like Claude Code's, so long results are trimmed to about 4,000 characters when Headroom is on.
 
 Tools run only for requests from this computer (`/ui/api/tools/call` refuses others), and only the chat page uses them. Claude Code connects to its own MCP servers (`claude mcp add ...`), and its tool calls pass through the harness unchanged.
 
@@ -633,7 +637,7 @@ Tools run only for requests from this computer (`/ui/api/tools/call` refuses oth
 
 <http://localhost:3000/ui/usage.html> shows how many tokens went where, for today, the last 7 or 30 days, or all time:
 
-- **Flow through the harness**: clients (Claude Code, the chat page, Aider, other API clients) into the Interceptor, how the model was picked (the Router, a pinned model, the client's choice, or the Router being down), then the Gateway and the service that answered (OpenRouter, Groq, Ollama, the local CLI wrapper...). Line widths follow the tokens.
+- **Flow through the harness**: clients (Claude Code, the chat page, Aider, other API clients) into the Interceptor, how the model was picked (the Router, a pinned model, the client's choice, or the Router being down), then the Gateway and the service that answered (OpenRouter, Groq, Ollama, the local engine...). Line widths follow the tokens.
 - **Sankey diagram**: client → model asked for → model that served it (after any Gateway fallbacks) → service, coloured by service.
 - **Costs**: spend for the range, the 30-day pace it is on, the cost per request and per million tokens, and how many requests went to free or local models. Prices come from the Gateway's price list (`/v1/model/info`) for the model that answered; models with no listed price show `?` and are left out of the totals. Cached input is counted at the full input price, so the figures can run a little high for Anthropic models.
 - **Over time**: a bar per day, split by the service that answered.
@@ -650,7 +654,7 @@ The counts are the ones each reply reports (`usage` in OpenAI replies, `input_to
 - **Compression:** the Compression box turns the Interceptor's transforms on and off for the routing shown: short replies (caveman), shrinking long tool results (Headroom) and skipping repeated tool results (context anchor).
 - **Tools:** the Tools box lists the MCP servers from `mcp-servers.json` with their status; untick one to stop Bright Chat offering it to the model in chats on that routing. **Reload servers** reconnects them.
 - **Named routings:** the **Routing** picker above the boxes switches between the default routing and named ones. **New routing** copies the routing shown under a new name; its route lines, threshold, Router-down models, compression and tools are its own, while the classifier, model boxes and fallbacks are shared by every routing. Chats and projects pick one in Bright Chat; any other client sends the header `x-harness-profile: <id>` (Claude Code: `ANTHROPIC_CUSTOM_HEADERS="x-harness-profile: cheap-and-quick"`). Named routings are saved in `routing-profiles.json` (gitignored); a request with an unknown id uses the default.
-- **Models:** **Add model** creates a new name in the Gateway with the provider model behind it (OpenRouter, Groq, Ollama, the local CLI wrapper, another OpenAI-compatible server, or any LiteLLM id). With OpenRouter picked, the dialog opens wide and lists OpenRouter's whole live model catalog as a table of context size, input and output price and what each model can do (tools, reasoning, images). Search it, filter by **Free**, **Tools**, **Reasoning**, **Images** or maker, sort by newest, cheapest, biggest context or name, and click a model to fill in its id (and a name for a new box) and see its details: description, longest reply, cached-input, image and reasoning prices, what it reads and writes, tokenizer, release date and accepted parameters, with a link to its OpenRouter page. **+ Add provider model** adds another one to an existing model, and the Gateway shares requests between them. × in a model's title removes it with its provider models and fallback lines; × next to a provider model removes just that one. **Clear unconnected models** removes, after asking, every model box that no route or fallback line touches in any routing (such as the ready-to-wire `or-*` models), with their `model_list` entries.
+- **Models:** **Add model** creates a new name in the Gateway with the provider model behind it (OpenRouter, Groq, Ollama, the local engine, another OpenAI-compatible server, or any LiteLLM id). With OpenRouter picked, the dialog opens wide and lists OpenRouter's whole live model catalog as a table of context size, input and output price and what each model can do (tools, reasoning, images). Search it, filter by **Free**, **Tools**, **Reasoning**, **Images** or maker, sort by newest, cheapest, biggest context or name, and click a model to fill in its id (and a name for a new box) and see its details: description, longest reply, cached-input, image and reasoning prices, what it reads and writes, tokenizer, release date and accepted parameters, with a link to its OpenRouter page. **+ Add provider model** adds another one to an existing model, and the Gateway shares requests between them. × in a model's title removes it with its provider models and fallback lines; × next to a provider model removes just that one. **Clear unconnected models** removes, after asking, every model box that no route or fallback line touches in any routing (such as the ready-to-wire `or-*` models), with their `model_list` entries.
 - **Live:** with **Show live requests** on, the path of each request lights up as it is routed.
 
 **Save** writes each change where its owner reads it: the Router's choices to `routellm-config.yaml` (as "Apply and save" on the Settings page does), the Interceptor's to `harness-settings.json`, named routings to `routing-profiles.json`, and models and fallback chains to `config.yaml`. In `config.yaml` it only removes or appends whole `model_list` entries and rewrites the fallback lines that changed, so comments and other settings stay; a new entry gets `model`, `api_base` and `api_key` (as `os.environ/NAME`, never a literal key), and options like `max_parallel_requests` can be added by hand afterwards. If the file changed since the page loaded, Save refuses and asks you to reload. The Router and Interceptor use their changes on the next request; **restart the Gateway** (LiteLLM) for model and fallback changes. Box positions are kept in the browser; **Tidy layout** resets them.
@@ -708,7 +712,7 @@ npm run validate:fix      # auto-correct in place
 
 ## How routing decisions are made
 
-The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the routing of the request that started them. Requests that define tools (every Claude Code request) go to the strong model or, when weak, to `weak_model_tools` (`fallback-openrouter-tools`), because the wildcard free tier may answer them with text instead of tool calls:
+The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the routing of the request that started them. Requests that define tools (every Claude Code request) go to the strong model or, when weak, to `weak_model_tools` (`fallback-openrouter-tools`), because a model without tool support answers them with text instead of tool calls:
 
 | Signal type | Examples | Threshold | Effect |
 |-------------|----------|-----------|--------|

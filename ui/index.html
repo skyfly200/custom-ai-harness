@@ -61,7 +61,7 @@ async function getJSON(url, opts) {
 const COMPONENT_HINTS = {
   'Router': 'Scores each request and picks a model (router.py, port 6060)',
   'Gateway (LiteLLM)': 'Sends each request to the provider and tries fallbacks when one fails (port 4000)',
-  'Local engine': 'Optional local CLI wrapper serving models on port 8000',
+  'Local engine': 'Optional: your llama.cpp or vLLM server on port 8000 (launch-local.sh)',
   'Ollama': 'Optional: models running on this computer',
   'Laya (local)': 'Optional: a local Laya classifier server for the Router',
 };

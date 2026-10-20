@@ -224,6 +224,8 @@ def load_config(path: str) -> None:
     if overrides:
         log.info("settings from the environment: %s", overrides)
         new_config.update(overrides)
+    for key in MODEL_KEYS & new_config.keys():
+        new_config[key] = RENAMED.get(new_config[key], new_config[key])
     # Build the scorer before swapping, so a bad file leaves the running config in place
     new_scorer = BACKENDS[new_config.get("backend", "routellm")](new_config)
     config.clear()
@@ -293,6 +295,9 @@ EDITABLE = {
     "auth_header": str, "timeout": float, "max_chars": int, "max_tokens": int,
     "laya_max_chars": int, "laya_preload": bool, "scorer": str,
 }
+# Old Gateway names for the local engine, which config.yaml once named after a
+# Claude model it never was; a config that still uses them reaches local-engine.
+RENAMED = {"claude-sonnet-5": "local-engine", "claude-3-5-sonnet": "local-engine"}
 MODEL_KEYS = {"strong_model", "weak_model", "weak_model_tools", "weak_model_overflow", "weak_model_max_tokens"}
 REQUIRED = {"strong_model", "weak_model", "backend"}
 

@@ -91,6 +91,19 @@ test('totals add up by client, model and service and are saved to the file', () 
     assert.equal(usage.summary().rows[0].input, 5);
 });
 
+test('tokens taken out by compression add up, and days keep the route and model', () => {
+    usage.clear();
+    const base = { client: 'Claude Code', route: 'Router', model: 'claude-sonnet-5', servedBy: 'fast-openrouter', usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0 } };
+    usage.record({ ...base, saved: { anchor: 300, headroom: 1200 } });
+    usage.record({ ...base, saved: { anchor: 0, headroom: 800 } });
+    usage.record(base);
+    const [row] = usage.summary(7).rows;
+    assert.deepEqual([row.requests, row.savedAnchor, row.savedHeadroom], [3, 300, 2000]);
+    const [day] = usage.summary(7).daily;
+    assert.deepEqual([day.route, day.model, day.servedBy, day.savedHeadroom], ['Router', 'claude-sonnet-5', 'fast-openrouter', 2000]);
+    usage.clear();
+});
+
 test('clients are told apart by header and user agent', () => {
     const req = (path, headers) => ({ path, headers });
     assert.equal(usage.clientOf(req('/v1/chat/completions', { 'x-harness-request-id': 'a' })), 'Chat page');

@@ -3,11 +3,10 @@
 // when it can't be reached, config.yaml still says which models are free.
 
 // Free: OpenRouter ":free" models and its free router, and anything served
-// from this machine (the local engine, Laya, Ollama)
+// from this machine (the local engine, Laya, Ollama), Docker's names for it included
 function isFree(model = '', apiBase = '') {
     return /:free\b|^openrouter\/(openrouter\/)?free$|-free\b/.test(model)
-        || /localhost|127\.0\.0\.1/.test(apiBase)
-        || /^ollama(_chat)?\//.test(model);
+        || isLocal(model, apiBase) !== false;
 }
 
 // Served from this machine: 'ollama' (its port, host name or provider) or
@@ -19,8 +18,9 @@ function isLocal(model = '', apiBase = '') {
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-// LiteLLM /v1/model/info -> { model_name: { maxInput, maxOutput, inputCost, outputCost, free } }
-// Costs are dollars per token. Several deployments of one name keep the first.
+// LiteLLM /v1/model/info -> { model_name: { maxInput, maxOutput, inputCost, outputCost,
+// cacheReadCost, cacheWriteCost, free } }. Costs are dollars per token; the cache
+// ones are null when LiteLLM doesn't list them. Several deployments of one name keep the first.
 function fromGatewayInfo(data) {
     const models = {};
     for (const d of data || []) {
@@ -36,6 +36,8 @@ function fromGatewayInfo(data) {
             maxOutput: num(info.max_output_tokens),
             inputCost: free ? 0 : inputCost,
             outputCost: free ? 0 : outputCost,
+            cacheReadCost: free ? 0 : num(info.cache_read_input_token_cost),
+            cacheWriteCost: free ? 0 : num(info.cache_creation_input_token_cost),
             free,
             // the provider model behind the name and whether it runs here,
             // so the chat page knows how long a prompt cache lasts
@@ -53,7 +55,8 @@ function fromConfig(text) {
     const finish = () => {
         if (current?.model_name && !models[current.model_name]) {
             const free = isFree(current.model, current.api_base);
-            models[current.model_name] = { maxInput: null, maxOutput: null, inputCost: free ? 0 : null, outputCost: free ? 0 : null, free,
+            models[current.model_name] = { maxInput: null, maxOutput: null, inputCost: free ? 0 : null, outputCost: free ? 0 : null,
+                cacheReadCost: free ? 0 : null, cacheWriteCost: free ? 0 : null, free,
                 upstream: current.model || null, local: isLocal(current.model, current.api_base) };
         }
     };
@@ -68,4 +71,29 @@ function fromConfig(text) {
     return models;
 }
 
-module.exports = { isFree, isLocal, fromGatewayInfo, fromConfig };
+// OpenRouter bills its models at its own prices, which LiteLLM's built-in list
+// often lacks (new models) or has out of date. Prices from OpenRouter's catalog
+// (utils/openrouterCatalog.js) replace the Gateway's for openrouter/ models.
+function withOpenrouterPrices(models, catalog) {
+    if (!catalog?.length) return models;
+    const byId = new Map(catalog.map(m => [m.id, m]));
+    const out = {};
+    for (const [name, info] of Object.entries(models)) {
+        const id = /^openrouter\//.test(info.upstream || '') ? info.upstream.replace(/^openrouter\//, '') : null;
+        const m = id && byId.get(id);
+        if (!m || info.local || (!m.free && m.inputCost == null)) { out[name] = info; continue; }
+        out[name] = {
+            ...info,
+            maxInput: info.maxInput ?? m.context,
+            inputCost: m.inputCost,
+            outputCost: m.outputCost ?? 0,
+            cacheReadCost: m.cacheReadCost,
+            cacheWriteCost: m.cacheWriteCost ?? null,
+            free: m.free || info.free,
+            priceFrom: 'openrouter',
+        };
+    }
+    return out;
+}
+
+module.exports = { isFree, isLocal, fromGatewayInfo, fromConfig, withOpenrouterPrices };

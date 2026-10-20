@@ -35,7 +35,7 @@ test.before(async () => {
     process.env.ROUTER_URL = 'http://127.0.0.1:9'; // nothing there: requests use the router-down model
     process.env.HARNESS_SETTINGS_FILE = path.join(dir, 'settings.json');
     process.env.HARNESS_USAGE_FILE = path.join(dir, 'usage.json');
-    fs.writeFileSync(process.env.HARNESS_SETTINGS_FILE, JSON.stringify({ gatewayTimeoutMs: 1000, streamIdleTimeoutMs: 1000 }));
+    fs.writeFileSync(process.env.HARNESS_SETTINGS_FILE, JSON.stringify({ gatewayTimeoutMs: 1000, streamIdleTimeoutMs: 1000, headroom: true }));
     const { app } = require('../server');
     harness = app.listen(0, '127.0.0.1');
     await new Promise((r) => harness.on('listening', r));
@@ -60,6 +60,22 @@ test('a working Gateway answers normally', async () => {
     const res = await send('/v1/chat/completions', chat);
     assert.equal(res.status, 200);
     assert.equal((await res.json()).choices[0].message.content, 'hi');
+});
+
+test('tokens Headroom takes out of tool results are counted for the Usage page', async () => {
+    mode = 'ok';
+    const big = 'line of tool output\n'.repeat(2000); // 40,000 characters; Headroom keeps 4,000
+    const res = await send('/v1/chat/completions', { messages: [
+        { role: 'user', content: 'run it' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 't1', type: 'function', function: { name: 'run', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 't1', content: big },
+    ] });
+    assert.equal(res.status, 200);
+    await res.text();
+    await new Promise((r) => setTimeout(r, 50));
+    const { rows } = await (await fetch(`${base}/ui/api/usage?days=1`)).json();
+    const saved = rows.reduce((sum, r) => sum + (r.savedHeadroom || 0), 0);
+    assert.ok(saved > 8000 && saved < 10000, `about 36,000 characters / 4, got ${saved}`);
 });
 
 test('a down Gateway gets an error, not a hang', async () => {

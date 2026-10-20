@@ -10,25 +10,16 @@ const fmt = (n) => Math.round(n).toLocaleString();
 const short = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : fmt(n);
 
 const MEASURES = { total: 'tokens', input: 'input tokens', output: 'output tokens', requests: 'requests', cost: 'cost' };
-const usd = (n) => n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : n < 100 ? `$${n.toFixed(2)}` : `$${Math.round(n).toLocaleString()}`;
+const usd = Costs.usd;
 // A value of the selected measure, written out
 const showV = (n, m = state.measure) => (m === 'cost' ? usd(n) : `${short(n)} ${MEASURES[m]}`);
 const shortV = (n, m = state.measure) => (m === 'cost' ? usd(n) : short(n));
 
-// Prices per token by Gateway model name; rows get .cost (dollars) and
-// .unpriced (requests on models with no known price)
+// Prices per token by Gateway model name (ui/costs.js prices the rows: .cost
+// in dollars with cached input at the cache price, .unpriced requests on
+// models with no known price)
 let prices = {};
-function price(rows) {
-  for (const r of rows) {
-    const p = prices[r.servedBy];
-    if (p?.free) { r.cost = 0; r.unpriced = 0; r.freeRequests = r.requests; continue; }
-    r.freeRequests = 0;
-    if (!p || p.inputCost == null) { r.cost = 0; r.unpriced = r.requests; continue; }
-    r.cost = r.input * p.inputCost + r.output * (p.outputCost || 0);
-    r.unpriced = 0;
-  }
-  return rows;
-}
+const price = (rows) => Costs.priceRows(rows, prices);
 const state = { days: 7, measure: 'total', data: { rows: [] } };
 try { Object.assign(state, JSON.parse(localStorage.getItem('usage-view') || '{}')); } catch {}
 
@@ -82,7 +73,7 @@ function text(parent, x, y, str, attrs = {}) {
   return t;
 }
 const fit = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const SUMS = ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated', 'cost', 'unpriced', 'freeRequests'];
+const SUMS = ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated', 'cost', 'listCost', 'unpriced', 'freeRequests', 'savedAnchor', 'savedHeadroom'];
 const blank = () => Object.fromEntries(SUMS.map(k => [k, 0]));
 function add(t, r) {
   for (const k of SUMS) t[k] += r[k] || 0;
@@ -123,7 +114,7 @@ function renderTiles(rows, daily) {
   const perDay = t.cost / Math.max(1, countedDays(daily));
   const tile = (label, v, sub = '', cls = '') => `<div class="card stat${cls}"><div class="label">${label}</div><div class="num">${v}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
   $('tiles').innerHTML = [
-    tile('Spend', usd(t.cost), t.unpriced ? `+ ${fmt(t.unpriced)} request${t.unpriced === 1 ? '' : 's'} with no known price` : 'from the Gateway’s prices', ' money'),
+    tile('Spend', usd(t.cost), t.unpriced ? `+ ${fmt(t.unpriced)} request${t.unpriced === 1 ? '' : 's'} with no known price` : 'cached input at cache prices', ' money'),
     tile('Per 30 days', usd(perDay * 30), `at ${usd(perDay)} a day`, ' money'),
     tile('Per request', priced ? usd(t.cost / priced) : '–', priced ? `over ${fmt(priced)} priced` : '', ' money'),
     tile('Per million tokens', t.input + t.output ? usd(t.cost / (t.input + t.output) * 1e6) : '–', 'input and output', ' money'),
@@ -328,6 +319,128 @@ function renderSankey(rows, colors) {
   });
 }
 
+// ---- savings ------------------------------------------------------------------
+// What the same requests would have cost sent straight to Claude Sonnet 5.5,
+// and how much each part of the stack took off (ui/costs.js does the sums)
+const LAYER_COLORS = { compression: 'var(--s3)', router: 'var(--s1)', pinned: 'var(--s7)', down: 'var(--s4)', fallback: 'var(--s2)', caching: 'var(--s5)' };
+const pct = (part, whole) => (whole > 0 ? `${Math.round(100 * part / whole)}%` : '–');
+
+function layerTokens(l) {
+  if (!l.tokens) return '–';
+  if (l.id === 'compression') return `${short(l.tokens)} trimmed`;
+  if (l.id === 'caching') return `${short(l.tokens)} cached`;
+  return `${short(l.tokens)} on free models`;
+}
+
+function renderSavings(rows, daily) {
+  const s = Costs.savings(rows);
+  const shown = s.layers.filter(l => l.saved || l.requests);
+  const leftOut = s.unpriced ? ` ${fmt(s.unpriced)} request${s.unpriced === 1 ? '' : 's'} on models with no known price are left out.` : '';
+  const fig = (label, v, sub = '', cls = '') => `<div class="fig${cls}"><div class="label">${label}</div><div class="num">${v}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+  $('saveHead').innerHTML = s.requests ? [
+    fig(`${Costs.SONNET.name} directly`, usd(s.baseline), 'same requests, no compression or caching'),
+    fig('Through the harness', usd(s.actual), `${fmt(s.requests)} priced request${s.requests === 1 ? '' : 's'}`),
+    fig(s.saved >= 0 ? 'Saved' : 'Cost extra', usd(Math.abs(s.saved)), `${pct(Math.abs(s.saved), s.baseline)} of the Sonnet price`, ' money'),
+  ].join('') : '';
+  $('saveLegend').innerHTML = shown.map(l => `<span><i class="sw" style="background:${LAYER_COLORS[l.id]}"></i>${esc(l.label)}</span>`).join('');
+  renderWaterfall(s, shown);
+  renderSaveTime(daily, shown);
+  $('saveRows').innerHTML = shown.length ? shown.map(l => `<tr>
+      <td><i class="sw" style="background:${LAYER_COLORS[l.id]};margin-right:6px"></i>${esc(l.label)}</td><td class="muted">${esc(l.what)}</td>
+      <td class="num r">${l.requests ? fmt(l.requests) : '–'}</td><td class="num r">${layerTokens(l)}</td>
+      <td class="num r">${l.saved < 0 ? `<span class="warn">${usd(l.saved)}</span>` : usd(l.saved)}</td><td class="num r">${s.saved > 0 && l.saved > 0 ? pct(l.saved, s.saved) : '–'}</td></tr>`).join('')
+    : '<tr><td colspan="6" class="muted">No priced requests in this range yet.</td></tr>';
+  const cached = s.requests ? ` Counting Sonnet’s own prompt caching on the same cache hits, Sonnet would have cost ${usd(s.baselineCached)}, so the harness ${s.savedCached >= 0 ? 'saved' : 'cost'} ${usd(Math.abs(s.savedCached))} (${pct(Math.abs(s.savedCached), s.baselineCached)}).` : '';
+  const trimmed = s.trimmed ? ` Compression took out about ${short(s.trimmed)} input tokens (${short(s.headroom)} by Headroom, ${short(s.anchor)} by the context anchor).` : '';
+  $('saveNote').textContent = `Sonnet 5.5 at $2 per million input tokens and $10 per million output, on the same token counts.${cached}${trimmed} Model layers save the difference between Sonnet’s price and the answering model’s; negative means that model cost more than Sonnet would have. Caveman’s shorter replies aren’t measured.${leftOut}`;
+}
+
+// Bars from the Sonnet price down to what was paid, a step per layer
+function renderWaterfall(s, shown) {
+  const svg = $('waterfall');
+  if (!s.requests) return emptyChart(svg, 'No priced requests in this range yet.');
+  svg.replaceChildren();
+  const steps = [{ label: `${Costs.SONNET.name} directly`, from: 0, to: s.baseline, total: true }];
+  let run = s.baseline;
+  for (const l of shown) { steps.push({ label: l.label, from: run - l.saved, to: run, layer: l }); run -= l.saved; }
+  steps.push({ label: 'Through the harness', from: 0, to: s.actual, total: true });
+  const W = 1120, L = 200, R = 110, ROW = 30, T = 6;
+  const H = T + steps.length * ROW + 4;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const max = Math.max(...steps.map(st => Math.max(st.from, st.to)), 1e-12);
+  const x = (v) => L + (Math.max(0, v) / max) * (W - L - R);
+  steps.forEach((st, i) => {
+    const y = T + i * ROW, lo = Math.min(st.from, st.to), hi = Math.max(st.from, st.to);
+    const g = el('g', {}, svg);
+    text(g, L - 10, y + ROW / 2 + 4, fit(st.label, 28), { 'text-anchor': 'end', ...(st.total ? { 'font-weight': 600 } : {}) });
+    el('rect', { x: x(lo), y: y + 5, width: Math.max(1.5, x(hi) - x(lo)), height: ROW - 10, rx: 3,
+      fill: st.total ? 'var(--node)' : LAYER_COLORS[st.layer.id], 'fill-opacity': st.layer?.saved < 0 ? 0.45 : 1 }, g);
+    if (i < steps.length - 1) { // the running total carries on to the next bar
+      const at = x(st.total ? st.to : st.from);
+      el('line', { x1: at, x2: at, y1: y + ROW - 5, y2: y + ROW + 5, class: 'grid' }, svg);
+    }
+    const value = st.total ? usd(st.to) : `${st.layer.saved >= 0 ? '−' : '+'}${usd(Math.abs(st.layer.saved))}`;
+    text(g, x(hi) + 8, y + ROW / 2 + 4, value, { class: st.total ? '' : 'muted' });
+    hoverable(g, () => st.total ? `<b>${esc(st.label)}</b><br>${usd(st.to)}`
+      : `<b>${esc(st.label)}</b><br>${st.layer.saved >= 0 ? 'Saved' : 'Cost extra'} ${usd(Math.abs(st.layer.saved))}${s.saved > 0 && st.layer.saved > 0 ? ` · ${pct(st.layer.saved, s.saved)} of savings` : ''}<br><span class="muted">${esc(st.layer.what)}${st.layer.tokens ? ` · ${layerTokens(st.layer)}` : ''}</span>`);
+  });
+}
+
+// Savings adding up day by day, a band per layer, with the net total as a line
+function renderSaveTime(daily, shown) {
+  const svg = $('saveTime');
+  if (!daily.length || !shown.length) return emptyChart(svg, 'Savings over time show up once there are priced requests.');
+  svg.replaceChildren();
+  const last = new Date().toISOString().slice(0, 10);
+  const n = rangeDays(daily);
+  const days = [];
+  for (let i = n - 1; i >= 0; i--) days.push(new Date(Date.parse(last) - i * 86400000).toISOString().slice(0, 10));
+  const ids = shown.map(l => l.id);
+  const sums = Object.fromEntries(ids.map(id => [id, 0]));
+  let net = 0;
+  const points = days.map(d => {
+    const s = Costs.savings(daily.filter(r => r.day === d));
+    for (const l of s.layers) if (l.id in sums) sums[l.id] += l.saved;
+    net += s.saved;
+    return { day: d, layers: { ...sums }, net };
+  });
+  const top = (p) => ids.reduce((sum, id) => sum + Math.max(0, p.layers[id]), 0);
+  const max = Math.max(...points.map(p => Math.max(top(p), p.net)), 1e-12);
+  const W = 1120, H = 220, L = 64, B = 26, T = 12;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const step = days.length > 1 ? (W - L - 12) / (days.length - 1) : 0;
+  const xOf = (i) => (days.length > 1 ? L + i * step : L + (W - L - 12) / 2);
+  const y = (v) => H - B - (Math.max(0, v) / max) * (H - B - T);
+  for (let k = 0; k <= 4; k++) {
+    const v = (max * k) / 4;
+    el('line', { x1: L, x2: W - 4, y1: y(v), y2: y(v), class: 'grid' }, svg);
+    text(svg, L - 8, y(v) + 4, usd(v), { 'text-anchor': 'end', class: 'muted' });
+  }
+  // bands stacked bottom up in layer order; a layer that cost extra adds nothing
+  const base = points.map(() => 0);
+  for (const id of ids) {
+    const lower = [...base];
+    points.forEach((p, i) => { base[i] += Math.max(0, p.layers[id]); });
+    if (base.every((v, i) => v === lower[i])) continue;
+    const upper = points.map((_, i) => `${xOf(i)},${y(base[i])}`);
+    const back = points.map((_, i) => `${xOf(i)},${y(lower[i])}`).reverse();
+    const d = days.length > 1 ? `M${upper.join(' L')} L${back.join(' L')} Z`
+      : `M${xOf(0) - 20},${y(base[0])} L${xOf(0) + 20},${y(base[0])} L${xOf(0) + 20},${y(lower[0])} L${xOf(0) - 20},${y(lower[0])} Z`;
+    el('path', { d, fill: LAYER_COLORS[id], 'fill-opacity': 0.55, stroke: LAYER_COLORS[id], 'stroke-width': 1 }, svg);
+  }
+  if (days.length > 1) el('path', { d: `M${points.map((p, i) => `${xOf(i)},${y(p.net)}`).join(' L')}`, fill: 'none', stroke: 'var(--text)', 'stroke-width': 1.5, 'stroke-dasharray': '4 3' }, svg);
+  const every = Math.ceil(days.length / 12);
+  const labels = Object.fromEntries(shown.map(l => [l.id, l.label]));
+  points.forEach((p, i) => {
+    if (i % every === 0 || i === days.length - 1) {
+      text(svg, xOf(i), H - 8, new Date(p.day + 'T12:00').toLocaleDateString(undefined, n <= 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' }), { 'text-anchor': 'middle', class: 'muted' });
+    }
+    const w = days.length > 1 ? step : 60;
+    const hit = el('rect', { x: xOf(i) - w / 2, y: T, width: w, height: H - B - T, fill: 'transparent' }, svg);
+    hoverable(hit, () => `<b>By ${new Date(p.day + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</b><br>Saved ${usd(p.net)} in all<br><span class="muted">${ids.filter(id => p.layers[id]).map(id => `${esc(labels[id])} ${usd(p.layers[id])}`).join(' · ') || 'nothing yet'}</span>`);
+  });
+}
+
 // ---- bars and table ---------------------------------------------------------
 function renderBars(target, rows, key, colors) {
   const groups = [...groupBy(rows, key)].sort((a, b) => valueOf(b[1]) - valueOf(a[1]));
@@ -351,13 +464,15 @@ function renderBars(target, rows, key, colors) {
 }
 
 function renderTable(rows) {
-  if (!rows.length) { $('rows').innerHTML = '<tr><td colspan="10" class="muted">No requests in this range yet.</td></tr>'; return; }
+  if (!rows.length) { $('rows').innerHTML = '<tr><td colspan="10" class="muted">No requests in this range yet.</td></tr>'; $('rowsTotal').innerHTML = ''; return; }
   const approx = (r) => (r.estimated ? '~' : '');
   $('rows').innerHTML = [...rows].sort((a, b) => valueOf(b) - valueOf(a)).map(r => `<tr>
     <td>${esc(r.client)}</td><td>${esc(r.route)}</td><td><code>${esc(r.model)}</code></td>
     <td><code>${esc(r.servedBy)}</code>${r.servedBy !== r.model ? ' <span class="tag warn">fallback</span>' : ''}</td><td>${esc(r.provider)}</td>
     <td class="num r">${fmt(r.requests)}</td><td class="num r">${approx(r)}${fmt(r.input)}</td><td class="num r">${fmt(r.cacheRead)}</td><td class="num r">${approx(r)}${fmt(r.output)}</td>
     <td class="num r">${r.unpriced ? '<span class="muted" title="No price for this model in the Gateway’s list">?</span>' : r.freeRequests ? '<span class="free">free</span>' : `${approx(r) || '≈ '}${usd(r.cost)}`}</td></tr>`).join('');
+  const t = rows.reduce(add, blank());
+  $('rowsTotal').innerHTML = `<tr><td colspan="5">Total</td><td class="num r">${fmt(t.requests)}</td><td class="num r">${fmt(t.input)}</td><td class="num r">${fmt(t.cacheRead)}</td><td class="num r">${fmt(t.output)}</td><td class="num r">${usd(t.cost)}${t.unpriced ? ' <span class="muted">+ ?</span>' : ''}</td></tr>`;
 }
 
 function render() {
@@ -368,6 +483,7 @@ function render() {
   for (const b of $('measure').querySelectorAll('button')) b.classList.toggle('on', b.dataset.m === state.measure);
   for (const l of document.querySelectorAll('.legend.io')) l.style.display = state.measure === 'requests' || state.measure === 'cost' ? 'none' : '';
   renderTiles(rows, daily);
+  renderSavings(rows, daily);
   renderTimeline(daily, colors);
   $('timeLegend').innerHTML = [...new Set(daily.map(r => r.provider))].sort()
     .map(p => `<span><i class="sw" style="background:${colors[p]}"></i>${esc(p)}</span>`).join('');

@@ -226,7 +226,7 @@ function routeOf(event) {
  * input comes from the request size and output from the reply text (about 4
  * characters a token), and the row is marked estimated.
  */
-function record({ time = new Date(), client, route, model, servedBy, usage, estimate }) {
+function record({ time = new Date(), client, route, model, servedBy, usage, estimate, saved }) {
     const counts = usage || {
         input: estimate?.input ?? 0,
         output: Math.ceil((estimate?.outputChars ?? 0) / 4),
@@ -245,6 +245,9 @@ function record({ time = new Date(), client, route, model, servedBy, usage, esti
     const key = [row.day, row.client, row.route, row.model, row.servedBy, row.provider].join('|');
     const t = data.rows[key] || (data.rows[key] = { ...row, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
     t.requests++;
+    // Input tokens the Interceptor's compression took out before sending
+    if (saved?.anchor) t.savedAnchor = (t.savedAnchor || 0) + saved.anchor;
+    if (saved?.headroom) t.savedHeadroom = (t.savedHeadroom || 0) + saved.headroom;
     t.input += counts.input;
     t.output += counts.output;
     t.cacheRead += counts.cacheRead;
@@ -255,12 +258,12 @@ function record({ time = new Date(), client, route, model, servedBy, usage, esti
     return { ...row, ...counts, estimated: !usage };
 }
 
-const COUNTS = ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated'];
+const COUNTS = ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated', 'savedAnchor', 'savedHeadroom'];
 
 /**
  * Totals over the last `days` days (0 or missing for all time), one row per
  * client + route + model + servedBy + provider, plus `daily`: one row per
- * day + servedBy + provider, for charts over time and costs per day.
+ * day + route + model + servedBy + provider, for charts, costs and savings per day.
  */
 function summary(days = 0) {
     const from = days > 0 ? new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10) : '';
@@ -269,9 +272,9 @@ function summary(days = 0) {
     for (const r of Object.values(data.rows)) {
         if (r.day < from) continue;
         const key = [r.client, r.route, r.model, r.servedBy, r.provider].join('|');
-        const t = rows[key] || (rows[key] = { client: r.client, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
-        const dayKey = [r.day, r.servedBy, r.provider].join('|');
-        const d = daily[dayKey] || (daily[dayKey] = { day: r.day, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
+        const t = rows[key] || (rows[key] = { client: r.client, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0, savedAnchor: 0, savedHeadroom: 0 });
+        const dayKey = [r.day, r.route, r.model, r.servedBy, r.provider].join('|');
+        const d = daily[dayKey] || (daily[dayKey] = { day: r.day, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0, savedAnchor: 0, savedHeadroom: 0 });
         for (const k of COUNTS) { t[k] += r[k] || 0; d[k] += r[k] || 0; }
     }
     return {

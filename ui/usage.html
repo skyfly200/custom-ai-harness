@@ -30,6 +30,22 @@
 
   <div class="grid" id="tiles"></div>
 
+  <h2 data-hint="What the same requests would have cost sent straight to Claude Sonnet 5.5, and how much each part of the harness took off">Savings vs Claude Sonnet 5.5</h2>
+  <div class="card chart-card savings">
+    <div class="save-head" id="saveHead"></div>
+    <div class="chart-scroll"><svg id="waterfall" class="chart" role="img" aria-label="Cost with Sonnet 5.5, minus each part of the harness, down to the actual cost"></svg></div>
+    <h3>Adding up over time</h3>
+    <div class="legend" id="saveLegend"></div>
+    <div class="chart-scroll"><svg id="saveTime" class="chart" role="img" aria-label="Savings adding up per day, by part of the harness"></svg></div>
+    <div class="table-wrap">
+      <table class="save-table">
+        <thead><tr><th>Part</th><th>What it does</th><th class="r">Requests</th><th class="r" data-hint="Compression: input tokens it took out. Model parts: tokens answered by free or local models. Caching: input read from the provider's cache">Tokens</th><th class="r" data-hint="What this part took off the Sonnet 5.5 price">Saved</th><th class="r">Share</th></tr></thead>
+        <tbody id="saveRows"></tbody>
+      </table>
+    </div>
+    <div class="sub muted" id="saveNote"></div>
+  </div>
+
   <h2>Over time</h2>
   <div class="card chart-card">
     <div class="legend" id="timeLegend"></div>
@@ -64,14 +80,16 @@
   <h2>Table</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th data-hint="The program that sent the requests">Client</th><th data-hint="How the model was picked: Router, pinned, client's choice or Router down">Route</th><th data-hint="The model the Router or client picked">Asked for</th><th data-hint="The model that answered, after any fallbacks">Served by</th><th data-hint="Who ran the model: OpenRouter, Groq, Ollama…">Service</th><th class="r">Requests</th><th class="r">Input</th><th class="r" data-hint="Input the provider read from its cache, usually cheaper">Cached input</th><th class="r">Output</th><th class="r" data-hint="Tokens times the Gateway's price for the model that answered. Cached input is counted at the full input price, so this can run a little high">Cost</th></tr></thead>
+      <thead><tr><th data-hint="The program that sent the requests">Client</th><th data-hint="How the model was picked: Router, pinned, client's choice or Router down">Route</th><th data-hint="The model the Router or client picked">Asked for</th><th data-hint="The model that answered, after any fallbacks">Served by</th><th data-hint="Who ran the model: OpenRouter, Groq, Ollama…">Service</th><th class="r">Requests</th><th class="r">Input</th><th class="r" data-hint="Input the provider read from its cache, usually cheaper">Cached input</th><th class="r">Output</th><th class="r" data-hint="Tokens times the price of the model that answered, with cached input at the provider's cache price">Cost</th></tr></thead>
       <tbody id="rows"><tr><td colspan="10" class="muted">No requests yet.</td></tr></tbody>
+      <tfoot id="rowsTotal"></tfoot>
     </table>
   </div>
-  <div class="sub muted" style="margin-top:8px">Counts come from the usage each reply reports. Values marked ~ are estimates (about 4 characters a token) for replies that had none, such as OpenAI streams without <code>stream_options.include_usage</code>. Costs are worked out from the Gateway's price list (LiteLLM's <code>/v1/model/info</code>) for the model that answered; free and local models cost nothing, and models with no listed price show ?. Totals are kept in <code>harness-usage.json</code> across restarts.</div>
+  <div class="sub muted" style="margin-top:8px">Counts come from the usage each reply reports. Values marked ~ are estimates (about 4 characters a token) for replies that had none, such as OpenAI streams without <code>stream_options.include_usage</code>. Costs are worked out for the model that answered from OpenRouter's own prices for OpenRouter models, else the Gateway's price list (LiteLLM's <code>/v1/model/info</code>), with cached input at the provider's cache price (a tenth of the input price for Claude when the list doesn't say). Free and local models cost nothing, and models with no listed price show ?. Totals are kept in <code>harness-usage.json</code> across restarts.</div>
 </main>
 <div id="tip" class="tip" hidden></div>
 <script src="hints.js"></script>
+<script src="costs.js"></script>
 <script src="usage.js"></script>
 <script src="bright.js"></script>
 </body>

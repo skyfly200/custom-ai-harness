@@ -83,7 +83,7 @@ async function getJSON(url, opts) {
   return body;
 }
 const postJSON = (url, body) => getJSON(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-function note(text, cls) { $('msg').textContent = text; $('msg').className = 'note ' + (cls || ''); }
+function note(text, cls) { $('msg').textContent = text; $('msg').className = 'note ' + (cls || ''); delete $('msg').dataset.auto; }
 const clone = (g) => JSON.parse(JSON.stringify(g));
 
 // ---- the graph -------------------------------------------------------------
@@ -168,25 +168,27 @@ const fallbacksChanged = () => JSON.stringify(chains(graph.fallbacks)) !== JSON.
 const gatewayChanged = () => { const c = deploymentChanges(); return !!(c.remove.length || c.add.length) || fallbacksChanged(); };
 const dirty = () => !!graph && (Object.keys(routerChanges()).length || Object.keys(interceptorChanges()).length || gatewayChanged() || profilesChanged());
 
+// What has to be fixed before saving: { text, routing, node, port }. `node` and
+// `port` say where it shows on the canvas when that routing is the one shown.
 function problems() {
   const out = [];
-  // The routing on screen first, so its problems are the ones shown
+  // The routing on screen first, so its problems are the ones listed first
   for (const r of [R(), ...routings().filter(x => x !== R())]) {
     const where = r === R() ? '' : ` (in ${routingName(r)})`;
-    for (const o of ENTRY_OUTS) if (o.required && !r[o.key]) out.push(`Connect “${o.label}” to a model${where}.`);
+    const add = (node, port, text) => out.push({ text: text.replace(/\.$/, `${where}.`), routing: r, node, port });
+    for (const o of ENTRY_OUTS) if (o.required && !r[o.key]) add('entry', `entry.${o.key}`, `Connect “${o.label}” to a model.`);
     // A profile's Router outputs are its own; the default's live in the Router
     if (r === graph ? routerUp() : !r.pin) {
-      for (const o of ROUTER_OUTS) if (o.required && !r[o.key]) out.push(`Connect the Router's “${o.label}” output to a model${where}.`);
+      for (const o of ROUTER_OUTS) if (o.required && !r[o.key]) add('router', `router.${o.key}`, `Connect the Router's “${o.label}” output to a model.`);
     }
-    if (r.overflow && !(Number.isInteger(r.maxTokens) && r.maxTokens > 0)) out.push(`Set the token limit for “Weak, over”${where}.`);
-    if (r.threshold !== null && !(r.threshold >= 0 && r.threshold <= 1)) out.push(`The threshold must be from 0 to 1${where}.`);
+    if (r.overflow && !(Number.isInteger(r.maxTokens) && r.maxTokens > 0)) add('router', 'router.overflow', 'Set the token limit for “Weak, over”.');
+    if (r.threshold !== null && !(r.threshold >= 0 && r.threshold <= 1)) add('router', null, 'The threshold must be from 0 to 1.');
   }
   if (gatewayEditable()) {
-    for (const [src, targets] of Object.entries(graph.fallbacks)) {
-      for (const name of [src, ...targets]) if (!served(name)) out.push(`“${name}” has fallback lines but no provider model: add one, or remove its box.`);
-    }
+    const names = new Set(Object.entries(graph.fallbacks).flatMap(([src, targets]) => [src, ...targets]));
+    for (const name of names) if (!served(name)) out.push({ text: `“${name}” has fallback lines but no provider model: add one, or remove its box.`, routing: null, node: `m:${name}`, port: null });
   }
-  return [...new Set(out)];
+  return out;
 }
 
 function connect(port, model) {
@@ -214,14 +216,10 @@ function removeWire(id) {
   changed();
 }
 
+// Called once × in the title has been held down; Discard changes brings it back
 function removeModel(name) {
   const uses = routings().flatMap(r => [...ENTRY_OUTS, ...ROUTER_OUTS].filter(o => r[o.key] === name)
     .map(o => `“${o.label}”${r === graph ? '' : ` in ${r.name}`}`));
-  const count = graph.deployments.filter(d => d.name === name).length;
-  const ask = `Remove ${name}?` + (count ? ` Its ${count === 1 ? 'provider model' : `${count} provider models`} and fallback lines go with it.` : '')
-    + (uses.length ? `\n\nIt is used for ${uses.join(', ')}. Connect ${uses.length === 1 ? 'that' : 'those'} to another model before saving.` : '')
-    + '\n\nNothing changes in the files until you press Save.';
-  if (!confirm(ask)) return;
   graph.deployments = graph.deployments.filter(d => d.name !== name);
   delete graph.fallbacks[name];
   for (const [src, targets] of Object.entries(graph.fallbacks)) {
@@ -231,26 +229,61 @@ function removeModel(name) {
   for (const r of routings()) for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (r[o.key] === name) r[o.key] = null;
   selected = null;
   changed();
+  note(`Removed ${name}.${uses.length ? ` Connect ${uses.join(', ')} to another model before saving.` : ''} Discard changes brings it back.`, uses.length ? 'err' : '');
 }
 
-// Models no route (in any routing) or fallback line touches
+// Press and hold: × on a model box removes it only once held for HOLD_MS
+const HOLD_MS = 800;
+let hold = null;
+function startHold(b) {
+  cancelHold();
+  b.style.setProperty('--hold', `${HOLD_MS}ms`);
+  b.classList.add('holding');
+  hold = { b, timer: setTimeout(() => { const name = b.dataset.name; hold = null; removeModel(name); }, HOLD_MS) };
+}
+function cancelHold() {
+  if (!hold) return;
+  clearTimeout(hold.timer);
+  hold.b.classList.remove('holding');
+  hold = null;
+}
+
+// Models a request can get to: a route in any routing points at it, or a
+// fallback line comes to it from a model that can be got to
+function reachable() {
+  const seen = new Set();
+  const todo = routings().flatMap(r => [...ENTRY_OUTS, ...ROUTER_OUTS].map(o => r[o.key]).filter(Boolean));
+  while (todo.length) {
+    const m = todo.pop();
+    if (seen.has(m)) continue;
+    seen.add(m);
+    todo.push(...(graph.fallbacks[m] || []));
+  }
+  return seen;
+}
+
+// Models no request can get to, with or without lines of their own. Unknown
+// while the Router is down, since its outputs can't be read.
 function unconnected() {
-  const used = new Set();
-  for (const r of routings()) for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (r[o.key]) used.add(r[o.key]);
-  for (const [src, targets] of Object.entries(graph.fallbacks)) { used.add(src); targets.forEach(t => used.add(t)); }
-  return models().filter(m => !used.has(m));
+  if (!routerUp()) return [];
+  const reach = reachable();
+  return models().filter(m => !reach.has(m));
 }
 
 function clearUnconnected() {
   const names = unconnected();
   if (!names.length) return;
   const count = graph.deployments.filter(d => names.includes(d.name)).length;
-  if (!confirm(`Remove ${names.length} unconnected model${names.length === 1 ? '' : 's'}${count ? ` and ${count === 1 ? 'its provider model' : `their ${count} provider models`}` : ''}?\n\n${names.join('\n')}\n\nNothing changes in config.yaml until you press Save.`)) return;
+  if (!confirm(`Remove ${names.length} model${names.length === 1 ? '' : 's'} no route reaches${count ? `, with ${count === 1 ? 'its provider model' : `their ${count} provider models`} and fallback lines` : ''}?\n\n${names.join('\n')}\n\nNothing changes in config.yaml until you press Save.`)) return;
   graph.deployments = graph.deployments.filter(d => !names.includes(d.name));
+  for (const [src, targets] of Object.entries(graph.fallbacks)) {
+    const kept = names.includes(src) ? [] : targets.filter(t => !names.includes(t));
+    if (kept.length) graph.fallbacks[src] = kept; else delete graph.fallbacks[src];
+  }
   for (const n of names) delete positions[`m:${n}`];
   selected = null;
   changed();
-  note(`Removed ${names.length} unconnected model${names.length === 1 ? '' : 's'}. Press Save to write config.yaml, then restart the Gateway.`);
+  note(`Removed ${names.length} model${names.length === 1 ? '' : 's'} no route reaches. Press Save to write config.yaml, then restart the Gateway.`);
 }
 
 function removeDeployment(key) {
@@ -271,8 +304,60 @@ function updateButtons() {
   const spare = gatewayEditable() ? unconnected().length : 0;
   $('clearUnused').disabled = !spare;
   $('clearUnused').textContent = spare ? `Clear unconnected models (${spare})` : 'Clear unconnected models';
-  if (d) note(problems()[0] || 'Unsaved changes.', problems().length ? 'err' : '');
+  const issues = problems();
+  markProblems(issues);
+  if (!$('toast').hidden && $('toast').dataset.kind === 'problems') showToast(issues);
+  // The note follows the edits; once they are all undone it goes too
+  if (d) {
+    note(issues.length ? `Unsaved changes, ${issues.length} to fix before saving.` : 'Unsaved changes.', issues.length ? 'err' : '');
+    $('msg').dataset.auto = '1';
+  } else if ($('msg').dataset.auto) note('');
 }
+
+// Red outlines, and the problems written in the box, for the routing shown
+function markProblems(issues) {
+  const world = $('world');
+  for (const el of world.querySelectorAll('.node.bad, .out.bad')) el.classList.remove('bad');
+  const had = world.querySelectorAll('.node .errs').length;
+  for (const el of world.querySelectorAll('.node .errs')) el.remove();
+  const byNode = new Map();
+  for (const p of issues) {
+    if (!p.node || (p.routing && p.routing !== R())) continue;
+    byNode.set(p.node, [...(byNode.get(p.node) || []), p]);
+  }
+  for (const [id, list] of byNode) {
+    const n = world.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+    if (!n) continue;
+    n.classList.add('bad');
+    n.querySelector('.head').insertAdjacentHTML('afterend', `<ul class="errs">${list.map(p => `<li>${esc(p.text)}</li>`).join('')}</ul>`);
+    for (const p of list) if (p.port) n.querySelector(`.port[data-port="${CSS.escape(p.port)}"]`)?.closest('.out')?.classList.add('bad');
+  }
+  if (byNode.size || had) placeNodes();
+  const bad = new Set(issues.map(p => p.routing).filter(Boolean));
+  for (const opt of $('profileSel').options) {
+    const r = opt.value ? graph.profiles.find(p => p.id === opt.value) : graph;
+    if (r) opt.textContent = routingLabel(r, bad.has(r));
+  }
+  drawWires();
+}
+
+// The toast that lists what stops a save; a problem in another routing gets a button to show it
+function showToast(issues, title = 'Can’t save yet') {
+  const t = $('toast');
+  if (!issues.length) { t.hidden = true; return; }
+  t.dataset.kind = issues[0].routing === undefined ? 'error' : 'problems';
+  t.querySelector('.toast-title').textContent = title;
+  t.querySelector('ul').innerHTML = issues.map(p => {
+    const other = p.routing && p.routing !== R();
+    return `<li>${esc(p.text)}${other ? ` <button data-routing="${esc(p.routing === graph ? '' : p.routing.id)}">Show</button>` : ''}</li>`;
+  }).join('');
+  t.hidden = false;
+}
+$('toast').addEventListener('click', (e) => {
+  if (e.target.closest('.toast-close')) { $('toast').hidden = true; return; }
+  const b = e.target.closest('button[data-routing]');
+  if (b) showRouting(b.dataset.routing);
+});
 
 // ---- drawing -----------------------------------------------------------------
 
@@ -304,7 +389,7 @@ const KIND_HINTS = {
 };
 
 function nodeHTML(id, cls, title, kind, body, outs, hasIn, extra = '') {
-  return `<div class="node ${cls}" data-id="${esc(id)}"${cls === 'model' ? ` data-model="${esc(title)}"` : ''}>
+  return `<div class="node ${cls}" data-id="${esc(id)}"${cls.split(' ')[0] === 'model' ? ` data-model="${esc(title)}"` : ''}>
     ${hasIn ? '<span class="port in-port"></span>' : ''}
     <div class="head" data-hint="${esc(KIND_HINTS[kind] || '')}"><span class="name">${esc(title)}</span><span class="kind">${esc(kind)}</span>${extra}</div>
     <div class="body">${body}</div>${outs ? `<div class="outs">${outs}</div>` : ''}</div>`;
@@ -370,7 +455,7 @@ function deploymentRow(d, only) {
   const id = d.model || '(no model id)';
   const where = [d.model, d.api_base && `at ${d.api_base}`, d.api_key && `key: ${d.api_key}`].filter(Boolean).join('\n');
   const remove = gatewayEditable()
-    ? `<button data-act="undeploy" data-key="${esc(d.key)}" data-hint="${only ? 'The last provider model can’t be removed on its own: remove the whole box with × in its title' : `Stop sending ${esc(d.name)} requests to this model`}"${only ? ' disabled' : ''}>×</button>`
+    ? `<button data-act="undeploy" data-key="${esc(d.key)}" data-hint="${only ? 'The last provider model can’t be removed on its own: hold × in the box title to remove the whole box' : `Stop sending ${esc(d.name)} requests to this model`}"${only ? ' disabled' : ''}>×</button>`
     : '';
   return `<li${d.id === undefined ? ' class="new"' : ''}><span class="tag" data-hint="${esc(where)}">${esc(providerOf(d))}</span>
     <span class="name" data-hint="${esc(where)}">${esc(id.replace(/^(openrouter|groq|openai)\//, ''))}</span>${remove}</li>`;
@@ -395,8 +480,10 @@ function modelNode(name) {
     : '';
   const outs = `<div class="out"><span class="label"><b>If it fails</b>${chain.length ? ', try in order' : ' · no fallbacks'}</span>
     <span class="port out-port fallback${editable ? '' : ' fixed'}" data-port="fail:${esc(name)}" data-hint="Drag to another model to try it when ${esc(name)} fails"></span></div>`;
-  const close = editable ? `<button class="close" data-act="unmodel" data-name="${esc(name)}" data-hint="Remove ${esc(name)} from the Gateway, with its provider models and fallback lines">×</button>` : '';
-  return nodeHTML(`m:${name}`, 'model', name, 'Model', servedBy + list, outs, true, close);
+  const close = editable ? `<button class="close hold" data-act="unmodel" data-name="${esc(name)}" aria-label="Remove ${esc(name)} (press and hold)" data-hint="Press and hold to remove ${esc(name)} from the Gateway, with its provider models and fallback lines">×</button>` : '';
+  const lost = routerUp() && !reachable().has(name);
+  const why = lost ? '<div class="unreach" data-hint="No route in any routing leads here, directly or through fallbacks. Clear unconnected models removes it">No route reaches it.</div>' : '';
+  return nodeHTML(`m:${name}`, lost ? 'model unreached' : 'model', name, 'Model', why + servedBy + list, outs, true, close);
 }
 
 function render() {
@@ -431,16 +518,160 @@ function placeNodes() {
     positions[id] = { x: columns[col], y: next[col] };
     next[col] += n.offsetHeight + 24;
   }
+  // A box that grew (an error written in it, a longer fallback list) moves the
+  // boxes it would cover down while it is that size; their saved spots stay
   let w = 0, h = 0;
-  for (const n of nodes) {
+  const shown = [];
+  for (const n of [...nodes].sort((a, b) => positions[a.dataset.id].y - positions[b.dataset.id].y)) {
     const p = positions[n.dataset.id];
+    const nw = n.offsetWidth, nh = n.offsetHeight;
+    let top = p.y;
+    for (let moved = true; moved;) {
+      moved = false;
+      for (const q of shown) {
+        if (p.x < q.x + q.w && q.x < p.x + nw && top < q.y + q.h + 8 && q.y < top + nh) { top = q.y + q.h + 12; moved = true; }
+      }
+    }
+    shown.push({ x: p.x, y: top, w: nw, h: nh });
     n.style.left = p.x + 'px';
-    n.style.top = p.y + 'px';
-    w = Math.max(w, p.x + n.offsetWidth);
-    h = Math.max(h, p.y + n.offsetHeight);
+    n.style.top = top + 'px';
+    w = Math.max(w, p.x + nw);
+    h = Math.max(h, top + nh);
   }
   $('world').style.width = w + 200 + 'px';
   $('world').style.height = h + 200 + 'px';
+}
+
+// Tidy layout: columns that follow the lines of the routing shown, left to
+// right. The Interceptor, Compression, Router and Tools boxes make the first
+// column and every model a route goes to makes the second, so no route line
+// passes a column. A model only fallbacks lead to sits one column right of the
+// furthest box with a fallback line to it (loops are cut where they turn back). A line that skips a column
+// keeps a gap open in each column it passes, and every column is ordered and
+// spaced so its boxes sit level with the lines coming in, which keeps lines
+// from crossing each other or running behind boxes.
+function tidy() {
+  const GAP = 24, SKIP = 30, LEFT = 30, TOP = 30, SPACE = 120;
+  const world = $('world');
+  const box = (id) => world.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+  const r = R();
+
+  // Lines: from an output dot (and the box it is on) to a model
+  const lines = [];
+  for (const o of ENTRY_OUTS) if (r[o.key]) lines.push({ port: `entry.${o.key}`, from: 'entry', to: r[o.key] });
+  for (const o of ROUTER_OUTS) if (r[o.key]) lines.push({ port: `router.${o.key}`, from: 'router', to: r[o.key] });
+  for (const [src, targets] of Object.entries(graph.fallbacks)) for (const t of targets) lines.push({ port: `fail:${src}`, from: src, to: t });
+
+  // Fallback lines that close a loop are left out of the columns
+  const all = models();
+  const routed = [...new Set(lines.filter(l => l.from === 'entry' || l.from === 'router').map(l => l.to))];
+  const state = {}; const order = []; const back = new Set();
+  const visit = (m) => {
+    state[m] = 'open';
+    for (const t of graph.fallbacks[m] || []) {
+      if (state[t] === 'open') back.add(`${m}|${t}`);
+      else if (!state[t]) visit(t);
+    }
+    state[m] = 'done';
+    order.unshift(m);
+  };
+  for (const m of [...routed, ...all]) if (!state[m]) visit(m);
+  // Models nothing on this routing leads to go in columns of their own on the right
+  const reach = new Set(); const todo = [...routed];
+  while (todo.length) { const m = todo.pop(); if (!reach.has(m)) { reach.add(m); todo.push(...(graph.fallbacks[m] || [])); } }
+  const column = Object.fromEntries(all.map(m => [m, 1]));
+  const direct = new Set(routed);
+  const spread = (group) => {
+    for (const m of order) if (group.has(m)) for (const t of graph.fallbacks[m] || []) {
+      if (group.has(t) && !direct.has(t) && !back.has(`${m}|${t}`)) column[t] = Math.max(column[t], column[m] + 1);
+    }
+  };
+  spread(reach);
+  const last = Math.max(1, ...[...reach].map(m => column[m]));
+  const rest = new Set(all.filter(m => !reach.has(m)));
+  for (const m of rest) column[m] = last + 1;
+  spread(rest);
+
+  // First column, top to bottom, then what is known about each box's dots
+  positions = {};
+  let y = TOP;
+  for (const id of ['entry', 'compress', 'router', 'tools']) { positions[id] = { x: LEFT, y }; y += (box(id)?.offsetHeight || 0) + GAP; }
+  const offset = (el, n) => { const a = el.getBoundingClientRect(), b = n.getBoundingClientRect(); return a.top - b.top + a.height / 2; };
+  const portY = {};   // output dot -> y below its box's top
+  const inY = {};     // model box -> y of its input dot below its top
+  for (const n of world.querySelectorAll('.node')) {
+    for (const p of n.querySelectorAll('.out-port')) portY[p.dataset.port] = offset(p, n);
+    const i = n.querySelector('.in-port');
+    if (i) inY[n.dataset.id] = offset(i, n);
+  }
+
+  // Each column holds its boxes and a gap for every line passing through it
+  const cols = [];
+  const item = (c, it) => { (cols[c] ||= []).push(it); return it; };
+  const items = Object.fromEntries(all.map(m => [m, item(column[m], { id: `m:${m}`, h: box(`m:${m}`)?.offsetHeight || 60, w: box(`m:${m}`)?.offsetWidth || 270, ins: [] })]));
+  for (const l of lines) {
+    const startCol = l.from === 'entry' || l.from === 'router' ? 0 : column[l.from];
+    // Only lines going right place boxes; ones turning back are drawn but don't pull
+    if (column[l.to] <= startCol) continue;
+    // Where the line leaves: a dot in the first column, or a dot on a model box placed earlier
+    let source = l.from === 'entry' || l.from === 'router'
+      ? { y: () => positions[l.from].y + portY[l.port] }
+      : { y: () => positions[`m:${l.from}`].y + portY[l.port] };
+    for (let c = startCol + 1; c < column[l.to]; c++) {
+      const gap = item(c, { id: null, h: SKIP, w: 0, ins: [source] });
+      source = { y: () => gap.y + SKIP / 2 };
+    }
+    items[l.to].ins.push(source);
+  }
+
+  // Place column by column: in the order of the lines coming in, each box as
+  // close to level with them as the boxes above it allow
+  let x = LEFT + Math.max(...['entry', 'compress', 'router', 'tools'].map(id => box(id)?.offsetWidth || 270)) + SPACE;
+  for (let c = 1; c < cols.length; c++) {
+    const col = cols[c] || [];
+    col.forEach((it, i) => {
+      it.at = i;
+      it.from = it.ins.map(s => s.y());
+      it.want = it.from.length ? it.from.reduce((sum, y) => sum + y, 0) / it.from.length : Infinity;
+    });
+    col.sort((a, b) => a.want - b.want || a.at - b.at);
+    leastCrossings(col);
+    let next = TOP;
+    for (const it of col) {
+      const dot = it.id ? (inY[it.id] ?? 19) : SKIP / 2;
+      it.y = Math.max(next, Number.isFinite(it.want) ? it.want - dot : next);
+      if (it.id) positions[it.id] = { x, y: Math.round(it.y) };
+      next = it.y + it.h + (it.id ? GAP : 6);
+    }
+    if (col.length) x += Math.max(0, ...col.map(it => it.w)) + SPACE;
+  }
+  placeNodes();
+  drawWires();
+}
+
+// Reorders a column, in place, so the fewest lines coming into it cross: every
+// order is tried for a short column (the level order wins a tie), longer ones
+// keep the level order. Two lines cross when their boxes are in the opposite
+// order to the dots they leave from.
+function leastCrossings(col) {
+  const n = col.length;
+  if (n < 2 || n > 7) return;
+  const pair = col.map(a => col.map(b => a === b ? 0 : a.from.reduce((sum, ya) => sum + b.from.filter(yb => yb < ya).length, 0)));
+  // pair[i][j]: crossings when i is above j
+  let best = null, bestCost = Infinity;
+  const idx = col.map((_, i) => i);
+  const cost = (order) => { let c = 0; for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) c += pair[order[i]][order[j]]; return c; };
+  const walk = (k) => {
+    if (k === n) { const c = cost(idx); if (c < bestCost) { bestCost = c; best = [...idx]; } return; }
+    for (let i = k; i < n; i++) {
+      [idx[k], idx[i]] = [idx[i], idx[k]];
+      walk(k + 1);
+      [idx[k], idx[i]] = [idx[i], idx[k]];
+    }
+  };
+  walk(0);
+  const items = best.map(i => col[i]);
+  col.splice(0, n, ...items);
 }
 
 function wireList() {
@@ -515,13 +746,18 @@ $('world').addEventListener('pointerdown', (e) => {
     drawWires();
     return;
   }
+  const holdBtn = e.target.closest('button.hold');
+  if (holdBtn && e.button === 0) {
+    e.preventDefault();
+    startHold(holdBtn);
+    return;
+  }
   const head = e.target.closest('.head');
   if (head && !e.target.closest('button')) {
     e.preventDefault();
     const node = head.parentElement;
     head.setPointerCapture(e.pointerId);
-    const p = positions[node.dataset.id];
-    drag = { kind: 'move', node, start: worldPoint(e), from: { ...p } };
+    drag = { kind: 'move', node, start: worldPoint(e), from: { x: node.offsetLeft, y: node.offsetTop } };
     return;
   }
   const hit = e.target.closest('[data-wire]');
@@ -563,11 +799,23 @@ function endDrag(e) {
 }
 $('world').addEventListener('pointerup', endDrag);
 $('world').addEventListener('pointercancel', endDrag);
+// Letting go, or sliding off ×, before the time is up keeps the model
+document.addEventListener('pointerup', cancelHold);
+document.addEventListener('pointercancel', cancelHold);
+$('world').addEventListener('pointerout', (e) => { if (hold && e.target.closest('button.hold') === hold.b) cancelHold(); });
+// The same with the keyboard: hold Enter or Space on a focused ×
+$('world').addEventListener('keydown', (e) => {
+  const b = e.target.closest?.('button.hold');
+  if (!b || (e.key !== 'Enter' && e.key !== ' ')) return;
+  e.preventDefault();
+  if (!e.repeat) startHold(b);
+});
+$('world').addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') cancelHold(); });
 
 $('world').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-act]');
   if (!b) return;
-  if (b.dataset.act === 'unmodel') return removeModel(b.dataset.name);
+  if (b.dataset.act === 'unmodel') return;
   if (b.dataset.act === 'undeploy') return removeDeployment(b.dataset.key);
   if (b.dataset.act === 'adddep') return openAdd(b.dataset.name);
   if (b.dataset.act === 'reloadtools') return reloadTools();
@@ -622,9 +870,8 @@ $('remove').addEventListener('click', () => removeWire(selected));
 $('clearUnused').addEventListener('click', clearUnconnected);
 
 $('tidy').addEventListener('click', () => {
-  positions = {};
-  try { localStorage.removeItem(LAYOUT_KEY); } catch {}
-  render();
+  tidy();
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(positions)); } catch {}
 });
 
 $('discard').addEventListener('click', () => {
@@ -638,7 +885,13 @@ $('discard').addEventListener('click', () => {
 
 $('save').addEventListener('click', async () => {
   const issues = problems();
-  if (issues.length) return note(issues[0], 'err');
+  if (issues.length) {
+    showToast(issues);
+    const first = $('world').querySelector('.node.bad');
+    first?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    return;
+  }
+  $('toast').hidden = true;
   $('save').disabled = $('discard').disabled = true;
   const done = [];
   let restart = false;
@@ -678,6 +931,7 @@ $('save').addEventListener('click', async () => {
     saved = graphFrom(info); // keep whatever did save, and the edits that didn't
     graph.profiles = editing;
     note(`${done.length ? `Saved ${done.join(', ')}, but ` : ''}${err.message}`, 'err');
+    showToast([{ text: $('msg').textContent }], 'Couldn’t save');
   }
   const message = $('msg').textContent, cls = $('msg').className;
   updateButtons();
@@ -690,11 +944,12 @@ window.addEventListener('resize', () => graph && drawWires());
 // ---- named routings -----------------------------------------------------------
 
 const VIEW_KEY = 'harness-routing-view';
+const routingLabel = (r, bad) => (r === graph ? 'Default routing' : r.name + (saved.profiles.some(x => x.id === r.id) ? '' : ' (new)')) + (bad ? ' · needs fixing' : '');
 
 function drawProfiles() {
   const sel = $('profileSel');
-  sel.innerHTML = `<option value="">Default routing</option>`
-    + graph.profiles.map(p => `<option value="${esc(p.id)}"${p.id === view ? ' selected' : ''}>${esc(p.name)}${saved.profiles.some(x => x.id === p.id) ? '' : ' (new)'}</option>`).join('');
+  sel.innerHTML = `<option value="">${esc(routingLabel(graph))}</option>`
+    + graph.profiles.map(p => `<option value="${esc(p.id)}"${p.id === view ? ' selected' : ''}>${esc(routingLabel(p))}</option>`).join('');
   sel.value = view;
   $('profileRename').disabled = $('profileDelete').disabled = !view;
   const p = view && R();
@@ -1010,8 +1265,11 @@ async function load() {
   ].filter(Boolean);
   $('updated').textContent = `Loaded ${new Date().toLocaleTimeString()}`;
   $('addModel').disabled = !gatewayEditable();
+  // A first visit gets the tidy layout; after that boxes stay where they were put
+  const fresh = !Object.keys(positions).length;
   render();
   updateButtons();
+  if (fresh) tidy();
   note(issues.join(' '), issues.length ? 'err' : '');
 }
 

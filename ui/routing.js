@@ -328,6 +328,52 @@ function clearUnconnected() {
   note(`Removed ${names.length} model${names.length === 1 ? '' : 's'} no route reaches. Press Save to write config.yaml, then restart the Gateway.`);
 }
 
+// ---- auto-route -----------------------------------------------------------------
+
+let autoPlan = null; // what the dialog is previewing: { r, plan }
+
+function autoPreview() {
+  const r = R();
+  const served = [...new Set(graph.deployments.map(d => d.name))];
+  const plan = AutoRoute.autoRoute(served, stats.models, r, graph.fallbacks);
+  if (!plan) {
+    note('Nothing to place: no model has a quality rating yet. Press Edit on a model box to type one, or add ARTIFICIAL_ANALYSIS_API_KEY to .env.', 'err');
+    return;
+  }
+  const after = Object.fromEntries(ROUTE_FIELDS.map(f => [f, r[f]]));
+  Object.assign(after, plan.routes, { tiers: plan.tiers });
+  const was = new Map(routeOuts(r).map(o => [o.port, o.model]));
+  const now = routeOuts(after);
+  const gone = routeOuts(r).filter(o => o.model && !now.some(x => x.port === o.port));
+  autoPlan = { r, plan };
+  $('autoFor').textContent = `for ${routingName(r)}`;
+  const line = (label, a, b) => `<tr class="${a === b ? 'same' : ''}"><td>${esc(label)}</td><td>${a ? esc(a) : '—'}</td><td>${b ? esc(b) : '—'}</td></tr>`;
+  const fb = Object.entries(plan.fallbacks);
+  $('autoBody').innerHTML = `<table><thead><tr><th>Output</th><th>Now</th><th>After</th></tr></thead><tbody>
+      ${now.filter(o => o.model || was.get(o.port)).map(o => line(o.label, was.get(o.port) ?? null, o.model)).join('')}
+      ${gone.map(o => line(o.label, o.model, null)).join('')}</tbody></table>
+    ${fb.length ? `<p class="small"><b>New fallbacks</b> (models that had none):</p><ul>${fb.map(([m, t]) => `<li>${esc(m)} → ${esc(t.join(', '))}</li>`).join('')}</ul>` : ''}
+    ${plan.skipped.length ? `<p class="small"><b>Left alone, no quality rating:</b> ${plan.skipped.map(esc).join(', ')}. Press Edit on ${plan.skipped.length === 1 ? 'its box' : 'their boxes'} to rate ${plan.skipped.length === 1 ? 'it' : 'them'}, then run Auto-route again.</p>` : ''}
+    ${plan.notes.map(n => `<p class="small muted">${esc(n)}</p>`).join('')}`;
+  $('autoDialog').showModal();
+}
+
+function autoApply() {
+  const { r, plan } = autoPlan;
+  Object.assign(r, plan.routes);
+  r.tiers = clone(plan.tiers);
+  for (const [m, t] of Object.entries(plan.fallbacks)) graph.fallbacks[m] = t;
+  $('autoDialog').close();
+  const n = routeOuts(r).filter(o => o.model).length;
+  tidy();
+  changed();
+  note(`Auto-routed ${routingName(r)}: ${n} outputs connected. Press Save to keep it, or Discard changes to undo.`, 'ok');
+}
+$('autoRoute').addEventListener('click', autoPreview);
+$('autoApply').addEventListener('click', autoApply);
+$('autoCancel').addEventListener('click', () => $('autoDialog').close());
+$('autoClose').addEventListener('click', () => $('autoDialog').close());
+
 function removeDeployment(key) {
   graph.deployments = graph.deployments.filter(d => d.key !== key);
   changed();

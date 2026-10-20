@@ -14,6 +14,11 @@
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" },
       "disabled": true
+    },
+    "jev-files": {
+      "command": "node",
+      "args": ["scripts/jev-files-mcp.js"],
+      "disabled": true
     }
   }
 }

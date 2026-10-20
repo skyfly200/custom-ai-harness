@@ -44,6 +44,16 @@
       <tbody id="events"><tr><td colspan="6" class="muted">No requests yet.</td></tr></tbody>
     </table>
   </div>
+
+  <h2 data-hint="Shell commands and file writes agents asked about before running them (POST /v1/guard; the Claude Code hook is .claude/hooks/guard.js)">Command guard</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Time</th><th data-hint="Allow: it runs. Ask: the agent has to ask you first. Deny: blocked">Decision</th><th data-hint="A rule in guard-rules.json, or Jev's confidence that it is risky">Why</th><th>Command or file</th>
+      </tr></thead>
+      <tbody id="guard"><tr><td colspan="4" class="muted">No checks yet. Add the hook in .claude/hooks/guard.js to Claude Code (see the README).</td></tr></tbody>
+    </table>
+  </div>
 </main>
 
 <script src="hints.js"></script>
@@ -218,6 +228,15 @@ function renderUsage({ rows = [] }) {
     + `<a class="more" href="usage.html">${models.length > 5 ? `${models.length - 5} more models · ` : ''}Full usage, costs and savings →</a>`;
 }
 
+function renderGuard(g) {
+  if (!g?.log?.length) return;
+  const cls = { deny: 'bad', ask: 'warn', allow: 'ok' };
+  $('guard').innerHTML = g.log.map(e => `<tr><td class="muted">${new Date(e.time).toLocaleTimeString()}</td>
+    <td><span class="tag ${cls[e.decision] || ''}">${esc(e.decision)}</span></td>
+    <td>${esc(e.reason)}${e.rule ? ` <span class="sub">rule ${esc(e.rule)}</span>` : ''}</td>
+    <td><code>${esc((e.text || '').slice(0, 160))}</code>${e.tool ? ` <span class="sub">${esc(e.tool)}</span>` : ''}</td></tr>`).join('');
+}
+
 // ---- loop ------------------------------------------------------------------
 
 async function refresh() {
@@ -226,6 +245,7 @@ async function refresh() {
     renderComponents(status.components);
     renderStats(status.stats);
     renderEvents(events);
+    renderGuard(await getJSON('api/guard?limit=20').catch(() => null));
     $('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('updated').textContent = `Interceptor unreachable: ${err.message}`;

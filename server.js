@@ -361,8 +361,13 @@ async function getModelInfo() {
 // pages count what OpenRouter actually bills
 app.get('/ui/api/model-info', async (req, res) => {
     const info = await getModelInfo();
-    const catalog = await getOpenrouterCatalog({ waitMs: 4000 });
-    res.json({ ...info, models: modelInfo.withOpenrouterPrices(info.models, catalog) });
+    const catalog = await getOpenrouterCatalog({ waitMs: 10000 });
+    res.json({
+        ...info,
+        models: modelInfo.withOpenrouterPrices(info.models, catalog),
+        // whether OpenRouter's prices are in, so the pages can say why a price is missing
+        openrouter: catalog ? { ok: true, at: new Date(openrouterCache.at).toISOString() } : { ok: false, error: openrouterError || 'not loaded yet' },
+    });
 });
 
 // Read-aloud for the chat page through an OpenAI-compatible speech endpoint
@@ -370,7 +375,7 @@ app.get('/ui/api/model-info', async (req, res) => {
 // OpenRouter's speech models; TTS_URL points it at Kokoro-FastAPI, OpenAI, or
 // the Gateway instead. The chat page picks the model and voice; TTS_MODEL and
 // TTS_VOICE are only the defaults.
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
+const OPENROUTER_URL = (process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
 const TTS_URL = (process.env.TTS_URL || (process.env.OPENROUTER_API_KEY ? OPENROUTER_URL : '')).replace(/\/+$/, '');
 const TTS_OPENROUTER = /openrouter\.ai/.test(TTS_URL);
 const TTS_MODEL = process.env.TTS_MODEL || (TTS_OPENROUTER ? 'fish-audio/s2.1-pro-free:free' : 'kokoro');
@@ -438,15 +443,20 @@ async function fetchOpenrouterCatalog(timeoutMs = 10000) {
 }
 
 // The catalog for prices: the hour's copy, else a fresh one. A failed fetch
-// isn't retried for 10 minutes, so pages don't wait on an unreachable OpenRouter.
+// isn't retried for a minute, so pages don't keep waiting on an unreachable OpenRouter.
 let openrouterFailedAt = 0;
+let openrouterError = '';
 async function getOpenrouterCatalog({ waitMs }) {
     if (openrouterCache.models && Date.now() - openrouterCache.at < 60 * 60 * 1000) return openrouterCache.models;
-    if (Date.now() - openrouterFailedAt < 10 * 60 * 1000) return openrouterCache.models;
+    if (Date.now() - openrouterFailedAt < 60 * 1000) return openrouterCache.models;
     try {
-        return await fetchOpenrouterCatalog(waitMs);
-    } catch {
+        const models = await fetchOpenrouterCatalog(waitMs);
+        openrouterError = '';
+        return models;
+    } catch (err) {
         openrouterFailedAt = Date.now();
+        openrouterError = err.message;
+        console.warn(`Couldn't load OpenRouter's prices: ${err.message}`);
         return openrouterCache.models;
     }
 }

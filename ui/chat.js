@@ -359,6 +359,7 @@ function openChat(id) {
   if (chat && chat.id !== id) saveDraft();
   chat = (id && loadChat(id)) || newChatObject();
   if (!id && scope) chat.project = scope; // a new chat starts in the project being shown
+  if (!id && !chat.project) { try { applyQuick(chat, localStorage.getItem(NEW_ROUTE_KEY)); } catch {} }
   cache.set(chat.id, chat);
   unseen.delete(chat.id);
   $('title').value = chat.title;
@@ -367,7 +368,7 @@ function openChat(id) {
   $('notes').value = chat.notes || '';
   $('input').value = chat.draft || '';
   pending = chat.pendingAttachments || [];
-  drawChips(); autoGrow(); drawContextSize(); drawRepo(); drawRoute(); drawTools();
+  drawChips(); autoGrow(); drawContextSize(); drawRepo(); drawRoute(); drawTools(); drawEffort();
   drawList();
   drawProjectBits();
   drawLog();
@@ -423,15 +424,58 @@ const SUGGESTIONS = [
   'What is the difference between a model and a router?',
   'Give me three names for a cosy café',
 ];
+const suggestionPicks = new Map(); // chat id -> its three suggestions, so a redraw doesn't reshuffle them
 function emptyState() {
   const p = projectOf(chat);
-  const picks = [...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 3);
+  if (!suggestionPicks.has(chat.id)) suggestionPicks.set(chat.id, [...SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, 3));
+  const picks = suggestionPicks.get(chat.id);
   return `<div class="empty"><div class="orb" aria-hidden="true"><i></i><i></i><i></i></div>
     <h2>${p ? `New chat in ${esc(p.name)}` : 'What shall we explore?'}</h2>
-    <p>Messages go through the harness like any other client, so the Router picks the model unless you name one in Options. Each reply shows, live, where it went and why.</p>
+    <p>Messages go through the harness like any other client, so a routing picks the model unless you choose one below. Each reply shows, live, where it went and why.</p>
+    ${quickPicker()}
     <div class="suggest">${picks.map(t => `<button type="button" class="chip-btn" data-suggest="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <p class="small">Attach files with the paperclip or by dropping them here, dictate with the mic, and type <kbd>/</kbd> for skills and tools.</p></div>`;
 }
+
+// Quick pick on a new chat: a routing, or one model directly. Outside projects
+// the last pick is remembered for the next new chat.
+const NEW_ROUTE_KEY = 'harness-new-chat-route';
+let gatewayModels = [];  // GET api/models
+let quickStats = {};     // GET api/model-stats: quality and price per model, for the picker's labels
+function quickValue(c) {
+  const own = c.route && c.route !== 'project' ? c.route : (projectOf(c) ? 'project' : 'default');
+  return own === 'model' ? (c.model ? `m:${c.model}` : 'default') : own;
+}
+function quickStat(m) {
+  const s = quickStats[m];
+  if (!s) return '';
+  const price = s.blended === null || s.blended === undefined ? null : s.blended === 0 ? 'free' : `$${s.blended < 0.1 ? +s.blended.toPrecision(2) : +s.blended.toFixed(2)}/M`;
+  const bits = [s.quality !== null && s.quality !== undefined && `quality ${Math.round(s.quality)}`, price].filter(Boolean);
+  return bits.length ? ` · ${bits.join(' · ')}` : '';
+}
+function quickNote(c) {
+  const r = routeOf(c);
+  if (r.model) return 'Every message goes to this one model. Change it any time in Options.';
+  const tiers = (r.profile ? r.profile.tiers : routings.tiers) || [];
+  return `The Router scores each message and picks ${tiers.length ? `one of ${tiers.length + 2} tiers` : 'a strong or a weak model'}. The Effort button by Send leans it cheaper or better.`;
+}
+function quickPicker() {
+  const p = projectOf(chat);
+  const v = quickValue(chat);
+  const opt = (val, label) => `<option value="${esc(val)}"${val === v ? ' selected' : ''}>${esc(label)}</option>`;
+  const models = [...new Set([...gatewayModels, ...(v.startsWith('m:') ? [v.slice(2)] : [])])];
+  const missing = v.startsWith('p:') && !routings.profiles.some(x => `p:${x.id}` === v);
+  return `<div class="quick-pick"><label>Answer with <select id="quickRoute" aria-label="Routing or model for this chat">
+      <optgroup label="Routings">${p ? opt('project', `Same as the project (${routeLabel(routeOf({ project: chat.project }))})`) : ''}${opt('default', 'Default routing')}${routings.profiles.map(x => opt(`p:${x.id}`, x.name)).join('')}${missing ? opt(v, `${v.slice(2)} (deleted)`) : ''}</optgroup>
+      ${models.length ? `<optgroup label="One model directly">${models.map(m => opt(`m:${m}`, m + quickStat(m))).join('')}</optgroup>` : ''}
+    </select></label><small id="quickNote">${esc(quickNote(chat))}</small></div>`;
+}
+function applyQuick(c, v) {
+  if (!v) return;
+  if (v.startsWith('m:')) { c.route = 'model'; c.model = v.slice(2); } else if (v === 'project') delete c.route; else c.route = v;
+}
+// A routing list or model list that arrives late redraws an empty chat's picker
+const redrawQuick = () => { if (chat && !chat.messages.length && $('quickRoute')) drawLog(); };
 
 // Something to read while the model gets going; turns over every few seconds
 const THINKING = ['Wandering the latent space…', 'Herding tokens…', 'Consulting the embeddings…', 'Asking the router nicely…',
@@ -459,7 +503,8 @@ function routeWhy(r) {
   const on = r.profile && !String(r.reason || '').includes(r.profile) ? ` (routing: ${r.profile})` : '';
   if (r.reason) return r.reason + on;
   if (r.routerError) return 'Router down' + on;
-  return r.winRate != null ? `win rate ${r.winRate} vs threshold ${r.threshold}${on}` : on.trim();
+  const effort = r.effort ? `, effort ${r.effort > 0 ? '+' : ''}${r.effort}` : '';
+  return r.winRate != null ? `${r.tier ? `${r.tier} tier: ` : ''}win rate ${r.winRate} vs threshold ${r.threshold}${effort}${on}` : on.trim();
 }
 
 function traceHtml(m) {
@@ -473,7 +518,7 @@ function traceHtml(m) {
   step('ok', 'Sent to the Interceptor', '');
   if (tr.routed) {
     const r = tr.routed;
-    const why = r.reason || (r.routerError ? `Router down (${esc(r.routerError)}), used the fallback` : r.winRate != null ? `strong win rate ${r.winRate} vs threshold ${r.threshold}` : '');
+    const why = r.reason || (r.routerError ? `Router down (${esc(r.routerError)}), used the fallback` : r.winRate != null ? `${r.tier ? `${r.tier} tier, ` : ''}strong win rate ${r.winRate} vs threshold ${r.threshold}${r.effort ? `, effort ${r.effort > 0 ? '+' : ''}${r.effort}` : ''}` : '');
     step('ok', `Routed to <code>${esc(r.model)}</code>${why ? ` · ${esc(why)}` : ''}${r.transforms?.length ? ` · ${esc(r.transforms.join(', '))}` : ''}`, fmtMs(r.routeMs));
   } else if (live) {
     step('now', 'Router is choosing a model…', fmtMs(now - tr.start));
@@ -736,6 +781,16 @@ setInterval(() => {
   for (const { reply } of running.values()) if (chat.messages.includes(reply)) redraw(reply);
   if (running.size) drawLiveStatus();
 }, 250);
+
+$('log').addEventListener('change', (e) => {
+  if (e.target.id !== 'quickRoute') return;
+  const v = e.target.value;
+  applyQuick(chat, v);
+  if (!chat.project) { try { localStorage.setItem(NEW_ROUTE_KEY, v); } catch {} }
+  saveChat(chat, { touch: false });
+  $('quickNote').textContent = quickNote(chat);
+  drawRoute(); drawTools(); drawHint(); drawStats(); drawEffort();
+});
 
 $('log').addEventListener('click', async (e) => {
   const sug = e.target.closest('[data-suggest]');
@@ -1872,7 +1927,7 @@ function onLive(update) {
   const reply = event.clientId && waiting.get(event.clientId);
   if (reply) {
     const tr = reply.trace;
-    if (type === 'route') tr.routed = { model: event.model, profile: event.profile, reason: event.reason, winRate: event.winRate, threshold: event.threshold, routerError: event.routerError, transforms: event.transforms, routeMs: event.routeMs };
+    if (type === 'route') tr.routed = { model: event.model, profile: event.profile, reason: event.reason, winRate: event.winRate, threshold: event.threshold, routerError: event.routerError, transforms: event.transforms, routeMs: event.routeMs, tier: event.tier, effort: event.effort };
     if (type === 'response') tr.answered = { status: event.status, ms: event.ms, servedBy: event.servedBy, fallbacks: event.fallbacks };
     if (type === 'error' && !tr.answered) tr.error = `Gateway: ${event.error}`;
     redraw(reply);
@@ -2022,7 +2077,7 @@ $('projectBadge').addEventListener('click', () => projectOf(chat) && openProject
 $('chatProject').addEventListener('change', () => {
   chat.project = $('chatProject').value || undefined;
   saveChat(chat, { touch: false });
-  drawList(); drawProjectBits(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit();
+  drawList(); drawProjectBits(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit(); drawEffort();
 });
 
 // ---------------------------------------------------------------------------
@@ -2033,8 +2088,8 @@ let routings = { profiles: [], mcpOff: [] }; // GET api/profiles, plus the defau
 
 async function loadRoutings() {
   const [p, st] = await Promise.allSettled([fetch('api/profiles').then(r => r.json()), fetch('api/settings').then(r => r.json())]);
-  routings = { profiles: p.value?.profiles || [], mcpOff: st.value?.settings?.mcpOff || [] };
-  drawRoute(); drawTools(); drawHint();
+  routings = { profiles: p.value?.profiles || [], mcpOff: st.value?.settings?.mcpOff || [], tiers: st.value?.settings?.tiers || [] };
+  drawRoute(); drawTools(); drawHint(); drawEffort(); redrawQuick();
 }
 
 // Where a chat's messages go: { model } straight to one model, { profile } a
@@ -2054,9 +2109,41 @@ function routeOf(c) {
 function routeHeaders(c) {
   const r = routeOf(c);
   if (r.model) return { 'x-harness-model': r.model };
-  if (r.profile) return { 'x-harness-profile': r.profile.id };
-  return {};
+  const effort = c?.effort && c.effort !== 'auto' ? { 'x-harness-effort': c.effort } : {};
+  if (r.profile) return { 'x-harness-profile': r.profile.id, ...effort };
+  return effort;
 }
+
+// Effort per chat: moves the Router's score, so the routing reaches for
+// cheaper or better tiers (utils/tiers.js). Sent as x-harness-effort.
+const EFFORTS = [
+  { id: 'min', name: 'Cheapest', note: 'Every message goes to the routing’s cheapest model (Weak).' },
+  { id: 'low', name: 'Lower', note: 'Leans cheaper: only clearly hard messages reach the better tiers.' },
+  { id: 'auto', name: 'Auto', note: 'The Router decides from how hard each message looks.' },
+  { id: 'high', name: 'Higher', note: 'Leans better: middling messages move up a tier.' },
+  { id: 'max', name: 'Best', note: 'Every message goes to the routing’s top tier.' },
+];
+function drawEffort() {
+  if (!chat) return;
+  const i = Math.max(0, EFFORTS.findIndex(e => e.id === (chat.effort || 'auto')));
+  const e = EFFORTS[i];
+  const direct = !!routeOf(chat).model;
+  $('effort').value = String(i);
+  $('effortName').textContent = e.name;
+  $('effortNote').textContent = direct ? 'This chat goes to one model directly, so effort has no effect. Pick a routing in Options to use it.' : e.note;
+  $('effortBtn').textContent = direct ? 'Direct' : e.name;
+  $('effortBtn').classList.toggle('on', !direct && e.id !== 'auto');
+}
+$('effortBtn').addEventListener('click', (e) => { e.stopPropagation(); drawEffort(); $('effortPop').hidden = !$('effortPop').hidden; });
+$('effort').addEventListener('input', () => {
+  chat.effort = EFFORTS[Number($('effort').value)].id;
+  if (chat.effort === 'auto') delete chat.effort;
+  saveChat(chat, { touch: false });
+  drawEffort();
+});
+document.addEventListener('click', (e) => {
+  if (!$('effortPop').hidden && !e.target.closest('#effortPop, #effortBtn')) $('effortPop').hidden = true;
+});
 
 // MCP servers the chat's routing doesn't offer (a direct model gets the default's choice)
 const routingMcpOff = (c) => routeOf(c).profile?.mcpOff || routings.mcpOff || [];
@@ -2098,7 +2185,7 @@ $('routeSel').addEventListener('change', () => {
   if (v === 'project') delete chat.route; else chat.route = v;
   if (v === 'model' && !chat.model) chat.model = replyModel([...chat.messages].reverse().find(m => m.role === 'assistant')) || '';
   saveChat(chat, { touch: false });
-  drawRoute(); drawTools(); drawHint(); drawStats();
+  drawRoute(); drawTools(); drawHint(); drawStats(); drawEffort();
   if (v === 'model') $('model').focus();
 });
 $('model').addEventListener('change', () => {
@@ -2200,7 +2287,7 @@ $('projectForm').addEventListener('submit', async (e) => {
     setScope(p.id);
     if (!chat.messages.length) { chat.project = p.id; drawProjectBits(); } else openChat(null);
   }
-  drawSide(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit();
+  drawSide(); drawRepo(); drawRoute(); drawTools(); drawHint(); drawKit(); drawEffort();
 });
 $('pDelete').addEventListener('click', () => {
   const p = editingProject;
@@ -2675,7 +2762,10 @@ window.addEventListener('beforeunload', saveDraft);
 // ---------------------------------------------------------------------------
 fetch('api/models').then(r => r.json()).then(({ models }) => {
   $('models').innerHTML = models.map(m => `<option value="${esc(m)}">`).join('');
+  gatewayModels = models;
+  redrawQuick();
 }).catch(() => {});
+fetch('api/model-stats').then(r => r.json()).then(({ models }) => { quickStats = models || {}; redrawQuick(); }).catch(() => {});
 
 applyPrefs(); drawHandsFree();
 loadModelInfo();

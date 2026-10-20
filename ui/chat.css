@@ -420,3 +420,25 @@ button.icon.on { color: var(--accent); }
 .cache-dot.soon { background: var(--warn); animation: pulse 1.2s infinite; }
 .cache-dot.expired { background: none; box-shadow: inset 0 0 0 1.5px var(--bad); }
 .cache-dot.kept { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 30%, transparent); }
+
+/* effort: how hard a chat's routing tries */
+.effort-btn { flex: none; align-self: center; border-radius: 999px; padding: 3px 10px; font-size: 12px; border: 1px solid var(--border); background: transparent; color: var(--muted); }
+.effort-btn.on { color: var(--text); border-color: var(--accent); }
+.effort-btn:disabled { opacity: .45; }
+.effort-pop { position: absolute; z-index: 25; right: 0; bottom: calc(100% + 8px); width: min(300px, 100%); padding: 10px 14px; display: grid; gap: 6px;
+  background: var(--glass-strong); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow), 0 0 40px -16px var(--glow-c); animation: pop .22s ease both; }
+.effort-pop[hidden] { display: none; }
+.effort-pop input[type="range"] { width: 100%; }
+.effort-ends { display: flex; justify-content: space-between; }
+.effort-pop p { margin: 0; }
+/* on phones the effort pill sits on the composer's top edge, leaving the row to the message box */
+@media (max-width: 560px) {
+  .effort-btn { position: absolute; top: -11px; right: 14px; padding: 1px 9px; font-size: 11px; background: var(--panel); z-index: 2; }
+}
+
+/* new chat: pick a routing or one model */
+.quick-pick { display: grid; gap: 4px; justify-items: center; margin: 14px auto 4px; max-width: 420px; }
+.quick-pick label { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; width: 100%; }
+.quick-pick select { flex: 1; min-width: 0; }
+.quick-pick small { color: var(--muted); }

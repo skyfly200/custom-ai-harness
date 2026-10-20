@@ -4,6 +4,7 @@ const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware
 const { countTokens, isEnabled, recordObservation } = require('./utils/tokenCounter');
 const {
     latestUserText,
+    latestUserHasImage,
     deriveThreshold,
     withCavemanOpenAI,
     withCavemanAnthropic,
@@ -15,11 +16,13 @@ const {
 const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
+const tiers = require('./utils/tiers');
 const usage = require('./utils/usage');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
 const cacheMarkers = require('./utils/cacheMarkers');
 const openrouterCatalog = require('./utils/openrouterCatalog');
+const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
@@ -71,24 +74,33 @@ function estimateTokens(body) {
  * that can call tools; the wildcard free tier may answer them with text.
  * With a named routing (`profile`, utils/profiles.js) the Router only scores
  * the request and the profile's own outputs pick the model.
+ * `effort` (x-harness-effort) moves the score up or down before the
+ * threshold and the extra tiers (utils/tiers.js) are applied.
  */
-async function routeModel(body, requested, profile) {
+async function routeModel(body, requested, profile, effort) {
     const { messages } = body;
     const config = settings.get();
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
     const fixed = profile ? profile.threshold : config.fixedThreshold;
     const threshold = fixed ?? deriveThreshold(messages);
-    const base = { threshold, winRate: null, tools: hasTools, ...(profile && { profile: profile.name }) };
+    const shift = tiers.effortShift(effort);
+    const base = { threshold, winRate: null, tools: hasTools, ...(profile && { profile: profile.name }), ...(shift && { effort: shift }) };
     // A client can name a model in the x-harness-model header (the chat page does)
     if (requested) return { ...base, model: requested, reason: 'chosen by the client' };
     if (profile?.pin) return { ...base, model: profile.pin, reason: `pinned in routing ${profile.name}` };
     if (!profile && config.pinModel) return { ...base, model: config.pinModel, reason: 'pinned in settings' };
+    // Pictures go to a model that reads them; agent requests (with tools) keep their route,
+    // since an images model that can't call tools would end the agent's loop
+    const images = profile ? profile.images : config.imagesModel;
+    if (images && !hasTools && latestUserHasImage(messages)) return { ...base, model: images, tier: 'Images', reason: 'the message has an image' };
     try {
         const tokens = estimateTokens(body);
+        // Effort moves the score; moving the threshold the other way makes the Router's own pick agree
+        const asked = tiers.clamp01(threshold - shift);
         const res = await fetch(`${ROUTER_URL}/route`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ prompt: latestUserText(messages), threshold, tokens, tools: hasTools }),
+            body: JSON.stringify({ prompt: latestUserText(messages), threshold: asked, tokens, tools: hasTools }),
             signal: AbortSignal.timeout(config.routerTimeoutMs),
         });
         if (!res.ok) {
@@ -97,7 +109,16 @@ async function routeModel(body, requested, profile) {
             throw new Error(`HTTP ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
         }
         const { model, win_rate } = await res.json();
-        return { ...base, model: profile ? profiles.pick(profile, win_rate, threshold, tokens, hasTools) : model, winRate: win_rate };
+        const score = win_rate + shift;
+        const extra = tiers.pick(profile ? profile.tiers : config.tiers, threshold, score, hasTools);
+        if (extra) return { ...base, model: extra.model, tier: extra.tier, winRate: win_rate };
+        const strong = score >= threshold;
+        return {
+            ...base,
+            model: profile ? profiles.pick(profile, score, threshold, tokens, hasTools) : model,
+            tier: strong ? 'Strong' : 'Weak',
+            winRate: win_rate,
+        };
     } catch (err) {
         const from = profile || { down: config.routerDownModel, downTools: config.routerDownToolsModel };
         const model = hasTools ? from.downTools : from.down;
@@ -106,11 +127,11 @@ async function routeModel(body, requested, profile) {
     }
 }
 
-function logRoute(path, { model, threshold, winRate, reason }) {
+function logRoute(path, { model, threshold, winRate, reason, tier, effort }) {
     if (reason) {
-        console.log(`${path} → ${model} (pinned: ${reason})`);
+        console.log(`${path} → ${model} (${tier ? reason : `pinned: ${reason}`})`);
     } else {
-        console.log(`${path} → ${model} (threshold ${threshold}, strong win rate ${winRate ?? 'n/a'})`);
+        console.log(`${path} → ${model} (${tier ? `${tier}, ` : ''}threshold ${threshold}, strong win rate ${winRate ?? 'n/a'}${effort ? `, effort ${effort > 0 ? '+' : ''}${effort}` : ''})`);
     }
 }
 
@@ -370,6 +391,49 @@ app.get('/ui/api/model-info', async (req, res) => {
     });
 });
 
+// Benchmarks from Artificial Analysis's free API (1,000 requests a day), kept
+// for a day. Off unless ARTIFICIAL_ANALYSIS_API_KEY is set.
+let benchCache = { at: 0, list: null, error: null };
+async function getBenchmarks() {
+    const key = process.env.ARTIFICIAL_ANALYSIS_API_KEY;
+    if (!key) return { list: null, error: null };
+    const fresh = benchCache.list && Date.now() - benchCache.at < 24 * 60 * 60 * 1000;
+    const retry = !benchCache.list && benchCache.error && Date.now() - benchCache.at < 10 * 60 * 1000;
+    if (fresh || retry) return benchCache;
+    try {
+        const upstream = await fetch(modelStats.AA_URL, { headers: { 'x-api-key': key }, signal: AbortSignal.timeout(8000) });
+        if (!upstream.ok) throw new Error(`Artificial Analysis answered HTTP ${upstream.status}`);
+        benchCache = { at: Date.now(), list: modelStats.fromArtificialAnalysis(await upstream.json()), error: null };
+    } catch (err) {
+        benchCache = { at: Date.now(), list: benchCache.list, error: err.message };
+    }
+    return benchCache;
+}
+
+// Quality, speed, price and strengths of each Gateway model (utils/modelStats.js)
+app.get('/ui/api/model-stats', async (req, res) => {
+    const info = await getModelInfo();
+    const catalog = await getOpenrouterCatalog({ waitMs: 4000 });
+    const bench = await getBenchmarks();
+    res.json({
+        models: modelStats.build(modelInfo.withOpenrouterPrices(info.models, catalog), catalog, bench.list),
+        strengths: modelStats.STRENGTHS,
+        benchmarks: {
+            on: !!process.env.ARTIFICIAL_ANALYSIS_API_KEY,
+            count: bench.list?.length || 0,
+            error: bench.error,
+            models: (bench.list || []).map(m => ({ slug: m.slug, name: m.name, creator: m.creator })),
+        },
+    });
+});
+app.post('/ui/api/model-stats', localJsonOnly, (req, res) => {
+    try {
+        res.json({ saved: modelStats.set(req.body?.name, req.body?.values) });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
 // Read-aloud for the chat page through an OpenAI-compatible speech endpoint
 // (POST {TTS_URL}/audio/speech). With an OpenRouter key and no TTS_URL it uses
 // OpenRouter's speech models; TTS_URL points it at Kokoro-FastAPI, OpenAI, or
@@ -618,7 +682,7 @@ async function routeAndRecord(req, res) {
     const prompt = latestUserText(req.body.messages);
     monitor.recordRouting({ path: req.path, clientId, prompt });
     const started = Date.now();
-    const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile);
+    const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile, req.get('x-harness-effort'));
     route.model = profiles.currentName(route.model);
     req.body.model = route.model;
     logRoute(req.path, route);
@@ -634,7 +698,8 @@ async function routeAndRecord(req, res) {
     res.set('x-harness-event', String(req.harnessEvent.id));
     res.set('x-harness-model', route.model);
     res.set('x-harness-route', route.reason || (route.routerError ? 'router down'
-        : `win rate ${route.winRate} vs threshold ${route.threshold}`));
+        : `${route.tier ? `${route.tier}: ` : ''}win rate ${route.winRate} vs threshold ${route.threshold}${route.effort ? `, effort ${route.effort > 0 ? '+' : ''}${route.effort}` : ''}`));
+    if (route.tier) res.set('x-harness-tier', encodeURIComponent(route.tier));
     if (route.profile) res.set('x-harness-profile', encodeURIComponent(route.profile));
 }
 

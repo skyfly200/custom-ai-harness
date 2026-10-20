@@ -95,8 +95,10 @@ function renderStats(s) {
 function why(e) {
   if (e.reason) return `<span class="tag">${esc(e.reason)}</span>`;
   if (e.routerError) return `<span class="tag bad">Router down</span> fallback model <div class="sub">${esc(e.routerError)}</div>`;
-  const strong = e.winRate != null && e.winRate >= e.threshold;
-  return `win rate ${e.winRate ?? 'n/a'} ${strong ? '≥' : '<'} threshold ${e.threshold}` + (e.tools ? ' <span class="tag">tools</span>' : '');
+  const score = e.winRate != null ? Math.round((e.winRate + (e.effort || 0)) * 1000) / 1000 : null;
+  const strong = score != null && score >= e.threshold;
+  return (e.tier ? `<b>${esc(e.tier)}</b> · ` : '') + `win rate ${e.winRate ?? 'n/a'}${e.effort ? ` ${e.effort > 0 ? '+' : '−'} effort ${Math.abs(e.effort)}` : ''} ${strong ? '≥' : '<'} threshold ${e.threshold}`
+    + (e.tools ? ' <span class="tag">tools</span>' : '');
 }
 
 function result(e) {

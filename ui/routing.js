@@ -52,6 +52,7 @@ function providerOf(d) {
 // Outputs that pick one model. `key` is the field in the graph below.
 const ENTRY_OUTS = [
   { key: 'pin', label: 'Pin every request', help: 'skips the Router' },
+  { key: 'images', label: 'Has an image', help: 'skips the Router' },
   { key: 'down', label: 'Router down', required: true },
   { key: 'downTools', label: 'Router down, with tools', required: true },
 ];
@@ -62,6 +63,28 @@ const ROUTER_OUTS = [
   { key: 'tools', label: 'Weak, with tools', help: 'unset: weak' },
   { key: 'overflow', label: 'Weak, over', tokens: true },
 ];
+
+// Every output of a routing that picks a model, extra tiers included:
+// { port, node, label, model }. Tier ports are router.tier:N and router.tierTools:N,
+// N being the tier's place in r.tiers.
+function routeOuts(r) {
+  const out = [
+    ...ENTRY_OUTS.map(o => ({ port: `entry.${o.key}`, node: 'entry', label: o.label, model: r[o.key] })),
+    ...ROUTER_OUTS.map(o => ({ port: `router.${o.key}`, node: 'router', label: o.label, model: r[o.key] })),
+  ];
+  (r.tiers || []).forEach((t, i) => {
+    out.push({ port: `router.tier:${i}`, node: 'router', label: t.name || 'a tier', model: t.model });
+    out.push({ port: `router.tierTools:${i}`, node: 'router', label: `${t.name || 'a tier'}, with tools`, model: t.tools });
+  });
+  return out;
+}
+function setOut(r, port, model) {
+  const key = port.split('.')[1];
+  const [kind, i] = key.split(':');
+  if (kind === 'tier') r.tiers[Number(i)].model = model;
+  else if (kind === 'tierTools') r.tiers[Number(i)].tools = model;
+  else r[key] = model;
+}
 
 let info = null;     // what the server reported: router, settings, gateway
 let saved = null;    // the graph as the server has it
@@ -107,6 +130,8 @@ function graphFrom({ router, settings, gateway }) {
     headroom: settings?.headroom ?? true,
     contextAnchor: settings?.contextAnchor ?? true,
     mcpOff: settings?.mcpOff || [],
+    images: settings?.imagesModel || null,
+    tiers: clone(settings?.tiers || []),
     fallbacks: chains(gateway?.fallbacks || {}),
     deployments: (gateway?.deployments || []).map(d => ({ ...d, key: `d${d.id}` })),
     profiles: clone(info.profiles?.profiles || []),
@@ -116,7 +141,7 @@ function graphFrom({ router, settings, gateway }) {
 // The routing being edited: the default (kept on the graph itself) or a profile
 const R = () => (view && graph.profiles.find(p => p.id === view)) || graph;
 const routings = () => [graph, ...graph.profiles];
-const ROUTE_FIELDS = ['pin', 'down', 'downTools', 'threshold', 'strong', 'strongTools', 'weak', 'tools', 'overflow', 'maxTokens', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
+const ROUTE_FIELDS = ['pin', 'images', 'down', 'downTools', 'threshold', 'strong', 'strongTools', 'weak', 'tools', 'overflow', 'maxTokens', 'tiers', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
 const routingName = (r) => (r === graph ? 'the default routing' : `“${r.name}”`);
 
 // Fallbacks without empty chains, sorted, so two can be compared as JSON
@@ -126,7 +151,7 @@ function chains(fallbacks) {
 
 function models() {
   const names = new Set(graph.deployments.map(d => d.name));
-  for (const r of routings()) for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (r[o.key]) names.add(r[o.key]);
+  for (const r of routings()) for (const o of routeOuts(r)) if (o.model) names.add(o.model);
   for (const [src, targets] of Object.entries(graph.fallbacks)) { names.add(src); targets.forEach(t => names.add(t)); }
   return [...names];
 }
@@ -150,12 +175,16 @@ function interceptorChanges() {
   const want = {
     pinModel: graph.pin, routerDownModel: graph.down, routerDownToolsModel: graph.downTools, fixedThreshold: graph.threshold,
     caveman: graph.caveman, headroom: graph.headroom, contextAnchor: graph.contextAnchor, mcpOff: graph.mcpOff,
+    imagesModel: graph.images, tiers: byScore(graph.tiers),
   };
   const have = info.settings || {};
   return Object.fromEntries(Object.entries(want).filter(([k, v]) => JSON.stringify(v ?? null) !== JSON.stringify(have[k] ?? null)));
 }
 
-const profilesChanged = () => JSON.stringify(graph.profiles) !== JSON.stringify(saved.profiles);
+// Tiers as the server keeps them (highest cut-off first), so editing order doesn't count as a change
+const byScore = (tiers) => [...(tiers || [])].map(t => ({ name: t.name, from: t.from, model: t.model, tools: t.tools ?? null })).sort((a, b) => b.from - a.from);
+const sameProfiles = (a, b) => JSON.stringify(a.map(p => ({ ...p, tiers: byScore(p.tiers) }))) === JSON.stringify(b.map(p => ({ ...p, tiers: byScore(p.tiers) })));
+const profilesChanged = () => !sameProfiles(graph.profiles, saved.profiles);
 
 // model_list entries to remove (by file id) and to append
 function deploymentChanges() {
@@ -185,6 +214,17 @@ function problems() {
     }
     if (r.overflow && !(Number.isInteger(r.maxTokens) && r.maxTokens > 0)) add('router', 'router.overflow', 'Set the token limit for “Weak, over”.');
     if (r.threshold !== null && !(r.threshold >= 0 && r.threshold <= 1)) add('router', null, 'The threshold must be from 0 to 1.');
+    if (r === graph ? true : !r.pin) {
+      const names = new Set(['strong', 'weak']);
+      (r.tiers || []).forEach((t, i) => {
+        const name = (t.name || '').trim();
+        if (!name) add('router', `router.tier:${i}`, 'Give every tier a name.');
+        else if (names.has(name.toLowerCase())) add('router', `router.tier:${i}`, `Two tiers are called “${name}”: rename one.`);
+        names.add(name.toLowerCase());
+        if (!(t.from > 0 && t.from <= 1)) add('router', `router.tier:${i}`, `Tier “${name || i + 1}” needs a score from above 0 up to 1.`);
+        if (!t.model) add('router', `router.tier:${i}`, `Connect tier “${name || i + 1}” to a model.`);
+      });
+    }
   }
   if (gatewayEditable()) {
     const names = new Set(Object.entries(graph.fallbacks).flatMap(([src, targets]) => [src, ...targets]));
@@ -200,7 +240,7 @@ function connect(port, model) {
     if (src === model || chain.includes(model)) return;
     graph.fallbacks[src] = [...chain, model];
   } else {
-    R()[port.split('.')[1]] = model;
+    setOut(R(), port, model);
   }
   changed();
 }
@@ -212,7 +252,7 @@ function removeWire(id) {
     graph.fallbacks[src] = (graph.fallbacks[src] || []).filter(t => t !== target);
     if (!graph.fallbacks[src].length) delete graph.fallbacks[src];
   } else {
-    R()[id.split('.')[1]] = null;
+    setOut(R(), id, null);
   }
   selected = null;
   changed();
@@ -220,7 +260,7 @@ function removeWire(id) {
 
 // Called once × in the title has been held down; Discard changes brings it back
 function removeModel(name) {
-  const uses = routings().flatMap(r => [...ENTRY_OUTS, ...ROUTER_OUTS].filter(o => r[o.key] === name)
+  const uses = routings().flatMap(r => routeOuts(r).filter(o => o.model === name)
     .map(o => `“${o.label}”${r === graph ? '' : ` in ${r.name}`}`));
   graph.deployments = graph.deployments.filter(d => d.name !== name);
   delete graph.fallbacks[name];
@@ -228,7 +268,7 @@ function removeModel(name) {
     const kept = targets.filter(t => t !== name);
     if (kept.length) graph.fallbacks[src] = kept; else delete graph.fallbacks[src];
   }
-  for (const r of routings()) for (const o of [...ENTRY_OUTS, ...ROUTER_OUTS]) if (r[o.key] === name) r[o.key] = null;
+  for (const r of routings()) for (const o of routeOuts(r)) if (o.model === name) setOut(r, o.port, null);
   selected = null;
   changed();
   note(`Removed ${name}.${uses.length ? ` Connect ${uses.join(', ')} to another model before saving.` : ''} Discard changes brings it back.`, uses.length ? 'err' : '');
@@ -254,7 +294,7 @@ function cancelHold() {
 // fallback line comes to it from a model that can be got to
 function reachable() {
   const seen = new Set();
-  const todo = routings().flatMap(r => [...ENTRY_OUTS, ...ROUTER_OUTS].map(o => r[o.key]).filter(Boolean));
+  const todo = routings().flatMap(r => routeOuts(r).map(o => o.model).filter(Boolean));
   while (todo.length) {
     const m = todo.pop();
     if (seen.has(m)) continue;
@@ -365,6 +405,7 @@ $('toast').addEventListener('click', (e) => {
 
 const OUT_HINTS = {
   pin: 'Connect to send every request to one model and skip the Router. Remove the line to turn it off',
+  images: 'Messages carrying a picture go here without asking the Router (not agent requests with tools, which keep their route). Connect a model that reads images. Unset: they are routed like any other',
   down: 'Where requests go when the Router doesn’t answer in time',
   downTools: 'Same, for requests that carry tools (all Claude Code requests)',
   strong: 'Hard requests: the classifier’s score is at or above the threshold',
@@ -376,11 +417,35 @@ const OUT_HINTS = {
 
 function outRow(id, o, { model, disabled }) {
   const empty = !model;
-  const target = empty ? `<span class="unset">${o.required ? 'not connected' : 'off'}</span>` : '';
+  const target = empty ? `<span class="unset">${o.required ? 'not connected' : 'off'}</span>` : statShort(model);
   const tokens = o.tokens ? ` <input type="number" min="1" step="1" data-field="maxTokens" value="${esc(R().maxTokens ?? '')}" placeholder="tokens"${disabled ? ' disabled' : ''}>` : '';
   return `<div class="out${o.required ? ' required' : ''}${empty ? ' empty' : ''}" data-hint="${esc(OUT_HINTS[o.key] || '')}">
     <span class="label"><b>${esc(o.label)}</b>${o.help ? ` <span>· ${esc(o.help)}</span>` : ''} ${target}</span>${tokens}
     <span class="port out-port${disabled ? ' fixed' : ''}" data-port="${id}"></span></div>`;
+}
+
+// Model numbers (GET api/model-stats): quality 0-100, price per million tokens, speed
+let stats = { models: {}, strengths: [], benchmarks: { on: false } };
+const money = (n) => (n === null || n === undefined ? '?' : n === 0 ? 'free' : `$${n < 0.1 ? +n.toPrecision(2) : +n.toFixed(2)}`);
+function statShort(model) {
+  const s = stats.models[model];
+  if (!s || (s.quality === null && s.blended === null)) return '';
+  const parts = [s.quality !== null && `Q ${Math.round(s.quality)}`, s.blended !== null && money(s.blended)].filter(Boolean);
+  return `<span class="stat" data-hint="${esc(model)}: quality ${s.quality ?? 'unknown'} of 100, ${money(s.blended)} per million tokens (3 in : 1 out)">${parts.join(' · ')}</span>`;
+}
+function statBlock(name) {
+  const s = stats.models[name];
+  if (!s) return '';
+  const facts = [
+    ['Quality', s.quality !== null ? `${s.quality}${s.qualityFrom === 'benchmark' ? '' : ' (yours)'}` : '?', 'How capable it is, 0 to 100. From Artificial Analysis’s intelligence index, or what you typed'],
+    ['Coding', s.coding ?? '?', 'Coding index, 0 to 100'],
+    ['Price', s.inPrice === 0 && s.outPrice === 0 ? 'free' : `${money(s.inPrice)} in · ${money(s.outPrice)} out per M`, 'Dollars per million tokens', true],
+    ['Speed', s.speed !== null ? `${s.speed} tokens/s${s.ttft !== null ? `, first after ${s.ttft} s` : ''}` : '?', 'Median output tokens per second, and how long the first token takes', true],
+  ];
+  const tags = s.strengths.length ? `<div class="strengths">${s.strengths.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : '';
+  return `<div class="sect" data-hint="What this model is good at and what it costs. Used to lay out tiers from cheap to capable">Strengths and numbers
+      <button class="link" data-act="stats" data-name="${esc(name)}" data-hint="Change the numbers and strengths for ${esc(name)}">Edit</button></div>
+    <dl class="stats">${facts.map(([k, v, h, wide]) => `<div${wide ? ' class="wide"' : ''} data-hint="${esc(h)}"><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>${tags}`;
 }
 
 const KIND_HINTS = {
@@ -450,8 +515,36 @@ function routerNode() {
        <small id="backendHelp">${esc(BACKEND_HELP[graph.backend] || '')}</small></label>
      <label data-hint="Requests scoring at or above this go to Strong. Empty uses the keyword rule">Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(r.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)">
        <small>0 always strong, 1 almost always weak.</small></label>`;
-  const outs = ROUTER_OUTS.map(o => outRow(`router.${o.key}`, o, { model: r[o.key], disabled: !editable })).join('');
+  const outs = ladder(r, editable);
   return nodeHTML('router', 'router' + (r.pin ? ' dim' : ''), 'Router', 'Classifier', body, outs, true);
+}
+
+// The Router's outputs as a ladder, hardest first: extra tiers sit above
+// Strong, between Strong and Weak, or (never) below Weak, by their cut-off
+function ladder(r, editable) {
+  const cut = r.threshold ?? 0.5; // the keyword rule's middle value when no threshold is set
+  const tiers = (r.tiers || []).map((t, i) => ({ t, i })).sort((a, b) => (b.t.from ?? 0) - (a.t.from ?? 0));
+  const above = tiers.filter(x => (x.t.from ?? 0) >= cut);
+  const below = tiers.filter(x => (x.t.from ?? 0) < cut);
+  const out = (key) => { const o = ROUTER_OUTS.find(x => x.key === key); return outRow(`router.${key}`, o, { model: r[key], disabled: !editable }); };
+  const tierRows = ({ t, i }) => `<div class="tier" data-hint="An extra tier: requests scoring at or above its cut-off (and below the next tier up) go to its model">
+      <input class="tier-name" data-tier="${i}" data-tf="name" value="${esc(t.name)}" placeholder="Tier name" aria-label="Tier name">
+      <label>from <input type="number" min="0.01" max="1" step="0.05" data-tier="${i}" data-tf="from" value="${esc(t.from ?? '')}" aria-label="Lowest score for this tier"></label>
+      <button data-act="untier" data-i="${i}" aria-label="Remove tier ${esc(t.name)}" data-hint="Remove this tier; its requests go back to Strong or Weak">×</button></div>`
+    + outRow(`router.tier:${i}`, { key: 'tier', label: t.name || 'Tier', help: `score ≥ ${t.from ?? '?'}`, required: true }, { model: t.model })
+    + outRow(`router.tierTools:${i}`, { key: 'tierTools', label: `${t.name || 'Tier'}, with tools`, help: `unset: ${t.name || 'tier'}` }, { model: t.tools });
+  // Higher rungs should be at least as good: say when the numbers disagree
+  const rungs = [...above.map(x => [x.t.name, x.t.model]), ['Strong', r.strong], ...below.map(x => [x.t.name, x.t.model]), ['Weak', r.weak]]
+    .filter(([, m]) => m && stats.models[m]?.quality != null);
+  const upsideDown = [];
+  for (let i = 0; i + 1 < rungs.length; i++) {
+    const [hi, hm] = rungs[i], [lo, lm] = rungs[i + 1];
+    if (stats.models[hm].quality < stats.models[lm].quality) upsideDown.push(`“${hi}” (${hm}, quality ${Math.round(stats.models[hm].quality)}) is below “${lo}” (${lm}, ${Math.round(stats.models[lm].quality)})`);
+  }
+  const warn = upsideDown.length ? `<div class="warn ladder-warn" data-hint="Harder requests go to the higher rungs, so their models should score higher. Swap the lines, or check the numbers in the model boxes">${esc(upsideDown.join('; '))}.</div>` : '';
+  const add = `<button class="add-dep add-tier" data-act="addtier" data-hint="Add a tier with its own model and score cut-off. Put one above the threshold for the hardest requests, or below it for middling ones">+ Add tier</button>`;
+  return above.map(tierRows).join('') + out('strong') + out('strongTools') + below.map(tierRows).join('')
+    + out('weak') + out('tools') + out('overflow') + warn + add;
 }
 
 function deploymentRow(d, only) {
@@ -486,7 +579,7 @@ function modelNode(name) {
   const close = editable ? `<button class="close hold" data-act="unmodel" data-name="${esc(name)}" aria-label="Remove ${esc(name)} (press and hold)" data-hint="Press and hold to remove ${esc(name)} from the Gateway, with its provider models and fallback lines">×</button>` : '';
   const lost = routerUp() && !reachable().has(name);
   const why = lost ? '<div class="unreach" data-hint="No route in any routing leads here, directly or through fallbacks. Clear unconnected models removes it">No route reaches it.</div>' : '';
-  return nodeHTML(`m:${name}`, lost ? 'model unreached' : 'model', name, 'Model', why + servedBy + list, outs, true, close);
+  return nodeHTML(`m:${name}`, lost ? 'model unreached' : 'model', name, 'Model', why + statBlock(name) + servedBy + list, outs, true, close);
 }
 
 function render() {
@@ -511,7 +604,7 @@ function placeNodes() {
     const col = p.x < 300 ? 0 : p.x < 650 ? 1 : 2;
     next[col] = Math.max(next[col], p.y + n.offsetHeight + 24);
   }
-  const routed = new Set([...ENTRY_OUTS, ...ROUTER_OUTS].map(o => R()[o.key]).filter(Boolean));
+  const routed = new Set(routeOuts(R()).map(o => o.model).filter(Boolean));
   const firstColumn = ['entry', 'compress', 'router', 'tools'];
   const order = [...firstColumn, ...[...routed].map(m => `m:${m}`), ...models().filter(m => !routed.has(m)).map(m => `m:${m}`)];
   for (const id of order) {
@@ -561,8 +654,7 @@ function tidy() {
 
   // Lines: from an output dot (and the box it is on) to a model
   const lines = [];
-  for (const o of ENTRY_OUTS) if (r[o.key]) lines.push({ port: `entry.${o.key}`, from: 'entry', to: r[o.key] });
-  for (const o of ROUTER_OUTS) if (r[o.key]) lines.push({ port: `router.${o.key}`, from: 'router', to: r[o.key] });
+  for (const o of routeOuts(r)) if (o.model) lines.push({ port: o.port, from: o.node, to: o.model });
   for (const [src, targets] of Object.entries(graph.fallbacks)) for (const t of targets) lines.push({ port: `fail:${src}`, from: src, to: t });
 
   // Fallback lines that close a loop are left out of the columns
@@ -683,8 +775,7 @@ function wireList() {
     { id: 'fixed', from: 'entry.router', to: 'compress', cls: 'fixed' },
     { id: 'fixed2', from: 'compress.router', to: 'router', cls: 'fixed', dim: !!r.pin },
   ];
-  for (const o of ENTRY_OUTS) if (r[o.key]) list.push({ id: `entry.${o.key}`, from: `entry.${o.key}`, to: `m:${r[o.key]}` });
-  for (const o of ROUTER_OUTS) if (r[o.key]) list.push({ id: `router.${o.key}`, from: `router.${o.key}`, to: `m:${r[o.key]}`, dim: !!r.pin });
+  for (const o of routeOuts(r)) if (o.model) list.push({ id: o.port, from: o.port, to: `m:${o.model}`, dim: o.node === 'router' && !!r.pin });
   for (const [src, targets] of Object.entries(graph.fallbacks)) {
     // Faint unless their model is under the pointer or selected, so the chains don't hide the routes
     targets.forEach((t, i) => {
@@ -822,6 +913,9 @@ $('world').addEventListener('click', (e) => {
   if (b.dataset.act === 'undeploy') return removeDeployment(b.dataset.key);
   if (b.dataset.act === 'adddep') return openAdd(b.dataset.name);
   if (b.dataset.act === 'reloadtools') return reloadTools();
+  if (b.dataset.act === 'addtier') return addTier();
+  if (b.dataset.act === 'untier') { R().tiers.splice(Number(b.dataset.i), 1); selected = null; return changed(); }
+  if (b.dataset.act === 'stats') return openStats(b.dataset.name);
   const chain = [...graph.fallbacks[b.dataset.src]];
   const i = Number(b.dataset.i);
   if (b.dataset.act === 'del') chain.splice(i, 1);
@@ -851,6 +945,13 @@ $('world').addEventListener('input', (e) => {
     R().mcpOff = [...off];
     return changed();
   }
+  if (e.target.dataset.tier !== undefined) {
+    const t = R().tiers[Number(e.target.dataset.tier)];
+    const raw = e.target.value;
+    if (e.target.dataset.tf === 'name') t.name = raw.trim();
+    else t.from = raw.trim() === '' ? null : Number(raw);
+    return updateButtons();
+  }
   const field = e.target.dataset.field;
   if (!field) return;
   const raw = e.target.value.trim();
@@ -862,6 +963,83 @@ $('world').addEventListener('input', (e) => {
   }
   updateButtons();
 });
+
+// A tier's cut-off or name, once typed, moves it to its place on the ladder
+$('world').addEventListener('change', (e) => { if (e.target.dataset.tier !== undefined) changed(); });
+
+function addTier() {
+  const r = R();
+  r.tiers = r.tiers || [];
+  const cut = r.threshold ?? 0.5;
+  const top = !r.tiers.some(t => t.from >= cut);
+  const from = Math.round((top ? cut + (1 - cut) / 2 : cut / 2) * 20) / 20 || 0.05;
+  const taken = new Set(['strong', 'weak', ...r.tiers.map(t => (t.name || '').toLowerCase())]);
+  let name = top ? 'Frontier' : 'Mid';
+  for (let n = 2; taken.has(name.toLowerCase()); n++) name = `Tier ${n}`;
+  r.tiers.push({ name, from: Math.min(1, from), model: null, tools: null });
+  changed();
+  note(`Added the tier “${name}”. Drag its dot to a model and set its score, then press Save.`);
+}
+
+// ---- model numbers -------------------------------------------------------------
+
+async function loadStats() {
+  try { stats = await getJSON('api/model-stats'); } catch { stats = { models: {}, strengths: [], benchmarks: { on: false } }; }
+  const b = stats.benchmarks || {};
+  $('benchNote').innerHTML = b.on
+    ? (b.error ? `Benchmarks couldn’t be read: ${esc(b.error)}.` : `Quality, coding and speed numbers: <a href="https://artificialanalysis.ai/" target="_blank" rel="noopener">Artificial Analysis</a> (${b.count} models).`)
+    : 'Set <code>ARTIFICIAL_ANALYSIS_API_KEY</code> in .env to fill in quality and speed from benchmarks, or type them in each model’s Edit.';
+}
+
+function openStats(name) {
+  const s = stats.models[name] || { strengths: [] };
+  const f = $('statsForm');
+  $('statsTitle').textContent = name;
+  f.quality.value = s.qualityFrom === 'you' ? s.quality : '';
+  f.quality.placeholder = s.qualityFrom === 'benchmark' ? `${s.quality} from the benchmark` : 'unknown';
+  f.coding.value = '';
+  f.coding.placeholder = s.coding !== null && s.coding !== undefined ? String(s.coding) : 'unknown';
+  f.speed.value = '';
+  f.speed.placeholder = s.speed !== null && s.speed !== undefined ? String(s.speed) : 'unknown';
+  const all = [...new Set([...(stats.strengths || []), ...s.strengths])];
+  $('statsTags').innerHTML = all.map(t => `<label class="chip-check"><input type="checkbox" value="${esc(t)}"${s.strengths.includes(t) ? ' checked' : ''}> ${esc(t)}</label>`).join('');
+  f.more.value = '';
+  const list = stats.benchmarks?.models || [];
+  $('benchField').hidden = !list.length;
+  f.benchmark.innerHTML = `<option value="">${s.benchmark ? `Matched: ${esc(s.benchmark.name)}` : 'No match found'}</option>`
+    + list.map(m => `<option value="${esc(m.slug)}">${esc(m.name)}${m.creator ? ` · ${esc(m.creator)}` : ''}</option>`).join('');
+  $('statsMsg').textContent = '';
+  $('statsDialog').dataset.name = name;
+  $('statsDialog').showModal();
+}
+
+async function saveStats(values) {
+  const name = $('statsDialog').dataset.name;
+  try {
+    await postJSON('api/model-stats', { name, values });
+    $('statsDialog').close();
+    await loadStats();
+    render();
+    note(`Saved the numbers for ${name}.`, 'ok');
+  } catch (err) {
+    $('statsMsg').textContent = err.message;
+  }
+}
+
+$('statsForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const s = stats.models[$('statsDialog').dataset.name] || {};
+  const tags = [...$('statsTags').querySelectorAll('input:checked')].map(i => i.value)
+    .concat(f.more.value.split(',').map(t => t.trim()).filter(Boolean));
+  const derived = JSON.stringify([...(s.strengths || [])].sort()) === JSON.stringify([...tags].sort()) && !s.edited;
+  saveStats({
+    quality: f.quality.value, coding: f.coding.value, speed: f.speed.value,
+    strengths: derived ? null : tags, benchmark: f.benchmark.value,
+  });
+});
+$('statsReset').addEventListener('click', () => saveStats({}));
+$('statsCancel').addEventListener('click', () => $('statsDialog').close());
 
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Delete' || e.key === 'Backspace') && selected && !e.target.closest('input, select, textarea')) {
@@ -905,6 +1083,7 @@ $('save').addEventListener('click', async () => {
       info.gateway = await postJSON('api/gateway', { version: info.gateway.version, ...deploymentChanges(), fallbacks: chains(graph.fallbacks) });
       graph.deployments = graphFrom(info).deployments;
       done.push('Gateway models and fallbacks');
+      loadStats().then(render);
       restart = true;
     }
     const rc = routerChanges();
@@ -927,6 +1106,7 @@ $('save').addEventListener('click', async () => {
     }
     saved = graphFrom(info);
     graph.profiles = clone(saved.profiles); // as the server cleaned them
+    graph.tiers = clone(saved.tiers);
     drawProfiles();
     note(`Saved: ${done.join(', ')}.${restart ? ' Restart the Gateway (LiteLLM) to use the new models and fallbacks.' : ''}`, 'ok');
   } catch (err) {
@@ -1243,7 +1423,7 @@ $('guide').addEventListener('toggle', () => {
 
 async function load() {
   const [status, settings, gateway, profiles, tools] = await Promise.allSettled([
-    getJSON('api/status'), getJSON('api/settings'), getJSON('api/gateway'), getJSON('api/profiles'), getJSON('api/tools')]);
+    getJSON('api/status'), getJSON('api/settings'), getJSON('api/gateway'), getJSON('api/profiles'), getJSON('api/tools'), loadStats()]);
   const router = status.value?.components?.find(c => c.name === 'Router');
   info = {
     router: router?.ok && router.detail?.settings ? router.detail : null,
@@ -1297,9 +1477,10 @@ function followLive() {
       let wires;
       if (!mine) wires = [];
       else if (e.reason?.startsWith('pinned in')) wires = ['fixed', 'entry.pin'];
+      else if (e.tier === 'Images') wires = ['fixed', 'entry.images'];
       else if (e.reason) wires = [];
       else if (e.routerError) wires = ['fixed', e.tools ? 'entry.downTools' : 'entry.down'];
-      else wires = ['fixed', 'fixed2', ...ROUTER_OUTS.filter(o => R()[o.key] === e.model).map(o => `router.${o.key}`)];
+      else wires = ['fixed', 'fixed2', ...routeOuts(R()).filter(o => o.node === 'router' && o.model === e.model).map(o => o.port)];
       flash([...wires, `m:${e.model}`]);
     } else if (update.type === 'response' && e.servedBy && e.servedBy !== e.model) {
       flash([['fb', e.model, e.servedBy].join('|'), `m:${e.servedBy}`]);

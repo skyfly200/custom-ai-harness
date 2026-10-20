@@ -1,11 +1,11 @@
-// "Auto": pick a named routing (utils/profiles.js) for each request. A client
-// asks for it with x-harness-profile: auto. Every routing can say when it fits:
+// "Auto": pick a named strategy (utils/profiles.js) for each request. A client
+// asks for it with x-harness-profile: auto. Every strategy can say when it fits:
 //   rules        words in the request, tools or not, which client, size
 //   description  a plain sentence Jev (the Router's classifier) is asked about
-// Jev goes first: each routing with a description is put to it as a yes/no
+// Jev goes first: each strategy with a description is put to it as a yes/no
 // question and the most likely one at or above `askAt` wins. If Jev finds no
-// fit (or isn't answering), the first routing whose rules all hold, in list
-// order, wins. Nothing fits: the default routing. The autoFirst setting can put
+// fit (or isn't answering), the first strategy whose rules all hold, in list
+// order, wins. Nothing fits: the default strategy. The autoFirst setting can put
 // the rules first, so Jev is only asked when no rule holds.
 
 const AUTO = 'auto';
@@ -20,8 +20,8 @@ const count = (v, label) => {
     return n;
 };
 
-/** A routing's `rules`, cleaned; throws with a readable message on a bad value. */
-function cleanRules(r, name = 'A routing') {
+/** A strategy's `rules`, cleaned; throws with a readable message on a bad value. */
+function cleanRules(r, name = 'A strategy') {
     const rules = r && typeof r === 'object' ? r : {};
     const list = (v) => [...new Set((Array.isArray(v) ? v : []).map(s => text(s, 60).toLowerCase()).filter(Boolean))].slice(0, MAX_WORDS);
     const tools = ['yes', 'no'].includes(rules.tools) ? rules.tools : 'any';
@@ -38,7 +38,7 @@ function cleanRules(r, name = 'A routing') {
 
 const hasRules = (p) => !!p.rules && (p.rules.words.length > 0 || p.rules.tools !== 'any' || p.rules.clients.length > 0 || p.rules.minTokens !== null || p.rules.maxTokens !== null);
 
-/** Why a routing's rules hold for this request, or null if one of them doesn't. */
+/** Why a strategy's rules hold for this request, or null if one of them doesn't. */
 function matches(p, { text: prompt, tools, client, tokens }) {
     const r = p.rules;
     const why = [];
@@ -74,10 +74,10 @@ function byRules(profiles, request) {
     return null;
 }
 
-/** Ask Jev about every described routing; { pick } the best at or above askAt, else { miss } why not. */
+/** Ask Jev about every described strategy; { pick } the best at or above askAt, else { miss } why not. */
 async function byJev(profiles, { text: prompt, ask, askAt }) {
     const described = profiles.filter(p => p.description).slice(0, MAX_ASKED);
-    if (!described.length || !prompt || typeof ask !== 'function') return { miss: described.length ? 'nothing to ask Jev about' : 'no routing has a description' };
+    if (!described.length || !prompt || typeof ask !== 'function') return { miss: described.length ? 'nothing to ask Jev about' : 'no strategy has a description' };
     try {
         const answers = await ask(prompt, Object.fromEntries(described.map((p, i) => [`q${i}`, question(p)])));
         let best = null;
@@ -93,7 +93,7 @@ async function byJev(profiles, { text: prompt, ask, askAt }) {
 }
 
 /**
- * Choose a routing. `ask(text, { q0: question, ... })` resolves to { q0: P(yes) }
+ * Choose a strategy. `ask(text, { q0: question, ... })` resolves to { q0: P(yes) }
  * (the Router's /ask). `first` says which goes first: 'jev' (the default) asks
  * Jev right away and uses the rules only if Jev finds no fit; 'rules' checks
  * them first and asks Jev only when none hold. Never throws. Returns

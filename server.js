@@ -75,7 +75,7 @@ function estimateTokens(body) {
  * Never throws: a down Router degrades to the free tier. Requests with tools
  * (every Claude Code request) tell the Router so, and it picks a weak model
  * that can call tools; the wildcard free tier may answer them with text.
- * With a named routing (`profile`, utils/profiles.js) the Router only scores
+ * With a named strategy (`profile`, utils/profiles.js) the Router only scores
  * the request and the profile's own outputs pick the model.
  * `effort` (x-harness-effort) moves the score up or down before the
  * threshold and the extra tiers (utils/tiers.js) are applied.
@@ -90,7 +90,7 @@ async function routeModel(body, requested, profile, effort) {
     const base = { threshold, winRate: null, tools: hasTools, ...(profile && { profile: profile.name }), ...(shift && { effort: shift }) };
     // A client can name a model in the x-harness-model header (the chat page does)
     if (requested) return { ...base, model: requested, reason: 'chosen by the client' };
-    if (profile?.pin) return { ...base, model: profile.pin, reason: `pinned in routing ${profile.name}` };
+    if (profile?.pin) return { ...base, model: profile.pin, reason: `pinned in strategy ${profile.name}` };
     if (!profile && config.pinModel) return { ...base, model: config.pinModel, reason: 'pinned in settings' };
     // Pictures go to a model that reads them; agent requests (with tools) keep their route,
     // since an images model that can't call tools would end the agent's loop
@@ -316,7 +316,7 @@ app.post('/ui/api/settings', localJsonOnly, (req, res) => {
 });
 app.post('/ui/api/settings/reset', localJsonOnly, (req, res) => res.json({ settings: settings.reset(), defaults: settings.DEFAULTS }));
 
-// Named routings (utils/profiles.js): the routing editor saves them, the chat
+// Named strategies (utils/profiles.js): the routing editor saves them, the chat
 // page picks one per chat or project, any client can name one in x-harness-profile.
 app.get('/ui/api/profiles', (req, res) => res.json(profiles.state()));
 // {version, profiles: [...]} replaces the whole list
@@ -715,11 +715,12 @@ app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
     }
 });
 
-// The named routing a request asked for with x-harness-profile (null: the
+// The named strategy a request asked for with x-harness-profile (null: the
 // default). "auto" lets the harness choose per request (utils/autoRoute.js);
 // req.harnessAuto then says how, for the routing log.
 async function profileOf(req) {
-    const id = req.get('x-harness-profile');
+    // x-harness-strategy is the same header under its current name
+    const id = req.get('x-harness-strategy') || req.get('x-harness-profile');
     if (id && id.trim().toLowerCase() === autoRoute.AUTO) {
         const { autoJev, autoAskAt, autoFirst } = settings.get();
         const picked = await autoRoute.pick(profiles.list(), {
@@ -730,11 +731,11 @@ async function profileOf(req) {
             ask: askRouter, jev: autoJev, askAt: autoAskAt, first: autoFirst,
         });
         req.harnessAuto = { how: picked.how, why: picked.why };
-        console.log(`Auto routing: ${picked.profile ? picked.profile.name : 'the default routing'} (${picked.how}: ${picked.why})`);
+        console.log(`Auto strategy: ${picked.profile ? picked.profile.name : 'the default strategy'} (${picked.how}: ${picked.why})`);
         return picked.profile;
     }
     const p = profiles.get(id);
-    if (id && !p) console.warn(`Unknown routing "${id}"; using the default`);
+    if (id && !p) console.warn(`Unknown strategy "${id}"; using the default`);
     return p;
 }
 

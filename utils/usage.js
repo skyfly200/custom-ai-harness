@@ -216,7 +216,7 @@ function clientOf(req) {
 // How the model was chosen, from a monitor event
 function routeOf(event) {
     if (event.routerError) return 'Router down';
-    if (event.reason === 'pinned in settings' || event.reason?.startsWith('pinned in routing')) return 'Pinned';
+    if (event.reason === 'pinned in settings' || /^pinned in (routing|strategy)/.test(event.reason || '')) return 'Pinned';
     if (event.reason === 'chosen by the client') return 'Chosen by client';
     return 'Router';
 }

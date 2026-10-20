@@ -18,6 +18,14 @@ const profiles = require('../utils/profiles');
 const BASE = { down: 'free', downTools: 'free-tools', strong: 'mid', weak: 'tiny' };
 const make = (name, extra) => profiles.clean({ ...BASE, name, ...extra });
 
+test('x-harness-strategy works like x-harness-profile', async () => {
+    profiles.replace([{ ...BASE, name: 'Quick', weak: 'quick-model', threshold: 1, rules: { words: ['quick'] } }]);
+    await send('a quick question', { 'x-harness-strategy': 'auto' });
+    assert.equal(lastBody.model, 'quick-model');
+    await send('hello', { 'x-harness-strategy': 'quick' });
+    assert.equal(lastBody.model, 'quick-model');
+});
+
 test('rules are cleaned, and a bad size range is refused', () => {
     const r = auto.cleanRules({ words: [' Refactor ', 'refactor', ''], tools: 'maybe', clients: ['Claude Code'], minTokens: '10' });
     assert.deepEqual(r, { words: ['refactor'], tools: 'any', clients: ['claude code'], minTokens: 10, maxTokens: null });

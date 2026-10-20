@@ -109,7 +109,7 @@ function renderStats(s) {
 }
 
 function why(e) {
-  const auto = e.auto ? `<div class="sub">Auto: ${esc(e.profile || 'default routing')} · ${esc(e.auto.how)}: ${esc(e.auto.why)}</div>` : '';
+  const auto = e.auto ? `<div class="sub">Auto: ${esc(e.profile || 'default strategy')} · ${esc(e.auto.how)}: ${esc(e.auto.why)}</div>` : '';
   return why1(e) + auto;
 }
 function why1(e) {

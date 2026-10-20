@@ -3,7 +3,8 @@
 // picks one per request with the x-harness-profile header; the chat page sends
 // it for chats and projects that use one. Each profile is a full set of route
 // choices, so nothing is inherited from the default except the Router's
-// classifier and the Gateway's models and fallbacks, which every routing shares.
+// classifier and the Gateway's models, which every routing shares. Fallback
+// chains are the Gateway's unless a routing keeps its own (`fallbacks`).
 // Saved to routing-profiles.json (gitignored) next to server.js.
 
 const fs = require('fs');
@@ -29,6 +30,21 @@ function model(p, k, required) {
     }
     if (typeof v !== 'string' || !MODEL_RE.test(v)) throw new Error(`${p.name || 'A routing'}: ${k} must be a model name`);
     return currentName(v);
+}
+
+/** A routing's own fallback chains {model: [models]}, or null to use the Gateway's. */
+function chains(p) {
+    if (p.fallbacks === null || p.fallbacks === undefined) return null;
+    if (typeof p.fallbacks !== 'object' || Array.isArray(p.fallbacks)) throw new Error(`${p.name || 'A routing'}: fallbacks must be an object of model -> list`);
+    const out = {};
+    for (const [src, targets] of Object.entries(p.fallbacks)) {
+        if (!MODEL_RE.test(src) || !Array.isArray(targets) || !targets.every(t => typeof t === 'string' && MODEL_RE.test(t))) {
+            throw new Error(`${p.name || 'A routing'}: fallbacks for “${src}” must be a list of model names`);
+        }
+        const list = [...new Set(targets.map(currentName))].filter(t => t !== currentName(src));
+        if (list.length) out[currentName(src)] = list;
+    }
+    return out;
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
@@ -57,6 +73,7 @@ function clean(p) {
         maxTokens: null,
         images: model(p, 'images'),
         tiers: tiers.clean(p.tiers, name).map(t => ({ ...t, model: currentName(t.model), tools: t.tools && currentName(t.tools) })),
+        fallbacks: chains(p),
         caveman: p.caveman !== false,
         headroom: p.headroom !== false,
         contextAnchor: p.contextAnchor !== false,
@@ -81,6 +98,9 @@ function load() {
     } catch {}
     version++;
 }
+
+/** The `fallbacks` value LiteLLM takes in a request body for a routing's own chains, or null. */
+const gatewayFallbacks = (p) => (p && p.fallbacks ? Object.entries(p.fallbacks).map(([src, targets]) => ({ [src]: targets })) : null);
 
 const list = () => profiles;
 const get = (id) => (id ? profiles.find(p => p.id === String(id).trim().toLowerCase()) || null : null);
@@ -115,4 +135,4 @@ function pick(p, winRate, threshold, tokens, tools) {
 
 load();
 
-module.exports = { list, get, state, replace, clean, pick, load, slug, currentName, FILE };
+module.exports = { gatewayFallbacks, list, get, state, replace, clean, pick, load, slug, currentName, FILE };

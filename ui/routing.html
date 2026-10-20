@@ -35,7 +35,7 @@
         <li><b>Set fallbacks</b> by dragging a model's <i>If it fails</i> dot to another model. When a model errors, hits a rate limit or times out, the Gateway tries its fallbacks from the top. Reorder them with ↑ ↓, and hover a model to see its fallback lines clearly.</li>
         <li><b>Add a model</b> with <b>Add model</b> above: give it a name, pick where it runs (OpenRouter, Groq, Ollama…) and the model id. For OpenRouter you can search its whole model list in the dialog, filter to free or tool-capable models, and click one to fill in the id. To give an existing model a second provider model, use <i>+ Add provider model</i> in its box; the Gateway then shares requests between them.</li>
         <li><b>Remove things</b>: <b>Clear unconnected models</b> removes every model box that no route reaches in any routing, directly or through fallbacks (those boxes are dashed and say so); press and hold × in a model's title to remove the whole model; × next to a provider model removes just that one; click a line and press Delete (or <b>Remove connection</b>) to remove a route.</li>
-        <li><b>Use different routings for different chats.</b> <b>New routing</b> copies the one shown under a new name; change its lines, compression and tools, then Save. In Bright Chat, pick it per chat in Options or per project in its settings, or choose <i>One model directly</i> to skip routing. Model boxes and fallbacks are shared by every routing. Other clients pick one with the header <code>x-harness-profile</code>.</li>
+        <li><b>Use different routings for different chats.</b> <b>New routing</b> copies the one shown under a new name; change its lines, compression and tools, then Save. In Bright Chat, pick it per chat in Options or per project in its settings, or choose <i>One model directly</i> to skip routing. Model boxes are shared by every routing. Fallback lines are the Gateway's until you change one while a routing is shown: that routing then keeps its own (<b>Use Gateway fallbacks</b> drops them). Other clients pick one with the header <code>x-harness-profile</code>.</li>
         <li><b>Tools</b> lists the MCP servers from <code>mcp-servers.json</code>. Untick one to stop offering it to the model in chats on this routing.</li>
         <li><b>Save</b> checks the routings first: anything that has to be fixed is listed in a box at the bottom right, and the boxes it is in turn red with the reason written inside. Then it writes each change where it belongs and tells you what it saved. The Router and Interceptor use changes on the next request. <b>Restart the Gateway</b> (LiteLLM) after changing models or fallbacks. <b>Discard changes</b> goes back to what is saved.</li>
       </ol>
@@ -49,6 +49,7 @@
     <button id="profileNew" data-hint="Add a routing, starting as a copy of the one shown">New routing</button>
     <button id="profileRename" data-hint="Rename the routing shown">Rename</button>
     <button id="profileDelete" data-hint="Delete the routing shown; its chats go back to the default">Delete</button>
+    <button id="profileFb" hidden data-hint="This routing keeps its own fallback lines. Use the Gateway's again">Use Gateway fallbacks</button>
     <span class="muted small" id="profileNote"></span>
   </div>
 

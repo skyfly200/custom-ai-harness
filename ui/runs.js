@@ -33,7 +33,7 @@ function renderList() {
   if (!runs.length) { $('list').innerHTML = '<p class="muted">No runs yet.</p>'; return; }
   $('list').innerHTML = runs.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta"><span class="tag ${TAGS[r.status] || ''}">${esc(NOTE_FOR[r.status] || r.status)}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
+    <span class="meta">${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(NOTE_FOR[r.status] || r.status)}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
 }
 
 function eventHtml(e) {
@@ -49,6 +49,7 @@ function eventHtml(e) {
   if (e.type === 'result') return `<div class="ev"><details data-k="${esc(key)}"${open(key)}><summary>${time}result: ${esc((e.text || '').split('\n')[0].slice(0, 120))}</summary><pre>${esc(e.text)}</pre></details></div>`;
   if (e.type === 'approval_needed') return `<div class="ev approval_needed">${time}Waiting for you: <code>${esc(e.text)}</code> (${esc(e.reason)})</div>`;
   if (e.type === 'approval') return `<div class="ev decided">${time}${e.allowed ? 'Allowed' : 'Declined'}: <code>${esc(e.text)}</code></div>`;
+  if (e.type === 'plan') return `<div class="ev stage">${time}<strong>Plan</strong><pre>${esc(e.text)}</pre></div>`;
   if (e.type === 'stage') return `<div class="ev stage">${time}<strong>${esc(e.text)}</strong></div>`;
   if (e.type === 'note') return `<div class="ev">${time}${esc(e.text)}</div>`;
   return '';
@@ -63,6 +64,11 @@ function renderDetail(run) {
     <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
     <div class="facts"><span>Repo <code>${esc(run.repo)}</code></span><span>Branch <code>${esc(run.branch)}</code></span>${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}</div>
+    ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
+    ${run.children?.length ? `<div class="result"><strong>Workers</strong><div class="workers">${run.children.map((id, i) => {
+      const c = runs.find((x) => x.id === id);
+      return `<button class="worker" data-go="${esc(id)}"><span class="tag ${TAGS[c?.status] || ''}">${esc(NOTE_FOR[c?.status] || c?.status || '?')}</span> ${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} <span class="muted">step ${c?.steps ?? 0}</span></button>`;
+    }).join('')}</div></div>` : ''}
     ${run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
     ${run.error ? `<div class="result"><span class="tag bad">error</span> ${esc(run.error)}</div>` : ''}
     ${r ? `<div class="result"><p class="summary">${esc(r.summary)}</p>
@@ -115,6 +121,8 @@ $('list').addEventListener('click', (e) => {
 });
 
 $('detail').addEventListener('click', async (e) => {
+  const go = e.target.closest('[data-go]')?.dataset.go;
+  if (go) { e.preventDefault(); selected = go; location.hash = go; openDetails = new Set(); renderList(); refresh(); return; }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (!act || !selected) return;
   try {
@@ -185,6 +193,7 @@ async function initWorkflows() {
     const { workflows } = await (await fetch('api/workflows')).json();
     workflowList = workflows;
     $('workflow').insertAdjacentHTML('beforeend', workflows.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join(''));
+    $('workflow').insertAdjacentHTML('beforeend', '<option value="swarm" title="A planner splits the goal, workers do the parts at the same time on their own branches, the branches are merged, and a reviewer checks the result">Swarm (several agents at once)</option>');
   } catch { /* auto still works without the list */ }
   $('newRun').elements.goal.addEventListener('input', schedulePick);
   $('workflow').addEventListener('change', () => { $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });

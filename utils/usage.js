@@ -9,7 +9,7 @@ const zlib = require('zlib');
 const { StringDecoder } = require('string_decoder');
 
 const FILE = process.env.HARNESS_USAGE_FILE || path.join(__dirname, '..', 'harness-usage.json');
-const CONFIG_FILE = path.join(__dirname, '..', 'config.yaml');
+const CONFIG_FILE = process.env.HARNESS_GATEWAY_CONFIG || path.join(__dirname, '..', 'config.yaml');
 const MAX_BODY_CHARS = 20 * 1024 * 1024; // non-streamed replies bigger than this go unparsed
 const SAVE_DELAY_MS = 2000;
 

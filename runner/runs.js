@@ -11,6 +11,7 @@ const { LocalSandbox } = require('./sandbox');
 const { makeTools } = require('./tools');
 const { runAgent, stageSystem } = require('./agent');
 const workflows = require('../utils/workflows');
+const swarm = require('./swarm');
 
 const MAX_EVENTS = 2000;
 const EVENT_TEXT = 3000;
@@ -24,7 +25,8 @@ class RunManager {
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000 }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000 }) {
+        this.pollMs = pollMs;
         this.dir = dir;
         this.roots = roots.map((r) => { try { return fs.realpathSync(r); } catch { return path.resolve(r); } });
         this.harnessUrl = harnessUrl.replace(/\/$/, '');
@@ -97,11 +99,12 @@ class RunManager {
         const repo = this.checkRepo(cfg.repo);
         const num = (v, lo, hi, d) => (v === undefined || v === null || v === '' ? d : Math.min(hi, Math.max(lo, Math.floor(Number(v)) || d)));
         if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
-        const workflow = workflows.get(cfg.workflow || workflows.FALLBACK);
+        const isSwarm = cfg.workflow === 'swarm';
+        const workflow = isSwarm ? { id: 'swarm', name: 'Swarm' } : workflows.get(cfg.workflow || workflows.FALLBACK);
         if (!workflow) throw new Error(`no workflow named ${cfg.workflow}`);
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
-            id, goal, repo, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
+            id, goal, repo, kind: isSwarm ? 'swarm' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             maxSteps: num(cfg.maxSteps, 1, 200, 40), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
@@ -116,7 +119,9 @@ class RunManager {
     }
 
     pump() {
-        while (this.live.size < this.maxRuns && this.queue.length) {
+        const working = () => [...this.live.values()].filter((l) => !l.swarm).length;
+        // a swarm only waits for its workers, so it doesn't take a place from them
+        while (this.queue.length && (working() < this.maxRuns || this.runs.get(this.queue[0])?.kind === 'swarm')) {
             const id = this.queue.shift();
             const run = this.runs.get(id);
             if (run?.status === 'queued') this.execute(run).catch(() => {});
@@ -196,24 +201,35 @@ class RunManager {
         });
     }
 
+    async swarmRun(run, live) {
+        const outcome = await swarm.executeSwarm(this, run, live);
+        return { sandbox: live.sandbox, outcome };
+    }
+
+    async plainRun(run, live, nextN) {
+        live.sandbox = await LocalSandbox.create({ repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
+        const sandbox = live.sandbox;
+        run.base = sandbox.base;
+        this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}.` });
+        const files = (await sandbox.git(['ls-files'])).split('\n').filter(Boolean);
+        const context = `The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
+        const workflow = workflows.get(run.workflow) || workflows.get(workflows.FALLBACK);
+        const deadline = Date.now() + run.maxMinutes * 60000;
+        return { sandbox, outcome: await this.runStages({ run, live, sandbox, workflow, context, deadline, nextN }) };
+    }
+
     async execute(run) {
-        const live = { sandbox: null, stopped: false, resolve: null };
+        const live = { sandbox: null, stopped: false, resolve: null, swarm: run.kind === 'swarm' };
         this.live.set(run.id, live);
         run.status = 'running';
         run.started = new Date().toISOString();
         this.save(run);
         let n = 0;
         try {
-            live.sandbox = await LocalSandbox.create({ repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
-            const sandbox = live.sandbox;
-            run.base = sandbox.base;
-            this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}.` });
-            const files = (await sandbox.git(['ls-files'])).split('\n').filter(Boolean);
-            const context = `The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
-            const workflow = workflows.get(run.workflow) || workflows.get(workflows.FALLBACK);
-            const deadline = Date.now() + run.maxMinutes * 60000;
-            const outcome = await this.runStages({ run, live, sandbox, workflow, context, deadline, nextN: () => ++n });
-            const commit = await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
+            const { sandbox, outcome } = run.kind === 'swarm' ? await this.swarmRun(run, live) : await this.plainRun(run, live, () => ++n);
+            let commit = await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
+            // a swarm's changes are already committed as merges
+            if (!commit && run.kind === 'swarm') { const head = (await sandbox.git(['rev-parse', 'HEAD'])).trim(); if (head !== run.base) commit = head; }
             const result = { summary: outcome.summary, commit, diffStat: await sandbox.diffStat(), tests: null };
             if (run.test && !live.stopped) {
                 this.event(run, { type: 'note', text: `Running the test command: ${run.test}` });

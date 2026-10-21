@@ -196,6 +196,23 @@ test('only repos inside the allowed folders can be used, and the form is checked
     assert.deepEqual(manager.repos(), [repo]);
 });
 
+test('the folder picker lists only folders inside the allowed roots and marks git repos', () => {
+    fs.mkdirSync(path.join(reposDir, 'plain', 'inner'), { recursive: true });
+    fs.mkdirSync(path.join(reposDir, '.hidden'), { recursive: true });
+    const top = manager.browse('');
+    assert.equal(top.path, fs.realpathSync(reposDir)); // a single allowed folder is opened for you
+    assert.equal(top.parent, null);
+    const root = manager.browse(reposDir);
+    assert.deepEqual(root.entries.map((e) => [e.name, e.git]), [['demo', true], ['plain', false]]);
+    assert.equal(manager.browse(repo).git, true);
+    const inner = manager.browse(path.join(reposDir, 'plain', 'inner'));
+    assert.equal(inner.parent, fs.realpathSync(path.join(reposDir, 'plain')));
+    assert.throws(() => manager.browse(os.tmpdir()), /not inside an allowed folder/);
+    assert.throws(() => manager.browse(path.join(reposDir, '..')), /not inside an allowed folder/);
+    assert.throws(() => manager.browse(path.join(dir, 'missing')), /does not exist/);
+    assert.throws(() => manager.browse(path.join(repo, 'app.js')), /not a folder/);
+});
+
 test('old tool output is cut from the history sent to the model', () => {
     const messages = [{ role: 'system', content: 's' }, ...Array.from({ length: 30 }, (_, i) => ({ role: 'tool', content: `${i}`.padEnd(2000, 'x') }))];
     const out = shrinkHistory(messages);
@@ -254,6 +271,9 @@ test('the Interceptor proxies the runner behind its own checks', async () => {
     assert.equal((await fetch(`${base}/ui/api/runs`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'x' })).status, 415);
     const bad = await fetch(`${base}/ui/api/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ goal: 'x', repo: '/etc' }) });
     assert.equal(bad.status, 400);
+    const browsed = await (await fetch(`${base}/ui/api/runs/browse?path=${encodeURIComponent(reposDir)}`)).json();
+    assert.ok(browsed.entries.some((e) => e.name === 'demo' && e.git));
+    assert.equal((await fetch(`${base}/ui/api/runs/browse?path=${encodeURIComponent(os.tmpdir())}`)).status, 400);
     runnerServer.close();
     const down = await fetch(`${base}/ui/api/runs`);
     assert.equal(down.status, 502);

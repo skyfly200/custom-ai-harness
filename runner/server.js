@@ -40,6 +40,9 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
 
     app.get('/runs', (req, res) => res.json({ runs: manager.list() }));
     app.get('/runs/repos', (req, res) => res.json({ repos: manager.repos(), roots: manager.roots }));
+    app.get('/runs/browse', (req, res) => {
+        try { res.json(manager.browse(req.query.path)); } catch (err) { fail(res, err); }
+    });
     app.post('/runs', (req, res) => {
         try { res.status(201).json(manager.create(req.body)); } catch (err) { fail(res, err); }
     });

@@ -159,6 +159,7 @@ $('newRun').addEventListener('submit', async (e) => {
       body.workflow = pick?.id || 'general';
     }
     const run = await post('', body);
+    if (body.repo) { rememberRepo(body.repo); renderRecent(); }
     selected = run.id; location.hash = run.id; openDetails = new Set();
     f.elements.goal.value = '';
     $('startMsg').textContent = '';
@@ -199,14 +200,83 @@ async function initWorkflows() {
   $('workflow').addEventListener('change', () => { $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });
 }
 
+// Repo picker: type or paste a path, pick a recent one, or browse the allowed folders
+const RECENT_KEY = 'harness-runs-recent-repos';
+let pickData = null;   // the folder listing shown in the dialog
+let pickRepo = '';     // the repo chosen in the dialog
+
+function recentRepos() {
+  try { const r = JSON.parse(localStorage.getItem(RECENT_KEY)); return Array.isArray(r) ? r.filter((x) => typeof x === 'string') : []; } catch { return []; }
+}
+function rememberRepo(repo) {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify([repo, ...recentRepos().filter((r) => r !== repo)].slice(0, 6))); } catch { /* private window */ }
+}
+function renderRecent(extra = []) {
+  const list = [...new Set([...recentRepos(), ...extra])].slice(0, 6);
+  $('recent').innerHTML = list.map((r) => `<button type="button" class="chip" data-repo="${esc(r)}" title="${esc(r)}">${esc(r.split(/[\\/]/).filter(Boolean).pop() || r)}</button>`).join('');
+}
+
+function renderPicker() {
+  const d = pickData;
+  const q = $('pickFilter').value.trim().toLowerCase();
+  const rows = d.entries.filter((e) => !q || e.name.toLowerCase().includes(q));
+  $('crumbs').innerHTML = `<button type="button" class="crumb" data-dir="">Allowed folders</button>${d.path ? ` <span class="muted">›</span> <code>${esc(d.path)}</code>` : ''}`;
+  const up = d.path && d.parent !== null ? `<div class="pick-row up" data-dir="${esc(d.parent)}" role="option" tabindex="0"><span class="ico">↰</span> Up one folder</div>` : '';
+  $('pickList').innerHTML = up + (rows.map((e) => `<div class="pick-row${e.path === pickRepo ? ' on' : ''}" data-dir="${esc(e.path)}" data-git="${e.git ? 1 : 0}" role="option" tabindex="0"><span class="ico">${e.git ? '◆' : '▸'}</span><span class="nm">${esc(e.name)}</span>${e.git ? '<span class="tag ok">git repo</span>' : ''}</div>`).join('')
+    || `<p class="muted pad">${d.entries.length ? 'No folder matches.' : 'No folders here.'}</p>`);
+  $('pickUse').disabled = !pickRepo;
+  $('pickHint').textContent = pickRepo || 'Click a ◆ git repo to choose it; click any other folder to open it.';
+}
+
+async function pickerGo(dir, showParent = false) {
+  try {
+    pickData = await api(`/browse?path=${encodeURIComponent(dir || '')}`);
+    // opening on a repo that is already typed: show the folder it is in, with it ticked
+    if (showParent && pickData.git && pickData.parent !== null) {
+      const chosen = pickData.path;
+      pickData = await api(`/browse?path=${encodeURIComponent(pickData.parent)}`);
+      pickRepo = chosen;
+      $('pickFilter').value = '';
+      return renderPicker();
+    }
+  } catch (err) {
+    if (!dir) { $('pickHint').textContent = err.message; return; }
+    return pickerGo('');   // the typed path was not browsable: start from the allowed folders
+  }
+  pickRepo = pickData.git ? pickData.path : '';
+  $('pickFilter').value = '';
+  renderPicker();
+}
+
+async function initRepoPicker() {
+  let repos = [];
+  try {
+    const r = await api('/repos');
+    repos = r.repos;
+    if (!repos.length) $('repo').placeholder = `Paste a path inside ${r.roots.join(' or ') || 'RUNNER_ROOTS'}`;
+    if (repos.length === 1) $('repo').value = repos[0];
+  } catch { /* the notice shows it */ }
+  const last = recentRepos()[0];
+  if (!$('repo').value && last) $('repo').value = last;
+  renderRecent(repos);
+  $('recent').addEventListener('click', (e) => { const b = e.target.closest('[data-repo]'); if (b) $('repo').value = b.dataset.repo; });
+  $('browse').addEventListener('click', () => { $('picker').showModal(); pickerGo($('repo').value.trim(), true); });
+  $('pickClose').addEventListener('click', () => $('picker').close());
+  $('pickFilter').addEventListener('input', () => pickData && renderPicker());
+  $('crumbs').addEventListener('click', (e) => { if (e.target.closest('[data-dir]')) pickerGo(''); });
+  $('pickList').addEventListener('click', (e) => {
+    const row = e.target.closest('.pick-row');
+    if (!row) return;
+    if (row.dataset.git === '1') { pickRepo = row.dataset.dir; renderPicker(); } else pickerGo(row.dataset.dir);
+  });
+  $('pickList').addEventListener('dblclick', (e) => { const row = e.target.closest('.pick-row'); if (row && row.dataset.git === '1') pickerGo(row.dataset.dir); });
+  $('pickList').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.closest('.pick-row')?.click(); });
+  $('pickUse').addEventListener('click', () => { $('repo').value = pickRepo; $('picker').close(); });
+}
+
 async function init() {
   initWorkflows();
-  try {
-    const { repos, roots } = await api('/repos');
-    $('repos').innerHTML = repos.map((r) => `<option value="${esc(r)}">`).join('');
-    if (!repos.length) $('newRun').elements.repo.placeholder = `Paste a path inside ${roots.join(' or ') || 'RUNNER_ROOTS'}`;
-    if (repos.length === 1) $('newRun').elements.repo.value = repos[0];
-  } catch { /* the notice shows it */ }
+  await initRepoPicker();
   try {
     const { profiles } = await (await fetch('api/profiles')).json();
     $('newRun').elements.profile.insertAdjacentHTML('beforeend', profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('') + '<option value="auto">Jev picks (auto)</option>');

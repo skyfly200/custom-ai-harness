@@ -716,11 +716,22 @@ Tool sets: `read` (list, read), `check` (also run commands) and `all` (also writ
 
 On the Runs page the Workflow box is **Jev picks (auto)** by default. A moment after you stop typing the goal, Jev is asked one yes/no question per recipe ("Is this task a bug report, a failing test or an error message...?"), the best answer at 50% or more wins (otherwise "Do the task"), and the pick is shown under the box. Choose another workflow in the box to override it. To add your own recipe, copy a file in `workflows/`, change the `id`, `name`, `when` (the sentence Jev is asked about) and `stages`; a file with a mistake is skipped and listed by `GET /ui/api/workflows` under `problems`. Set `HARNESS_WORKFLOWS_DIR` to keep recipes elsewhere.
 
+#### Swarm (several agents on one task)
+
+Choose **Swarm (several agents at once)** in the Workflow box for a task that splits into separate parts. It runs in four steps:
+
+1. A **Planner** (read-only, high effort) reads the repo and splits the goal into up to 5 parts that touch different files. If its plan can't be read, the whole task runs as one part.
+2. A **worker** per part starts as an ordinary run (its own branch, its own approvals, the workflow the planner chose for it). They run side by side, as many as `RUNNER_MAX_RUNS` (default 2) allow, and the rest wait their turn.
+3. Each finished branch is merged into the swarm's own branch `harness/<id>`. A part that fails, changes nothing or conflicts with another is left out and named in the summary; its branch stays in your repo.
+4. A **Reviewer** runs the tests and checks that the combined result does the whole task. Your test command, if you gave one, runs last.
+
+The swarm's page lists its workers; click one to watch it or answer its approval. Stopping the swarm stops every worker. A swarm is marked finished only when every part merged and the reviewer said PASS. Raise `RUNNER_MAX_RUNS` for more workers at once (each one is a stream of model calls, so mind your rate limits).
+
 Notes:
 
 - The runner is its own process (`node runner/server.js`, port 3100, only reachable from this machine). The Interceptor passes the Runs page's requests to it after its own login check, and `npm run all` sets a shared `RUNNER_TOKEN` so nothing else on the machine can drive it. If you start the parts yourself, set the same `RUNNER_TOKEN` in `.env` for both.
 - Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed.
-- It isn't in the Docker setup yet. One agent works at a time on a task; several agents working together on parts of it come next, and cloud sandboxes can replace the local worktree later.
+- It isn't in the Docker setup yet. Cloud sandboxes can replace the local worktree later.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
 
 ### Control UI

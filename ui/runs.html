@@ -30,6 +30,11 @@
     <label class="field wide"><span>What should it do?</span>
       <textarea name="goal" rows="4" required placeholder="Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI"></textarea></label>
     <div class="row">
+      <label class="field"><span data-hint="The steps the agent follows. Auto asks Jev which recipe fits your goal, and shows its pick before you start">Workflow</span>
+        <select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select></label>
+      <span class="pick-note muted" id="pickNote"></span>
+    </div>
+    <div class="row">
       <label class="field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder)">Repo</span>
         <input type="text" name="repo" list="repos" required placeholder="Choose or paste a path"><datalist id="repos"></datalist></label>
       <label class="field"><span data-hint="Which routing picks the models for this run">Routing</span><select name="profile"><option value="">Default</option></select></label>

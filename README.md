@@ -344,6 +344,7 @@ The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 | `utils/access.js` | The optional `HARNESS_PASSWORD` login |
 | `guard-rules.json`, `utils/guard.js`, `.claude/hooks/guard.js` | The command guard (see [Command guard](#command-guard-jev-checks-commands-before-they-run)) |
 | `scripts/jev-files-mcp.js`, `utils/jevFiles.js`, `utils/jevAsk.js` | The `ask_jev_file` tools (see [Ask Jev about a file](#ask-jev-about-a-file-ask_jev_file-tools)) |
+| `workflows/`, `utils/workflows.js` | Recipes for the task runner and Jev's pick between them |
 | `runner/`, `ui/runs.html` | The task runner: sandbox, tools, agent loop, run manager and API (see [Task runner](#task-runner-agents-that-do-a-whole-task)) |
 | `ui/manifest.webmanifest`, `ui/sw.js`, `ui/icon*.svg`, `ui/icon-*.png` | The installable app: manifest, offline copy of the pages, icons (re-render the PNGs from the SVGs if the logo changes) |
 
@@ -697,11 +698,29 @@ How it keeps your work safe:
 
 To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Runs** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Add a test command such as `npm test` to see whether the result passes.
 
+#### Workflows (recipes the agent follows)
+
+A workflow is a short list of stages. Each stage is its own agent loop with a role, the tools it may use, a step budget and optionally an effort, and it is handed what the stages before it found. The recipes live in `workflows/*.json`, one file each:
+
+| Workflow | Stages | Fits |
+| --- | --- | --- |
+| Quick answer | Explainer (read-only) | a question about the code |
+| Fix a bug | Investigator (reads, runs tests), Implementer, Verifier | a bug report or failing test |
+| Build a feature | Planner (high effort), Implementer, Verifier | new behaviour |
+| Refactor | Planner (runs the tests first), Implementer, Verifier | restructuring without changing behaviour |
+| Review | Reviewer, Skeptic (tries to disprove each finding) | "review this branch", changes nothing |
+| Research the code | Reader, Writer | how something works, changes nothing |
+| Do the task | Engineer | anything else (the fallback) |
+
+Tool sets: `read` (list, read), `check` (also run commands) and `all` (also write files). A **Verifier** starts its summary with PASS or FAIL; FAIL sends the run back to the Implementer once, with what was wrong, and a second FAIL stops the run for you to look at.
+
+On the Runs page the Workflow box is **Jev picks (auto)** by default. A moment after you stop typing the goal, Jev is asked one yes/no question per recipe ("Is this task a bug report, a failing test or an error message...?"), the best answer at 50% or more wins (otherwise "Do the task"), and the pick is shown under the box. Choose another workflow in the box to override it. To add your own recipe, copy a file in `workflows/`, change the `id`, `name`, `when` (the sentence Jev is asked about) and `stages`; a file with a mistake is skipped and listed by `GET /ui/api/workflows` under `problems`. Set `HARNESS_WORKFLOWS_DIR` to keep recipes elsewhere.
+
 Notes:
 
 - The runner is its own process (`node runner/server.js`, port 3100, only reachable from this machine). The Interceptor passes the Runs page's requests to it after its own login check, and `npm run all` sets a shared `RUNNER_TOKEN` so nothing else on the machine can drive it. If you start the parts yourself, set the same `RUNNER_TOKEN` in `.env` for both.
 - Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed.
-- It isn't in the Docker setup yet. This first version works alone on one task; workflows that Jev chooses between and several agents working together come next, and cloud sandboxes can replace the local worktree later.
+- It isn't in the Docker setup yet. One agent works at a time on a task; several agents working together on parts of it come next, and cloud sandboxes can replace the local worktree later.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
 
 ### Control UI

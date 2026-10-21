@@ -17,6 +17,7 @@ const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
 const autoStrategy = require('./utils/autoStrategy');
+const workflows = require('./utils/workflows');
 const tiers = require('./utils/tiers');
 const guard = require('./utils/guard');
 const { askText, DEFAULT_WINDOW } = require('./utils/jevAsk');
@@ -445,6 +446,15 @@ async function askRouter(text, questions) {
     if (!res.ok) throw new Error(body.error || `Router answered HTTP ${res.status}`);
     return body.answers;
 }
+// Workflows (workflows/*.json): the recipes the task runner follows. /pick asks
+// Jev which one fits a goal, so the Runs page can show it before the run starts.
+app.get('/ui/api/workflows', (req, res) => {
+    const { list, problems } = workflows.load();
+    res.json({ workflows: list.map(({ id, name, when, fallback, stages }) => ({ id, name, when, fallback, stages: stages.map(({ id: sid, role, tools, effort, verdict }) => ({ id: sid, role, tools, effort, verdict })) })), problems });
+});
+app.post('/ui/api/workflows/pick', async (req, res) => {
+    res.json(await workflows.pick(String(req.body?.goal || ''), { ask: askRouter }));
+});
 app.post('/v1/guard', async (req, res) => {
     const { guardJev, guardAskAt, guardDenyAt } = settings.get();
     const result = await guard.check(req.body || {}, { ask: askRouter, jev: guardJev, askAt: guardAskAt, denyAt: guardDenyAt });

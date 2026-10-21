@@ -1,0 +1,11 @@
+{
+  "id": "review",
+  "name": "Review",
+  "when": "a request to review, audit or check code, a branch or recent changes and report problems, without changing anything",
+  "stages": [
+    { "id": "review", "role": "Reviewer", "tools": "check", "maxSteps": 20, "effort": "high",
+      "prompt": "Review the code or changes the task points at (for recent changes use `git log` and `git diff`). Look for bugs, missing error handling, security problems and missing tests. Do not change any file. Call finish with a numbered list of findings, each with the file and line and why it is a problem." },
+    { "id": "verify", "role": "Skeptic", "tools": "check", "maxSteps": 15, "effort": "medium",
+      "prompt": "Try to disprove each finding from the review: read the code, run it if you can, and decide whether the problem is real. Do not change any file. Call finish with the findings that survived, each marked CONFIRMED or UNSURE, and the ones you dropped with a reason." }
+  ]
+}

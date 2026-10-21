@@ -31,8 +31,8 @@ function shrinkHistory(messages) {
  * `tools` from makeTools. `emit(event)` records what happens.
  * Resolves { status: 'finished' | 'out_of_steps' | 'out_of_time' | 'stopped', summary }.
  */
-async function runAgent({ run, tools, chat, emit, firstContext = '' }) {
-    const messages = [{ role: 'system', content: SYSTEM }, { role: 'user', content: `Task:\n${run.goal}${firstContext ? `\n\n${firstContext}` : ''}` }];
+async function runAgent({ run, tools, chat, emit, firstContext = '', system = SYSTEM }) {
+    const messages = [{ role: 'system', content: system }, { role: 'user', content: `Task:\n${run.goal}${firstContext ? `\n\n${firstContext}` : ''}` }];
     let nudges = 0;
     for (let step = 1; step <= run.maxSteps; step++) {
         if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
@@ -63,4 +63,9 @@ async function runAgent({ run, tools, chat, emit, firstContext = '' }) {
     return { status: 'out_of_steps', summary: `Used all ${run.maxSteps} steps without finishing.` };
 }
 
-module.exports = { runAgent, shrinkHistory, SYSTEM };
+/** The base rules plus what this stage of a workflow is for. */
+function stageSystem(stage) {
+    return `${SYSTEM}\n\nYour role in this run: ${stage.role}. ${stage.prompt}`;
+}
+
+module.exports = { runAgent, shrinkHistory, stageSystem, SYSTEM };

@@ -9,7 +9,8 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { LocalSandbox } = require('./sandbox');
 const { makeTools } = require('./tools');
-const { runAgent } = require('./agent');
+const { runAgent, stageSystem } = require('./agent');
+const workflows = require('../utils/workflows');
 
 const MAX_EVENTS = 2000;
 const EVENT_TEXT = 3000;
@@ -96,9 +97,11 @@ class RunManager {
         const repo = this.checkRepo(cfg.repo);
         const num = (v, lo, hi, d) => (v === undefined || v === null || v === '' ? d : Math.min(hi, Math.max(lo, Math.floor(Number(v)) || d)));
         if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
+        const workflow = workflows.get(cfg.workflow || workflows.FALLBACK);
+        if (!workflow) throw new Error(`no workflow named ${cfg.workflow}`);
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
-            id, goal, repo, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
+            id, goal, repo, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             maxSteps: num(cfg.maxSteps, 1, 200, 40), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
@@ -123,7 +126,7 @@ class RunManager {
     event(run, e) {
         run.events.push({ t: new Date().toISOString(), ...e, ...(e.text !== undefined ? { text: short(e.text) } : {}), ...(e.args !== undefined ? { args: this.shortArgs(e.args) } : {}) });
         if (run.events.length > MAX_EVENTS) run.events.splice(0, run.events.length - MAX_EVENTS);
-        if (e.type === 'step') run.steps = e.step;
+        if (e.type === 'step') run.steps += 1;
         if (e.type === 'model' && e.usage) { run.tokens.in += e.usage.prompt_tokens || 0; run.tokens.out += e.usage.completion_tokens || 0; }
         this.save(run);
     }
@@ -207,16 +210,9 @@ class RunManager {
             this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}.` });
             const files = (await sandbox.git(['ls-files'])).split('\n').filter(Boolean);
             const context = `The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
-            const tools = makeTools({
-                sandbox,
-                check: (kind, text) => this.guard(kind, text),
-                approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
-            });
-            const outcome = await runAgent({
-                run: { goal: run.goal, maxSteps: run.maxSteps, deadline: Date.now() + run.maxMinutes * 60000, stopped: () => live.stopped },
-                tools, firstContext: context, emit: (e) => this.event(run, e),
-                chat: (messages, defs) => this.chat(run, messages, defs, ++n),
-            });
+            const workflow = workflows.get(run.workflow) || workflows.get(workflows.FALLBACK);
+            const deadline = Date.now() + run.maxMinutes * 60000;
+            const outcome = await this.runStages({ run, live, sandbox, workflow, context, deadline, nextN: () => ++n });
             const commit = await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
             const result = { summary: outcome.summary, commit, diffStat: await sandbox.diffStat(), tests: null };
             if (run.test && !live.stopped) {
@@ -237,6 +233,53 @@ class RunManager {
             this.live.delete(run.id);
             this.pump();
         }
+    }
+
+    /**
+     * Run a workflow's stages in order in one sandbox. Each stage is its own
+     * agent loop with its own prompt, tools and effort, and gets the earlier
+     * stages' summaries. A verdict stage that says FAIL sends the run back to
+     * its retryTo stage (maxRetries times), with what was wrong.
+     */
+    async runStages({ run, live, sandbox, workflow, context, deadline, nextN }) {
+        const notes = [];
+        const retries = {};
+        let outcome = { status: 'finished', summary: '' };
+        for (let i = 0; i < workflow.stages.length; i++) {
+            const stage = workflow.stages[i];
+            run.stage = stage.id;
+            this.event(run, { type: 'stage', stage: stage.id, role: stage.role, text: `Stage ${i + 1} of ${workflow.stages.length}: ${stage.role}` });
+            const tools = makeTools({
+                sandbox, toolset: stage.tools,
+                check: (kind, text) => this.guard(kind, text),
+                approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
+            });
+            const handoff = notes.map((n) => `## ${n.role} (${n.stage})\n${n.summary}`).join('\n\n');
+            // the stage's effort replaces the run's only when the person set none
+            const stageRun = run.effort || !stage.effort ? run : { ...run, effort: stage.effort };
+            outcome = await runAgent({
+                run: { goal: run.goal, maxSteps: Math.min(stage.maxSteps, run.maxSteps), deadline, stopped: () => live.stopped },
+                tools, system: stageSystem(stage), emit: (e) => this.event(run, { ...e, stage: stage.id }),
+                firstContext: `${context}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
+                chat: (messages, defs) => this.chat(stageRun, messages, defs, nextN()),
+            });
+            notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
+            if (outcome.status !== 'finished') break;
+            if (stage.verdict && /^\W*FAIL/i.test(outcome.summary)) {
+                retries[stage.id] = (retries[stage.id] || 0) + 1;
+                if (retries[stage.id] <= stage.maxRetries) {
+                    this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo}.` });
+                    i = workflow.stages.findIndex((s) => s.id === stage.retryTo) - 1;
+                    continue;
+                }
+                this.event(run, { type: 'note', text: `${stage.role} still says FAIL; stopping here for a person to look.` });
+                outcome = { status: 'incomplete', summary: outcome.summary };
+                break;
+            }
+        }
+        run.stage = null;
+        if (workflow.stages.length > 1) outcome.summary = notes.map((n) => `${n.role}: ${n.summary}`).join('\n\n');
+        return outcome;
     }
 
     approve(id, allow) {

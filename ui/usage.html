@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="usage.css">
+<link rel="stylesheet" href="calm.css">
 </head>
 <body>
 <main>
@@ -49,27 +50,27 @@
         <tbody id="saveRows"></tbody>
       </table>
     </div>
-    <div class="sub muted" id="saveNote"></div>
+    <div class="sub muted fine" id="saveNote"></div>
   </div>
 
   <h2>Over time</h2>
   <div class="card chart-card">
     <div class="legend" id="timeLegend"></div>
     <div class="chart-scroll"><svg id="timeline" class="chart" role="img" aria-label="Usage per day by service"></svg></div>
-    <div class="sub muted" id="timelineNote"></div>
+    <div class="sub muted fine" id="timelineNote"></div>
   </div>
 
   <h2>Flow through the harness</h2>
   <div class="card chart-card">
     <div class="chart-scroll"><svg id="flow" class="chart" role="img" aria-label="Flow of tokens through the harness"></svg></div>
-    <div class="sub muted">Every client request passes the Interceptor, is routed (by the Router, a pin, or the client's choice), and goes through the Gateway to the service that answers. Line width follows the selected measure.</div>
+    <div class="sub muted fine">Every client request passes the Interceptor, is routed (by the Router, a pin, or the client's choice), and goes through the Gateway to the service that answers. Line width follows the selected measure.</div>
   </div>
 
-  <h2>Tokens from client to model to service</h2>
+  <h2>Client → model → service</h2>
   <div class="card chart-card">
     <div class="legend" id="legend"></div>
     <div class="chart-scroll"><svg id="sankey" class="chart" role="img" aria-label="Sankey diagram of tokens from client to model to service"></svg></div>
-    <div class="sub muted">"Asked for" is the model the Router or client picked; "Served by" is the one that answered after any Gateway fallbacks. Bands are coloured by the service that answered.</div>
+    <div class="sub muted fine">"Asked for" is the model the Router or client picked; "Served by" is the one that answered after any Gateway fallbacks. Bands are coloured by the service that answered.</div>
   </div>
 
   <div class="two">
@@ -91,7 +92,7 @@
       <tfoot id="rowsTotal"></tfoot>
     </table>
   </div>
-  <div class="sub muted" style="margin-top:8px">Counts come from the usage each reply reports. Values marked ~ are estimates (about 4 characters a token) for replies that had none, such as OpenAI streams without <code>stream_options.include_usage</code>. Costs are worked out for the model that answered from OpenRouter's own prices for OpenRouter models, else the Gateway's price list (LiteLLM's <code>/v1/model/info</code>), with cached input at the provider's cache price (a tenth of the input price for Claude when the list doesn't say). Free and local models cost nothing, and models with no listed price show ?. Totals are kept in <code>harness-usage.json</code> across restarts.</div>
+  <div class="sub muted fine" style="margin-top:8px">Counts come from the usage each reply reports. Values marked ~ are estimates (about 4 characters a token) for replies that had none, such as OpenAI streams without <code>stream_options.include_usage</code>. Costs are worked out for the model that answered from OpenRouter's own prices for OpenRouter models, else the Gateway's price list (LiteLLM's <code>/v1/model/info</code>), with cached input at the provider's cache price (a tenth of the input price for Claude when the list doesn't say). Free and local models cost nothing, and models with no listed price show ?. Totals are kept in <code>harness-usage.json</code> across restarts.</div>
 </main>
 <div id="tip" class="tip" hidden></div>
 <script src="hints.js"></script>

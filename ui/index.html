@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="Bright Chat">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="calm.css">
 </head>
 <body>
 <main>
@@ -25,7 +26,7 @@
   <h2 data-hint="Each part of the harness and whether it answers. Optional parts can be off">Components</h2>
   <div class="grid" id="components"></div>
 
-  <h2 data-hint="Counts reset when the Interceptor (npm start) restarts">Since the Interceptor started</h2>
+  <h2 id="sinceHead" data-hint="Counts reset when the Interceptor (npm start) restarts">Since start</h2>
   <div class="grid" id="stats"></div>
 
   <div class="two home">
@@ -41,7 +42,7 @@
     </section>
   </div>
 
-  <h2 data-hint="The latest requests, newest first, with where they went and why">Recent routing decisions</h2>
+  <h2 data-hint="The latest requests, newest first, with where they went and why">Recent requests</h2>
   <div class="table-wrap">
     <table>
       <thead><tr>
@@ -57,7 +58,7 @@
       <thead><tr>
         <th>Time</th><th data-hint="Allow: it runs. Ask: the agent has to ask you first. Deny: blocked">Decision</th><th data-hint="A rule in guard-rules.json, or Jev's confidence that it is risky">Why</th><th>Command or file</th>
       </tr></thead>
-      <tbody id="guard"><tr><td colspan="4" class="muted">No checks yet. Add the hook in .claude/hooks/guard.js to Claude Code (see the README).</td></tr></tbody>
+      <tbody id="guard"><tr><td colspan="4" class="muted">No checks yet.</td></tr></tbody>
     </table>
   </div>
 </main>
@@ -95,17 +96,17 @@ const STAT_HINTS = {
 function renderComponents(components) {
   $('components').innerHTML = components.map(c => {
     const state = c.ok ? 'ok' : c.optional ? 'off' : 'bad';
-    const label = c.ok ? `Up · ${c.ms} ms` : c.optional ? 'Not running (optional)' : `Down · ${esc(c.error || 'HTTP ' + c.status)}`;
+    const label = c.ok ? `Up · ${c.ms} ms` : c.optional ? 'Off (optional)' : `Down · ${esc(c.error || 'HTTP ' + c.status)}`;
     const extra = c.name === 'Router' && c.ok ? ` · classifier <b>${esc(c.detail?.backend)}</b>` : '';
     return `<div class="card"><div class="name" data-hint="${esc(COMPONENT_HINTS[c.name] || '')}"><span class="dot ${state}"></span>${esc(c.name)}</div>
-      <div class="sub">${label}${extra}</div><div class="sub"><code>${esc(c.url)}</code></div></div>`;
+      <div class="sub">${label}${extra}</div><div class="sub url"><code>${esc(c.url)}</code></div></div>`;
   }).join('');
 }
 
 function renderStats(s) {
   const items = [['Requests', s.requests], ['Router unreachable', s.routerDown], ['Gateway fallbacks', s.fallbacks], ['Errors', s.errors], ['Rate limited', s.rateLimited ?? 0], ['Timed out', s.timeouts ?? 0]];
-  $('stats').innerHTML = items.map(([k, v]) => `<div class="card stat" data-hint="${esc(STAT_HINTS[k] || '')}"><div class="num">${v}</div><div class="sub">${k}</div></div>`).join('')
-    + `<div class="card stat"><div class="num" style="font-size:14px">${new Date(s.since).toLocaleString()}</div><div class="sub">Started</div></div>`;
+  $('stats').innerHTML = items.map(([k, v]) => `<div class="card stat" data-hint="${esc(STAT_HINTS[k] || '')}"><div class="num">${v}</div><div class="sub">${k}</div></div>`).join('');
+  $('sinceHead').setAttribute('data-hint', `Counts since the Interceptor started, ${new Date(s.since).toLocaleString()}. They reset when it restarts`);
 }
 
 function why(e) {

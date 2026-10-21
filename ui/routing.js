@@ -1203,7 +1203,7 @@ function drawProfiles() {
   const p = view && R();
   $('profileNote').innerHTML = p
     ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Models are shared by every strategy. ${p.fallbacks ? 'This strategy keeps its own fallback lines.' : 'Its fallback lines are the Gateway’s until you change one here.'}`
-    : `What every request uses unless its chat, project or client picks another strategy. ${graph.profiles.length ? '' : 'Add a strategy to send some chats elsewhere, such as cheaper models or no compression.'}`;
+    : `Used unless a chat, project or client picks another.${graph.profiles.length ? '' : ' Add one to send some chats elsewhere.'}`;
   drawAuto();
 }
 
@@ -1515,7 +1515,7 @@ $('addForm').addEventListener('submit', (e) => {
 // ---- the guide ---------------------------------------------------------------
 
 // Open until the reader closes it once
-try { $('guide').open = localStorage.getItem('harness-routing-guide') !== 'closed'; } catch { $('guide').open = true; }
+try { $('guide').open = localStorage.getItem('harness-routing-guide') === 'open'; } catch { $('guide').open = false; }
 $('guide').addEventListener('toggle', () => {
   try { localStorage.setItem('harness-routing-guide', $('guide').open ? 'open' : 'closed'); } catch {}
 });

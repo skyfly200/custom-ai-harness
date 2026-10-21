@@ -47,7 +47,7 @@ test('a routing picks like the Router does', () => {
 
 test('replacing routings saves them, refuses two with one name and a stale version', () => {
     const { version } = profiles.state();
-    assert.throws(() => profiles.replace([CHEAP, { ...CHEAP }], version), /Two routings/);
+    assert.throws(() => profiles.replace([CHEAP, { ...CHEAP }], version), /Two strategies/);
     assert.throws(() => profiles.replace([CHEAP], version + 5), /changed since/);
     profiles.replace([CHEAP], version);
     assert.equal(JSON.parse(fs.readFileSync(process.env.HARNESS_PROFILES_FILE, 'utf8')).profiles[0].id, 'cheap-and-quick');
@@ -148,7 +148,7 @@ test('a pinned routing skips the Router; a model header still wins; an unknown r
     profiles.replace([{ ...CHEAP, pin: 'just-this' }]);
     const res = await send({ 'x-harness-profile': 'cheap-and-quick' });
     assert.equal(lastBody.model, 'just-this');
-    assert.match(res.headers.get('x-harness-route'), /pinned in routing Cheap and quick/);
+    assert.match(res.headers.get('x-harness-route'), /pinned in strategy Cheap and quick/);
     await send({ 'x-harness-profile': 'cheap-and-quick', 'x-harness-model': 'direct' });
     assert.equal(lastBody.model, 'direct');
     await send({ 'x-harness-profile': 'nope' });

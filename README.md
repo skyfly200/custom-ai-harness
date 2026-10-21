@@ -686,7 +686,7 @@ How it behaves:
 
 ### Task runner (agents that do a whole task)
 
-The **Runs** page gives an agent a goal, such as "fix the failing test in `utils/tiers.js`", and lets it work until it is done. The agent reads and edits files and runs commands in its own copy of your repo, using the models your routing picks. When it finishes you get a summary, the changes, and the result of your test command.
+The **Runs** page gives an agent a goal, such as "fix the failing test in `utils/tiers.js`", and lets it work until it is done. The agent reads and edits files and runs commands in its own copy of your repo, using the models your routing picks. When it finishes you get a summary and the changes.
 
 How it keeps your work safe:
 
@@ -696,7 +696,7 @@ How it keeps your work safe:
 - **No keys.** Commands the agent runs get a trimmed environment, so they can't print the harness's API keys.
 - **Limits.** Each run stops after its max steps (40) or max minutes (30), and at most `RUNNER_MAX_RUNS` (2) run at once. **Stop** ends a run, even in the middle of a command.
 
-To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Runs** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Add a test command such as `npm test` to see whether the result passes.
+To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Runs** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Type or paste the repo's path, pick a recent one, or press **Browse…** to walk through the allowed folders (repos are marked ◆). The agent runs the project's tests itself when the task calls for it.
 
 #### Workflows (recipes the agent follows)
 
@@ -723,7 +723,7 @@ Choose **Swarm (several agents at once)** in the Workflow box for a task that sp
 1. A **Planner** (read-only, high effort) reads the repo and splits the goal into up to 5 parts that touch different files. If its plan can't be read, the whole task runs as one part.
 2. A **worker** per part starts as an ordinary run (its own branch, its own approvals, the workflow the planner chose for it). They run side by side, as many as `RUNNER_MAX_RUNS` (default 2) allow, and the rest wait their turn.
 3. Each finished branch is merged into the swarm's own branch `harness/<id>`. A part that fails, changes nothing or conflicts with another is left out and named in the summary; its branch stays in your repo.
-4. A **Reviewer** runs the tests and checks that the combined result does the whole task. Your test command, if you gave one, runs last.
+4. A **Reviewer** runs the tests and checks that the combined result does the whole task.
 
 The swarm's page lists its workers; click one to watch it or answer its approval. Stopping the swarm stops every worker. A swarm is marked finished only when every part merged and the reviewer said PASS. Raise `RUNNER_MAX_RUNS` for more workers at once (each one is a stream of model calls, so mind your rate limits).
 

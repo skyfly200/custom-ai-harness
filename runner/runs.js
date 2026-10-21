@@ -82,6 +82,30 @@ class RunManager {
         return out;
     }
 
+    /**
+     * List the sub-folders of a folder inside the allowed roots, for the folder picker.
+     * No path lists the roots themselves. Each entry says whether it is a git repo.
+     */
+    browse(dir) {
+        const entry = (p) => ({ name: path.basename(p) || p, path: p, git: fs.existsSync(path.join(p, '.git')) });
+        const roots = this.roots.filter((r) => fs.existsSync(r));
+        if (!dir && roots.length === 1) dir = roots[0]; // one allowed folder: start inside it
+        if (!dir) return { path: '', parent: null, git: false, entries: roots.map(entry) };
+        let real;
+        try { real = fs.realpathSync(String(dir)); } catch { throw new Error(`${dir} does not exist`); }
+        if (!fs.statSync(real).isDirectory()) throw new Error(`${dir} is not a folder`);
+        const inRoot = this.roots.find((r) => real === r || real.startsWith(r + path.sep));
+        if (!inRoot) throw new Error(`${dir} is not inside an allowed folder (${this.roots.join(', ') || 'none; set RUNNER_ROOTS'})`);
+        let entries = [];
+        try {
+            entries = fs.readdirSync(real, { withFileTypes: true })
+                .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+                .map((e) => entry(path.join(real, e.name)));
+        } catch { /* unreadable folder: show it empty */ }
+        entries.sort((a, b) => (b.git - a.git) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+        return { path: real, parent: real !== inRoot ? path.dirname(real) : (roots.length > 1 ? '' : null), git: fs.existsSync(path.join(real, '.git')), entries };
+    }
+
     checkRepo(repo) {
         if (typeof repo !== 'string' || !repo.trim()) throw new Error('repo is required');
         let real;

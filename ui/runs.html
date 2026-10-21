@@ -36,20 +36,28 @@
       <span class="pick-note muted" id="pickNote"></span>
     </div>
     <div class="row">
-      <label class="field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder)">Repo</span>
-        <input type="text" name="repo" list="repos" required placeholder="Choose or paste a path"><datalist id="repos"></datalist></label>
+      <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
+        <div class="repo-input"><input type="text" name="repo" id="repo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
+        <div class="recent" id="recent"></div></div>
       <label class="field"><span data-hint="Which routing picks the models for this run">Routing</span><select name="profile"><option value="">Default</option></select></label>
       <label class="field"><span data-hint="Nudges every request toward cheaper or stronger models">Effort</span>
         <select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
     </div>
     <div class="row">
-      <label class="field"><span data-hint="Run after the agent finishes, so you see whether it passes. Leave empty to skip">Test command</span><input type="text" name="test" placeholder="npm test"></label>
       <label class="field"><span data-hint="Most model calls before it stops">Max steps</span><input type="number" name="maxSteps" min="1" max="200" placeholder="40"></label>
       <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
     </div>
     <div class="actions"><button class="primary" type="submit">Start run</button><span class="note" id="startMsg"></span></div>
     <p class="sub muted fine">Risky commands and writes wait here for your OK. Nothing is pushed; the result is a branch.</p>
   </form>
+
+  <dialog id="picker" class="picker" aria-label="Choose a repo">
+    <div class="picker-head"><strong>Choose a repo</strong><button type="button" id="pickClose" aria-label="Close">×</button></div>
+    <div class="crumbs" id="crumbs"></div>
+    <input type="search" id="pickFilter" placeholder="Filter this folder" autocomplete="off" spellcheck="false">
+    <div class="picker-list" id="pickList" role="listbox"></div>
+    <div class="picker-foot"><span class="muted" id="pickHint"></span><button type="button" class="primary" id="pickUse" disabled>Use this repo</button></div>
+  </dialog>
 
   <h2>Runs</h2>
   <div class="split">

@@ -9,6 +9,7 @@
 #                       routellm, llm or passthrough
 #   STRONG_MODEL, WEAK_MODEL, ...   the models the Router picks between
 #   COMPOSE_PROFILES=local and LOCAL_MODELS   run Ollama with these models
+#   COMPOSE_PROFILES=tunnel (+ TUNNEL_TOKEN) or tunnel-quick   reach it from a phone over https
 # Change them, then run docker compose up -d --build.
 x-local-urls: &local-urls
   OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
@@ -80,6 +81,28 @@ services:
     #   resources:
     #     reservations:
     #       devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+
+  # A Cloudflare tunnel, only with COMPOSE_PROFILES=tunnel (a stable address,
+  # needs TUNNEL_TOKEN in .env) or COMPOSE_PROFILES=tunnel-quick (a random
+  # address that changes each start, no Cloudflare account; the address is in
+  # `docker compose logs tunnel-quick`). The tunnel dials out to Cloudflare, so
+  # no port needs opening. The harness still asks for HARNESS_PASSWORD.
+  # Combine with others: COMPOSE_PROFILES=local,tunnel
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.2
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env (see "Reach it from your phone" in the README)}
+    depends_on: [harness]
+
+  tunnel-quick:
+    image: cloudflare/cloudflared:2026.10.2
+    profiles: [tunnel-quick]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://harness:3000
+    depends_on: [harness]
 
 volumes:
   ollama:

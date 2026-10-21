@@ -30,7 +30,7 @@ const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
 const repoTools = require('./utils/repoTools');
-const { requirePassword } = require('./utils/access');
+const { requirePassword, viaProxy } = require('./utils/access');
 const fs = require('fs');
 const path = require('path');
 
@@ -280,7 +280,8 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // anyone who gave it), and only to JSON: a plain cross-site form can't send
 // that without a CORS preflight, so another web page can't change settings either.
 function localJsonOnly(req, res, next) {
-    if (!LOOPBACK.has(req.socket.remoteAddress) && !req.harnessAuthenticated) {
+    // A request through a tunnel or proxy on this machine looks like loopback, but isn't "this machine"
+    if ((!LOOPBACK.has(req.socket.remoteAddress) || viaProxy(req)) && !req.harnessAuthenticated) {
         return res.status(403).json({ error: 'controls work only from this machine, or with HARNESS_PASSWORD set' });
     }
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });

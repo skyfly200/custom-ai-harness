@@ -19,6 +19,10 @@ const MODEL_RE = /^[\w.:/@-]+$/;
 // that still use them reach local-engine.
 const RENAMED = { 'claude-sonnet-5': 'local-engine', 'claude-3-5-sonnet': 'local-engine' };
 const currentName = (m) => RENAMED[m] || m;
+// Claude Code's model aliases (Haiku, Sonnet, Opus, with or without a version) are
+// not Gateway models; a request or pin that names one is routed like any other.
+const CLAUDE_ALIAS_RE = /^(claude[-\s])?(haiku|sonnet|opus)([-\s.\d]*)(\[1m\])?$/i;
+const isClaudeAlias = (m) => typeof m === 'string' && CLAUDE_ALIAS_RE.test(m.trim());
 
 let profiles = [];
 let version = 0;
@@ -139,4 +143,4 @@ function pick(p, winRate, threshold, tokens, tools) {
 
 load();
 
-module.exports = { gatewayFallbacks, list, get, state, replace, clean, pick, load, slug, currentName, FILE };
+module.exports = { gatewayFallbacks, list, get, state, replace, clean, pick, load, slug, currentName, isClaudeAlias, FILE };

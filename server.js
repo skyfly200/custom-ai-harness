@@ -89,9 +89,9 @@ async function routeModel(body, requested, profile, effort) {
     const shift = tiers.effortShift(effort);
     const base = { threshold, winRate: null, tools: hasTools, ...(profile && { profile: profile.name }), ...(shift && { effort: shift }) };
     // A client can name a model in the x-harness-model header (the chat page does)
-    if (requested) return { ...base, model: requested, reason: 'chosen by the client' };
-    if (profile?.pin) return { ...base, model: profile.pin, reason: `pinned in strategy ${profile.name}` };
-    if (!profile && config.pinModel) return { ...base, model: config.pinModel, reason: 'pinned in settings' };
+    if (requested && !profiles.isClaudeAlias(requested)) return { ...base, model: requested, reason: 'chosen by the client' };
+    if (profile?.pin && !profiles.isClaudeAlias(profile.pin)) return { ...base, model: profile.pin, reason: `pinned in strategy ${profile.name}` };
+    if (!profile && config.pinModel && !profiles.isClaudeAlias(config.pinModel)) return { ...base, model: config.pinModel, reason: 'pinned in settings' };
     // Pictures go to a model that reads them; agent requests (with tools) keep their route,
     // since an images model that can't call tools would end the agent's loop
     const images = profile ? profile.images : config.imagesModel;

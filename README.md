@@ -344,6 +344,7 @@ The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 | `utils/access.js` | The optional `HARNESS_PASSWORD` login |
 | `guard-rules.json`, `utils/guard.js`, `.claude/hooks/guard.js` | The command guard (see [Command guard](#command-guard-jev-checks-commands-before-they-run)) |
 | `scripts/jev-files-mcp.js`, `utils/jevFiles.js`, `utils/jevAsk.js` | The `ask_jev_file` tools (see [Ask Jev about a file](#ask-jev-about-a-file-ask_jev_file-tools)) |
+| `runner/`, `ui/runs.html` | The task runner: sandbox, tools, agent loop, run manager and API (see [Task runner](#task-runner-agents-that-do-a-whole-task)) |
 | `ui/manifest.webmanifest`, `ui/sw.js`, `ui/icon*.svg`, `ui/icon-*.png` | The installable app: manifest, offline copy of the pages, icons (re-render the PNGs from the SVGs if the logo changes) |
 
 ---
@@ -681,6 +682,27 @@ How it behaves:
 - **Only some files can be sent.** The tool server reads files only inside the folder it was started in, or the folders in `HARNESS_FILE_ROOTS` (separated by `:`, or `;` on Windows). It refuses `.env` and other secrets files, SSH keys, binaries and files over `HARNESS_FILE_MAX_BYTES` (2 MB), because the text goes to Jev's host.
 - **It costs one Jev call per part.** Nothing is cached yet.
 - `HARNESS_URL` (default `http://localhost:3000`) and `HARNESS_PASSWORD` tell the tool server where the harness is. Other programs can call `POST /v1/jev/ask` directly with `{"text", "question", "mode": "bool" | "scale"}`.
+
+### Task runner (agents that do a whole task)
+
+The **Runs** page gives an agent a goal, such as "fix the failing test in `utils/tiers.js`", and lets it work until it is done. The agent reads and edits files and runs commands in its own copy of your repo, using the models your routing picks. When it finishes you get a summary, the changes, and the result of your test command.
+
+How it keeps your work safe:
+
+- **Its own branch.** Each run is a `git worktree` of your repo on a new branch named `harness/<id>`. Your checked-out files are never touched. Review the branch with `git diff <start>..harness/<id>` (the page shows the exact command) and push it yourself if you like. Nothing is ever pushed or published for you.
+- **Every command and file write goes past the [command guard](#command-guard-jev-checks-commands-before-they-run).** Dangerous ones are refused, risky ones wait on the Runs page for you to **Allow** or **Decline** (no answer for 15 minutes counts as decline), and an unreachable guard counts as "ask".
+- **Only chosen folders.** Repos must be inside `RUNNER_ROOTS` (default the `repos` folder next to the harness; set it in `.env`, separating folders with `;` on Windows). Files the agent reads and writes must stay inside its workspace, and `.git` is off limits.
+- **No keys.** Commands the agent runs get a trimmed environment, so they can't print the harness's API keys.
+- **Limits.** Each run stops after its max steps (40) or max minutes (30), and at most `RUNNER_MAX_RUNS` (2) run at once. **Stop** ends a run, even in the middle of a command.
+
+To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Runs** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Add a test command such as `npm test` to see whether the result passes.
+
+Notes:
+
+- The runner is its own process (`node runner/server.js`, port 3100, only reachable from this machine). The Interceptor passes the Runs page's requests to it after its own login check, and `npm run all` sets a shared `RUNNER_TOKEN` so nothing else on the machine can drive it. If you start the parts yourself, set the same `RUNNER_TOKEN` in `.env` for both.
+- Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed.
+- It isn't in the Docker setup yet. This first version works alone on one task; workflows that Jev chooses between and several agents working together come next, and cloud sandboxes can replace the local worktree later.
+- Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
 
 ### Control UI
 

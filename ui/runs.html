@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bright Chat · Runs</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bright Chat">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="runs.css">
+</head>
+<body>
+<main>
+  <header>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Runs</span></h1><a href="./" data-hint="Health of each part, recent chats, usage and requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a><a href="settings.html" data-hint="Interceptor and Router settings">Settings</a></nav>
+    <span class="muted" id="updated">Loading…</span>
+  </header>
+
+  <div id="down" class="card notice" hidden></div>
+
+  <h2 data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2>
+  <form class="card" id="newRun" autocomplete="off">
+    <label class="field wide"><span>What should it do?</span>
+      <textarea name="goal" rows="4" required placeholder="Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI"></textarea></label>
+    <div class="row">
+      <label class="field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder)">Repo</span>
+        <input type="text" name="repo" list="repos" required placeholder="Choose or paste a path"><datalist id="repos"></datalist></label>
+      <label class="field"><span data-hint="Which routing picks the models for this run">Routing</span><select name="profile"><option value="">Default</option></select></label>
+      <label class="field"><span data-hint="Nudges every request toward cheaper or stronger models">Effort</span>
+        <select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
+    </div>
+    <div class="row">
+      <label class="field"><span data-hint="Run after the agent finishes, so you see whether it passes. Leave empty to skip">Test command</span><input type="text" name="test" placeholder="npm test"></label>
+      <label class="field"><span data-hint="Most model calls before it stops">Max steps</span><input type="number" name="maxSteps" min="1" max="200" placeholder="40"></label>
+      <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+    </div>
+    <div class="actions"><button class="primary" type="submit">Start run</button><span class="note" id="startMsg"></span></div>
+    <p class="sub muted">Every command and file write is checked by the command guard. Risky ones wait here for you to allow or decline. Nothing is pushed; the result is a branch in your repo.</p>
+  </form>
+
+  <h2>Runs</h2>
+  <div class="split">
+    <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
+    <div class="card detail" id="detail"><p class="muted">Pick a run to see what the agent did.</p></div>
+  </div>
+</main>
+<script src="hints.js"></script>
+<script src="bright.js"></script>
+<script src="runs.js"></script>
+</body>
+</html>

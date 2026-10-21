@@ -11,3 +11,4 @@ data/
 repos/
 model-stats.json
 guard-rules.local.json
+runs/

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * start-all — `npm run all`: Gateway, Router and Interceptor in one window
+ * start-all — `npm run all`: Gateway, Router, Interceptor and task runner in one window
  *
  * Runs the three parts from the repo's .venv, so no Activate.ps1 is needed.
  * Ollama is opt-in: `npm run all:ollama`, `npm run all -- --ollama`, or
@@ -53,6 +53,7 @@ function buildCommands(opts = {}) {
         { name: 'gateway',     command: `${litellm || 'litellm'} --config config.yaml`, env: { PYTHONUTF8: '1' }, prefixColor: 'magenta' },
         { name: 'router',      command: `${python || 'python'} router.py`, env: { PYTHONUTF8: '1' }, prefixColor: 'cyan' },
         { name: 'interceptor', command: 'node server.js', prefixColor: 'green' },
+        { name: 'runner',      command: 'node runner/server.js', prefixColor: 'blue' },
     ];
 
     if (wantsOllama(argv, env)) {
@@ -78,6 +79,8 @@ async function main() {
     require('dotenv').config({ path: path.join(ROOT, '.env'), quiet: true });
 
     const argv = process.argv.slice(2);
+    // The Interceptor and the task runner share this, so nothing else on this machine can drive the runner
+    if (!process.env.RUNNER_TOKEN) process.env.RUNNER_TOKEN = require('crypto').randomBytes(16).toString('hex');
     const running = wantsOllama(argv, process.env) && await ollamaRunning(process.env);
     const { commands, warnings } = buildCommands({ argv, ollamaRunning: running });
     for (const w of warnings) console.log(`[start-all] ${w}`);

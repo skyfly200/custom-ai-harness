@@ -1,0 +1,10 @@
+{
+  "id": "general",
+  "name": "Do the task",
+  "when": "any other task that asks for something to be changed or built and doesn't fit the more specific recipes",
+  "fallback": true,
+  "stages": [
+    { "id": "work", "role": "Engineer", "tools": "all", "maxSteps": 40,
+      "prompt": "Complete the task. Look before you change, make the smallest change that completes it, and check your work by running the project's tests or another command that proves it works." }
+  ]
+}

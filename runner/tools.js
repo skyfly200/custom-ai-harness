@@ -6,6 +6,12 @@
 'use strict';
 
 const MAX_READ = 40000;
+// What a workflow stage may use: read looks only, check also runs commands, all writes too
+const TOOLSETS = {
+    read: ['list_files', 'read_file', 'finish'],
+    check: ['list_files', 'read_file', 'run_command', 'finish'],
+    all: ['list_files', 'read_file', 'write_file', 'edit_file', 'run_command', 'finish'],
+};
 
 const definitions = [
     { type: 'function', function: { name: 'list_files', description: 'List the files and folders in a directory of the workspace (not recursive).',
@@ -28,7 +34,7 @@ const definitions = [
  * person allows it. Returns { definitions, call(name, args) } where call
  * resolves { text, finished? }.
  */
-function makeTools({ sandbox, check, approve }) {
+function makeTools({ sandbox, check, approve, toolset = 'all' }) {
     async function gate(kind, text) {
         let verdict;
         try {
@@ -81,10 +87,11 @@ function makeTools({ sandbox, check, approve }) {
         async finish({ summary }) { return String(summary || ''); },
     };
 
+    const allowed = TOOLSETS[toolset] || TOOLSETS.all;
     return {
-        definitions,
+        definitions: definitions.filter((d) => allowed.includes(d.function.name)),
         async call(name, args) {
-            if (!Object.hasOwn(run, name)) return { text: `Unknown tool ${name}. Available: ${Object.keys(run).join(', ')}.` };
+            if (!Object.hasOwn(run, name) || !allowed.includes(name)) return { text: `Unknown tool ${name}. Available: ${allowed.join(', ')}.` };
             try {
                 return { text: await run[name](args || {}), finished: name === 'finish' };
             } catch (err) {
@@ -94,4 +101,4 @@ function makeTools({ sandbox, check, approve }) {
     };
 }
 
-module.exports = { makeTools, definitions };
+module.exports = { makeTools, definitions, TOOLSETS };

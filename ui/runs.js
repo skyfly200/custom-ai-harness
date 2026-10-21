@@ -49,6 +49,7 @@ function eventHtml(e) {
   if (e.type === 'result') return `<div class="ev"><details data-k="${esc(key)}"${open(key)}><summary>${time}result: ${esc((e.text || '').split('\n')[0].slice(0, 120))}</summary><pre>${esc(e.text)}</pre></details></div>`;
   if (e.type === 'approval_needed') return `<div class="ev approval_needed">${time}Waiting for you: <code>${esc(e.text)}</code> (${esc(e.reason)})</div>`;
   if (e.type === 'approval') return `<div class="ev decided">${time}${e.allowed ? 'Allowed' : 'Declined'}: <code>${esc(e.text)}</code></div>`;
+  if (e.type === 'stage') return `<div class="ev stage">${time}<strong>${esc(e.text)}</strong></div>`;
   if (e.type === 'note') return `<div class="ev">${time}${esc(e.text)}</div>`;
   return '';
 }
@@ -61,7 +62,7 @@ function renderDetail(run) {
   $('detail').innerHTML = `
     <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
-    <div class="facts"><span>Repo <code>${esc(run.repo)}</code></span><span>Branch <code>${esc(run.branch)}</code></span><span>Step ${run.steps}/${run.maxSteps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}</div>
+    <div class="facts"><span>Repo <code>${esc(run.repo)}</code></span><span>Branch <code>${esc(run.branch)}</code></span>${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}</div>
     ${run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
     ${run.error ? `<div class="result"><span class="tag bad">error</span> ${esc(run.error)}</div>` : ''}
     ${r ? `<div class="result"><p class="summary">${esc(r.summary)}</p>
@@ -145,6 +146,10 @@ $('newRun').addEventListener('submit', async (e) => {
   for (const k of Object.keys(body)) if (body[k] === '') delete body[k];
   try {
     $('startMsg').textContent = 'Starting…';
+    if (body.workflow === 'auto') {
+      const pick = lastPick?.goal === body.goal ? lastPick : await pickWorkflow(body.goal);
+      body.workflow = pick?.id || 'general';
+    }
     const run = await post('', body);
     selected = run.id; location.hash = run.id; openDetails = new Set();
     f.elements.goal.value = '';
@@ -153,7 +158,40 @@ $('newRun').addEventListener('submit', async (e) => {
   } catch (err) { $('startMsg').textContent = err.message; }
 });
 
+// Workflows: the picker asks Jev about the goal a moment after you stop typing
+let lastPick = null;
+let workflowList = [];
+let pickTimer = null;
+const nameOf = (id) => workflowList.find((w) => w.id === id)?.name || id;
+
+async function pickWorkflow(goal) {
+  const r = await (await fetch('api/workflows/pick', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ goal }) })).json();
+  lastPick = { ...r, goal };
+  if (r.id) $('pickNote').textContent = r.by === 'jev'
+    ? `Jev picks “${nameOf(r.id)}” (${Math.round(r.p * 100)}% sure). Choose another workflow to override.`
+    : `“${nameOf(r.id)}” (Jev wasn't sure enough to choose a specific recipe).`;
+  return lastPick;
+}
+
+function schedulePick() {
+  clearTimeout(pickTimer);
+  const goal = $('newRun').elements.goal.value.trim();
+  if ($('workflow').value !== 'auto' || goal.length < 8) { $('pickNote').textContent = ''; return; }
+  pickTimer = setTimeout(() => pickWorkflow(goal).catch(() => {}), 700);
+}
+
+async function initWorkflows() {
+  try {
+    const { workflows } = await (await fetch('api/workflows')).json();
+    workflowList = workflows;
+    $('workflow').insertAdjacentHTML('beforeend', workflows.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join(''));
+  } catch { /* auto still works without the list */ }
+  $('newRun').elements.goal.addEventListener('input', schedulePick);
+  $('workflow').addEventListener('change', () => { $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });
+}
+
 async function init() {
+  initWorkflows();
   try {
     const { repos, roots } = await api('/repos');
     $('repos').innerHTML = repos.map((r) => `<option value="${esc(r)}">`).join('');

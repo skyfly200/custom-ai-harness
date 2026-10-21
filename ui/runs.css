@@ -25,3 +25,5 @@
 .ev.decided, .ev.approval_needed { border-color: var(--warn); }
 .ev .t { color: var(--muted); font-size: 11px; margin-right: 6px; }
 .ev details summary { cursor: pointer; }
+.pick-note { align-self: end; padding-bottom: 6px; font-size: 13px; }
+.ev.stage { border-left: 3px solid var(--accent, #6366f1); padding-left: 8px; margin-top: 8px; }

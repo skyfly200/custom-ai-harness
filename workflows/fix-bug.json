@@ -1,0 +1,13 @@
+{
+  "id": "fix-bug",
+  "name": "Fix a bug",
+  "when": "a bug report, a failing test or an error message: something that should work but does not",
+  "stages": [
+    { "id": "investigate", "role": "Investigator", "tools": "check", "maxSteps": 15, "effort": "low",
+      "prompt": "Find the cause of the problem. Reproduce it first if you can (run the failing test or command). Do not change any file. Call finish with: the root cause, the file and line, and the smallest fix you recommend." },
+    { "id": "fix", "role": "Implementer", "tools": "all", "maxSteps": 30,
+      "prompt": "Fix the problem following the investigation. Make the smallest change that fixes the cause, not the symptom. Add or adjust a test if the project has tests for this area. Run the tests. Call finish with what you changed." },
+    { "id": "verify", "role": "Verifier", "tools": "check", "maxSteps": 10, "effort": "low", "verdict": true, "retryTo": "fix", "maxRetries": 1,
+      "prompt": "Check the fix. Run the project's tests or the command that failed, and read the diff with `git diff` (it is not committed yet, so use `git diff HEAD`). Start your finish summary with PASS if the problem is fixed and nothing else broke, or FAIL followed by exactly what is still wrong." }
+  ]
+}

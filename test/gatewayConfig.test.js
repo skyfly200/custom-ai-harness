@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const gateway = require('../utils/gatewayConfig');
 
-const config = fs.readFileSync(path.join(__dirname, '..', 'config.yaml'), 'utf8');
+const config = fs.readFileSync(path.join(__dirname, 'fixtures', 'config.yaml'), 'utf8');
 
 test('reads the model names and fallback chains from config.yaml', () => {
     const { models, fallbacks } = gateway.parse(config);
@@ -14,7 +14,8 @@ test('reads the model names and fallback chains from config.yaml', () => {
 });
 
 test('a rate-limited free group has its own chain ending at a paid model', () => {
-    const { fallbacks } = gateway.parse(config);
+    // this one checks the config.yaml that ships, not the fixture
+    const { fallbacks } = gateway.parse(fs.readFileSync(path.join(__dirname, '..', 'config.yaml'), 'utf8'));
     // LiteLLM answers "No fallback model group found" for a group without a chain
     for (const group of fallbacks['local-engine'].filter((m) => m !== 'fast-openrouter')) {
         assert.ok(fallbacks[group]?.length, `${group} has no fallback chain`);

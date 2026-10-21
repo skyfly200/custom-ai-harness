@@ -8,6 +8,7 @@ const { PassThrough } = require('node:stream');
 
 const FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'harness-')), 'usage.json');
 process.env.HARNESS_USAGE_FILE = FILE;
+process.env.HARNESS_GATEWAY_CONFIG = path.join(__dirname, 'fixtures', 'config.yaml');
 const usage = require('../utils/usage');
 
 // A fake Gateway reply: headers plus a body sent in small pieces
@@ -52,7 +53,7 @@ test('compressed JSON replies are read too', async () => {
 });
 
 test('services come from config.yaml', () => {
-    const map = usage.parseProviders(fs.readFileSync(path.join(__dirname, '..', 'config.yaml'), 'utf8'));
+    const map = usage.parseProviders(fs.readFileSync(path.join(__dirname, 'fixtures', 'config.yaml'), 'utf8'));
     assert.equal(map['fallback-groq'], 'Groq');
     assert.equal(map['fallback-openrouter-tools'], 'OpenRouter');
     assert.equal(map['fallback-ollama'], 'Ollama');

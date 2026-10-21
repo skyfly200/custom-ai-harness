@@ -56,6 +56,16 @@ test('replacing routings saves them, refuses two with one name and a stale versi
     assert.equal(profiles.get('nope'), null);
 });
 
+test('a routing keeps its own fallback chains, or none to use the Gateway\'s', () => {
+    assert.equal(profiles.clean(CHEAP).fallbacks, null);
+    const p = profiles.clean({ ...CHEAP, fallbacks: { tiny: ['mid', 'mid', 'tiny', 'free'], empty: [], 'claude-sonnet-5': ['free'] } });
+    assert.deepEqual(p.fallbacks, { tiny: ['mid', 'free'], 'local-engine': ['free'] });
+    assert.deepEqual(profiles.gatewayFallbacks(p), [{ tiny: ['mid', 'free'] }, { 'local-engine': ['free'] }]);
+    assert.equal(profiles.gatewayFallbacks(profiles.clean(CHEAP)), null);
+    assert.throws(() => profiles.clean({ ...CHEAP, fallbacks: { tiny: 'mid' } }), /list of model names/);
+    assert.throws(() => profiles.clean({ ...CHEAP, fallbacks: [] }), /object/);
+});
+
 // ---- through the Interceptor ----
 
 let routerUp = true;
@@ -114,6 +124,17 @@ test('a routing uses its own outputs, threshold and compression', async () => {
     const e = monitor.recentEvents(1)[0];
     assert.equal(e.profile, 'Cheap and quick');
     assert.deepEqual(e.transforms, ['headroom']);
+});
+
+test('a routing sends its own fallbacks to the Gateway; another routing sends none', async () => {
+    profiles.replace([{ ...CHEAP, fallbacks: { tiny: ['mid'] } }, { ...CHEAP, name: 'Plain' }]);
+    await send({ 'x-harness-profile': 'cheap-and-quick' });
+    assert.deepEqual(lastBody.fallbacks, [{ tiny: ['mid'] }]);
+    await send({ 'x-harness-profile': 'plain' });
+    assert.equal(lastBody.fallbacks, undefined);
+    await send();
+    assert.equal(lastBody.fallbacks, undefined);
+    profiles.replace([CHEAP]);
 });
 
 test('a routing with the Router down uses its own Router-down models', async () => {

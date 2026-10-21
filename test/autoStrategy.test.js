@@ -12,7 +12,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-auto-'));
 process.env.HARNESS_PROFILES_FILE = path.join(dir, 'profiles.json');
 process.env.HARNESS_SETTINGS_FILE = path.join(dir, 'settings.json');
 process.env.HARNESS_USAGE_FILE = path.join(dir, 'usage.json');
-const auto = require('../utils/autoRoute');
+const auto = require('../utils/autoStrategy');
 const profiles = require('../utils/profiles');
 
 const BASE = { down: 'free', downTools: 'free-tools', strong: 'mid', weak: 'tiny' };

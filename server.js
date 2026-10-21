@@ -16,7 +16,7 @@ const {
 const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
-const autoRoute = require('./utils/autoRoute');
+const autoStrategy = require('./utils/autoStrategy');
 const tiers = require('./utils/tiers');
 const guard = require('./utils/guard');
 const { askText, DEFAULT_WINDOW } = require('./utils/jevAsk');
@@ -716,14 +716,14 @@ app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
 });
 
 // The named strategy a request asked for with x-harness-profile (null: the
-// default). "auto" lets the harness choose per request (utils/autoRoute.js);
+// default). "auto" lets the harness choose per request (utils/autoStrategy.js);
 // req.harnessAuto then says how, for the routing log.
 async function profileOf(req) {
     // x-harness-strategy is the same header under its current name
     const id = req.get('x-harness-strategy') || req.get('x-harness-profile');
-    if (id && id.trim().toLowerCase() === autoRoute.AUTO) {
+    if (id && id.trim().toLowerCase() === autoStrategy.AUTO) {
         const { autoJev, autoAskAt, autoFirst } = settings.get();
-        const picked = await autoRoute.pick(profiles.list(), {
+        const picked = await autoStrategy.pick(profiles.list(), {
             text: latestUserText(req.body.messages || []),
             tools: Array.isArray(req.body.tools) && req.body.tools.length > 0,
             client: usage.clientOf(req),
@@ -777,6 +777,9 @@ async function routeAndRecord(req, res) {
     const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile, req.get('x-harness-effort'));
     route.model = profiles.currentName(route.model);
     req.body.model = route.model;
+    // A strategy's own fallback chains replace the Gateway's for this request
+    const own = profiles.gatewayFallbacks(req.harnessProfile);
+    if (own) req.body.fallbacks = own;
     logRoute(req.path, route);
     req.harnessClient = usage.clientOf(req);
     req.harnessInputEstimate = Math.ceil(JSON.stringify(req.body.messages || []).length / 4)

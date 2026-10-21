@@ -5,21 +5,47 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
+const ROOT = path.join(__dirname, '..');
 const CONFIG_FILE = process.env.MCP_CONFIG || path.join(__dirname, '..', 'mcp-servers.json');
 const CALL_TIMEOUT_MS = 120000;
 const MAX_RESULT_CHARS = 100000; // Headroom trims it further when it's on
 
-// ${VAR} and ${VAR:-default} from the environment (.env included), as Claude Code does
-function expand(value) {
+// ${VAR} and ${VAR:-default} from the environment (.env included), as Claude Code does.
+// Also ${HOME} (the home folder on Windows too) and ${HARNESS_DIR} (this repo's folder).
+// Names with no value and no default are added to `missing`, when given.
+function expand(value, missing) {
     if (typeof value === 'string') {
-        return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_, name, fallback) => process.env[name] ?? fallback ?? '');
+        return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_, name, fallback) => {
+            const found = process.env[name] || (name === 'HOME' ? os.homedir() : name === 'HARNESS_DIR' ? ROOT : undefined);
+            if (found !== undefined) return found;
+            if (fallback === undefined) missing?.push(name);
+            return fallback ?? '';
+        });
     }
-    if (Array.isArray(value)) return value.map(expand);
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, expand(v)]));
+    if (Array.isArray(value)) return value.map(v => expand(v, missing));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, expand(v, missing)]));
     return value;
 }
+
+// Whether a bare program name (npx, uvx...) is on PATH; Windows adds .exe/.cmd/.bat
+function onPath(command) {
+    if (path.isAbsolute(command) || /[\\/]/.test(command)) return fs.existsSync(command);
+    const exts = process.platform === 'win32' ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').concat('') : [''];
+    return (process.env.PATH || '').split(path.delimiter).filter(Boolean).some(dir => exts.some(ext => fs.existsSync(path.join(dir, command + ext))));
+}
+
+// What to install when a server's program isn't found
+const INSTALL_HINTS = {
+    npx: 'install Node.js from nodejs.org',
+    node: 'install Node.js from nodejs.org',
+    uvx: 'install uv from docs.astral.sh/uv, then restart the Interceptor',
+    uv: 'install uv from docs.astral.sh/uv, then restart the Interceptor',
+    docker: 'install Docker Desktop',
+    python: 'install Python',
+};
 
 /**
  * Read the server list: { name: { command, args, env, cwd } | { type: 'http' | 'sse', url, headers } }.
@@ -106,11 +132,14 @@ class McpManager {
 
     async connect(server) {
         const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-        const spec = expand(server.spec);
+        const missing = [];
+        const spec = expand(server.spec, missing);
         try {
+            if (missing.length) throw new Error(`${[...new Set(missing)].map(n => '${' + n + '}').join(', ')} ${new Set(missing).size > 1 ? 'are' : 'is'} not set: add ${new Set(missing).size > 1 ? 'them' : 'it'} to .env, then restart the Interceptor and press Reload`);
             const client = new Client({ name: 'custom-ai-harness', version: '1.0.0' });
             client.onerror = () => {};
             server.client = client;
+            if (transportType(spec) === 'stdio' && spec.command && !onPath(spec.command)) throw Object.assign(new Error('not found'), { code: 'ENOENT' });
             await client.connect(this.transport(server, spec), { timeout: 30000 });
             const tools = [];
             let cursor;
@@ -130,7 +159,10 @@ class McpManager {
             };
         } catch (err) {
             server.status = 'failed';
-            if (err.code === 'ENOENT') err.message = `could not start "${spec.command}": no such program (is it installed and on PATH?)`;
+            if (err.code === 'ENOENT') {
+                const hint = INSTALL_HINTS[path.basename(String(spec.command)).replace(/\.(exe|cmd)$/i, '')];
+                err.message = `could not start "${spec.command}": not found on PATH${hint ? ` (${hint})` : ''}`;
+            }
             server.error = server.stderr?.trim().split('\n').slice(-3).join(' ') || err.message;
             if (server.stderr && !server.error.includes(err.message)) server.error = `${err.message}: ${server.error}`;
             try { await server.client?.close(); } catch {}
@@ -142,12 +174,13 @@ class McpManager {
         const type = transportType(spec);
         if (type === 'stdio') {
             if (!spec.command) throw new Error('needs a "command" (or a "url" for an HTTP server)');
-            const { StdioClientTransport, getDefaultEnvironment } = require('@modelcontextprotocol/sdk/client/stdio.js');
+            const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
             const transport = new StdioClientTransport({
                 command: spec.command,
                 args: spec.args || [],
-                env: { ...getDefaultEnvironment(), ...(spec.env || {}) },
-                cwd: spec.cwd,
+                // the whole environment, as Claude Code does: npx needs the proxy, npm and Windows folder variables
+                env: { ...process.env, ...(spec.env || {}) },
+                cwd: spec.cwd || ROOT, // so "scripts/jev-files-mcp.js" works wherever the Interceptor was started
                 stderr: 'pipe',
             });
             // keep the last of what the server prints, to explain a failed start

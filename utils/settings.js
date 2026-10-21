@@ -23,7 +23,7 @@ const DEFAULTS = Object.freeze({
     mcpOff: [],               // MCP servers the chat page doesn't offer on the default routing
     tiers: [],                // extra tiers of the default routing beside the Router's strong and weak (utils/tiers.js)
     imagesModel: null,        // Gateway model for requests whose latest user turn carries an image
-    autoJev: true,            // Auto routing (utils/autoRoute.js): ask Jev which routing fits when no routing's rules do
+    autoJev: true,            // Auto routing (utils/autoStrategy.js): ask Jev which routing fits when no routing's rules do
     autoFirst: 'jev',         // which Auto tries first: 'jev' (rules only if Jev finds no fit) or 'rules'
     autoAskAt: 0.5,           // Jev's confidence that a routing fits at which Auto picks it
     guardJev: true,           // command guard (utils/guard.js): ask Jev about commands the rules don't cover

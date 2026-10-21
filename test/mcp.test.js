@@ -78,3 +78,48 @@ test('a broken config file is reported, not thrown', async () => {
     assert.match(mcp.status().error, /bad\.json/);
     assert.deepEqual(mcp.status().servers, []);
 });
+
+test('${HOME} and ${HARNESS_DIR} always resolve; unset names are reported', () => {
+    const missing = [];
+    const out = expand(['${HOME}/Documents', '${HARNESS_DIR}', '${NOPE_NOT_SET}', '${NOPE2:-d}'], missing);
+    assert.equal(out[0], `${process.env.HOME || os.homedir()}/Documents`);
+    assert.equal(out[1], path.join(__dirname, '..'));
+    assert.equal(out[2], '');
+    assert.equal(out[3], 'd');
+    assert.deepEqual(missing, ['NOPE_NOT_SET']);
+});
+
+test('a server using an unset ${VAR} fails with a message naming it', async () => {
+    const file = path.join(dir, 'unset.json');
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { gh: { type: 'http', url: 'http://127.0.0.1:9/', headers: { Authorization: 'Bearer ${HARNESS_TEST_UNSET}' } } } }));
+    const mcp = new McpManager({ file });
+    try {
+        await mcp.start();
+        const gh = mcp.status().servers[0];
+        assert.equal(gh.status, 'failed');
+        assert.match(gh.error, /\$\{HARNESS_TEST_UNSET\} is not set/);
+    } finally { await mcp.close(); }
+});
+
+test('a missing program names what to install; relative paths resolve from the repo folder', async () => {
+    const file = path.join(dir, 'hints.json');
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: {
+        fetch: { command: 'uvx-not-installed-xyz' },
+        rel: { command: process.execPath, args: ['test/fixtures/echo-mcp-server.js'] },
+    } }));
+    const mcp = new McpManager({ file });
+    try {
+        await mcp.start();
+        const by = Object.fromEntries(mcp.status().servers.map(s => [s.name, s]));
+        assert.match(by.fetch.error, /not found on PATH/);
+        assert.equal(by.rel.status, 'connected');
+    } finally { await mcp.close(); }
+});
+
+test('mcp-servers.example.json parses and its enabled servers are plain stdio', () => {
+    const servers = readConfig(path.join(__dirname, '..', 'mcp-servers.example.json'));
+    assert.deepEqual(Object.keys(servers), ['filesystem', 'jev-files', 'fetch', 'github']);
+    assert.ok(!servers.filesystem.disabled && !servers['jev-files'].disabled);
+    assert.ok(servers.fetch.disabled && servers.github.disabled);
+    assert.ok(!JSON.stringify(servers).includes('C:\\\\Users\\\\you'));
+});

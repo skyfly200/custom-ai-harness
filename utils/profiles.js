@@ -3,13 +3,14 @@
 // picks one per request with the x-harness-profile header; the chat page sends
 // it for chats and projects that use one. Each profile is a full set of route
 // choices, so nothing is inherited from the default except the Router's
-// classifier and the Gateway's models and fallbacks, which every strategy shares.
+// classifier and the Gateway's models, which every strategy shares. Fallback
+// chains are the Gateway's unless a strategy keeps its own (`fallbacks`).
 // Saved to routing-profiles.json (gitignored) next to server.js.
 
 const fs = require('fs');
 const path = require('path');
 const tiers = require('./tiers');
-const auto = require('./autoRoute');
+const auto = require('./autoStrategy');
 
 const FILE = process.env.HARNESS_PROFILES_FILE || path.join(__dirname, '..', 'routing-profiles.json');
 const MODEL_RE = /^[\w.:/@-]+$/;
@@ -32,6 +33,21 @@ function model(p, k, required) {
     return currentName(v);
 }
 
+/** A strategy's own fallback chains {model: [models]}, or null to use the Gateway's. */
+function chains(p) {
+    if (p.fallbacks === null || p.fallbacks === undefined) return null;
+    if (typeof p.fallbacks !== 'object' || Array.isArray(p.fallbacks)) throw new Error(`${p.name || 'A strategy'}: fallbacks must be an object of model -> list`);
+    const out = {};
+    for (const [src, targets] of Object.entries(p.fallbacks)) {
+        if (!MODEL_RE.test(src) || !Array.isArray(targets) || !targets.every(t => typeof t === 'string' && MODEL_RE.test(t))) {
+            throw new Error(`${p.name || 'A strategy'}: fallbacks for “${src}” must be a list of model names`);
+        }
+        const list = [...new Set(targets.map(currentName))].filter(t => t !== currentName(src));
+        if (list.length) out[currentName(src)] = list;
+    }
+    return out;
+}
+
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 
 /** One profile, cleaned; throws with a readable message on a bad value. */
@@ -46,7 +62,7 @@ function clean(p) {
     const out = {
         id, name,
         note: typeof p.note === 'string' ? p.note.slice(0, 200) : '',
-        // when Auto (utils/autoRoute.js) should pick this strategy
+        // when Auto (utils/autoStrategy.js) should pick this strategy
         description: typeof p.description === 'string' ? p.description.trim().slice(0, 300) : '',
         rules: auto.cleanRules(p.rules, name),
         pin: model(p, 'pin'),
@@ -61,6 +77,7 @@ function clean(p) {
         maxTokens: null,
         images: model(p, 'images'),
         tiers: tiers.clean(p.tiers, name).map(t => ({ ...t, model: currentName(t.model), tools: t.tools && currentName(t.tools) })),
+        fallbacks: chains(p),
         caveman: p.caveman !== false,
         headroom: p.headroom !== false,
         contextAnchor: p.contextAnchor !== false,
@@ -85,6 +102,9 @@ function load() {
     } catch {}
     version++;
 }
+
+/** The `fallbacks` value LiteLLM takes in a request body for a strategy's own chains, or null. */
+const gatewayFallbacks = (p) => (p && p.fallbacks ? Object.entries(p.fallbacks).map(([src, targets]) => ({ [src]: targets })) : null);
 
 const list = () => profiles;
 const get = (id) => (id ? profiles.find(p => p.id === String(id).trim().toLowerCase()) || null : null);
@@ -119,4 +139,4 @@ function pick(p, winRate, threshold, tokens, tools) {
 
 load();
 
-module.exports = { list, get, state, replace, clean, pick, load, slug, currentName, FILE };
+module.exports = { gatewayFallbacks, list, get, state, replace, clean, pick, load, slug, currentName, FILE };

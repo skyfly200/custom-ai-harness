@@ -212,3 +212,14 @@ dialog#statsDialog { width: min(560px, calc(100vw - 32px)); padding: 18px 20px; 
 .auto-box .auto-size input { width: 50%; min-width: 0; }
 .auto-box input, .auto-box select { font-size: 13px; }
 .auto-box .small { flex: 1 1 100%; }
+dialog#autoDialog { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 18px 20px; color: var(--text); overflow: auto; }
+dialog#autoDialog::backdrop { background: rgba(0,0,0,.35); }
+dialog#autoDialog h3 { margin: 0 0 4px; font-size: 17px; }
+dialog#autoDialog .add-head { display: flex; align-items: flex-start; gap: 12px; }
+dialog#autoDialog .add-head > div { flex: 1; }
+dialog#autoDialog .add-head .close { padding: 0 8px; font-size: 18px; line-height: 26px; border-radius: 6px; }
+dialog#autoDialog table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+dialog#autoDialog th, dialog#autoDialog td { text-align: left; padding: 4px 8px; border-bottom: 1px solid rgba(128,128,128,.25); }
+dialog#autoDialog .same { opacity: .55; }
+dialog#autoDialog .actions { display: flex; gap: 8px; margin-top: 12px; }
+dialog#autoDialog ul { margin: 6px 0; padding-left: 20px; font-size: 13px; }

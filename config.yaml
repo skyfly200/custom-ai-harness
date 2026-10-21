@@ -52,8 +52,11 @@ litellm_settings:
     # Tool-capable first: strong requests are mostly Claude Code, which needs tool calls.
     - {"local-engine":              ["fast-openrouter", "fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
     - {"fallback-groq":             ["fallback-openrouter"]}
-    - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter", "fallback-groq"]}
-    - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter"]}
+    # A rate-limited free model must not end the chain: LiteLLM answers "No fallback
+    # model group found" for a group with no entry here. Paid fast-openrouter is the last resort.
+    - {"fallback-openrouter":       ["fallback-openrouter-tools", "fallback-groq", "fast-openrouter"]}
+    - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter", "fallback-groq", "fast-openrouter"]}
+    - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter", "fast-openrouter"]}
 
 router_settings:
   # Go straight to the next fallback instead of retrying the same model: a 429

@@ -760,6 +760,9 @@ async function routeAndRecord(req, res) {
     const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile, req.get('x-harness-effort'));
     route.model = profiles.currentName(route.model);
     req.body.model = route.model;
+    // A routing's own fallback chains replace the Gateway's for this request
+    const own = profiles.gatewayFallbacks(req.harnessProfile);
+    if (own) req.body.fallbacks = own;
     logRoute(req.path, route);
     req.harnessClient = usage.clientOf(req);
     req.harnessInputEstimate = Math.ceil(JSON.stringify(req.body.messages || []).length / 4)

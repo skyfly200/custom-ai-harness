@@ -9,8 +9,9 @@
 // Named routings (profiles) are other sets of route choices, compression and
 // tools, picked per chat or project on the chat page. The picker above the
 // canvas switches which routing the Request, Compression, Router and Tools
-// boxes show; model boxes and fallbacks belong to the Gateway and every
-// routing shares them.
+// boxes show; model boxes belong to the Gateway and every routing shares them.
+// Fallback chains are the Gateway's too, until a routing's chains are edited:
+// then that routing keeps its own, sent with each of its requests.
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -141,7 +142,17 @@ function graphFrom({ router, settings, gateway }) {
 // The routing being edited: the default (kept on the graph itself) or a profile
 const R = () => (view && graph.profiles.find(p => p.id === view)) || graph;
 const routings = () => [graph, ...graph.profiles];
-const ROUTE_FIELDS = ['pin', 'images', 'down', 'downTools', 'threshold', 'strong', 'strongTools', 'weak', 'tools', 'overflow', 'maxTokens', 'tiers', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
+// Fallback chains: the Gateway's (on the graph) unless the routing keeps its own
+const fbOf = (r) => (r !== graph && r.fallbacks) || graph.fallbacks;
+const fb = () => fbOf(R());
+const allFb = () => [graph.fallbacks, ...graph.profiles.map(p => p.fallbacks).filter(Boolean)];
+// The chains to edit: a routing on its own chains starts from a copy of the Gateway's
+function ownFb() {
+  const r = R();
+  if (r !== graph && !r.fallbacks) r.fallbacks = clone(graph.fallbacks);
+  return fbOf(r);
+}
+const ROUTE_FIELDS = ['fallbacks', 'pin', 'images', 'down', 'downTools', 'threshold', 'strong', 'strongTools', 'weak', 'tools', 'overflow', 'maxTokens', 'tiers', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
 const routingName = (r) => (r === graph ? 'the default routing' : `“${r.name}”`);
 
 // Fallbacks without empty chains, sorted, so two can be compared as JSON
@@ -152,7 +163,7 @@ function chains(fallbacks) {
 function models() {
   const names = new Set(graph.deployments.map(d => d.name));
   for (const r of routings()) for (const o of routeOuts(r)) if (o.model) names.add(o.model);
-  for (const [src, targets] of Object.entries(graph.fallbacks)) { names.add(src); targets.forEach(t => names.add(t)); }
+  for (const f of allFb()) for (const [src, targets] of Object.entries(f)) { names.add(src); targets.forEach(t => names.add(t)); }
   return [...names];
 }
 
@@ -227,7 +238,7 @@ function problems() {
     }
   }
   if (gatewayEditable()) {
-    const names = new Set(Object.entries(graph.fallbacks).flatMap(([src, targets]) => [src, ...targets]));
+    const names = new Set(allFb().flatMap(f => Object.entries(f).flatMap(([src, targets]) => [src, ...targets])));
     for (const name of names) if (!served(name)) out.push({ text: `“${name}” has fallback lines but no provider model: add one, or remove its box.`, routing: null, node: `m:${name}`, port: null });
   }
   return out;
@@ -236,9 +247,9 @@ function problems() {
 function connect(port, model) {
   if (port.startsWith('fail:')) {
     const src = port.slice(5);
-    const chain = graph.fallbacks[src] || [];
+    const chain = fb()[src] || [];
     if (src === model || chain.includes(model)) return;
-    graph.fallbacks[src] = [...chain, model];
+    ownFb()[src] = [...chain, model];
   } else {
     setOut(R(), port, model);
   }
@@ -249,8 +260,9 @@ function removeWire(id) {
   if (!id) return;
   if (id.startsWith('fb|')) {
     const [, src, target] = id.split('|');
-    graph.fallbacks[src] = (graph.fallbacks[src] || []).filter(t => t !== target);
-    if (!graph.fallbacks[src].length) delete graph.fallbacks[src];
+    const own = ownFb();
+    own[src] = (own[src] || []).filter(t => t !== target);
+    if (!own[src].length) delete own[src];
   } else {
     setOut(R(), id, null);
   }
@@ -263,10 +275,12 @@ function removeModel(name) {
   const uses = routings().flatMap(r => routeOuts(r).filter(o => o.model === name)
     .map(o => `“${o.label}”${r === graph ? '' : ` in ${r.name}`}`));
   graph.deployments = graph.deployments.filter(d => d.name !== name);
-  delete graph.fallbacks[name];
-  for (const [src, targets] of Object.entries(graph.fallbacks)) {
-    const kept = targets.filter(t => t !== name);
-    if (kept.length) graph.fallbacks[src] = kept; else delete graph.fallbacks[src];
+  for (const f of allFb()) {
+    delete f[name];
+    for (const [src, targets] of Object.entries(f)) {
+      const kept = targets.filter(t => t !== name);
+      if (kept.length) f[src] = kept; else delete f[src];
+    }
   }
   for (const r of routings()) for (const o of routeOuts(r)) if (o.model === name) setOut(r, o.port, null);
   selected = null;
@@ -294,12 +308,15 @@ function cancelHold() {
 // fallback line comes to it from a model that can be got to
 function reachable() {
   const seen = new Set();
-  const todo = routings().flatMap(r => routeOuts(r).map(o => o.model).filter(Boolean));
-  while (todo.length) {
-    const m = todo.pop();
-    if (seen.has(m)) continue;
-    seen.add(m);
-    todo.push(...(graph.fallbacks[m] || []));
+  for (const r of routings()) {
+    const todo = routeOuts(r).map(o => o.model).filter(Boolean);
+    const done = new Set();
+    while (todo.length) {
+      const m = todo.pop();
+      if (done.has(m)) continue;
+      done.add(m); seen.add(m);
+      todo.push(...(fbOf(r)[m] || []));
+    }
   }
   return seen;
 }
@@ -318,9 +335,9 @@ function clearUnconnected() {
   const count = graph.deployments.filter(d => names.includes(d.name)).length;
   if (!confirm(`Remove ${names.length} model${names.length === 1 ? '' : 's'} no route reaches${count ? `, with ${count === 1 ? 'its provider model' : `their ${count} provider models`} and fallback lines` : ''}?\n\n${names.join('\n')}\n\nNothing changes in config.yaml until you press Save.`)) return;
   graph.deployments = graph.deployments.filter(d => !names.includes(d.name));
-  for (const [src, targets] of Object.entries(graph.fallbacks)) {
+  for (const f of allFb()) for (const [src, targets] of Object.entries(f)) {
     const kept = names.includes(src) ? [] : targets.filter(t => !names.includes(t));
-    if (kept.length) graph.fallbacks[src] = kept; else delete graph.fallbacks[src];
+    if (kept.length) f[src] = kept; else delete f[src];
   }
   for (const n of names) delete positions[`m:${n}`];
   selected = null;
@@ -604,7 +621,7 @@ function deploymentRow(d, only) {
 }
 
 function modelNode(name) {
-  const chain = graph.fallbacks[name] || [];
+  const chain = fb()[name] || [];
   const editable = gatewayEditable();
   const deps = graph.deployments.filter(d => d.name === name);
   const servedBy = editable
@@ -701,7 +718,7 @@ function tidy() {
   // Lines: from an output dot (and the box it is on) to a model
   const lines = [];
   for (const o of routeOuts(r)) if (o.model) lines.push({ port: o.port, from: o.node, to: o.model });
-  for (const [src, targets] of Object.entries(graph.fallbacks)) for (const t of targets) lines.push({ port: `fail:${src}`, from: src, to: t });
+  for (const [src, targets] of Object.entries(fb())) for (const t of targets) lines.push({ port: `fail:${src}`, from: src, to: t });
 
   // Fallback lines that close a loop are left out of the columns
   const all = models();
@@ -709,7 +726,7 @@ function tidy() {
   const state = {}; const order = []; const back = new Set();
   const visit = (m) => {
     state[m] = 'open';
-    for (const t of graph.fallbacks[m] || []) {
+    for (const t of fb()[m] || []) {
       if (state[t] === 'open') back.add(`${m}|${t}`);
       else if (!state[t]) visit(t);
     }
@@ -719,11 +736,11 @@ function tidy() {
   for (const m of [...routed, ...all]) if (!state[m]) visit(m);
   // Models nothing on this routing leads to go in columns of their own on the right
   const reach = new Set(); const todo = [...routed];
-  while (todo.length) { const m = todo.pop(); if (!reach.has(m)) { reach.add(m); todo.push(...(graph.fallbacks[m] || [])); } }
+  while (todo.length) { const m = todo.pop(); if (!reach.has(m)) { reach.add(m); todo.push(...(fb()[m] || [])); } }
   const column = Object.fromEntries(all.map(m => [m, 1]));
   const direct = new Set(routed);
   const spread = (group) => {
-    for (const m of order) if (group.has(m)) for (const t of graph.fallbacks[m] || []) {
+    for (const m of order) if (group.has(m)) for (const t of fb()[m] || []) {
       if (group.has(t) && !direct.has(t) && !back.has(`${m}|${t}`)) column[t] = Math.max(column[t], column[m] + 1);
     }
   };
@@ -822,7 +839,7 @@ function wireList() {
     { id: 'fixed2', from: 'compress.router', to: 'router', cls: 'fixed', dim: !!r.pin },
   ];
   for (const o of routeOuts(r)) if (o.model) list.push({ id: o.port, from: o.port, to: `m:${o.model}`, dim: o.node === 'router' && !!r.pin });
-  for (const [src, targets] of Object.entries(graph.fallbacks)) {
+  for (const [src, targets] of Object.entries(fb())) {
     // Faint unless their model is under the pointer or selected, so the chains don't hide the routes
     targets.forEach((t, i) => {
       const id = ['fb', src, t].join('|');
@@ -962,14 +979,15 @@ $('world').addEventListener('click', (e) => {
   if (b.dataset.act === 'addtier') return addTier();
   if (b.dataset.act === 'untier') { R().tiers.splice(Number(b.dataset.i), 1); selected = null; return changed(); }
   if (b.dataset.act === 'stats') return openStats(b.dataset.name);
-  const chain = [...graph.fallbacks[b.dataset.src]];
+  const own = ownFb();
+  const chain = [...own[b.dataset.src]];
   const i = Number(b.dataset.i);
   if (b.dataset.act === 'del') chain.splice(i, 1);
   else {
     const j = b.dataset.act === 'up' ? i - 1 : i + 1;
     [chain[i], chain[j]] = [chain[j], chain[i]];
   }
-  if (chain.length) graph.fallbacks[b.dataset.src] = chain; else delete graph.fallbacks[b.dataset.src];
+  if (chain.length) own[b.dataset.src] = chain; else delete own[b.dataset.src];
   changed();
 });
 
@@ -1181,9 +1199,10 @@ function drawProfiles() {
     + graph.profiles.map(p => `<option value="${esc(p.id)}"${p.id === view ? ' selected' : ''}>${esc(routingLabel(p))}</option>`).join('');
   sel.value = view;
   $('profileRename').disabled = $('profileDelete').disabled = !view;
+  $('profileFb').hidden = !(view && R().fallbacks);
   const p = view && R();
   $('profileNote').innerHTML = p
-    ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Models and fallbacks are shared by every routing.`
+    ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Models are shared by every routing. ${p.fallbacks ? 'This routing keeps its own fallback lines.' : 'Its fallback lines are the Gateway’s until you change one here.'}`
     : `What every request uses unless its chat, project or client picks another routing. ${graph.profiles.length ? '' : 'Add a routing to send some chats elsewhere, such as cheaper models or no compression.'}`;
 }
 
@@ -1214,11 +1233,21 @@ $('profileNew').addEventListener('click', () => {
   let id = slug(name);
   for (let n = 2; graph.profiles.some(p => p.id === id); n++) id = `${slug(name)}-${n}`;
   const copy = Object.fromEntries(ROUTE_FIELDS.map(k => [k, clone(from[k] ?? null)]));
+  copy.fallbacks = from === graph ? null : copy.fallbacks; // the default's are the Gateway's, which a new routing keeps using
   copy.mcpOff = copy.mcpOff || [];
   // The default's Router outputs may be unknown while the Router is down
   graph.profiles.push({ id, name, note: '', ...copy });
   showRouting(id);
   note(`Added “${name}”. Change its lines and boxes, then press Save.`);
+});
+
+$('profileFb').addEventListener('click', () => {
+  const p = R();
+  if (!p.fallbacks || !confirm(`Drop the fallback lines kept for “${p.name}” and use the Gateway's again?\n\nNothing changes until you press Save.`)) return;
+  p.fallbacks = null;
+  selected = null;
+  drawProfiles();
+  changed();
 });
 
 $('profileRename').addEventListener('click', () => {

@@ -349,12 +349,17 @@ function clearUnconnected() {
 
 let autoPlan = null; // what the dialog is previewing: { r, plan }
 
-function autoPreview() {
+const servedModels = () => [...new Set(graph.deployments.map(d => d.name))];
+const presetHint = (id) => AutoRoute.PRESETS.find(p => p.id === id)?.hint || '';
+
+function autoPreview(opening) {
   const r = R();
-  const served = [...new Set(graph.deployments.map(d => d.name))];
-  const plan = AutoRoute.autoRoute(served, stats.models, r, graph.fallbacks);
+  const preset = $('autoPreset').value || 'balanced';
+  const plan = AutoRoute.preset(preset, servedModels(), stats.models, r, graph.fallbacks);
+  $('autoPresetHint').textContent = presetHint(preset);
   if (!plan) {
-    note('Nothing to place: no model has a quality rating yet. Press Edit on a model box to type one, or add ARTIFICIAL_ANALYSIS_API_KEY to .env.', 'err');
+    if ($('autoDialog').open) $('autoDialog').close();
+    note(preset === 'local' ? 'No Gateway model is named local-… so there is nothing local to use.' : 'Nothing to place: no model has a quality rating yet. Press Edit on a model box to type one, or add ARTIFICIAL_ANALYSIS_API_KEY to .env.', 'err');
     return;
   }
   const after = Object.fromEntries(ROUTE_FIELDS.map(f => [f, r[f]]));
@@ -372,7 +377,7 @@ function autoPreview() {
     ${fb.length ? `<p class="small"><b>New fallbacks</b> (models that had none):</p><ul>${fb.map(([m, t]) => `<li>${esc(m)} → ${esc(t.join(', '))}</li>`).join('')}</ul>` : ''}
     ${plan.skipped.length ? `<p class="small"><b>Left alone, no quality rating:</b> ${plan.skipped.map(esc).join(', ')}. Press Edit on ${plan.skipped.length === 1 ? 'its box' : 'their boxes'} to rate ${plan.skipped.length === 1 ? 'it' : 'them'}, then run Auto-route again.</p>` : ''}
     ${plan.notes.map(n => `<p class="small muted">${esc(n)}</p>`).join('')}`;
-  $('autoDialog').showModal();
+  if (!$('autoDialog').open) $('autoDialog').showModal();
 }
 
 function autoApply() {
@@ -386,7 +391,9 @@ function autoApply() {
   changed();
   note(`Auto-routed ${routingName(r)}: ${n} outputs connected. Press Save to keep it, or Discard changes to undo.`, 'ok');
 }
-$('autoRoute').addEventListener('click', autoPreview);
+$('autoPreset').innerHTML = AutoRoute.PRESETS.map(p => `<option value="${p.id}">${esc(p.label)}</option>`).join('');
+$('autoRoute').addEventListener('click', () => autoPreview());
+$('autoPreset').addEventListener('change', () => autoPreview());
 $('autoApply').addEventListener('click', autoApply);
 $('autoCancel').addEventListener('click', () => $('autoDialog').close());
 $('autoClose').addEventListener('click', () => $('autoDialog').close());
@@ -441,7 +448,7 @@ function markProblems(issues) {
   const bad = new Set(issues.map(p => p.routing).filter(Boolean));
   for (const opt of $('profileSel').options) {
     const r = opt.value ? graph.profiles.find(p => p.id === opt.value) : graph;
-    if (r) opt.textContent = routingLabel(r, bad.has(r));
+    if (r) opt.textContent = `${routingLabel(r, bad.has(r))} — ${AutoRoute.describe(r)}`;
   }
   drawWires();
 }
@@ -1195,8 +1202,8 @@ const routingLabel = (r, bad) => (r === graph ? 'Default strategy' : r.name + (s
 
 function drawProfiles() {
   const sel = $('profileSel');
-  sel.innerHTML = `<option value="">${esc(routingLabel(graph))}</option>`
-    + graph.profiles.map(p => `<option value="${esc(p.id)}"${p.id === view ? ' selected' : ''}>${esc(routingLabel(p))}</option>`).join('');
+  sel.innerHTML = `<option value="">${esc(routingLabel(graph))} — ${esc(AutoRoute.describe(graph))}</option>`
+    + graph.profiles.map(p => `<option value="${esc(p.id)}"${p.id === view ? ' selected' : ''}>${esc(routingLabel(p))} — ${esc(AutoRoute.describe(p))}</option>`).join('');
   sel.value = view;
   $('profileRename').disabled = $('profileDelete').disabled = !view;
   $('profileFb').hidden = !(view && R().fallbacks);
@@ -1252,19 +1259,87 @@ function askName(title, current) {
   return name;
 }
 
-$('profileNew').addEventListener('click', () => {
+function openNew() {
   const from = R();
-  const name = askName(`Name the new strategy. It starts as a copy of ${from === graph ? 'the default strategy' : from.name}.`);
-  if (!name) return;
+  $('newStart').innerHTML = `<option value="copy">A copy of ${esc(from === graph ? 'the default strategy' : from.name)}</option>`
+    + AutoRoute.PRESETS.map(p => `<option value="${p.id}">${esc(p.label)}</option>`).join('');
+  // Different from the start is the point of a second strategy, so a preset is offered first once there is one
+  if (graph.profiles.length || from !== graph) $('newStart').value = 'balanced';
+  $('newName').value = '';
+  newHint();
+  $('newDialog').showModal();
+  $('newName').focus();
+}
+function newHint() {
+  const v = $('newStart').value;
+  $('newHint').textContent = v === 'copy' ? 'Starts with the same lines, so it behaves the same until you change something.' : presetHint(v);
+}
+
+function createStrategy(name, start) {
+  const from = R();
   let id = slug(name);
   for (let n = 2; graph.profiles.some(p => p.id === id); n++) id = `${slug(name)}-${n}`;
   const copy = Object.fromEntries(ROUTE_FIELDS.map(k => [k, clone(from[k] ?? null)]));
   copy.fallbacks = from === graph ? null : copy.fallbacks; // the default's are the Gateway's, which a new strategy keeps using
   copy.mcpOff = copy.mcpOff || [];
   // The default's Router outputs may be unknown while the Router is down
-  graph.profiles.push({ id, name, note: '', description: '', rules: emptyRules(), ...copy });
+  const p = { id, name, note: '', description: '', rules: emptyRules(), ...copy };
+  let how = 'a copy';
+  if (start !== 'copy') {
+    const plan = AutoRoute.preset(start, servedModels(), stats.models, { ...p, down: null, downTools: null }, graph.fallbacks);
+    if (plan) {
+      Object.assign(p, { strongTools: null, tools: null, overflow: null, maxTokens: null, pin: null, threshold: null }, plan.routes, { tiers: clone(plan.tiers) });
+      p.fallbacks = Object.assign({}, from.fallbacks || graph.fallbacks, plan.fallbacks);
+      how = AutoRoute.PRESETS.find(x => x.id === start).label;
+    } else how = 'a copy, since there was nothing to place';
+  }
+  graph.profiles.push(p);
   showRouting(id);
-  note(`Added “${name}”. Change its lines and boxes, then press Save.`);
+  tidy();
+  changed();
+  note(`Added “${name}” as ${how}. Change its lines and boxes, then press Save.`);
+}
+
+$('profileNew').addEventListener('click', openNew);
+$('newStart').addEventListener('change', newHint);
+$('newCancel').addEventListener('click', () => $('newDialog').close());
+$('newForm').addEventListener('submit', () => {
+  const name = $('newName').value.trim();
+  const taken = graph.profiles.some(p => p.name.toLowerCase() === name.toLowerCase());
+  if (!name || !slug(name) || slug(name) === 'default' || slug(name) === 'auto' || taken) { note(`Pick another name than “${name}”.`, 'err'); return; }
+  createStrategy(name, $('newStart').value);
+});
+
+// Every strategy side by side
+function openCompare() {
+  const all = strategies();
+  const rows = new Map(); // label -> [model per strategy]
+  all.forEach((r, i) => {
+    for (const o of routeOuts(r)) {
+      if (!rows.has(o.label)) rows.set(o.label, all.map(() => null));
+      rows.get(o.label)[i] = o.model || null;
+    }
+  });
+  const extra = [
+    ['Threshold', (r) => (r.threshold == null ? 'Router’s' : String(r.threshold))],
+    ['Fallback lines', (r) => (r.fallbacks ? `${Object.keys(r.fallbacks).length} own` : 'Gateway’s')],
+  ];
+  const cell = (v, vals) => `<td class="${new Set(vals).size > 1 ? 'differs' : ''}">${v ? esc(v) : '—'}</td>`;
+  const head = all.map((r, i) => `<th><button type="button" class="link" data-show="${i ? esc(r.id) : ''}">${esc(r === graph ? 'Default' : r.name)}</button></th>`).join('');
+  const body = [...rows].filter(([, v]) => v.some(Boolean)).map(([label, vals]) => `<tr><td>${esc(label)}</td>${vals.map(v => cell(v, vals)).join('')}</tr>`).join('')
+    + extra.map(([label, f]) => { const vals = all.map(f); return `<tr><td>${label}</td>${vals.map(v => cell(v, vals)).join('')}</tr>`; }).join('');
+  const same = all.length > 1 && all.every((r) => AutoRoute.describe(r) === AutoRoute.describe(all[0]));
+  $('compareBody').innerHTML = `${same ? '<p class="small"><b>These strategies all use the same models.</b> Press New strategy and start from Cheapest or Best quality, or use Auto-route and pick a Style, to make them differ.</p>' : ''}
+    <table class="compare"><thead><tr><th></th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  $('compareDialog').showModal();
+}
+$('profileCompare').addEventListener('click', openCompare);
+$('compareClose').addEventListener('click', () => $('compareDialog').close());
+$('compareBody').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-show]');
+  if (!b) return;
+  $('compareDialog').close();
+  showRouting(b.dataset.show);
 });
 
 $('profileFb').addEventListener('click', () => {

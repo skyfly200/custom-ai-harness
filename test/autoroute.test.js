@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { autoRoute } = require('../ui/autoroute');
+const { autoRoute, preset, describe: describeStrategy, PRESETS } = require('../ui/autoroute');
 
 const m = (quality, blended, strengths = ['tools']) => ({ quality, blended, strengths });
 const stats = {
@@ -73,4 +73,32 @@ test('the result has every required output filled', () => {
         const { routes } = autoRoute(names, stats, {});
         for (const k of ['strong', 'weak', 'down', 'downTools']) assert.ok(names.includes(routes[k]), `${k} for ${names}`);
     }
+});
+
+test('presets: each starts with its own wiring', () => {
+    const served = ['big', 'good', 'mid', 'cheap'];
+    const plans = Object.fromEntries(PRESETS.map(p => [p.id, preset(p.id, served, stats, {})]));
+    assert.equal(plans.best.routes.strong, 'big');
+    assert.equal(plans.best.routes.weak, 'big');
+    assert.equal(plans.cheapest.routes.strong, 'cheap');
+    assert.equal(plans.cheapest.routes.weak, 'cheap');
+    assert.equal(plans.balanced.routes.strong, 'big');
+    assert.notEqual(plans.balanced.routes.weak, 'big');
+    assert.notEqual(plans.fast.routes.strong, 'big');
+    assert.equal(plans.fast.routes.threshold, 0.8);
+    assert.equal(plans.local, null);
+    const seen = new Set(['best', 'cheapest', 'balanced', 'fast'].map(k => JSON.stringify([plans[k].routes, plans[k].tiers])));
+    assert.equal(seen.size, 4);
+});
+
+test('presets: local only uses local models', () => {
+    const plan = preset('local', ['big', 'local-engine'], { ...stats, 'local-engine': m(20, 0) }, {});
+    assert.equal(plan.routes.strong, 'local-engine');
+    assert.equal(plan.routes.weak, 'local-engine');
+});
+
+test('describe: one line per strategy', () => {
+    assert.equal(describeStrategy({ strong: 'a', weak: 'a' }), 'a for everything');
+    assert.equal(describeStrategy({ strong: 'a', weak: 'b', threshold: 0.8 }), 'a ↔ b at 0.8');
+    assert.equal(describeStrategy({ pin: 'x' }), 'pinned to x');
 });

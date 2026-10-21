@@ -56,6 +56,24 @@ test('replacing routings saves them, refuses two with one name and a stale versi
     assert.equal(profiles.get('nope'), null);
 });
 
+test('saving several routings keeps each one as it was sent', () => {
+    const { version } = profiles.state();
+    const a = { ...CHEAP, name: 'Best', strong: 'big', weak: 'big', threshold: null };
+    const b = { ...CHEAP, name: 'Cheapest', strong: 'tiny', weak: 'tiny', threshold: 0.3, fallbacks: { tiny: ['free'] } };
+    profiles.replace([CHEAP, a, b], version);
+    profiles.load();
+    assert.deepEqual(profiles.list().map(x => [x.id, x.strong, x.weak, x.threshold]),
+        [['cheap-and-quick', 'mid', 'tiny', 0.95], ['best', 'big', 'big', null], ['cheapest', 'tiny', 'tiny', 0.3]]);
+    assert.equal(profiles.get('best').fallbacks, null);
+    assert.deepEqual(profiles.get('cheapest').fallbacks, { tiny: ['free'] });
+    // editing one and saving all leaves the others alone
+    profiles.replace(profiles.list().map(x => (x.id === 'best' ? { ...x, strong: 'mid' } : x)), profiles.state().version);
+    assert.equal(profiles.get('best').strong, 'mid');
+    assert.equal(profiles.get('cheapest').strong, 'tiny');
+    assert.equal(profiles.get('cheap-and-quick').strong, 'mid');
+    profiles.replace([CHEAP], profiles.state().version);
+});
+
 test('a routing keeps its own fallback chains, or none to use the Gateway\'s', () => {
     assert.equal(profiles.clean(CHEAP).fallbacks, null);
     const p = profiles.clean({ ...CHEAP, fallbacks: { tiny: ['mid', 'mid', 'tiny', 'free'], empty: [], 'claude-sonnet-5': ['free'] } });

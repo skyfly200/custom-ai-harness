@@ -49,7 +49,8 @@
   <div class="profiles" id="profiles">
     <label class="profile-pick" data-hint="Which strategy the boxes below show. Chats and projects can each use a different one">Routing
       <select id="profileSel" aria-label="Routing to show"></select></label>
-    <button id="profileNew" data-hint="Add a strategy, starting as a copy of the one shown">New strategy</button>
+    <button id="profileNew" data-hint="Add a strategy, as a copy of the one shown or from a starting point such as Cheapest or Best quality">New strategy</button>
+    <button id="profileCompare" data-hint="Every strategy side by side; what differs is highlighted">Compare</button>
     <button id="profileRename" data-hint="Rename the strategy shown">Rename</button>
     <button id="profileDelete" data-hint="Delete the strategy shown; its chats go back to the default">Delete</button>
     <button id="profileFb" hidden data-hint="This strategy keeps its own fallback lines. Use the Gateway's again">Use Gateway fallbacks</button>
@@ -158,11 +159,34 @@
       <p class="sub muted">Models are placed by their quality rating and price. Nothing changes until you press Apply, and <b>Discard changes</b> undoes it afterwards. Press Save to keep it.</p></div>
     <button type="button" class="close" id="autoClose" aria-label="Close" data-hint="Close without changing anything">×</button>
   </div>
+  <label class="small">Style <select id="autoPreset" data-hint="Which idea to place the models by"></select></label>
+  <p class="small muted" id="autoPresetHint"></p>
   <div id="autoBody"></div>
   <div class="actions">
     <button type="button" class="primary" id="autoApply">Apply</button>
     <button type="button" id="autoCancel">Cancel</button>
   </div>
+</dialog>
+
+<dialog id="newDialog" class="card">
+  <form method="dialog" id="newForm" autocomplete="off">
+    <div class="add-head"><h3>New strategy</h3></div>
+    <p><label>Name <input id="newName" maxlength="60" required></label></p>
+    <p><label>Start as <select id="newStart" data-hint="A copy keeps the lines of the strategy shown. The others place your models for you, so the new strategy begins different"></select></label></p>
+    <p class="small muted" id="newHint"></p>
+    <div class="actions">
+      <button type="submit" class="primary" id="newOk">Add</button>
+      <button type="button" id="newCancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="compareDialog" class="card">
+  <div class="add-head">
+    <div><h3>Compare strategies</h3><p class="sub muted">Cells that differ between strategies are highlighted. Press a name to show that strategy.</p></div>
+    <button type="button" class="close" id="compareClose" aria-label="Close">×</button>
+  </div>
+  <div id="compareBody" class="compare-scroll"></div>
 </dialog>
 
 <dialog id="statsDialog" class="card">

@@ -82,7 +82,57 @@
     return { routes, tiers, fallbacks: added, skipped, notes };
   }
 
-  const api = { autoRoute };
+  // Starting points for a strategy. Each one is autoRoute() run over the models
+  // that fit its idea, so a fresh strategy begins different from the others.
+  const PRESETS = [
+    { id: 'balanced', label: 'Balanced', hint: 'Best model for hard requests, cheapest for easy ones' },
+    { id: 'best', label: 'Best quality', hint: 'The top-rated model for every request' },
+    { id: 'cheapest', label: 'Cheapest', hint: 'The cheapest rated model for every request' },
+    { id: 'fast', label: 'Fast and light', hint: 'Cheap by default; the top-rated model only when the Router is very sure it is needed' },
+    { id: 'local', label: 'Local only', hint: 'Only models that run on this computer (local-… names)' },
+  ];
+  const isLocal = (n) => /^(local|ollama)[-_:\/]/i.test(n);
+
+  /** autoRoute() shaped by a preset. Returns null with nothing to place. Adds `threshold` where the preset sets one. */
+  function preset(id, served, stats, r = {}, fallbacks = {}) {
+    const rated = served.map(name => ({ name, s: stats[name] || {} })).filter(m => typeof m.s.quality === 'number');
+    let pool = served;
+    let threshold;
+    if (id === 'best') pool = [rated.sort(byQuality)[0]?.name].filter(Boolean);
+    else if (id === 'cheapest') pool = [rated.sort(byPrice)[0]?.name].filter(Boolean);
+    else if (id === 'local') pool = served.filter(isLocal);
+    else if (id === 'fast') { pool = served; threshold = 0.8; }
+    if (!pool.length) return null;
+    const plan = autoRoute(pool, stats, { ...r, down: null, downTools: null, images: null }, fallbacks);
+    if (!plan) return null;
+    if (threshold !== undefined) plan.routes.threshold = threshold;
+    if (id === 'fast' && rated.length > 2) {
+      // Strong is a middle model, not the best: cost stays low even when the Router asks for strong
+      const mid = [...rated].sort(byQuality)[Math.floor(rated.length / 3)];
+      plan.routes.strong = mid.name;
+      plan.routes.strongTools = null;
+      plan.routes.down = mid.name;
+      plan.routes.downTools = plan.routes.tools || mid.name;
+      plan.tiers = [];
+    }
+    if (pool.length < served.length) {
+      // Fallbacks may reach outside the pool except for Local only, which stays on this computer
+      const full = id === 'local' ? null : autoRoute(served, stats, r, fallbacks);
+      if (full) for (const [m, t] of Object.entries(full.fallbacks)) if (!plan.fallbacks[m] && !fallbacks[m]?.length) plan.fallbacks[m] = t;
+    }
+    return plan;
+  }
+
+  /** One line saying what a strategy does, for the picker and the compare table. */
+  function describe(r) {
+    const strong = r.strong, weak = r.weak;
+    if (!strong && !weak) return r.pin ? `pinned to ${r.pin}` : 'not wired yet';
+    if (r.pin) return `pinned to ${r.pin}`;
+    if (strong === weak) return `${strong} for everything`;
+    return `${strong || '—'} ↔ ${weak || '—'}${r.threshold != null ? ` at ${r.threshold}` : ''}`;
+  }
+
+  const api = { autoRoute, preset, describe, PRESETS };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AutoRoute = api;
 })(typeof window !== 'undefined' ? window : globalThis);

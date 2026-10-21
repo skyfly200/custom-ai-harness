@@ -32,11 +32,23 @@ function passwordsFrom(req) {
     return found;
 }
 
+// A request that arrived through a reverse proxy or tunnel on this machine
+// (cloudflared, Tailscale serve, nginx) comes from 127.0.0.1 as far as the
+// socket can tell, so it would look local. These headers give it away.
+const PROXY_HEADERS = ['cf-connecting-ip', 'cf-ray', 'x-forwarded-for', 'forwarded', 'x-real-ip'];
+const viaProxy = (req) => PROXY_HEADERS.some((h) => req.headers[h]);
+// Cloudflare adds these to everything it carries, so they mean the tunnel is open to the internet
+const viaCloudflare = (req) => Boolean(req.headers['cf-connecting-ip'] || req.headers['cf-ray']);
+
 function requirePassword(password) {
     const want = digest(password);
     const matches = (value) => crypto.timingSafeEqual(digest(value), want);
     return function checkPassword(req, res, next) {
-        if (!password) return next();
+        if (!password) {
+            // Never serve the internet with no password: that would hand out your API credit
+            if (viaCloudflare(req)) return res.status(403).json({ error: 'this request came through a Cloudflare tunnel and no HARNESS_PASSWORD is set; set one in .env and restart' });
+            return next();
+        }
         if (!passwordsFrom(req).some(matches)) {
             res.set('www-authenticate', 'Basic realm="AI Harness", charset="UTF-8"');
             return res.status(401).json({ error: 'password required (HARNESS_PASSWORD)' });
@@ -52,4 +64,4 @@ function requirePassword(password) {
     };
 }
 
-module.exports = { requirePassword, PASSWORD_HEADER };
+module.exports = { requirePassword, viaProxy, PASSWORD_HEADER };

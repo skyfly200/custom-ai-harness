@@ -7,9 +7,9 @@ const everything = () => true;
 const nothing = () => false;
 const names = r => r.commands.map(c => c.name);
 
-test('starts Gateway, Router and Interceptor, without Ollama by default', () => {
+test('starts Gateway, Router, Interceptor and task runner, without Ollama by default', () => {
     const r = buildCommands({ platform: 'linux', env: {}, argv: [], exists: everything });
-    assert.deepStrictEqual(names(r), ['gateway', 'router', 'interceptor']);
+    assert.deepStrictEqual(names(r), ['gateway', 'router', 'interceptor', 'runner']);
     assert.strictEqual(r.commands[0].command, `${path.join('.venv', 'bin', 'litellm')} --config config.yaml`);
     assert.strictEqual(r.commands[0].env.PYTHONUTF8, '1');
     assert.deepStrictEqual(r.warnings, []);
@@ -33,11 +33,11 @@ test('Ollama is opt-in by flag or START_OLLAMA', () => {
     assert.strictEqual(wantsOllama([], { START_OLLAMA: '1' }), true);
     assert.strictEqual(wantsOllama(['--no-ollama'], { START_OLLAMA: 'true' }), false);
     const r = buildCommands({ platform: 'linux', env: {}, argv: ['--ollama'], exists: everything });
-    assert.deepStrictEqual(names(r), ['gateway', 'router', 'interceptor', 'ollama']);
+    assert.deepStrictEqual(names(r), ['gateway', 'router', 'interceptor', 'runner', 'ollama']);
 });
 
 test('does not start Ollama twice when it already answers', () => {
     const r = buildCommands({ platform: 'linux', env: { START_OLLAMA: 'yes' }, argv: [], exists: everything, ollamaRunning: true });
-    assert.deepStrictEqual(names(r), ['gateway', 'router', 'interceptor']);
+    assert.deepStrictEqual(names(r), ['gateway', 'router', 'interceptor', 'runner']);
     assert.match(r.warnings[0], /already running/);
 });

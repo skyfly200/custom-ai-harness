@@ -30,7 +30,7 @@ const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
 const repoTools = require('./utils/repoTools');
-const { requirePassword } = require('./utils/access');
+const { requirePassword, viaProxy } = require('./utils/access');
 const fs = require('fs');
 const path = require('path');
 
@@ -280,7 +280,8 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // anyone who gave it), and only to JSON: a plain cross-site form can't send
 // that without a CORS preflight, so another web page can't change settings either.
 function localJsonOnly(req, res, next) {
-    if (!LOOPBACK.has(req.socket.remoteAddress) && !req.harnessAuthenticated) {
+    // A request through a tunnel or proxy on this machine looks like loopback, but isn't "this machine"
+    if ((!LOOPBACK.has(req.socket.remoteAddress) || viaProxy(req)) && !req.harnessAuthenticated) {
         return res.status(403).json({ error: 'controls work only from this machine, or with HARNESS_PASSWORD set' });
     }
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
@@ -301,6 +302,22 @@ async function forwardToRouter(req, res, routerPath) {
     }
 }
 
+// The task runner (runner/server.js) is its own process; its API is reached
+// through here so it sits behind the same login. Starting, approving, stopping
+// and deleting runs are controls, so they get the same local-or-password check.
+const RUNNER_URL = (process.env.RUNNER_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
+app.use('/ui/api/runs', (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
+    const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
+    try {
+        const upstream = await fetch(`${RUNNER_URL}/runs${req.url === '/' ? '' : req.url}`, {
+            method: req.method, headers, signal: AbortSignal.timeout(60000),
+            ...(req.method === 'GET' ? {} : { body: JSON.stringify(req.body ?? {}) }),
+        });
+        res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(await upstream.text());
+    } catch (err) {
+        res.status(502).json({ error: `The task runner is not running (${err.cause?.code || err.message}). Start it with npm run all, or node runner/server.js.` });
+    }
+});
 app.post('/ui/api/router/backend', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/backend'));
 app.post('/ui/api/router/reload', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/reload'));
 app.post('/ui/api/router/config', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/config'));

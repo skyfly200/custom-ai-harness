@@ -1,0 +1,27 @@
+/* Runs page (runs.html) */
+.notice { color: var(--warn); border-color: var(--warn); }
+#newRun .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 10px; }
+#newRun .field.wide textarea { width: 100%; resize: vertical; font: inherit; }
+.split { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.list { padding: 6px; max-height: 70vh; overflow: auto; }
+.run-item { display: block; width: 100%; text-align: left; padding: 8px 10px; margin: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; }
+.run-item:hover, .run-item.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.run-item .goal { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-item .meta { display: block; font-size: 12px; color: var(--muted); }
+.detail h3 { margin: 0 0 4px; font-size: 16px; }
+.detail .goal-full { white-space: pre-wrap; margin: 6px 0 10px; }
+.detail .facts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.detail code, .detail pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.detail pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); overflow: auto; max-height: 360px; white-space: pre-wrap; word-break: break-word; }
+.approval { border: 1.5px solid var(--warn); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.approval .actions { margin-top: 8px; display: flex; gap: 8px; }
+.result { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.result .summary { white-space: pre-wrap; margin: 0 0 8px; }
+.timeline { margin-top: 12px; display: grid; gap: 6px; }
+.ev { font-size: 13px; padding-left: 10px; border-left: 3px solid var(--border); }
+.ev.model { border-color: var(--accent); }
+.ev.tool { border-color: var(--ok); }
+.ev.decided, .ev.approval_needed { border-color: var(--warn); }
+.ev .t { color: var(--muted); font-size: 11px; margin-right: 6px; }
+.ev details summary { cursor: pointer; }

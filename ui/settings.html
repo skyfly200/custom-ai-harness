@@ -53,6 +53,13 @@
         <span>Headroom<br><small>Compress tool results over 4,000 characters.</small></span></label>
       <label class="field check"><input type="checkbox" name="contextAnchor">
         <span>Context anchor<br><small>Replace repeated identical tool results with a pointer.</small></span></label>
+      <label class="field check"><input type="checkbox" name="autoJev">
+        <span>Auto strategy asks Jev<br><small>When no strategy's rules fit a request, Jev rates each strategy's description. Off: only the rules apply.</small></span></label>
+      <label class="field"><span data-hint="Which Auto tries first. Jev first: it rates every strategy's description right away and the rules only apply if it finds no fit. Rules first: Jev is asked only when no rule holds">Auto tries first</span>
+        <select name="autoFirst"><option value="jev">Jev</option><option value="rules">Rules</option></select></label>
+      <label class="field"><span data-hint="How sure Jev must be that a strategy's description fits before Auto picks it">Auto: pick a strategy from</span>
+        <input type="number" name="autoAskAt" min="0" max="1" step="0.05">
+        <small>0.5: the best-fitting strategy is used if Jev rates it 50% likely.</small></label>
       <label class="field check"><input type="checkbox" name="guardJev">
         <span>Command guard asks Jev<br><small>Commands the guard rules don't cover are rated by Jev. Off: only the rules apply.</small></span></label>
       <label class="field"><span data-hint="How sure Jev must be that a command is risky before the agent has to ask you">Guard: ask you from</span>

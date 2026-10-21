@@ -6,11 +6,12 @@
 // models inside them (config.yaml model_list entries). Save writes each change
 // to the file its owner reads.
 //
-// Named routings (profiles) are other sets of route choices, compression and
+// Named strategies (profiles) are other sets of route choices, compression and
 // tools, picked per chat or project on the chat page. The picker above the
-// canvas switches which routing the Request, Compression, Router and Tools
-// boxes show; model boxes and fallbacks belong to the Gateway and every
-// routing shares them.
+// canvas switches which strategy the Request, Compression, Router and Tools
+// boxes show; model boxes belong to the Gateway and every strategy shares them.
+// Fallback chains are the Gateway's too, until a strategy's chains are edited:
+// then that strategy keeps its own, sent with each of its requests.
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -64,7 +65,7 @@ const ROUTER_OUTS = [
   { key: 'overflow', label: 'Weak, over', tokens: true },
 ];
 
-// Every output of a routing that picks a model, extra tiers included:
+// Every output of a strategy that picks a model, extra tiers included:
 // { port, node, label, model }. Tier ports are router.tier:N and router.tierTools:N,
 // N being the tier's place in r.tiers.
 function routeOuts(r) {
@@ -95,7 +96,7 @@ const flashing = new Map(); // node or wire id -> time the highlight ends
 let drag = null;     // a node being moved or a wire being drawn
 let focus = null;    // model under the pointer: its fallback lines are drawn in full
 let newKeys = 0;     // keys for provider models added on this page (saved ones use their file id)
-let view = '';       // the routing being shown: '' for the default, else a profile id
+let view = '';       // the strategy being shown: '' for the default, else a profile id
 let toolInfo = null; // MCP servers (GET api/tools)
 
 try { positions = JSON.parse(localStorage.getItem(LAYOUT_KEY)) || {}; } catch {}
@@ -138,11 +139,21 @@ function graphFrom({ router, settings, gateway }) {
   };
 }
 
-// The routing being edited: the default (kept on the graph itself) or a profile
+// The strategy being edited: the default (kept on the graph itself) or a profile
 const R = () => (view && graph.profiles.find(p => p.id === view)) || graph;
-const routings = () => [graph, ...graph.profiles];
-const ROUTE_FIELDS = ['pin', 'images', 'down', 'downTools', 'threshold', 'strong', 'strongTools', 'weak', 'tools', 'overflow', 'maxTokens', 'tiers', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
-const routingName = (r) => (r === graph ? 'the default routing' : `“${r.name}”`);
+const strategies = () => [graph, ...graph.profiles];
+// Fallback chains: the Gateway's (on the graph) unless the strategy keeps its own
+const fbOf = (r) => (r !== graph && r.fallbacks) || graph.fallbacks;
+const fb = () => fbOf(R());
+const allFb = () => [graph.fallbacks, ...graph.profiles.map(p => p.fallbacks).filter(Boolean)];
+// The chains to edit: a strategy on its own chains starts from a copy of the Gateway's
+function ownFb() {
+  const r = R();
+  if (r !== graph && !r.fallbacks) r.fallbacks = clone(graph.fallbacks);
+  return fbOf(r);
+}
+const ROUTE_FIELDS = ['fallbacks', 'pin', 'images', 'down', 'downTools', 'threshold', 'strong', 'strongTools', 'weak', 'tools', 'overflow', 'maxTokens', 'tiers', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
+const routingName = (r) => (r === graph ? 'the default strategy' : `“${r.name}”`);
 
 // Fallbacks without empty chains, sorted, so two can be compared as JSON
 function chains(fallbacks) {
@@ -151,8 +162,8 @@ function chains(fallbacks) {
 
 function models() {
   const names = new Set(graph.deployments.map(d => d.name));
-  for (const r of routings()) for (const o of routeOuts(r)) if (o.model) names.add(o.model);
-  for (const [src, targets] of Object.entries(graph.fallbacks)) { names.add(src); targets.forEach(t => names.add(t)); }
+  for (const r of strategies()) for (const o of routeOuts(r)) if (o.model) names.add(o.model);
+  for (const f of allFb()) for (const [src, targets] of Object.entries(f)) { names.add(src); targets.forEach(t => names.add(t)); }
   return [...names];
 }
 
@@ -200,11 +211,11 @@ const gatewayChanged = () => { const c = deploymentChanges(); return !!(c.remove
 const dirty = () => !!graph && (Object.keys(routerChanges()).length || Object.keys(interceptorChanges()).length || gatewayChanged() || profilesChanged());
 
 // What has to be fixed before saving: { text, routing, node, port }. `node` and
-// `port` say where it shows on the canvas when that routing is the one shown.
+// `port` say where it shows on the canvas when that strategy is the one shown.
 function problems() {
   const out = [];
-  // The routing on screen first, so its problems are the ones listed first
-  for (const r of [R(), ...routings().filter(x => x !== R())]) {
+  // The strategy on screen first, so its problems are the ones listed first
+  for (const r of [R(), ...strategies().filter(x => x !== R())]) {
     const where = r === R() ? '' : ` (in ${routingName(r)})`;
     const add = (node, port, text) => out.push({ text: text.replace(/\.$/, `${where}.`), routing: r, node, port });
     for (const o of ENTRY_OUTS) if (o.required && !r[o.key]) add('entry', `entry.${o.key}`, `Connect “${o.label}” to a model.`);
@@ -227,7 +238,7 @@ function problems() {
     }
   }
   if (gatewayEditable()) {
-    const names = new Set(Object.entries(graph.fallbacks).flatMap(([src, targets]) => [src, ...targets]));
+    const names = new Set(allFb().flatMap(f => Object.entries(f).flatMap(([src, targets]) => [src, ...targets])));
     for (const name of names) if (!served(name)) out.push({ text: `“${name}” has fallback lines but no provider model: add one, or remove its box.`, routing: null, node: `m:${name}`, port: null });
   }
   return out;
@@ -236,9 +247,9 @@ function problems() {
 function connect(port, model) {
   if (port.startsWith('fail:')) {
     const src = port.slice(5);
-    const chain = graph.fallbacks[src] || [];
+    const chain = fb()[src] || [];
     if (src === model || chain.includes(model)) return;
-    graph.fallbacks[src] = [...chain, model];
+    ownFb()[src] = [...chain, model];
   } else {
     setOut(R(), port, model);
   }
@@ -249,8 +260,9 @@ function removeWire(id) {
   if (!id) return;
   if (id.startsWith('fb|')) {
     const [, src, target] = id.split('|');
-    graph.fallbacks[src] = (graph.fallbacks[src] || []).filter(t => t !== target);
-    if (!graph.fallbacks[src].length) delete graph.fallbacks[src];
+    const own = ownFb();
+    own[src] = (own[src] || []).filter(t => t !== target);
+    if (!own[src].length) delete own[src];
   } else {
     setOut(R(), id, null);
   }
@@ -260,15 +272,17 @@ function removeWire(id) {
 
 // Called once × in the title has been held down; Discard changes brings it back
 function removeModel(name) {
-  const uses = routings().flatMap(r => routeOuts(r).filter(o => o.model === name)
+  const uses = strategies().flatMap(r => routeOuts(r).filter(o => o.model === name)
     .map(o => `“${o.label}”${r === graph ? '' : ` in ${r.name}`}`));
   graph.deployments = graph.deployments.filter(d => d.name !== name);
-  delete graph.fallbacks[name];
-  for (const [src, targets] of Object.entries(graph.fallbacks)) {
-    const kept = targets.filter(t => t !== name);
-    if (kept.length) graph.fallbacks[src] = kept; else delete graph.fallbacks[src];
+  for (const f of allFb()) {
+    delete f[name];
+    for (const [src, targets] of Object.entries(f)) {
+      const kept = targets.filter(t => t !== name);
+      if (kept.length) f[src] = kept; else delete f[src];
+    }
   }
-  for (const r of routings()) for (const o of routeOuts(r)) if (o.model === name) setOut(r, o.port, null);
+  for (const r of strategies()) for (const o of routeOuts(r)) if (o.model === name) setOut(r, o.port, null);
   selected = null;
   changed();
   note(`Removed ${name}.${uses.length ? ` Connect ${uses.join(', ')} to another model before saving.` : ''} Discard changes brings it back.`, uses.length ? 'err' : '');
@@ -290,16 +304,19 @@ function cancelHold() {
   hold = null;
 }
 
-// Models a request can get to: a route in any routing points at it, or a
+// Models a request can get to: a route in any strategy points at it, or a
 // fallback line comes to it from a model that can be got to
 function reachable() {
   const seen = new Set();
-  const todo = routings().flatMap(r => routeOuts(r).map(o => o.model).filter(Boolean));
-  while (todo.length) {
-    const m = todo.pop();
-    if (seen.has(m)) continue;
-    seen.add(m);
-    todo.push(...(graph.fallbacks[m] || []));
+  for (const r of strategies()) {
+    const todo = routeOuts(r).map(o => o.model).filter(Boolean);
+    const done = new Set();
+    while (todo.length) {
+      const m = todo.pop();
+      if (done.has(m)) continue;
+      done.add(m); seen.add(m);
+      todo.push(...(fbOf(r)[m] || []));
+    }
   }
   return seen;
 }
@@ -318,9 +335,9 @@ function clearUnconnected() {
   const count = graph.deployments.filter(d => names.includes(d.name)).length;
   if (!confirm(`Remove ${names.length} model${names.length === 1 ? '' : 's'} no route reaches${count ? `, with ${count === 1 ? 'its provider model' : `their ${count} provider models`} and fallback lines` : ''}?\n\n${names.join('\n')}\n\nNothing changes in config.yaml until you press Save.`)) return;
   graph.deployments = graph.deployments.filter(d => !names.includes(d.name));
-  for (const [src, targets] of Object.entries(graph.fallbacks)) {
+  for (const f of allFb()) for (const [src, targets] of Object.entries(f)) {
     const kept = names.includes(src) ? [] : targets.filter(t => !names.includes(t));
-    if (kept.length) graph.fallbacks[src] = kept; else delete graph.fallbacks[src];
+    if (kept.length) f[src] = kept; else delete f[src];
   }
   for (const n of names) delete positions[`m:${n}`];
   selected = null;
@@ -402,7 +419,7 @@ function updateButtons() {
   } else if ($('msg').dataset.auto) note('');
 }
 
-// Red outlines, and the problems written in the box, for the routing shown
+// Red outlines, and the problems written in the box, for the strategy shown
 function markProblems(issues) {
   const world = $('world');
   for (const el of world.querySelectorAll('.node.bad, .out.bad')) el.classList.remove('bad');
@@ -429,7 +446,7 @@ function markProblems(issues) {
   drawWires();
 }
 
-// The toast that lists what stops a save; a problem in another routing gets a button to show it
+// The toast that lists what stops a save; a problem in another strategy gets a button to show it
 function showToast(issues, title = 'Can’t save yet') {
   const t = $('toast');
   if (!issues.length) { t.hidden = true; return; }
@@ -527,7 +544,7 @@ function compressNode() {
   const r = R();
   const on = TRANSFORMS.filter(t => r[t.key]).length;
   const body = TRANSFORMS.map(t => `<label class="check" data-hint="${esc(t.help)}"><input type="checkbox" data-toggle="${t.key}"${r[t.key] ? ' checked' : ''}> ${esc(t.label)}</label>`).join('')
-    + `<small>${on ? `${on} of 3 on.` : 'Off: requests go on unchanged.'} Runs on every request on this routing, pinned ones too.</small>`;
+    + `<small>${on ? `${on} of 3 on.` : 'Off: requests go on unchanged.'} Runs on every request on this strategy, pinned ones too.</small>`;
   const outs = `<div class="out"><span class="label"><b>Router</b> · scores each request</span><span class="port out-port fixed" data-port="compress.router"></span></div>`;
   return nodeHTML('compress', 'compress', 'Compression', 'Transforms', body, outs, true);
 }
@@ -544,7 +561,7 @@ function toolsNode() {
       <span class="dot ${dot}"></span><span class="name">${esc(s.name)}</span><span class="muted">${esc(detail)}</span></label></li>`;
   });
   const body = `<ul class="mcp">${rows.join('') || `<li class="muted small">${toolInfo ? `No servers. List them in <code>${esc((toolInfo.file || 'mcp-servers.json').split(/[\\/]/).pop())}</code> next to server.js.` : 'Couldn’t read the tool servers.'}</li>`}</ul>
-    <small>Ticked servers are offered to the model in Bright Chat chats on this routing (each chat can still turn them off in Options). Claude Code brings its own tools.</small>
+    <small>Ticked servers are offered to the model in Bright Chat chats on this strategy (each chat can still turn them off in Options). Claude Code brings its own tools.</small>
     <button class="add-dep" data-act="reloadtools" data-hint="Read mcp-servers.json again and reconnect every server">Reload servers</button>`;
   return nodeHTML('tools', 'tools', 'Tools', 'MCP', body, '', false);
 }
@@ -556,8 +573,8 @@ function routerNode() {
   const editable = r === graph ? up : true;
   const backends = info.router?.backends || (graph.backend ? [graph.backend] : []);
   const body = (up ? '' : r === graph ? '<div class="warn">The Router is down, so its choices can’t be read or changed. Start it and reload this page.</div>'
-      : '<div class="warn">The Router is down: requests on this routing go to “Router down” until it is back.</div>')
-    + `<label data-hint="How requests are scored. Every routing shares it. Its other settings (address, key, timeout) are on the Settings page">Classifier${view ? ' · shared' : ''}<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
+      : '<div class="warn">The Router is down: requests on this strategy go to “Router down” until it is back.</div>')
+    + `<label data-hint="How requests are scored. Every strategy shares it. Its other settings (address, key, timeout) are on the Settings page">Classifier${view ? ' · shared' : ''}<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
        <small id="backendHelp">${esc(BACKEND_HELP[graph.backend] || '')}</small></label>
      <label data-hint="Requests scoring at or above this go to Strong. Empty uses the keyword rule">Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(r.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)">
        <small>0 always strong, 1 almost always weak.</small></label>`;
@@ -604,7 +621,7 @@ function deploymentRow(d, only) {
 }
 
 function modelNode(name) {
-  const chain = graph.fallbacks[name] || [];
+  const chain = fb()[name] || [];
   const editable = gatewayEditable();
   const deps = graph.deployments.filter(d => d.name === name);
   const servedBy = editable
@@ -624,7 +641,7 @@ function modelNode(name) {
     <span class="port out-port fallback${editable ? '' : ' fixed'}" data-port="fail:${esc(name)}" data-hint="Drag to another model to try it when ${esc(name)} fails"></span></div>`;
   const close = editable ? `<button class="close hold" data-act="unmodel" data-name="${esc(name)}" aria-label="Remove ${esc(name)} (press and hold)" data-hint="Press and hold to remove ${esc(name)} from the Gateway, with its provider models and fallback lines">×</button>` : '';
   const lost = routerUp() && !reachable().has(name);
-  const why = lost ? '<div class="unreach" data-hint="No route in any routing leads here, directly or through fallbacks. Clear unconnected models removes it">No route reaches it.</div>' : '';
+  const why = lost ? '<div class="unreach" data-hint="No route in any strategy leads here, directly or through fallbacks. Clear unconnected models removes it">No route reaches it.</div>' : '';
   return nodeHTML(`m:${name}`, lost ? 'model unreached' : 'model', name, 'Model', why + statBlock(name) + servedBy + list, outs, true, close);
 }
 
@@ -684,7 +701,7 @@ function placeNodes() {
   $('world').style.height = h + 200 + 'px';
 }
 
-// Tidy layout: columns that follow the lines of the routing shown, left to
+// Tidy layout: columns that follow the lines of the strategy shown, left to
 // right. The Interceptor, Compression, Router and Tools boxes make the first
 // column and every model a route goes to makes the second, so no route line
 // passes a column. A model only fallbacks lead to sits one column right of the
@@ -701,7 +718,7 @@ function tidy() {
   // Lines: from an output dot (and the box it is on) to a model
   const lines = [];
   for (const o of routeOuts(r)) if (o.model) lines.push({ port: o.port, from: o.node, to: o.model });
-  for (const [src, targets] of Object.entries(graph.fallbacks)) for (const t of targets) lines.push({ port: `fail:${src}`, from: src, to: t });
+  for (const [src, targets] of Object.entries(fb())) for (const t of targets) lines.push({ port: `fail:${src}`, from: src, to: t });
 
   // Fallback lines that close a loop are left out of the columns
   const all = models();
@@ -709,7 +726,7 @@ function tidy() {
   const state = {}; const order = []; const back = new Set();
   const visit = (m) => {
     state[m] = 'open';
-    for (const t of graph.fallbacks[m] || []) {
+    for (const t of fb()[m] || []) {
       if (state[t] === 'open') back.add(`${m}|${t}`);
       else if (!state[t]) visit(t);
     }
@@ -717,13 +734,13 @@ function tidy() {
     order.unshift(m);
   };
   for (const m of [...routed, ...all]) if (!state[m]) visit(m);
-  // Models nothing on this routing leads to go in columns of their own on the right
+  // Models nothing on this strategy leads to go in columns of their own on the right
   const reach = new Set(); const todo = [...routed];
-  while (todo.length) { const m = todo.pop(); if (!reach.has(m)) { reach.add(m); todo.push(...(graph.fallbacks[m] || [])); } }
+  while (todo.length) { const m = todo.pop(); if (!reach.has(m)) { reach.add(m); todo.push(...(fb()[m] || [])); } }
   const column = Object.fromEntries(all.map(m => [m, 1]));
   const direct = new Set(routed);
   const spread = (group) => {
-    for (const m of order) if (group.has(m)) for (const t of graph.fallbacks[m] || []) {
+    for (const m of order) if (group.has(m)) for (const t of fb()[m] || []) {
       if (group.has(t) && !direct.has(t) && !back.has(`${m}|${t}`)) column[t] = Math.max(column[t], column[m] + 1);
     }
   };
@@ -822,7 +839,7 @@ function wireList() {
     { id: 'fixed2', from: 'compress.router', to: 'router', cls: 'fixed', dim: !!r.pin },
   ];
   for (const o of routeOuts(r)) if (o.model) list.push({ id: o.port, from: o.port, to: `m:${o.model}`, dim: o.node === 'router' && !!r.pin });
-  for (const [src, targets] of Object.entries(graph.fallbacks)) {
+  for (const [src, targets] of Object.entries(fb())) {
     // Faint unless their model is under the pointer or selected, so the chains don't hide the routes
     targets.forEach((t, i) => {
       const id = ['fb', src, t].join('|');
@@ -962,14 +979,15 @@ $('world').addEventListener('click', (e) => {
   if (b.dataset.act === 'addtier') return addTier();
   if (b.dataset.act === 'untier') { R().tiers.splice(Number(b.dataset.i), 1); selected = null; return changed(); }
   if (b.dataset.act === 'stats') return openStats(b.dataset.name);
-  const chain = [...graph.fallbacks[b.dataset.src]];
+  const own = ownFb();
+  const chain = [...own[b.dataset.src]];
   const i = Number(b.dataset.i);
   if (b.dataset.act === 'del') chain.splice(i, 1);
   else {
     const j = b.dataset.act === 'up' ? i - 1 : i + 1;
     [chain[i], chain[j]] = [chain[j], chain[i]];
   }
-  if (chain.length) graph.fallbacks[b.dataset.src] = chain; else delete graph.fallbacks[b.dataset.src];
+  if (chain.length) own[b.dataset.src] = chain; else delete own[b.dataset.src];
   changed();
 });
 
@@ -1146,9 +1164,9 @@ $('save').addEventListener('click', async () => {
       done.push('Interceptor');
     }
     if (profilesChanged()) {
-      note('Saving the routings…');
+      note('Saving the strategies…');
       info.profiles = await postJSON('api/profiles', { version: info.profiles.version, profiles: graph.profiles });
-      done.push('named routings');
+      done.push('named strategies');
     }
     saved = graphFrom(info);
     graph.profiles = clone(saved.profiles); // as the server cleaned them
@@ -1170,10 +1188,10 @@ $('save').addEventListener('click', async () => {
 window.addEventListener('beforeunload', (e) => { if (dirty()) e.preventDefault(); });
 window.addEventListener('resize', () => graph && drawWires());
 
-// ---- named routings -----------------------------------------------------------
+// ---- named strategies -----------------------------------------------------------
 
 const VIEW_KEY = 'harness-routing-view';
-const routingLabel = (r, bad) => (r === graph ? 'Default routing' : r.name + (saved.profiles.some(x => x.id === r.id) ? '' : ' (new)')) + (bad ? ' · needs fixing' : '');
+const routingLabel = (r, bad) => (r === graph ? 'Default strategy' : r.name + (saved.profiles.some(x => x.id === r.id) ? '' : ' (new)')) + (bad ? ' · needs fixing' : '');
 
 function drawProfiles() {
   const sel = $('profileSel');
@@ -1181,11 +1199,38 @@ function drawProfiles() {
     + graph.profiles.map(p => `<option value="${esc(p.id)}"${p.id === view ? ' selected' : ''}>${esc(routingLabel(p))}</option>`).join('');
   sel.value = view;
   $('profileRename').disabled = $('profileDelete').disabled = !view;
+  $('profileFb').hidden = !(view && R().fallbacks);
   const p = view && R();
   $('profileNote').innerHTML = p
-    ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Models and fallbacks are shared by every routing.`
-    : `What every request uses unless its chat, project or client picks another routing. ${graph.profiles.length ? '' : 'Add a routing to send some chats elsewhere, such as cheaper models or no compression.'}`;
+    ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Models are shared by every strategy. ${p.fallbacks ? 'This strategy keeps its own fallback lines.' : 'Its fallback lines are the Gateway’s until you change one here.'}`
+    : `What every request uses unless its chat, project or client picks another strategy. ${graph.profiles.length ? '' : 'Add a strategy to send some chats elsewhere, such as cheaper models or no compression.'}`;
+  drawAuto();
 }
+
+// Auto's rules and description for the strategy shown (the default has none: it is Auto's fallback)
+const emptyRules = () => ({ words: [], tools: 'any', clients: [], minTokens: null, maxTokens: null });
+const csv = (v) => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+function drawAuto() {
+  $('autoBox').hidden = !view;
+  const p = view && R();
+  if (!p) return;
+  const r = p.rules || (p.rules = emptyRules());
+  $('autoDesc').value = p.description || '';
+  $('autoWords').value = r.words.join(', ');
+  $('autoTools').value = r.tools;
+  $('autoClients').value = r.clients.join(', ');
+  $('autoMin').value = r.minTokens ?? '';
+  $('autoMax').value = r.maxTokens ?? '';
+}
+function readAuto() {
+  const p = R();
+  if (!view || !p) return;
+  const num = (id) => ($(id).value === '' ? null : Number($(id).value));
+  p.description = $('autoDesc').value;
+  p.rules = { words: csv($('autoWords').value), tools: $('autoTools').value, clients: csv($('autoClients').value), minTokens: num('autoMin'), maxTokens: num('autoMax') };
+  updateButtons();
+}
+for (const id of ['autoDesc', 'autoWords', 'autoTools', 'autoClients', 'autoMin', 'autoMax']) $(id).addEventListener('input', readAuto);
 
 function showRouting(id) {
   view = id || '';
@@ -1209,21 +1254,31 @@ function askName(title, current) {
 
 $('profileNew').addEventListener('click', () => {
   const from = R();
-  const name = askName(`Name the new routing. It starts as a copy of ${from === graph ? 'the default routing' : from.name}.`);
+  const name = askName(`Name the new strategy. It starts as a copy of ${from === graph ? 'the default strategy' : from.name}.`);
   if (!name) return;
   let id = slug(name);
   for (let n = 2; graph.profiles.some(p => p.id === id); n++) id = `${slug(name)}-${n}`;
   const copy = Object.fromEntries(ROUTE_FIELDS.map(k => [k, clone(from[k] ?? null)]));
+  copy.fallbacks = from === graph ? null : copy.fallbacks; // the default's are the Gateway's, which a new strategy keeps using
   copy.mcpOff = copy.mcpOff || [];
   // The default's Router outputs may be unknown while the Router is down
-  graph.profiles.push({ id, name, note: '', ...copy });
+  graph.profiles.push({ id, name, note: '', description: '', rules: emptyRules(), ...copy });
   showRouting(id);
   note(`Added “${name}”. Change its lines and boxes, then press Save.`);
 });
 
+$('profileFb').addEventListener('click', () => {
+  const p = R();
+  if (!p.fallbacks || !confirm(`Drop the fallback lines kept for “${p.name}” and use the Gateway's again?\n\nNothing changes until you press Save.`)) return;
+  p.fallbacks = null;
+  selected = null;
+  drawProfiles();
+  changed();
+});
+
 $('profileRename').addEventListener('click', () => {
   const p = R();
-  const name = askName('New name for this routing. Chats using it keep using it.', p.name);
+  const name = askName('New name for this strategy. Chats using it keep using it.', p.name);
   if (!name) return;
   p.name = name;
   drawProfiles();
@@ -1232,7 +1287,7 @@ $('profileRename').addEventListener('click', () => {
 
 $('profileDelete').addEventListener('click', () => {
   const p = R();
-  if (!confirm(`Delete the routing “${p.name}”? Chats and projects set to it go back to the default routing.\n\nNothing changes until you press Save.`)) return;
+  if (!confirm(`Delete the strategy “${p.name}”? Chats and projects set to it go back to the default strategy.\n\nNothing changes until you press Save.`)) return;
   graph.profiles = graph.profiles.filter(x => x !== p);
   showRouting('');
 });
@@ -1489,7 +1544,7 @@ async function load() {
   const issues = [
     !info.settings && `Interceptor settings: ${settings.reason?.message}`,
     !info.router && 'The Router is down or has no admin endpoints, so its choices can’t be changed.',
-    profiles.reason && `Named routings: ${profiles.reason.message}`,
+    profiles.reason && `Named strategies: ${profiles.reason.message}`,
     info.gatewayError && `Models and fallbacks can’t be edited: ${info.gatewayError}`,
   ].filter(Boolean);
   $('updated').textContent = `Loaded ${new Date().toLocaleTimeString()}`;
@@ -1518,7 +1573,7 @@ function followLive() {
     try { update = JSON.parse(msg.data); } catch { return; }
     const e = update.event || {};
     if (update.type === 'route' && e.model) {
-      // Only requests on the routing shown light up its lines; any model box still flashes
+      // Only requests on the strategy shown light up its lines; any model box still flashes
       const mine = (e.profile || null) === (view ? R().name : null);
       let wires;
       if (!mine) wires = [];

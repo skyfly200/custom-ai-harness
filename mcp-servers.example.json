@@ -2,7 +2,11 @@
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\you\\Documents"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${HOME}/Documents"]
+    },
+    "jev-files": {
+      "command": "node",
+      "args": ["scripts/jev-files-mcp.js"]
     },
     "fetch": {
       "command": "uvx",
@@ -13,11 +17,6 @@
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/",
       "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" },
-      "disabled": true
-    },
-    "jev-files": {
-      "command": "node",
-      "args": ["scripts/jev-files-mcp.js"],
       "disabled": true
     }
   }

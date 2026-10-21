@@ -47,13 +47,23 @@ test('a routing picks like the Router does', () => {
 
 test('replacing routings saves them, refuses two with one name and a stale version', () => {
     const { version } = profiles.state();
-    assert.throws(() => profiles.replace([CHEAP, { ...CHEAP }], version), /Two routings/);
+    assert.throws(() => profiles.replace([CHEAP, { ...CHEAP }], version), /Two strategies/);
     assert.throws(() => profiles.replace([CHEAP], version + 5), /changed since/);
     profiles.replace([CHEAP], version);
     assert.equal(JSON.parse(fs.readFileSync(process.env.HARNESS_PROFILES_FILE, 'utf8')).profiles[0].id, 'cheap-and-quick');
     profiles.load();
     assert.equal(profiles.get('cheap-and-quick').name, 'Cheap and quick');
     assert.equal(profiles.get('nope'), null);
+});
+
+test('a routing keeps its own fallback chains, or none to use the Gateway\'s', () => {
+    assert.equal(profiles.clean(CHEAP).fallbacks, null);
+    const p = profiles.clean({ ...CHEAP, fallbacks: { tiny: ['mid', 'mid', 'tiny', 'free'], empty: [], 'claude-sonnet-5': ['free'] } });
+    assert.deepEqual(p.fallbacks, { tiny: ['mid', 'free'], 'local-engine': ['free'] });
+    assert.deepEqual(profiles.gatewayFallbacks(p), [{ tiny: ['mid', 'free'] }, { 'local-engine': ['free'] }]);
+    assert.equal(profiles.gatewayFallbacks(profiles.clean(CHEAP)), null);
+    assert.throws(() => profiles.clean({ ...CHEAP, fallbacks: { tiny: 'mid' } }), /list of model names/);
+    assert.throws(() => profiles.clean({ ...CHEAP, fallbacks: [] }), /object/);
 });
 
 // ---- through the Interceptor ----
@@ -116,6 +126,17 @@ test('a routing uses its own outputs, threshold and compression', async () => {
     assert.deepEqual(e.transforms, ['headroom']);
 });
 
+test('a routing sends its own fallbacks to the Gateway; another routing sends none', async () => {
+    profiles.replace([{ ...CHEAP, fallbacks: { tiny: ['mid'] } }, { ...CHEAP, name: 'Plain' }]);
+    await send({ 'x-harness-profile': 'cheap-and-quick' });
+    assert.deepEqual(lastBody.fallbacks, [{ tiny: ['mid'] }]);
+    await send({ 'x-harness-profile': 'plain' });
+    assert.equal(lastBody.fallbacks, undefined);
+    await send();
+    assert.equal(lastBody.fallbacks, undefined);
+    profiles.replace([CHEAP]);
+});
+
 test('a routing with the Router down uses its own Router-down models', async () => {
     routerUp = false;
     await send({ 'x-harness-profile': 'cheap-and-quick' }, { messages: [{ role: 'user', content: 'hi' }], tools: [{ type: 'function', function: { name: 'x', parameters: {} } }] });
@@ -127,7 +148,7 @@ test('a pinned routing skips the Router; a model header still wins; an unknown r
     profiles.replace([{ ...CHEAP, pin: 'just-this' }]);
     const res = await send({ 'x-harness-profile': 'cheap-and-quick' });
     assert.equal(lastBody.model, 'just-this');
-    assert.match(res.headers.get('x-harness-route'), /pinned in routing Cheap and quick/);
+    assert.match(res.headers.get('x-harness-route'), /pinned in strategy Cheap and quick/);
     await send({ 'x-harness-profile': 'cheap-and-quick', 'x-harness-model': 'direct' });
     assert.equal(lastBody.model, 'direct');
     await send({ 'x-harness-profile': 'nope' });
@@ -142,4 +163,13 @@ test('the routing editor reads and replaces routings over the API', async () => 
     const ok = await fetch(`${base}/ui/api/profiles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version: got.version, profiles: [] }) });
     assert.equal(ok.status, 200);
     assert.deepEqual((await ok.json()).profiles, []);
+});
+
+test('Claude Code model aliases are not Gateway models', () => {
+    for (const m of ['Haiku', 'haiku', 'sonnet', 'Opus', 'claude-haiku-5.5', 'opus[1m]', 'Claude Sonnet 5.5']) {
+        assert.equal(profiles.isClaudeAlias(m), true, m);
+    }
+    for (const m of ['local-engine', 'fast-openrouter', 'or-haiku', 'or-claude-haiku-5.5', '', null]) {
+        assert.equal(profiles.isClaudeAlias(m), false, String(m));
+    }
 });

@@ -50,6 +50,10 @@ litellm_settings:
     - {"Opus":   ["Sonnet"]}
     - {"Sonnet": ["Haiku"]}
     # Tool-capable first: strong requests are mostly Claude Code, which needs tool calls.
+    - {"local-engine":              ["fast-openrouter", "fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
+    - {"fallback-groq":             ["fallback-openrouter"]}
+    - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter", "fallback-groq"]}
+    - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter"]}
 
 router_settings:
   # Go straight to the next fallback instead of retrying the same model: a 429

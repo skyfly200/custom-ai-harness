@@ -1,8 +1,8 @@
-// Auto-route: wires the Gateway's models into a routing by their ratings.
+// Auto-route: wires the Gateway's models into a strategy by their ratings.
 //
 // autoRoute() is pure. It takes the model names the Gateway serves, their
-// numbers (GET api/model-stats), and the routing being edited, and returns the
-// route choices and fallback lines that make the routing complete. The Routing
+// numbers (GET api/model-stats), and the strategy being edited, and returns the
+// route choices and fallback lines that make the strategy complete. The Strategy
 // page shows them as a preview and applies them only when asked.
 //
 // Rules: the best-rated model is Strong (and with five or more rated models the
@@ -19,7 +19,7 @@
   /**
    * @param {string[]} served  model names the Gateway serves
    * @param {Object} stats     name -> { quality, blended, inPrice, strengths }
-   * @param {Object} r         the routing: threshold, down, downTools, images, pin
+   * @param {Object} r         the strategy: threshold, down, downTools, images, pin
    * @param {Object} fallbacks name -> [fallback names], kept as they are where set
    * @returns {{ routes, tiers, fallbacks, skipped, notes }|null} null with nothing rated
    */

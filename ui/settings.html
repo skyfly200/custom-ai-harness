@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="Bright Chat">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="calm.css">
 </head>
 <body>
 <main>
@@ -74,7 +75,7 @@
       <button id="ireset" data-hint="Put every Interceptor setting back to its default">Reset to defaults</button>
       <span class="note" id="imsg"></span>
     </div>
-    <div class="sub muted" style="margin-top:8px">Takes effect on the next request and is kept in <code>harness-settings.json</code> across restarts.</div>
+    <div class="sub muted fine" style="margin-top:8px">Applies from the next request; kept in <code>harness-settings.json</code>.</div>
   </div>
 
   <h2 data-hint="Which models the Router picks between, and how it scores requests. The Routing page shows the same as a map">Router settings</h2>
@@ -111,8 +112,8 @@
       <button id="rreload" data-hint="Throw away unsaved Router changes and read its config file again">Reload from file</button>
       <span class="note" id="rmsg"></span>
     </div>
-    <div class="sub muted" style="margin-top:8px">
-      Apply lasts until the Router restarts. Save also writes <span id="rpath">the config file</span>, keeping its comments; a setting you clear is commented out.
+    <div class="sub muted fine" style="margin-top:8px">
+      Apply lasts until the Router restarts. Save also writes <span id="rpath">the config file</span>.
     </div>
     <div class="sub" id="routerError"></div>
   </div>

@@ -1,0 +1,52 @@
+/* Calmer pages: secondary controls and notes fade in on hover or keyboard
+   focus. Only on devices that can hover; touch screens (phones) keep
+   everything visible. Faded things stay in the layout and stay focusable. */
+@media (hover: hover) {
+  /* ---- chat: top bar ---- */
+  .top-actions > button.icon:not(#toggleOptions):not(#toggleActivity) { opacity: 0; transition: opacity .18s; }
+  button.stats { opacity: .5; transition: opacity .18s, border-color .15s, background-color .15s; }
+  .top:hover .top-actions > button.icon,
+  .top:hover button.stats,
+  .top:focus-within .top-actions > button.icon,
+  .top:focus-within button.stats { opacity: 1; }
+
+  /* ---- chat: sidebar ---- */
+  .sec-add:not(.scope-clear), .side-foot { opacity: 0; transition: opacity .18s, color .15s; }
+  .side:hover .sec-add, .side:focus-within .sec-add,
+  .side:hover .side-foot, .side:focus-within .side-foot { opacity: 1; }
+  .side-foot .foot-tip { display: none; }
+  .side-foot:hover .foot-tip, .side-foot:focus-within .foot-tip { display: inline; }
+
+  /* ---- chat: replies and composer ---- */
+  .msg .meta-wrap { opacity: .4; transition: opacity .18s; }
+  .quick-pick small, .compose-hint { opacity: 0; transition: opacity .18s; }
+  .msg:hover .meta-wrap, .msg:focus-within .meta-wrap, .msg .meta-wrap:has(details[open]),
+  .quick-pick:hover small, .quick-pick:focus-within small,
+  .compose:hover .compose-hint, .compose:focus-within .compose-hint { opacity: 1; }
+  .empty .tip { opacity: .0; transition: opacity .18s; }
+  .empty:hover .tip { opacity: 1; }
+  .effort-btn { opacity: .6; transition: opacity .18s; }
+  .compose-row:hover .effort-btn, .compose-row:focus-within .effort-btn, .effort-btn.on { opacity: 1; }
+}
+.compose-hint:empty { display: none; }
+
+/* ---- all pages ---- */
+@media (hover: hover) {
+  /* footnotes: faint until you point at them */
+  .fine { opacity: .5; transition: opacity .18s; }
+  .fine:hover, .fine:focus-within { opacity: 1; }
+
+  /* form help: a bubble under the field while it is hovered or focused */
+  .field { position: relative; }
+  .field > small, .field.check small {
+    display: none; position: absolute; z-index: 30; left: 0; top: calc(100% + 2px); width: max-content; max-width: min(340px, 100%);
+    padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--glass-strong); color: var(--text);
+    box-shadow: var(--shadow); font-size: 12px; pointer-events: none; }
+  .field:hover > small, .field:focus-within > small,
+  .field.check:hover small, .field.check:focus-within small { display: block; }
+  .field.check br { display: none; }
+
+  /* dashboard: a component's address appears on hover */
+  .card .sub.url { opacity: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .18s; }
+  .card:hover .sub.url, .card:focus-within .sub.url { opacity: 1; }
+}

@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="chat.css">
+<link rel="stylesheet" href="calm.css">
 </head>
 <body class="chat-page" data-bg="off">
 <div class="app" id="app">
@@ -40,7 +41,7 @@
   <aside class="side" id="side">
     <div class="side-top">
       <button class="primary wide" id="newChat" title="New chat (Ctrl+Shift+O)">+ New chat</button>
-      <input type="search" id="search" placeholder="Search chats (Ctrl+K)" autocomplete="off">
+      <input type="search" id="search" placeholder="Search (Ctrl+K)" title="Search chats (Ctrl+K)" autocomplete="off">
     </div>
     <div class="side-scroll">
       <section class="side-sec" data-sec="projects">
@@ -59,7 +60,7 @@
     <div class="side-foot">
       <button id="exportAll" class="icon" title="Export all chats (one Markdown file)" aria-label="Export all chats"></button>
       <button id="deleteAll" class="icon danger" title="Delete all chats saved in this browser" aria-label="Delete all chats"></button>
-      <span class="muted small">Alt+↑/↓ switches chats</span>
+      <span class="muted small foot-tip">Alt+↑/↓: switch chats</span>
     </div>
   </aside>
 
@@ -70,51 +71,51 @@
       <div class="opt-grid">
         <fieldset>
           <legend>Model</legend>
-          <label title="Where this chat's messages go. Routings are made on the Routing page">Routing for this chat <select id="routeSel"></select></label>
+          <label title="Where this chat's messages go. Routings are made on the Routing page">Routing <select id="routeSel"></select></label>
           <label id="directRow" hidden>Model <input type="text" id="model" list="models" placeholder="e.g. fast-openrouter" autocomplete="off"></label>
           <div class="muted small" id="routeNote"></div>
           <label>Max tokens <input type="number" id="maxTokens" min="1" value="2048"></label>
           <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
-          <label class="check"><input type="checkbox" id="stream" checked> Stream the reply</label>
-          <label class="check" title="After the first reply, ask the model for a short name for the chat"><input type="checkbox" id="autoName" checked> Name new chats automatically</label>
-          <label class="check" title="Keep the newest text in view while a reply arrives. Off, the chat stays where you scrolled; it still jumps to the end when you send or open a chat."><input type="checkbox" id="autoScroll" checked> Scroll with the reply as it arrives</label>
+          <label class="check"><input type="checkbox" id="stream" checked> Stream</label>
+          <label class="check" title="After the first reply, ask the model for a short name for the chat"><input type="checkbox" id="autoName" checked> Auto-name chats</label>
+          <label class="check" title="Keep the newest text in view while a reply arrives. Off, the chat stays where you scrolled; it still jumps to the end when you send or open a chat."><input type="checkbox" id="autoScroll" checked> Follow the reply</label>
           <div class="pair">
-            <label title="Give up when no reply has started after this long. 0 waits forever.">Give up with no reply after (s) <input type="number" id="timeoutFirst" min="0" step="10" value="310"></label>
-            <label title="Give up when a reply stops arriving for this long. 0 waits forever.">…or when it stalls for (s) <input type="number" id="timeoutStall" min="0" step="10" value="130"></label>
+            <label title="Give up when no reply has started after this long. 0 waits forever.">Start limit (s) <input type="number" id="timeoutFirst" min="0" step="10" value="310"></label>
+            <label title="Give up when a reply stops arriving for this long. 0 waits forever.">Stall limit (s) <input type="number" id="timeoutStall" min="0" step="10" value="130"></label>
           </div>
         </fieldset>
         <fieldset>
-          <legend>Context for this chat</legend>
+          <legend>Context</legend>
           <label>Project <select id="chatProject"></select></label>
           <label>System prompt
-            <textarea id="system" rows="3" placeholder="Optional. The Interceptor still adds its caveman line unless it's off in the dashboard."></textarea>
+            <textarea id="system" rows="3" placeholder="Optional" title="Optional. The Interceptor still adds its caveman line unless it's off in Settings."></textarea>
           </label>
-          <label>Notes the model always sees
-            <textarea id="notes" rows="3" placeholder="Background, requirements, pasted docs… Sent with every message in this chat."></textarea>
+          <label title="Background, requirements, pasted docs. Sent with every message in this chat.">Notes
+            <textarea id="notes" rows="3" placeholder="Always sent to the model"></textarea>
           </label>
           <div class="muted small" id="contextSize"></div>
         </fieldset>
         <fieldset>
           <legend>Tools</legend>
-          <label>Git repo for this chat
+          <label title="Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).">Git repo
             <span class="repo-row">
               <input type="text" id="repoPath" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false">
               <button type="button" id="repoLink" class="mini">Link</button>
             </span>
           </label>
-          <div class="muted small" id="repoInfo">The model can read the repo's files and history (read-only).</div>
+          <div class="muted small" id="repoInfo">Read-only for the model.</div>
           <div class="tools-head"><span>MCP servers</span><button type="button" id="mcpReload" class="mini" title="Read mcp-servers.json again and reconnect">Reload</button></div>
           <ul class="mcp-list" id="mcpList"><li class="muted small">Loading…</li></ul>
-          <label title="Stop a reply after this many rounds of tool calls">Most tool rounds per reply <input type="number" id="maxToolRounds" min="1" max="50" value="12"></label>
+          <label title="Stop a reply after this many rounds of tool calls">Max tool rounds <input type="number" id="maxToolRounds" min="1" max="50" value="12"></label>
         </fieldset>
         <fieldset>
           <legend>Voice</legend>
           <label>Dictation language <input type="text" id="sttLang" placeholder="en-US"></label>
-          <label class="check"><input type="checkbox" id="autoSend"> Send when I stop talking</label>
-          <label>Read aloud with
+          <label class="check"><input type="checkbox" id="autoSend"> Send on pause</label>
+          <label>Read aloud
             <select id="ttsEngine">
               <option value="browser">Browser voices</option>
-              <option value="server">Speech model (through the harness)</option>
+              <option value="server">Speech model</option>
             </select>
           </label>
           <label id="serverModelRow" hidden>Speech model <select id="serverModel"></select></label>
@@ -127,9 +128,9 @@
             <label data-engine="browser">Pitch <input type="range" id="pitch" min="0" max="2" step="0.1" value="1"> <span id="pitchOut">1.0</span></label>
             <label>Volume <input type="range" id="volume" min="0" max="1" step="0.05" value="1"> <span id="volumeOut">100%</span></label>
           </div>
-          <label class="check" title="Says symbols, abbreviations, numbers like 10k and names like max_tokens as words"><input type="checkbox" id="speakClear" checked> Read clearly: symbols, shorthand and code names as words</label>
-          <label class="check"><input type="checkbox" id="autoSpeak"> Read replies aloud as they arrive</label>
-          <label class="check"><input type="checkbox" id="handsFree"> Hands-free: listen again after each reply</label>
+          <label class="check" title="Says symbols, abbreviations, numbers like 10k and names like max_tokens as words"><input type="checkbox" id="speakClear" checked> Read clearly</label>
+          <label class="check"><input type="checkbox" id="autoSpeak"> Read replies aloud</label>
+          <label class="check" title="Listen again after each reply"><input type="checkbox" id="handsFree"> Hands-free</label>
           <div class="muted small" id="voiceNote"></div>
         </fieldset>
       </div>
@@ -143,7 +144,7 @@
         <button type="button" class="icon" id="attach" title="Attach files or images (or drop / paste them)" aria-label="Attach"></button>
         <input type="file" id="fileInput" multiple hidden>
         <button type="button" class="icon" id="kitBtn" title="Skills and tools (or type / in an empty box)" aria-label="Skills and tools"></button>
-        <textarea id="input" rows="1" placeholder="Message (Enter to send, Shift+Enter for a new line)"></textarea>
+        <textarea id="input" rows="1" placeholder="Message" title="Enter to send, Shift+Enter for a new line"></textarea>
         <button type="button" class="icon" id="mic" title="Dictate (Ctrl+M)" aria-label="Dictate"></button>
         <button type="button" class="icon" id="handsFreeBtn" title="Hands-free: talk, it sends when you pause, reads the reply, then listens again" aria-label="Hands-free mode" aria-pressed="false"></button>
         <button type="button" class="effort-btn" id="effortBtn" title="Effort: how hard the routing should try. Lower is cheaper, higher sends more to the better tiers" aria-haspopup="true">Auto</button>
@@ -157,9 +158,9 @@
         <div class="kit" id="kit" hidden>
           <div class="kit-sec">
             <div class="kit-head"><b>Skills</b><button type="button" class="mini" id="manageSkills">Manage skills</button></div>
-            <p class="muted small">Instructions the model follows in this chat. Project skills apply to every chat in the project.</p>
+            
             <ul class="kit-list" id="kitSkills"></ul>
-            <label class="check small" title="Lists your other skills to the model with a use_skill tool, so it can load one when a question needs it. Requests with tools go to models that can call them."><input type="checkbox" id="skillTool"> Let the model load other skills when it needs them</label>
+            <label class="check small" title="Lists your other skills to the model with a use_skill tool, so it can load one when a question needs it. Requests with tools go to models that can call them."><input type="checkbox" id="skillTool"> Let the model load skills</label>
           </div>
           <div class="kit-sec">
             <div class="kit-head"><b>Tools</b><button type="button" class="mini" id="kitReload" title="Read mcp-servers.json again and reconnect">Reload</button></div>
@@ -176,11 +177,11 @@
   <aside class="activity" id="activity" hidden>
     <div class="act-head">
       <strong>Activity</strong>
-      <span class="live" id="liveState" title="Live feed from the Interceptor"><span class="dot"></span><span>connecting</span></span>
+      <span class="live" id="liveState" title="Live feed from the Interceptor: every request through the harness, from this page and other clients such as Claude Code"><span class="dot"></span><span>connecting</span></span>
       <button class="icon" id="closeActivity" title="Close" aria-label="Close activity"></button>
     </div>
     <div class="health" id="health"></div>
-    <p class="muted small act-note">Every request through the harness, from this page and from other clients such as Claude Code, as it happens.</p>
+    
     <ul class="feed" id="feed"><li class="muted small">Waiting for requests…</li></ul>
   </aside>
 </div>

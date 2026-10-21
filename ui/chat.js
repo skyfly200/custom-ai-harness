@@ -305,7 +305,7 @@ function drawProjects() {
       <i class="pdot" style="background:${p.color}"></i><span class="ct">${esc(p.name)}</span>
       ${live[p.id] ? '<span class="busy" title="A chat in this project is replying"></span>' : ''}<span class="when">${counts[p.id] || 0}</span>
       <button class="del edit" data-edit="${p.id}" title="Project settings" aria-label="Project settings">${ICONS.gear}</button></li>`).join('')
-    || '<li class="muted small empty-row">Group chats with shared instructions, skills and a repo.</li>';
+    || '<li class="muted small empty-row" title="Group chats with shared instructions, skills and a repo">No projects</li>';
 }
 
 function drawSchedules() {
@@ -313,7 +313,7 @@ function drawSchedules() {
   $('schedList').innerHTML = list.map(s => {
     const when = s.next ? (s.next - Date.now() < 86400000 ? new Date(s.next).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : new Date(s.next).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })) : 'done';
     return `<li data-sid="${s.id}" title="${esc(s.prompt)}">${ICONS.clock}<span class="ct">${esc(s.name || s.prompt)}</span><span class="when">${s.repeat !== 'once' ? '↻ ' : ''}${esc(when)}</span></li>`;
-  }).join('') || '<li class="muted small empty-row">Send a message on a timer, once or on repeat.</li>';
+  }).join('') || '<li class="muted small empty-row" title="Send a message on a timer, once or on repeat">Nothing scheduled</li>';
 }
 
 function drawSide() {
@@ -431,10 +431,10 @@ function emptyState() {
   const picks = suggestionPicks.get(chat.id);
   return `<div class="empty"><div class="orb" aria-hidden="true"><i></i><i></i><i></i></div>
     <h2>${p ? `New chat in ${esc(p.name)}` : 'What shall we explore?'}</h2>
-    <p>Messages go through the harness like any other client, so a strategy picks the model unless you choose one below. Each reply shows, live, where it went and why.</p>
+    
     ${quickPicker()}
     <div class="suggest">${picks.map(t => `<button type="button" class="chip-btn" data-suggest="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-    <p class="small">Attach files with the paperclip or by dropping them here, dictate with the mic, and type <kbd>/</kbd> for skills and tools.</p></div>`;
+    <p class="small tip">Drop files, dictate, or type <kbd>/</kbd> for skills and tools.</p></div>`;
 }
 
 // Quick pick on a new chat: a strategy, or one model directly. Outside projects
@@ -455,10 +455,10 @@ function quickStat(m) {
 }
 function quickNote(c) {
   const r = routeOf(c);
-  if (r.model) return 'Every message goes to this one model. Change it any time in Options.';
-  if (r.auto) return 'Each message goes to the strategy whose rules or description fit it, else the default strategy.';
+  if (r.model) return 'Every message goes to this model.';
+  if (r.auto) return 'Picks the strategy that fits each message.';
   const tiers = (r.profile ? r.profile.tiers : strategies.tiers) || [];
-  return `The Router scores each message and picks ${tiers.length ? `one of ${tiers.length + 2} tiers` : 'a strong or a weak model'}. The Effort button by Send leans it cheaper or better.`;
+  return `The Router picks ${tiers.length ? `one of ${tiers.length + 2} tiers` : 'strong or weak'}. Effort leans it.`;
 }
 function quickPicker() {
   const p = projectOf(chat);
@@ -1229,7 +1229,7 @@ function drawContextSize() {
 }
 
 function drawHint() {
-  const bits = ['Enter to send · Shift+Enter for a new line'];
+  const bits = [];
   const total = requestTokens();
   if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${pending.some(a => a.kind === 'image') ? ' plus images' : ''}`);
   const route = chat ? routeOf(chat) : null;
@@ -1373,7 +1373,7 @@ function drawTools() {
   });
   if (toolInfo?.error) rows.unshift(`<li class="err">${esc(toolInfo.error)}</li>`);
   $('mcpList').innerHTML = $('kitTools').innerHTML = rows.join('') || (toolInfo
-    ? `<li class="muted small">None yet. List servers in <code>${esc(toolInfo.file?.split(/[\\/]/).pop() || 'mcp-servers.json')}</code> next to server.js, the same way as Claude Code's <code>.mcp.json</code>, then press Reload.</li>`
+    ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. Add them to <code>${esc(toolInfo.file?.split(/[\\/]/).pop() || 'mcp-servers.json')}</code>.</li>`
     : '<li class="err">Could not reach the harness.</li>');
 }
 
@@ -1412,7 +1412,7 @@ function drawRepo() {
     ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model can read its files and history (read-only).`
     : projectOf(chat)?.repo
       ? `Using the project's repo <b>${esc(projectOf(chat).repo.name)}</b>. Link another folder here to use that instead.`
-      : 'Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).';
+      : 'Read-only for the model.';
 }
 
 $('repoPath').addEventListener('input', () => { $('repoPath').dataset.typed = $('repoPath').value; });
@@ -2179,12 +2179,12 @@ function drawRoute() {
   $('directRow').hidden = own !== 'model';
   $('model').value = own === 'model' ? chat.model || '' : '';
   const r = routeOf(chat);
-  $('routeNote').innerHTML = r.empty ? 'Type the model to send every message to.'
+  $('routeNote').innerHTML = r.empty ? 'Type a model name.'
     : r.missing ? `The strategy “${esc(r.missing)}” was deleted, so the default is used.`
-    : r.model ? 'Every message goes to this model as is: no Router, no fallback strategy choices (the Gateway’s own fallbacks still apply).'
-    : r.auto ? 'Each message goes to the strategy whose rules or description fit it best (set them on the <a href="routing.html">Routing page</a>), else the default strategy. The reply says which one it chose.'
+    : r.model ? 'Straight to this model, no Router.'
+    : r.auto ? 'Picks the strategy that fits each message. <a href="routing.html">Set rules</a>'
     : r.profile ? `${r.profile.pin ? `Pinned to ${esc(r.profile.pin)}. ` : ''}Compression: ${['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).length ? ['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).map(k => ({ caveman: 'short replies', headroom: 'shrink tool results', contextAnchor: 'skip repeats' })[k]).join(', ') : 'off'}. <a href="routing.html?routing=${encodeURIComponent(r.profile.id)}">Edit it</a>`
-    : '<a href="routing.html">Make strategies</a> on the Routing page to send some chats to other models.';
+    : '<a href="routing.html">Make strategies</a>';
 }
 
 $('routeSel').addEventListener('change', () => {

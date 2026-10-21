@@ -3,6 +3,25 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
 
 model_list:
+  - model_name: Sonnet
+    litellm_params:
+      model: openrouter/anthropic/claude-sonnet-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: Haiku
+    litellm_params:
+      model: openrouter/anthropic/claude-haiku-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: Opus
+    litellm_params:
+      model: openrouter/anthropic/claude-opus-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: or-qwen3.8-omni-flash
+    litellm_params:
+      model: openrouter/qwen/qwen3.8-omni-flash
+      api_key: os.environ/OPENROUTER_API_KEY
   # Concurrency: max_parallel_requests caps in-flight calls per deployment;
   # extra requests queue instead of tripping provider rate limits.
   # Tier 1: your local engine (launch-local.sh: llama.cpp or vLLM on port 8000,
@@ -10,61 +29,6 @@ model_list:
   # model; llama.cpp and vLLM answer with the loaded model whatever id is sent.
   # The old names for it, claude-sonnet-5 and claude-3-5-sonnet, still reach it
   # (the Interceptor and Router rename them).
-  - model_name: local-engine
-    litellm_params:
-      model: openai/local-model
-      api_base: http://localhost:8000/v1
-      api_key: dummy-key-not-needed
-      max_parallel_requests: 1
-
-  # Tier 2: Groq — GPT-OSS 120B. Free tier: 8K tokens/min, 1K requests/day,
-  # same limits as the 20B, so the bigger model costs nothing extra. Too small
-  # for Claude Code requests; the Router sends those to OpenRouter instead.
-  - model_name: fallback-groq
-    litellm_params:
-      model: groq/openai/gpt-oss-120b
-      api_key: os.environ/GROQ_API_KEY
-      max_parallel_requests: 3
-      additional_drop_params: ["prompt_cache_key"] # LiteLLM adds it for Claude Code; Groq rejects it
-
-  # Tier 3: OpenRouter fast (no request size cap; serves Claude Code).
-  # GPT-4o mini is paid (cents per million tokens) and not bound by the free
-  # tier's daily quota, so it keeps working once the :free models run out.
-  # OpenRouter has no free GPT-4o mini; a made-up id fails every call.
-  - model_name: fast-openrouter
-    litellm_params:
-      model: openrouter/openai/gpt-4o-mini
-      api_key: os.environ/OPENROUTER_API_KEY
-      max_parallel_requests: 10
-
-  # Tier 4: OpenRouter free chat model (no request size cap). A named model,
-  # not openrouter/free: that one picks a free model at random, and its pool
-  # includes NVIDIA's content-safety classifier, which answers "User Safety:
-  # safe / Response Safety:" instead of replying, plus embedding models.
-  - model_name: fallback-openrouter
-    litellm_params:
-      model: openrouter/xingchen-agi/xing4.0-29b-a4b:free
-      api_key: os.environ/OPENROUTER_API_KEY
-      max_parallel_requests: 5
-
-  # Tier 4b: OpenRouter free model with tool/function-calling support, for
-  # Claude Code's agentic loops. (Llama 3.3 70B :free, used before, has no
-  # provider serving it on OpenRouter any more, so every call failed.)
-  - model_name: fallback-openrouter-tools
-    litellm_params:
-      model: openrouter/nvidia/nemotron-3.5-super-vl:free
-      api_key: os.environ/OPENROUTER_API_KEY
-      max_parallel_requests: 5
-
-  # Tier 5: Local Ollama — zero API cost, runs on-device.
-  # Qwen2.5-Coder 7B has solid tool/function-calling support for coding tasks.
-  # Requires `ollama serve` to be running locally.
-  - model_name: fallback-ollama
-    litellm_params:
-      model: openai/qwen2.5-coder:7b
-      api_base: http://localhost:11434/v1
-      api_key: dummy
-      max_parallel_requests: 2
 
 # LiteLLM Fallback Chain
 # OpenRouter comes before Groq for strong-model failures: those are mostly
@@ -83,11 +47,9 @@ litellm_settings:
   # leaves unanswered (gatewayTimeoutMs in the dashboard, 5 minutes).
   request_timeout: 120
   fallbacks:
+    - {"Opus":   ["Sonnet"]}
+    - {"Sonnet": ["Haiku"]}
     # Tool-capable first: strong requests are mostly Claude Code, which needs tool calls.
-    - {"local-engine":              ["fast-openrouter", "fallback-openrouter-tools", "fallback-openrouter", "fallback-groq"]}
-    - {"fallback-groq":             ["fallback-openrouter"]}
-    - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter", "fallback-groq"]}
-    - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter"]}
 
 router_settings:
   # Go straight to the next fallback instead of retrying the same model: a 429

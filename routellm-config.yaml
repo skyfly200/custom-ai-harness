@@ -3,22 +3,22 @@ checkpoint: routellm/bert_gpt4_augmented
 
 # Gateway (config.yaml) model names the Router picks between.
 # The Interceptor sends the request to the Gateway, which applies the fallback chain.
-strong_model: local-engine
+strong_model: Sonnet
 # Hard requests that carry tools (Claude Code, agents) can go to their own
 # model; unset sends them to strong_model. fallback-openrouter-tools is free
 # (NVIDIA Nemotron 3.5 Super VL) and calls tools.
 # strong_model_tools: fallback-openrouter-tools
-weak_model: fallback-groq
+weak_model: Haiku
 
 # Groq's free tier allows 8K tokens per minute, counting requested output.
 # Weak requests estimated above this go to the overflow model instead
 # (every Claude Code request does: its system prompt and tools alone exceed it).
-weak_model_max_tokens: 7000
-weak_model_overflow: fallback-openrouter
+# weak_model_max_tokens: 7000
+# weak_model_overflow: or-deepseek-v4.1-flash-1017
 
 # Weak requests that carry tools (every Claude Code request) need a model that
 # makes tool calls; the size cap above doesn't apply to it.
-weak_model_tools: fallback-openrouter-tools
+# weak_model_tools: or-deepseek-v4.1-flash-1017
 
 # Classifier backend: routellm (default) | laya | systemone | llm | custom.
 # Each returns the strong model's win rate; the rest of the Router is unchanged.
@@ -60,3 +60,4 @@ timeout: 5               # under the Interceptor's 10 s wait on the Router
 # -- custom: your own scorer, factory(config) -> callable(prompt) -> float in [0, 1]
 # backend: custom
 # scorer: my_scorer:make
+# strong_model_tools: or-deepseek-v4.1-flash-1017

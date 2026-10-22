@@ -267,6 +267,34 @@
   }
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; drawInstall(); });
   window.addEventListener('appinstalled', () => { installEvent = null; drawInstall(); });
+  // With HARNESS_REQUIRE_LOGIN on, show who is signed in, with a way out
+  async function drawAccount() {
+    const nav = document.querySelector('nav');
+    if (!nav || document.getElementById('accountChip')) return;
+    let me;
+    try {
+      const r = await fetch('/ui/api/me', { credentials: 'same-origin' });
+      if (!r.ok) return;
+      me = await r.json();
+    } catch { return; }
+    if (!me.name || document.getElementById('accountChip')) return;
+    const a = document.createElement('a');
+    a.id = 'accountChip';
+    a.className = 'account-chip';
+    a.href = '/ui/users.html';
+    a.textContent = me.name;
+    a.dataset.hint = a.title = me.role === 'admin' ? 'Your account, other users and API keys' : 'Your password and API keys';
+    const out = document.createElement('button');
+    out.type = 'button';
+    out.className = 'account-out';
+    out.textContent = 'Sign out';
+    out.addEventListener('click', async () => {
+      try { await fetch('/logout', { method: 'POST' }); } catch {}
+      location.href = '/login';
+    });
+    nav.append(a, out);
+  }
+  drawAccount();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   function init() {

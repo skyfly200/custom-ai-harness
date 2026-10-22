@@ -64,4 +64,4 @@ function requirePassword(password) {
     };
 }
 
-module.exports = { requirePassword, viaProxy, PASSWORD_HEADER };
+module.exports = { requirePassword, viaProxy, viaCloudflare, passwordsFrom, PASSWORD_HEADER };

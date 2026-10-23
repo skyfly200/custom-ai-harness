@@ -82,3 +82,24 @@ test('what the user saves wins, and clearing it goes back to the benchmark', () 
     assert.throws(() => stats.set('fast-openrouter', { quality: 101 }), /0 to 100/);
     assert.throws(() => stats.set('bad name', {}), /model name/);
 });
+
+test('benchmarks are matched to OpenRouter catalog ids', () => {
+    const list = stats.fromArtificialAnalysis(AA);
+    const catalog = [
+        { id: 'openai/gpt-4o-mini' },
+        { id: 'openai/gpt-oss-120b:free' },
+        { id: 'some/unknown-model' },
+    ];
+    const found = stats.forCatalog(catalog, list);
+    assert.deepEqual(Object.keys(found), ['openai/gpt-4o-mini', 'openai/gpt-oss-120b:free']);
+    assert.equal(found['openai/gpt-4o-mini'].intelligence, 36.2);
+    assert.equal(found['openai/gpt-4o-mini'].speed, 160.4);
+    assert.equal(found['openai/gpt-oss-120b:free'].coding, null);
+    assert.deepEqual(stats.forCatalog(catalog, null), {});
+});
+
+test('the Add model dialog has benchmark columns, sorts and a rated filter', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'ui', 'routing.html'), 'utf8');
+    for (const id of ['catalogRated', 'value="quality"', 'value="coding"', 'value="speed"']) assert.ok(html.includes(id), id);
+    assert.ok(html.includes('<span>Quality</span>') || html.includes('>Quality</span>'));
+});

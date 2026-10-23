@@ -1465,7 +1465,7 @@ const vision = (m) => (m.inputs || []).includes('image');
 
 function badges(m) {
   return [m.free && '<span class="badge free">free</span>', m.tools && '<span class="badge">tools</span>',
-    m.reasoning && '<span class="badge">reasoning</span>', vision(m) && '<span class="badge">images</span>'].filter(Boolean).join('');
+    m.reasoning && '<span class="badge">reasoning</span>', m.batch && '<span class="badge" data-hint="Batch API: about half price, results within 24 hours">batch</span>', vision(m) && '<span class="badge">images</span>'].filter(Boolean).join('');
 }
 
 const SORTS = {
@@ -1482,17 +1482,17 @@ for (const [key, field] of [['quality', 'intelligence'], ['coding', 'coding'], [
 function showCatalog() {
   if (!catalog) return;
   const words = $('catalogSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
-  const want = { free: $('catalogFree').checked, tools: $('catalogTools').checked, reasoning: $('catalogReasoning').checked, vision: $('catalogVision').checked };
+  const want = { free: $('catalogFree').checked, tools: $('catalogTools').checked, reasoning: $('catalogReasoning').checked, batch: $('catalogBatch').checked, vision: $('catalogVision').checked };
   const maker = $('catalogProvider').value;
   const rated = $('catalogRated').checked;
-  catalogShown = catalog.filter(m => (!rated || bench.models?.[m.id]) && (!want.free || m.free) && (!want.tools || m.tools) && (!want.reasoning || m.reasoning) && (!want.vision || vision(m))
+  catalogShown = catalog.filter(m => (!rated || bench.models?.[m.id]) && (!want.free || m.free) && (!want.tools || m.tools) && (!want.reasoning || m.reasoning) && (!want.batch || m.batch) && (!want.vision || vision(m))
     && (!maker || (m.provider || m.id.split('/')[0]) === maker)
     && words.every(w => m.id.toLowerCase().includes(w) || m.name.toLowerCase().includes(w)))
     .sort(SORTS[$('catalogSort').value] || SORTS.new);
   const typed = $('addForm').elements.model.value.trim().replace(/^openrouter\//, '');
   if (!catalogPick && catalog.some(m => m.id === typed)) catalogPick = typed;
   $('catalogRows').innerHTML = catalogShown.slice(0, CATALOG_ROWS).map(m => `<div class="catalog-row${m.id === catalogPick ? ' on' : ''}" role="option" aria-selected="${m.id === catalogPick}" data-id="${esc(m.id)}">
-      <span class="cm"><b>${esc(m.name)}</b><code>${esc(m.id)}</code></span>
+      <span class="cm"><b>${esc(m.name)}${m.batch ? ' <span class="badge">batch</span>' : ''}</b><code>${esc(m.id)}</code></span>
       <span>${pt(score(m, 'intelligence'))}</span>
       <span>${pt(score(m, 'coding'))}</span>
       <span>${pt(score(m, 'speed'))}</span>
@@ -1599,7 +1599,7 @@ $('catalogSearch').addEventListener('keydown', (e) => {
   e.preventDefault();
   if (catalogShown[0]) pickCatalog(catalogShown[0].id);
 });
-for (const id of ['catalogFree', 'catalogTools', 'catalogReasoning', 'catalogVision', 'catalogRated', 'catalogProvider', 'catalogSort']) $(id).addEventListener('change', showCatalog);
+for (const id of ['catalogFree', 'catalogTools', 'catalogReasoning', 'catalogVision', 'catalogRated', 'catalogBatch', 'catalogProvider', 'catalogSort']) $(id).addEventListener('change', showCatalog);
 
 $('addForm').elements.provider.innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('');
 $('addForm').elements.provider.addEventListener('change', showProvider);

@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const tiers = require('./tiers');
+const langfuse = require('./langfuse');
 
 const FILE = process.env.HARNESS_SETTINGS_FILE || path.join(__dirname, '..', 'harness-settings.json');
 
@@ -29,6 +30,7 @@ const DEFAULTS = Object.freeze({
     guardJev: true,           // command guard (utils/guard.js): ask Jev about commands the rules don't cover
     guardAskAt: 0.5,          // Jev's confidence that a command is risky at which the agent must ask you
     guardDenyAt: null,        // ...at which it is blocked outright; null: Jev alone never blocks
+    langfuseContent: langfuse.contentDefault(), // Langfuse (utils/langfuse.js): log prompts and replies too; off: only model, tokens, cost and tags
 });
 
 // Each setting's check: returns the cleaned value or throws with a readable message.
@@ -79,6 +81,7 @@ const VALIDATORS = {
         if (v === null || v === '' || !Number.isFinite(n) || n < 0 || n > 1) throw new Error('autoAskAt must be from 0 to 1');
         return n;
     },
+    langfuseContent: bool('langfuseContent'),
     guardJev: bool('guardJev'),
     guardAskAt: (v) => {
         const n = Number(v);

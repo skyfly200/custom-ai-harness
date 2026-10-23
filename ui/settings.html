@@ -24,6 +24,10 @@
   </header>
 
   <p class="muted" id="usersLink" hidden><a href="users.html">Users and API keys</a>: who can sign in, and keys for programs.</p>
+  <div class="card" id="langfuse" hidden>
+    <div class="sub"><b>Langfuse</b> <span id="lfState"></span></div>
+    <div class="sub muted fine" id="lfNote"></div>
+  </div>
   <h2 style="margin-top:16px" data-hint="How the Interceptor treats each request before routing it">Interceptor settings</h2>
   <div class="card">
     <form id="isettings" class="form" autocomplete="off">
@@ -62,6 +66,8 @@
       <label class="field"><span data-hint="How sure Jev must be that a strategy's description fits before Auto picks it">Auto: pick a strategy from</span>
         <input type="number" name="autoAskAt" min="0" max="1" step="0.05">
         <small>0.5: the best-fitting strategy is used if Jev rates it 50% likely.</small></label>
+      <label class="field check"><input type="checkbox" name="langfuseContent">
+        <span>Langfuse: also log prompts and replies<br><small>Off: Langfuse gets the model, tokens, cost, timing and tags only. On: it also keeps the text of every prompt and reply (code, file contents). Only matters once Langfuse is set up (see above).</small></span></label>
       <label class="field check"><input type="checkbox" name="guardJev">
         <span>Command guard asks Jev<br><small>Commands the guard rules don't cover are rated by Jev. Off: only the rules apply.</small></span></label>
       <label class="field"><span data-hint="How sure Jev must be that a command is risky before the agent has to ask you">Guard: ask you from</span>
@@ -267,6 +273,27 @@ loadModels();
 loadInterceptorSettings();
 refresh();
 setInterval(refresh, 5000);
+
+// ---- Langfuse ----------------------------------------------------------------
+
+async function loadLangfuse() {
+  try {
+    const lf = await getJSON('api/langfuse');
+    $('langfuse').hidden = false;
+    if (!lf.configured) {
+      $('lfState').textContent = 'is off';
+      $('lfNote').innerHTML = 'Add <code>LANGFUSE_PUBLIC_KEY</code> and <code>LANGFUSE_SECRET_KEY</code> to <code>.env</code> and restart the Gateway to log every call. See the README, “Langfuse”.';
+      return;
+    }
+    $('lfState').innerHTML = (lf.ok ? '<span class="note ok">connected</span>' : `<span class="note err">${esc(lf.problem)}</span>`)
+      + ` · <a href="${esc(lf.url)}" target="_blank" rel="noopener">open ${esc(new URL(lf.url).host)}</a>`;
+    $('lfNote').textContent = lf.content
+      ? 'Prompts and replies are logged too (the setting below).'
+      : 'Logging metadata only: model, tokens, cost, timing and tags. Prompt and reply text is left out (the setting below).';
+  } catch { $('langfuse').hidden = true; }
+}
+loadLangfuse();
+$('isave').addEventListener('click', () => setTimeout(loadLangfuse, 500));
 </script>
 <script>fetch('/ui/api/me').then((r) => r.ok && (document.getElementById('usersLink').hidden = false)).catch(() => {});</script>
 <script src="bright.js"></script>

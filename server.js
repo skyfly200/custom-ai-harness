@@ -16,6 +16,7 @@ const {
 const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
+const langfuse = require('./utils/langfuse');
 const autoStrategy = require('./utils/autoStrategy');
 const workflows = require('./utils/workflows');
 const tiers = require('./utils/tiers');
@@ -224,6 +225,7 @@ const toGateway = createProxyMiddleware({
     on: {
         proxyReq: (proxyReq, req, res) => {
             for (const [name, value] of Object.entries(gatewayAuth)) proxyReq.setHeader(name, value);
+            for (const [name, value] of Object.entries(req.harnessLangfuse || {})) proxyReq.setHeader(name, value);
             fixRequestBody(proxyReq, req, res);
             if (!req.harnessEvent) return; // token counting, model listing
             const { gatewayTimeoutMs, streamIdleTimeoutMs } = settings.get();
@@ -262,6 +264,9 @@ const toGateway = createProxyMiddleware({
 
 // Control UI: monitor the stack and switch the Router's classifier.
 app.use('/ui', express.static(path.join(__dirname, 'ui')));
+
+// Langfuse logging (utils/langfuse.js): are keys set, can we reach it, are prompts logged
+app.get('/ui/api/langfuse', async (req, res) => res.json(await langfuse.status(settings.get())));
 
 app.get('/ui/api/status', async (req, res) => {
     res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats() });
@@ -854,6 +859,7 @@ async function routeAndRecord(req, res) {
     if (route.tier) res.set('x-harness-tier', encodeURIComponent(route.tier));
     if (route.profile) res.set('x-harness-profile', encodeURIComponent(route.profile));
     if (req.harnessAuto) res.set('x-harness-auto', encodeURIComponent(`${req.harnessAuto.how}: ${req.harnessAuto.why}`));
+    req.harnessLangfuse = langfuse.headersFor(req, route, { content: settings.get().langfuseContent });
 }
 
 // OpenAI-compatible agents (Cursor, Aider, Continue, ...) and the chat page

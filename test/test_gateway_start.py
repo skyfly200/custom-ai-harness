@@ -12,7 +12,7 @@ CONFIG = yaml.safe_load(open(os.path.join(ROOT, "config.yaml"), encoding="utf-8"
 
 def build(monkeypatch, **env):
     for k in ("HARNESS_MODE", "PASSTHROUGH_MODEL", "PASSTHROUGH_API_BASE", "PASSTHROUGH_API_KEY",
-              "LOCAL_MODELS", "OLLAMA_URL", "LOCAL_ENGINE_URL"):
+              "LOCAL_MODELS", "OLLAMA_URL", "LOCAL_ENGINE_URL", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
         monkeypatch.delenv(k, raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -55,3 +55,28 @@ def test_passthrough_to_a_provider_id(monkeypatch):
 def test_passthrough_needs_a_model(monkeypatch):
     with pytest.raises(SystemExit, match="PASSTHROUGH_MODEL"):
         build(monkeypatch, HARNESS_MODE="passthrough")
+
+
+def test_langfuse_off_without_both_keys(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+    assert build(monkeypatch, LANGFUSE_PUBLIC_KEY="pk-lf-1") == CONFIG
+
+
+def test_langfuse_callbacks_with_both_keys(monkeypatch):
+    config = build(monkeypatch, LANGFUSE_PUBLIC_KEY="pk-lf-1", LANGFUSE_SECRET_KEY="sk-lf-1")
+    settings = config["litellm_settings"]
+    assert settings["success_callback"] == ["langfuse"]
+    assert settings["failure_callback"] == ["langfuse"]
+    assert settings["turn_off_message_logging"] is True
+    assert settings["drop_params"] is True  # the rest is kept
+
+
+def test_langfuse_keeps_other_callbacks_and_passthrough(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
+    cfg = copy.deepcopy(CONFIG)
+    cfg["litellm_settings"]["success_callback"] = ["custom"]
+    monkeypatch.setenv("HARNESS_MODE", "passthrough")
+    monkeypatch.setenv("PASSTHROUGH_MODEL", "fast-openrouter")
+    out = gateway_start.build(cfg)
+    assert out["litellm_settings"]["success_callback"] == ["custom", "langfuse"]

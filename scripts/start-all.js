@@ -12,6 +12,7 @@
 
 const fs   = require('fs');
 const path = require('path');
+const langfuse = require('../utils/langfuse');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -49,8 +50,15 @@ function buildCommands(opts = {}) {
             + 'If the Gateway or Router fails with "not found", run the one-time setup in the README.');
     }
 
+    // With Langfuse keys in .env the Gateway starts through docker/gateway-start.py,
+    // which writes .gateway-config.yaml (config.yaml plus the Langfuse callbacks).
+    const gateway = langfuse.configured(env)
+        ? { command: `${python || 'python'} ${path.join('docker', 'gateway-start.py')}`,
+            env: { PYTHONUTF8: '1', GATEWAY_SOURCE: 'config.yaml', GATEWAY_TARGET: '.gateway-config.yaml',
+                   GATEWAY_LITELLM: litellm || 'litellm' } }
+        : { command: `${litellm || 'litellm'} --config config.yaml`, env: { PYTHONUTF8: '1' } };
     const commands = [
-        { name: 'gateway',     command: `${litellm || 'litellm'} --config config.yaml`, env: { PYTHONUTF8: '1' }, prefixColor: 'magenta' },
+        { name: 'gateway',     ...gateway, prefixColor: 'magenta' },
         { name: 'router',      command: `${python || 'python'} router.py`, env: { PYTHONUTF8: '1' }, prefixColor: 'cyan' },
         { name: 'interceptor', command: 'node server.js', prefixColor: 'green' },
         { name: 'runner',      command: 'node runner/server.js', prefixColor: 'blue' },

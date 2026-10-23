@@ -2111,6 +2111,10 @@ function routeOf(c) {
 }
 
 function routeHeaders(c) {
+  return { ...(c?.id ? { 'x-harness-session': `chat-${c.id}` } : {}), ...routeHeadersOf(c) };
+}
+
+function routeHeadersOf(c) {
   const r = routeOf(c);
   if (r.model) return { 'x-harness-model': r.model };
   const effort = c?.effort && c.effort !== 'auto' ? { 'x-harness-effort': c.effort } : {};

@@ -154,7 +154,13 @@
     return { stats: out, guessed };
   }
 
-  const api = { autoRoute, preset, describe, withGuesses, PRESETS };
+  // Strategies with no fallback lines of their own use the Gateway's. Before those
+  // are edited, each gets a copy of them, so the edit changes one strategy only.
+  function freezeFallbacks(profiles, gateway) {
+    for (const p of profiles) if (!p.fallbacks) p.fallbacks = JSON.parse(JSON.stringify(gateway));
+  }
+
+  const api = { freezeFallbacks, autoRoute, preset, describe, withGuesses, PRESETS };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AutoRoute = api;
 })(typeof window !== 'undefined' ? window : globalThis);

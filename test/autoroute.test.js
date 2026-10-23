@@ -120,3 +120,17 @@ test('Opus/Sonnet/Haiku with no numbers at all still route: Opus strong, Haiku w
     assert.equal(plan.routes.strong, 'Opus');
     assert.equal(plan.routes.weak, 'Haiku');
 });
+
+test('freezeFallbacks gives strategies on the Gateway lines their own copy, so editing the Gateway lines leaves them alone', () => {
+    const { freezeFallbacks } = require('../ui/autoroute');
+    const gateway = { a: ['b'] };
+    const own = { a: ['c'] };
+    const profiles = [{ name: 'X', fallbacks: null }, { name: 'Y', fallbacks: own }, { name: 'Z' }];
+    freezeFallbacks(profiles, gateway);
+    gateway.a.push('d');
+    gateway.e = ['f'];
+    assert.deepStrictEqual(profiles[0].fallbacks, { a: ['b'] });
+    assert.deepStrictEqual(profiles[2].fallbacks, { a: ['b'] });
+    assert.strictEqual(profiles[1].fallbacks, own);
+    assert.notStrictEqual(profiles[0].fallbacks, profiles[2].fallbacks);
+});

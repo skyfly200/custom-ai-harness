@@ -102,3 +102,21 @@ test('describe: one line per strategy', () => {
     assert.equal(describeStrategy({ strong: 'a', weak: 'b', threshold: 0.8 }), 'a ↔ b at 0.8');
     assert.equal(describeStrategy({ pin: 'x' }), 'pinned to x');
 });
+
+test('withGuesses keeps ratings, ranks unrated models by price, else by name', () => {
+    const { stats: out, guessed } = require('../ui/autoroute').withGuesses(['big', 'a', 'b', 'c'],
+        { ...stats, a: { quality: null, blended: 5 }, b: { quality: null, blended: 0.2 }, c: { quality: null, blended: 1 } });
+    assert.deepEqual(guessed, ['a', 'b', 'c']);
+    assert.equal(out.big.quality, 90);
+    assert.ok(out.a.quality > out.c.quality && out.c.quality > out.b.quality);
+    const byName = require('../ui/autoroute').withGuesses(['Opus', 'Sonnet', 'Haiku'], {}).stats;
+    assert.ok(byName.Opus.quality > byName.Sonnet.quality && byName.Sonnet.quality > byName.Haiku.quality);
+});
+
+test('Opus/Sonnet/Haiku with no numbers at all still route: Opus strong, Haiku weak', () => {
+    const { withGuesses } = require('../ui/autoroute');
+    const names = ['Sonnet', 'Haiku', 'Opus'];
+    const plan = preset('balanced', names, withGuesses(names, {}).stats, {}, {});
+    assert.equal(plan.routes.strong, 'Opus');
+    assert.equal(plan.routes.weak, 'Haiku');
+});

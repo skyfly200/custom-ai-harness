@@ -13,7 +13,8 @@
     "hash": "node scripts/hash-password.js",
     "all": "node scripts/start-all.js",
     "all:ollama": "node scripts/start-all.js --ollama",
-    "full": "npm run validate && npm test && node scripts/start-all.js"
+    "full": "npm run validate && npm test && node scripts/start-all.js",
+    "claude": "npx @anthropic-ai/claude-code"
   },
   "keywords": [],
   "author": "",

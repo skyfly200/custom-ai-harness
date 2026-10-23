@@ -13,6 +13,9 @@ test('batch models match exact ids, :free twins and vendor wildcards', () => {
 });
 
 test('the shipped batch list loads and a missing file gives no batch models', () => {
-    assert.ok(batch.load().includes('anthropic/claude-haiku-5.5'));
+    // the file is edited by hand, so only check its shape, not which models it names
+    const shipped = batch.load();
+    assert.ok(Array.isArray(shipped) && shipped.every(id => typeof id === 'string' && id === id.toLowerCase()));
+    assert.ok(shipped.length > 0);
     assert.deepEqual(batch.load('/nonexistent/batch.json'), []);
 });

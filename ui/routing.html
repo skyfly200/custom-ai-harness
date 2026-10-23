@@ -129,6 +129,7 @@
         <input type="search" id="catalogSearch" placeholder="Search, e.g. claude, qwen coder, gemini" aria-label="Search OpenRouter models">
         <label data-hint="Only models that cost nothing (ids ending in :free). They share a daily request limit"><input type="checkbox" id="catalogFree"> Free</label>
         <label data-hint="Only models that take tool calls. Claude Code needs these"><input type="checkbox" id="catalogTools"> Tools</label>
+        <label data-hint="Only models on OpenRouter's Batch API: about half price, results within 24 hours. For jobs that can wait. The list is data/batch-models.json"><input type="checkbox" id="catalogBatch"> Batch</label>
         <label data-hint="Only models that think before answering (reasoning tokens)"><input type="checkbox" id="catalogReasoning"> Reasoning</label>
         <label data-hint="Only models that can read images"><input type="checkbox" id="catalogVision"> Images</label>
         <label data-hint="Only models with a benchmark score from Artificial Analysis"><input type="checkbox" id="catalogRated" disabled> Rated</label>

@@ -26,6 +26,7 @@ const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
 const cacheMarkers = require('./utils/cacheMarkers');
 const openrouterCatalog = require('./utils/openrouterCatalog');
+const batchModels = require('./utils/batchModels');
 const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
@@ -658,11 +659,11 @@ async function getOpenrouterCatalog({ waitMs }) {
 }
 
 app.get('/ui/api/openrouter/models', async (req, res) => {
-    if (openrouterCache.models && Date.now() - openrouterCache.at < 60 * 60 * 1000) return res.json({ models: openrouterCache.models });
+    if (openrouterCache.models && Date.now() - openrouterCache.at < 60 * 60 * 1000) return res.json({ models: batchModels.mark(openrouterCache.models) });
     try {
-        res.json({ models: await fetchOpenrouterCatalog() });
+        res.json({ models: batchModels.mark(await fetchOpenrouterCatalog()) });
     } catch (err) {
-        if (openrouterCache.models) return res.json({ models: openrouterCache.models, stale: true });
+        if (openrouterCache.models) return res.json({ models: batchModels.mark(openrouterCache.models), stale: true });
         res.status(502).json({ error: `Couldn't load OpenRouter's model list: ${err.message}` });
     }
 });

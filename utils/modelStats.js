@@ -60,6 +60,17 @@ function findBenchmark(list, upstream, slug) {
     return list.find(m => m.slug === key) || list.find(m => matchKey(m.name) === key) || null;
 }
 
+/** Benchmarks for each OpenRouter catalog id that has some: { id: { slug, name, intelligence, ... } } */
+function forCatalog(catalog, bench) {
+    const out = {};
+    if (!bench?.length) return out;
+    for (const m of catalog || []) {
+        const b = findBenchmark(bench, m.id);
+        if (b) out[m.id] = { slug: b.slug, name: b.name, intelligence: b.intelligence, coding: b.coding, math: b.math, speed: b.speed, ttft: b.ttft, inPrice: b.inPrice, outPrice: b.outPrice };
+    }
+    return out;
+}
+
 /** Tags a model earns from its catalog entry and prices. */
 function derivedStrengths(info, catalogEntry, bench) {
     const tags = new Set();
@@ -159,4 +170,4 @@ function build(models, catalog, bench) {
 
 load();
 
-module.exports = { fromArtificialAnalysis, matchKey, findBenchmark, derivedStrengths, build, set, load, STRENGTHS, AA_URL, FILE };
+module.exports = { fromArtificialAnalysis, matchKey, findBenchmark, forCatalog, derivedStrengths, build, set, load, STRENGTHS, AA_URL, FILE };

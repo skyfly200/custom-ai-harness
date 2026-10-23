@@ -131,14 +131,15 @@
         <label data-hint="Only models that take tool calls. Claude Code needs these"><input type="checkbox" id="catalogTools"> Tools</label>
         <label data-hint="Only models that think before answering (reasoning tokens)"><input type="checkbox" id="catalogReasoning"> Reasoning</label>
         <label data-hint="Only models that can read images"><input type="checkbox" id="catalogVision"> Images</label>
+        <label data-hint="Only models with a benchmark score from Artificial Analysis"><input type="checkbox" id="catalogRated" disabled> Rated</label>
         <select id="catalogProvider" aria-label="Maker" data-hint="Only one maker's models"><option value="">Every maker</option></select>
         <select id="catalogSort" aria-label="Sort by" data-hint="Order of the list">
-          <option value="new">Newest</option><option value="cheap">Cheapest</option><option value="context">Biggest context</option><option value="name">Name</option>
+          <option value="new">Newest</option><option value="quality">Best quality</option><option value="coding">Best coding</option><option value="speed">Fastest</option><option value="cheap">Cheapest</option><option value="context">Biggest context</option><option value="name">Name</option>
         </select>
       </div>
       <div class="catalog-body">
         <div class="catalog-table" role="listbox" id="catalogList" aria-label="OpenRouter models" tabindex="0">
-          <div class="catalog-row catalog-th" aria-hidden="true"><span>Model</span><span>Context</span><span>Input $/M</span><span>Output $/M</span><span>Can</span></div>
+          <div class="catalog-row catalog-th" aria-hidden="true"><span>Model</span><span data-hint="Artificial Analysis intelligence index, 0-100">Quality</span><span data-hint="Artificial Analysis coding index, 0-100">Coding</span><span data-hint="Output tokens per second">Speed</span><span>Input $/M</span><span>Output $/M</span></div>
           <div id="catalogRows"></div>
         </div>
         <aside class="catalog-detail" id="catalogDetail"><p class="muted">Click a model to see its details.</p></aside>

@@ -103,9 +103,9 @@ dialog#addDialog [hidden], dialog#statsDialog [hidden] { display: none; }
 .catalog-body { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 12px; height: min(52vh, 520px); min-height: 280px; }
 .catalog-table { overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); outline: none; }
 .catalog-table:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-.catalog-row { display: grid; grid-template-columns: minmax(0, 1fr) 62px 76px 80px 190px; gap: 8px; align-items: center;
+.catalog-row { display: grid; grid-template-columns: minmax(0, 1fr) 52px 52px 52px 66px 70px; gap: 8px; align-items: center;
   padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; cursor: pointer; }
-.catalog-row > span:nth-child(n+2):nth-child(-n+4) { text-align: right; font-variant-numeric: tabular-nums; }
+.catalog-row > span:nth-child(n+2) { text-align: right; font-variant-numeric: tabular-nums; }
 .catalog-row:hover { background: var(--panel); }
 .catalog-row.on { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
 .catalog-th { position: sticky; top: 0; z-index: 1; background: var(--panel); cursor: default; font-size: 11px; font-weight: 600;
@@ -132,8 +132,8 @@ dialog#addDialog [hidden], dialog#statsDialog [hidden] { display: none; }
 @media (max-width: 760px) {
   .catalog-body { grid-template-columns: 1fr; height: auto; }
   .catalog-table { max-height: 45vh; }
-  .catalog-row { grid-template-columns: minmax(0, 1fr) 54px 64px; }
-  .catalog-row > span:nth-child(4), .catalog-row > span:nth-child(5) { display: none; }
+  .catalog-row { grid-template-columns: minmax(0, 1fr) 48px 60px; }
+  .catalog-row > span:nth-child(3), .catalog-row > span:nth-child(4), .catalog-row > span:nth-child(6) { display: none; }
 }
 
 .profiles { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; }
@@ -230,3 +230,13 @@ table.compare { border-collapse: collapse; font-size: 0.85rem; }
 table.compare th, table.compare td { padding: 4px 10px; border-bottom: 1px solid var(--line, #8883); text-align: left; white-space: nowrap; }
 table.compare td.differs { background: color-mix(in srgb, var(--accent, #e8a33d) 22%, transparent); font-weight: 600; }
 table.compare button.link { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+
+/* benchmarks in the Add model list */
+.catalog-row .na { color: var(--muted); opacity: .6; }
+.catalog-bench { margin: 8px 0; display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; }
+.catalog-bench .meter { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.catalog-bench .meter i { display: block; height: 100%; background: var(--accent); }
+.catalog-bench .lbl { color: var(--muted); }
+.catalog-bench .val { font-variant-numeric: tabular-nums; text-align: right; }
+.catalog-bench-note { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.catalog-bench-note code { font-size: 11px; }

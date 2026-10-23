@@ -547,6 +547,17 @@ app.get('/ui/api/model-stats', async (req, res) => {
         },
     });
 });
+// Benchmarks matched to each OpenRouter catalog id, for the Add model dialog
+app.get('/ui/api/openrouter/benchmarks', async (req, res) => {
+    const catalog = await getOpenrouterCatalog({ waitMs: 4000 });
+    const bench = await getBenchmarks();
+    res.json({
+        on: !!process.env.ARTIFICIAL_ANALYSIS_API_KEY,
+        error: bench.error,
+        count: bench.list?.length || 0,
+        models: modelStats.forCatalog(catalog, bench.list),
+    });
+});
 app.post('/ui/api/model-stats', localJsonOnly, (req, res) => {
     try {
         res.json({ saved: modelStats.set(req.body?.name, req.body?.values) });

@@ -1432,6 +1432,7 @@ function showProvider() {
 let catalog = null;  // [{ id, name, context, inputCost, outputCost, free, tools, ... }] once loaded
 let catalogLoading = null;
 let catalogShown = []; // the rows on screen, in order
+let bench = { on: false, error: null, count: 0, models: {} }; // GET api/openrouter/benchmarks
 let catalogPick = null; // id of the model whose details are shown
 const CATALOG_ROWS = 400;
 
@@ -1445,7 +1446,13 @@ function loadCatalog() {
     })
     .catch((err) => { $('catalogNote').textContent = `${err.message} Type the id from openrouter.ai/models instead.`; })
     .finally(() => { catalogLoading = null; if (catalog) showCatalog(); });
+  getJSON('api/openrouter/benchmarks')
+    .then((b) => { bench = b; $('catalogRated').disabled = !Object.keys(b.models || {}).length; showCatalog(); })
+    .catch(() => {});
 }
+
+const score = (m, k) => bench.models?.[m.id]?.[k] ?? null;
+const pt = (v) => (v === null || v === undefined ? '<span class="na">–</span>' : Math.round(v));
 
 // $ per million tokens, short
 function perMillion(cost) {
@@ -1467,13 +1474,18 @@ const SORTS = {
   context: (a, b) => (b.context || 0) - (a.context || 0) || a.id.localeCompare(b.id),
   name: (a, b) => a.name.localeCompare(b.name),
 };
+// Best first, models without a score last
+for (const [key, field] of [['quality', 'intelligence'], ['coding', 'coding'], ['speed', 'speed']]) {
+  SORTS[key] = (a, b) => (score(b, field) ?? -1) - (score(a, field) ?? -1) || a.id.localeCompare(b.id);
+}
 
 function showCatalog() {
   if (!catalog) return;
   const words = $('catalogSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
   const want = { free: $('catalogFree').checked, tools: $('catalogTools').checked, reasoning: $('catalogReasoning').checked, vision: $('catalogVision').checked };
   const maker = $('catalogProvider').value;
-  catalogShown = catalog.filter(m => (!want.free || m.free) && (!want.tools || m.tools) && (!want.reasoning || m.reasoning) && (!want.vision || vision(m))
+  const rated = $('catalogRated').checked;
+  catalogShown = catalog.filter(m => (!rated || bench.models?.[m.id]) && (!want.free || m.free) && (!want.tools || m.tools) && (!want.reasoning || m.reasoning) && (!want.vision || vision(m))
     && (!maker || (m.provider || m.id.split('/')[0]) === maker)
     && words.every(w => m.id.toLowerCase().includes(w) || m.name.toLowerCase().includes(w)))
     .sort(SORTS[$('catalogSort').value] || SORTS.new);
@@ -1481,14 +1493,39 @@ function showCatalog() {
   if (!catalogPick && catalog.some(m => m.id === typed)) catalogPick = typed;
   $('catalogRows').innerHTML = catalogShown.slice(0, CATALOG_ROWS).map(m => `<div class="catalog-row${m.id === catalogPick ? ' on' : ''}" role="option" aria-selected="${m.id === catalogPick}" data-id="${esc(m.id)}">
       <span class="cm"><b>${esc(m.name)}</b><code>${esc(m.id)}</code></span>
-      <span>${tokensShort(m.context)}</span>
+      <span>${pt(score(m, 'intelligence'))}</span>
+      <span>${pt(score(m, 'coding'))}</span>
+      <span>${pt(score(m, 'speed'))}</span>
       <span>${m.free ? 'free' : `$${perMillion(m.inputCost)}`}</span>
-      <span>${m.free ? 'free' : `$${perMillion(m.outputCost)}`}</span>
-      <span class="badges">${badges(m)}</span></div>`).join('');
+      <span>${m.free ? 'free' : `$${perMillion(m.outputCost)}`}</span></div>`).join('');
   $('catalogNote').textContent = catalogShown.length
-    ? `${catalogShown.length} of ${catalog.length} models${catalogShown.length > CATALOG_ROWS ? `, the first ${CATALOG_ROWS} shown: search or filter to narrow` : ''}. Click one to see its details and fill in the model id.`
+    ? `${benchNote()}${catalogShown.length} of ${catalog.length} models${catalogShown.length > CATALOG_ROWS ? `, the first ${CATALOG_ROWS} shown: search or filter to narrow` : ''}. Click one to see its details and fill in the model id.`
     : `None of OpenRouter's ${catalog.length} models match.`;
   showDetail();
+}
+
+// One line under the list about where the scores come from, or why there are none
+function benchNote() {
+  if (!bench.on) return 'No benchmark scores: set ARTIFICIAL_ANALYSIS_API_KEY in .env. ';
+  if (bench.error && !bench.count) return `Benchmarks unavailable (${bench.error}). `;
+  return '';
+}
+
+function benchBlock(m) {
+  const b = bench.models?.[m.id];
+  if (!bench.on) return `<p class="catalog-bench-note">No benchmark scores yet. Get a free key at <a href="https://artificialanalysis.ai/" target="_blank" rel="noopener">artificialanalysis.ai</a>, add <code>ARTIFICIAL_ANALYSIS_API_KEY=…</code> to <code>.env</code>, then restart the Interceptor.</p>`;
+  if (!b) return `<p class="catalog-bench-note">${bench.error && !bench.count ? `Benchmarks unavailable: ${esc(bench.error)}` : 'No benchmark data for this model.'}</p>`;
+  const bar = (label, v, hint) => (v === null || v === undefined ? '' : `<span class="lbl" data-hint="${esc(hint)}">${label}</span><span class="meter"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></span><span class="val">${Math.round(v)}</span>`);
+  return `<div class="catalog-bench">
+      ${bar('Quality', b.intelligence, 'Artificial Analysis intelligence index, 0-100')}
+      ${bar('Coding', b.coding, 'Artificial Analysis coding index, 0-100')}
+      ${bar('Math', b.math, 'Artificial Analysis math index, 0-100')}
+    </div>
+    <dl class="facts">
+      ${fact('Speed', b.speed ? `${Math.round(b.speed)} tokens/s` : null, 'Median output speed')}
+      ${fact('First token', b.ttft ? `${b.ttft} s` : null, 'Median wait for the first token')}
+    </dl>
+    <p class="catalog-bench-note">Scores for “${esc(b.name)}” from <a href="https://artificialanalysis.ai/" target="_blank" rel="noopener">Artificial Analysis</a>.</p>`;
 }
 
 function fact(label, value, hint) {
@@ -1505,6 +1542,7 @@ function showDetail() {
     <h4>${esc(m.name)}</h4>
     <code class="id">${esc(m.id)}</code>
     <div class="badges">${badges(m)}${m.structured ? '<span class="badge">structured output</span>' : ''}${m.moderated ? '<span class="badge warn">moderated</span>' : ''}</div>
+    ${benchBlock(m)}
     ${m.description ? `<p class="desc">${esc(m.description)}</p>` : ''}
     <dl class="facts">
       ${fact('Context', m.context ? `${m.context.toLocaleString()} tokens` : null, 'How much the model can read at once: prompt, history and tools together')}
@@ -1561,7 +1599,7 @@ $('catalogSearch').addEventListener('keydown', (e) => {
   e.preventDefault();
   if (catalogShown[0]) pickCatalog(catalogShown[0].id);
 });
-for (const id of ['catalogFree', 'catalogTools', 'catalogReasoning', 'catalogVision', 'catalogProvider', 'catalogSort']) $(id).addEventListener('change', showCatalog);
+for (const id of ['catalogFree', 'catalogTools', 'catalogReasoning', 'catalogVision', 'catalogRated', 'catalogProvider', 'catalogSort']) $(id).addEventListener('change', showCatalog);
 
 $('addForm').elements.provider.innerHTML = Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('');
 $('addForm').elements.provider.addEventListener('change', showProvider);

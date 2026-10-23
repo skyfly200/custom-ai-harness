@@ -147,9 +147,10 @@ const fbOf = (r) => (r !== graph && r.fallbacks) || graph.fallbacks;
 const fb = () => fbOf(R());
 const allFb = () => [graph.fallbacks, ...graph.profiles.map(p => p.fallbacks).filter(Boolean)];
 // The chains to edit: a strategy on its own chains starts from a copy of the Gateway's
-function ownFb() {
-  const r = R();
+// Editing the Gateway's own lines first gives every strategy still using them a copy, so the edit stays here
+function ownFb(r = R()) {
   if (r !== graph && !r.fallbacks) r.fallbacks = clone(graph.fallbacks);
+  if (r === graph) AutoRoute.freezeFallbacks(graph.profiles, graph.fallbacks);
   return fbOf(r);
 }
 const ROUTE_FIELDS = ['fallbacks', 'pin', 'images', 'down', 'downTools', 'threshold', 'strong', 'strongTools', 'weak', 'tools', 'overflow', 'maxTokens', 'tiers', 'caveman', 'headroom', 'contextAnchor', 'mcpOff'];
@@ -283,6 +284,8 @@ function removeWire(id) {
 function removeModel(name) {
   const uses = strategies().flatMap(r => routeOuts(r).filter(o => o.model === name)
     .map(o => `“${o.label}”${r === graph ? '' : ` in ${r.name}`}`));
+  const others = strategies().filter(r => r !== R() && routeOuts(r).some(o => o.model === name));
+  if (others.length && !confirm(`${name} is a model every strategy shares. Removing it also disconnects it in ${others.map(routingName).join(', ')}.\n\nRemove it anyway? Nothing changes in config.yaml until you press Save.`)) return;
   graph.deployments = graph.deployments.filter(d => d.name !== name);
   for (const f of allFb()) {
     delete f[name];
@@ -395,7 +398,7 @@ function autoApply() {
   const { r, plan } = autoPlan;
   Object.assign(r, plan.routes);
   r.tiers = clone(plan.tiers);
-  for (const [m, t] of Object.entries(plan.fallbacks)) graph.fallbacks[m] = t;
+  for (const [m, t] of Object.entries(plan.fallbacks)) ownFb(r)[m] = t;
   $('autoDialog').close();
   const n = routeOuts(r).filter(o => o.model).length;
   tidy();
@@ -1222,7 +1225,7 @@ function drawProfiles() {
   $('profileFb').hidden = !(view && R().fallbacks);
   const p = view && R();
   $('profileNote').innerHTML = p
-    ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Models are shared by every strategy. ${p.fallbacks ? 'This strategy keeps its own fallback lines.' : 'Its fallback lines are the Gateway’s until you change one here.'}`
+    ? `Chats and projects pick it in their settings; other clients send the header <code>x-harness-profile: ${esc(p.id)}</code>. Only the model boxes (and their provider settings) are shared by every strategy; routes, tiers and compression are this strategy’s own. ${p.fallbacks ? 'This strategy keeps its own fallback lines.' : 'Its fallback lines are the Gateway’s until you change one here.'}`
     : `Used unless a chat, project or client picks another.${graph.profiles.length ? '' : ' Add one to send some chats elsewhere.'}`;
   drawAuto();
 }
@@ -1293,7 +1296,7 @@ function createStrategy(name, start) {
   let id = slug(name);
   for (let n = 2; graph.profiles.some(p => p.id === id); n++) id = `${slug(name)}-${n}`;
   const copy = Object.fromEntries(ROUTE_FIELDS.map(k => [k, clone(from[k] ?? null)]));
-  copy.fallbacks = from === graph ? null : copy.fallbacks; // the default's are the Gateway's, which a new strategy keeps using
+  copy.fallbacks = clone(from.fallbacks || graph.fallbacks); // its own lines, so editing either strategy never changes the other
   copy.mcpOff = copy.mcpOff || [];
   // The default's Router outputs may be unknown while the Router is down
   const p = { id, name, note: '', description: '', rules: emptyRules(), ...copy };
@@ -1657,7 +1660,7 @@ function wireBasic(r, lead) {
   if (!plan) return false;
   Object.assign(r, plan.routes);
   r.tiers = clone(plan.tiers);
-  for (const [m, t] of Object.entries(plan.fallbacks)) (r === graph ? graph.fallbacks : ownFb())[m] = t;
+  for (const [m, t] of Object.entries(plan.fallbacks)) ownFb(r)[m] = t;
   tidy();
   changed();
   note(`${lead} Wired ${routingName(r)} with a basic Balanced routing${guessed.length ? ' (quality guessed from price and name)' : ''}: ${plan.routes.strong} for hard requests, ${plan.routes.weak} for easy ones. Press Save to keep it, or change it with Auto-route.`, 'ok');

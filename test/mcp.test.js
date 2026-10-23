@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { McpManager, readConfig, expand, toolName, resultText } = require('../utils/mcp');
+const { McpManager, readConfig, expand, toolName, resultText, connectPolicy, describeFailure } = require('../utils/mcp');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-mcp-'));
 const fixture = path.join(__dirname, 'fixtures', 'echo-mcp-server.js');
@@ -122,4 +122,48 @@ test('mcp-servers.example.json parses and its enabled servers are plain stdio', 
     assert.ok(!servers.filesystem.disabled && !servers['jev-files'].disabled);
     assert.ok(servers.fetch.disabled && servers.github.disabled);
     assert.ok(!JSON.stringify(servers).includes('C:\\\\Users\\\\you'));
+});
+
+test('a server that times out once is tried again; "timeoutMs" and "retries" are read from its entry', async () => {
+    const file = path.join(dir, 'flaky.json');
+    const marker = path.join(dir, 'flaky-marker');
+    const flaky = path.join(__dirname, 'fixtures', 'flaky-mcp-server.js');
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: {
+        retried: { command: process.execPath, args: [flaky], env: { FLAKY_MARKER: marker }, timeoutMs: 1500, retries: 1 },
+        once: { command: process.execPath, args: [flaky], env: { FLAKY_MARKER: path.join(dir, 'once-marker') }, timeoutMs: 1000, retries: 0 },
+    } }));
+    const mcp = new McpManager({ file });
+    try {
+        await mcp.start();
+        const byName = Object.fromEntries(mcp.status().servers.map(s => [s.name, s]));
+        assert.equal(byName.retried.status, 'connected');
+        assert.equal(byName.once.status, 'failed');
+        assert.match(byName.once.error, /did not answer within 1 s/);
+        assert.match(byName.once.error, /timeoutMs/);
+    } finally {
+        await mcp.close();
+    }
+});
+
+test('connect policy: npx and uvx get longer and one retry; others keep 30 s, no retry; entries override', () => {
+    assert.deepEqual(connectPolicy({ command: 'npx' }), { timeoutMs: 120000, retries: 1 });
+    assert.deepEqual(connectPolicy({ command: 'C:\\Program Files\\nodejs\\npx.cmd' }), { timeoutMs: 120000, retries: 1 });
+    assert.deepEqual(connectPolicy({ command: 'uvx' }), { timeoutMs: 120000, retries: 1 });
+    assert.deepEqual(connectPolicy({ command: 'node' }), { timeoutMs: 30000, retries: 0 });
+    assert.deepEqual(connectPolicy({ url: 'https://x.test/mcp' }), { timeoutMs: 30000, retries: 0 });
+    assert.deepEqual(connectPolicy({ command: 'npx', timeoutMs: 5000, retries: 0 }), { timeoutMs: 5000, retries: 0 });
+    assert.deepEqual(connectPolicy({ command: 'node', timeoutMs: -1, retries: 2 }), { timeoutMs: 30000, retries: 2 });
+});
+
+test('failures say what to do', () => {
+    const timeout = Object.assign(new Error('MCP error -32001: Request timed out'), { code: -32001 });
+    assert.match(describeFailure(timeout, { command: 'npx' }, { timeoutMs: 120000, tries: 2 }), /did not answer within 120 s, even after 2 tries.*downloading.*timeoutMs/);
+    assert.doesNotMatch(describeFailure(timeout, { command: 'node' }, { timeoutMs: 30000 }), /downloading/);
+    const http404 = Object.assign(new Error('Streamable HTTP error: Error POSTing to endpoint: {"error":{"code":"404"}}'), { code: 404 });
+    const msg = describeFailure(http404, { type: 'http', url: 'https://aa.test/mcp?key=SECRET' });
+    assert.match(msg, /https:\/\/aa\.test\/mcp answered 404.*"url".*"disabled": true/);
+    assert.doesNotMatch(msg, /SECRET/);
+    assert.match(describeFailure(Object.assign(new Error('x'), { code: 401 }), { type: 'http', url: 'https://a.test/' }), /refused the login.*headers/);
+    assert.match(describeFailure(Object.assign(new Error('fetch failed'), { cause: { code: 'ENOTFOUND' } }), { type: 'http', url: 'https://a.test/' }), /could not reach.*ENOTFOUND/);
+    assert.match(describeFailure(Object.assign(new Error('nf'), { code: 'ENOENT' }), { command: 'uvx' }), /"uvx": not found on PATH \(install uv/);
 });

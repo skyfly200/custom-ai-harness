@@ -143,9 +143,29 @@ async function probe(name, url, { optional = false, timeout = 2000 } = {}) {
     }
 }
 
+/**
+ * Why the Router can't be edited, and what to do about it; null when it can.
+ * `c` is the probe result for the Router.
+ */
+function routerProblem(c, platform = process.platform) {
+    if (!c) return null;
+    if (c.ok && c.detail?.settings) return null;
+    const url = c.url ? c.url.replace(/\/health$/, '') : 'the Router address';
+    if (c.ok) return `The Router at ${url} is an older version without admin endpoints. Update router.py (git pull) and restart it.`;
+    if (c.status != null) return `Something answered at ${url}/health with HTTP ${c.status}, but it is not the Router. Another program may be using port 6060, or ROUTER_URL in .env points at the wrong service.`;
+    const py = platform === 'win32' ? '.venv\\Scripts\\python router.py' : '.venv/bin/python router.py';
+    const refused = /ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|fetch failed|UND_ERR/i.test(c.error || '');
+    if (refused) {
+        const localhost = /\/\/localhost[:/]/i.test(url) ? ` If it is running, \`localhost\` may mean ::1 here while the Router listens on 127.0.0.1: set ROUTER_URL=http://127.0.0.1:6060 in .env and restart the Interceptor.` : '';
+        return `Nothing is listening at ${url} (${c.error}). The Router did not start or has stopped: look for the lines marked "router" in the window running npm run all, which show the Python error (often a missing package: see the README setup). To see it alone, run ${py}.${localhost}`;
+    }
+    if (/Timeout|Abort/i.test(c.error || '')) return `The Router at ${url} did not answer within 2 s. It may still be starting (a classifier model can take a minute to load); refresh in a moment.`;
+    return `The Router at ${url} can't be reached (${c.error || 'no answer'}).`;
+}
+
 function checkComponents(urls) {
     return Promise.all([
-        probe('Router', `${urls.router}/health`),
+        probe('Router', `${urls.router}/health`).then(r => ({ ...r, problem: routerProblem(r) })),
         probe('Gateway (LiteLLM)', `${urls.gateway}/health/liveliness`),
         probe('Local engine', `${urls.localEngine}/v1/models`, { optional: true }),
         probe('Ollama', `${urls.ollama}/api/tags`, { optional: true }),
@@ -153,4 +173,4 @@ function checkComponents(urls) {
     ]);
 }
 
-module.exports = { live, recordRouting, recordRoute, recordResponse, recordFinish, recordError, recordCancel, recordUsage, recentEvents, stats, checkComponents, probe };
+module.exports = { live, recordRouting, recordRoute, recordResponse, recordFinish, recordError, recordCancel, recordUsage, recentEvents, stats, checkComponents, probe, routerProblem };

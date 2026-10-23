@@ -1680,6 +1680,7 @@ async function load() {
   const router = status.value?.components?.find(c => c.name === 'Router');
   info = {
     router: router?.ok && router.detail?.settings ? router.detail : null,
+    routerProblem: router?.problem || (status.reason ? `The Interceptor's status can't be read: ${status.reason.message}` : 'The Router is down or has no admin endpoints.'),
     settings: settings.value?.settings || null,
     gateway: gateway.value || null,
     gatewayError: gateway.reason?.message || null,
@@ -1695,7 +1696,7 @@ async function load() {
   if (info.gateway?.file) $('gatewayFile').textContent = info.gateway.file;
   const issues = [
     !info.settings && `Interceptor settings: ${settings.reason?.message}`,
-    !info.router && 'The Router is down or has no admin endpoints, so its choices can’t be changed.',
+    !info.router && `${info.routerProblem} Its choices can’t be changed until then.`,
     profiles.reason && `Named strategies: ${profiles.reason.message}`,
     info.gatewayError && `Models and fallbacks can’t be edited: ${info.gatewayError}`,
   ].filter(Boolean);

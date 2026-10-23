@@ -58,7 +58,7 @@ if (LOGIN_ON) {
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-const ROUTER_URL = process.env.ROUTER_URL || 'http://localhost:6060';
+const ROUTER_URL = process.env.ROUTER_URL || 'http://127.0.0.1:6060';
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:4000';
 // LiteLLM reads the same LITELLM_MASTER_KEY from .env. When it is set, every
 // call to the Gateway needs it, so the harness sends it in place of whatever

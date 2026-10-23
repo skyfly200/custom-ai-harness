@@ -1,5 +1,5 @@
 # The whole harness on one server: docker compose up -d --build
-# Needs .env next to this file with your API keys, HARNESS_PASSWORD and
+# Needs .env next to this file with your API keys, HARNESS_PASSWORD (or HARNESS_REQUIRE_LOGIN + HARNESS_ADMINS) and
 # LITELLM_MASTER_KEY.
 # Only the Interceptor (port 3000) is published; the Router and Gateway are
 # reachable only from the other containers.
@@ -22,7 +22,12 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      HARNESS_PASSWORD: ${HARNESS_PASSWORD:?set HARNESS_PASSWORD in .env before running on a server}
+      # A server needs HARNESS_PASSWORD, or HARNESS_REQUIRE_LOGIN=1 with HARNESS_ADMINS (see the README); it refuses to start with neither
+      HARNESS_SERVER: "1"
+      HARNESS_PASSWORD: ${HARNESS_PASSWORD:-}
+      HARNESS_REQUIRE_LOGIN: ${HARNESS_REQUIRE_LOGIN:-}
+      HARNESS_ADMINS: ${HARNESS_ADMINS:-}
+      HARNESS_USERS_FILE: /app/data/users.json
       ROUTER_URL: http://router:6060
       GATEWAY_URL: http://gateway:4000
       HARNESS_SETTINGS_FILE: /app/data/harness-settings.json

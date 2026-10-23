@@ -32,13 +32,29 @@ const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
 const repoTools = require('./utils/repoTools');
 const { requirePassword, viaProxy } = require('./utils/access');
+const { createLogin } = require('./utils/login');
+const { parseAdmins, Users, FileStore } = require('./utils/users');
 const fs = require('fs');
 const path = require('path');
 
 const app = express();
 // HARNESS_PASSWORD locks every page and API (see utils/access.js); unset, all stay open
 const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || '';
-app.use(requirePassword(HARNESS_PASSWORD));
+// HARNESS_REQUIRE_LOGIN=1 puts named logins in front instead (utils/login.js)
+const LOGIN_ON = /^(1|true|yes|on)$/i.test(process.env.HARNESS_REQUIRE_LOGIN || '');
+if (LOGIN_ON) {
+    const { admins, problems } = parseAdmins(process.env.HARNESS_ADMINS);
+    if (problems.length || !admins.length) {
+        throw new Error('HARNESS_REQUIRE_LOGIN is on but HARNESS_ADMINS is ' + (problems.length ? `invalid:\n  ${problems.join('\n  ')}` : 'empty')
+            + '\nMake a hash with `npm run hash`, then set HARNESS_ADMINS=name:HASH (several: name:HASH,name2:HASH2). Refusing to start open.');
+    }
+    const users = new Users({ admins, store: new FileStore(process.env.HARNESS_USERS_FILE || 'users.json') });
+    app.use(createLogin({ users, legacyPassword: HARNESS_PASSWORD }).gate);
+} else if (process.env.HARNESS_SERVER === '1' && !HARNESS_PASSWORD) {
+    throw new Error('Running as a server (Docker) needs HARNESS_PASSWORD, or HARNESS_REQUIRE_LOGIN=1 with HARNESS_ADMINS, in .env');
+} else {
+    app.use(requirePassword(HARNESS_PASSWORD));
+}
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -281,8 +297,10 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // anyone who gave it), and only to JSON: a plain cross-site form can't send
 // that without a CORS preflight, so another web page can't change settings either.
 function localJsonOnly(req, res, next) {
+    // With logins on, controls are for admins, wherever they sit
+    if (req.harnessLogin && req.harnessUser.role !== 'admin') return res.status(403).json({ error: 'admins only' });
     // A request through a tunnel or proxy on this machine looks like loopback, but isn't "this machine"
-    if ((!LOOPBACK.has(req.socket.remoteAddress) || viaProxy(req)) && !req.harnessAuthenticated) {
+    if (!req.harnessLogin && (!LOOPBACK.has(req.socket.remoteAddress) || viaProxy(req)) && !req.harnessAuthenticated) {
         return res.status(403).json({ error: 'controls work only from this machine, or with HARNESS_PASSWORD set' });
     }
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });

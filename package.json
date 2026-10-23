@@ -10,6 +10,7 @@
     "validate:fix": "node validate-config.js --fix",
     "test": "node --test \"test/*.test.js\"",
     "ollama": "ollama serve",
+    "hash": "node scripts/hash-password.js",
     "all": "node scripts/start-all.js",
     "all:ollama": "node scripts/start-all.js --ollama",
     "full": "npm run validate && npm test && node scripts/start-all.js"

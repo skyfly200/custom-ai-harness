@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bright Chat · Users</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="calm.css">
+</head>
+<body>
+<main>
+  <header>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Users</span></h1><a href="./">Dashboard</a><a href="chat.html">Chat</a></nav>
+    <span class="muted" id="who"></span>
+  </header>
+
+  <p class="muted" id="off" hidden>Logins are off. Set <code>HARNESS_REQUIRE_LOGIN=1</code> and <code>HARNESS_ADMINS</code> in .env to turn them on.</p>
+  <div id="msg" class="muted" role="status" style="min-height:1.4em"></div>
+
+  <section id="admin" hidden>
+    <h2>Users</h2>
+    <div class="card">
+      <table id="userTable" style="width:100%;border-collapse:collapse"></table>
+      <form id="addUser" class="form" autocomplete="off" style="margin-top:12px">
+        <label class="field"><span>User name</span><input name="name" required pattern="[A-Za-z0-9._-]{1,40}" autocapitalize="none"></label>
+        <label class="field"><span>Password</span><input name="password" type="password" required autocomplete="new-password"><small id="minpw"></small></label>
+        <label class="field"><span>Role</span><select name="role"><option value="user">User: chat and API</option><option value="admin">Admin: also Settings and Users</option></select></label>
+        <div class="field"><span>&nbsp;</span><button class="primary">Add user</button></div>
+      </form>
+      <p class="muted" style="margin-bottom:0">Admins marked <em>env</em> come from <code>HARNESS_ADMINS</code> and are changed in .env.</p>
+    </div>
+  </section>
+
+  <h2 id="keysHead">API keys</h2>
+  <div class="card">
+    <p class="muted" style="margin-top:0">For programs such as Claude Code: set <code>ANTHROPIC_AUTH_TOKEN</code> (or an OpenAI key) to the key. A key is shown once.</p>
+    <div id="ownerRow" class="field" hidden><span>Keys of</span><select id="owner"></select></div>
+    <table id="keyTable" style="width:100%;border-collapse:collapse"></table>
+    <form id="addKey" class="form" autocomplete="off" style="margin-top:12px">
+      <label class="field"><span>Name</span><input name="name" placeholder="Claude Code on my laptop" maxlength="60"></label>
+      <div class="field"><span>&nbsp;</span><button class="primary">Make a key</button></div>
+    </form>
+    <pre id="newKey" hidden style="white-space:pre-wrap;word-break:break-all;margin:12px 0 0"></pre>
+  </div>
+
+  <section id="pwSection" hidden>
+    <h2>Change my password</h2>
+    <div class="card">
+      <form id="pw" class="form" autocomplete="off">
+        <label class="field"><span>Current password</span><input name="current" type="password" required autocomplete="current-password"></label>
+        <label class="field"><span>New password</span><input name="password" type="password" required autocomplete="new-password"></label>
+        <div class="field"><span>&nbsp;</span><button class="primary">Change password</button></div>
+      </form>
+    </div>
+  </section>
+</main>
+<script src="users.js"></script>
+<script src="bright.js"></script>
+</body>
+</html>

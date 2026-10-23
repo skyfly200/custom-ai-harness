@@ -93,3 +93,7 @@ main > *:nth-child(4) { animation-delay: .12s; } main > *:nth-child(n+5) { anima
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* signed-in chip (HARNESS_REQUIRE_LOGIN) */
+.account-chip { margin-left: auto; font-weight: 600; }
+.account-out { font-size: 12px; padding: 4px 10px; }

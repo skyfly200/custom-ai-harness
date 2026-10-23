@@ -23,6 +23,7 @@
     <span class="muted" id="updated">Loading…</span>
   </header>
 
+  <p class="muted" id="usersLink" hidden><a href="users.html">Users and API keys</a>: who can sign in, and keys for programs.</p>
   <h2 style="margin-top:16px" data-hint="How the Interceptor treats each request before routing it">Interceptor settings</h2>
   <div class="card">
     <form id="isettings" class="form" autocomplete="off">
@@ -267,6 +268,7 @@ loadInterceptorSettings();
 refresh();
 setInterval(refresh, 5000);
 </script>
+<script>fetch('/ui/api/me').then((r) => r.ok && (document.getElementById('usersLink').hidden = false)).catch(() => {});</script>
 <script src="bright.js"></script>
 </body>
 </html>

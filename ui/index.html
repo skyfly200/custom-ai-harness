@@ -99,7 +99,7 @@ function renderComponents(components) {
     const label = c.ok ? `Up · ${c.ms} ms` : c.optional ? 'Off (optional)' : `Down · ${esc(c.error || 'HTTP ' + c.status)}`;
     const extra = c.name === 'Router' && c.ok ? ` · classifier <b>${esc(c.detail?.backend)}</b>` : '';
     return `<div class="card"><div class="name" data-hint="${esc(COMPONENT_HINTS[c.name] || '')}"><span class="dot ${state}"></span>${esc(c.name)}</div>
-      <div class="sub">${label}${extra}</div><div class="sub url"><code>${esc(c.url)}</code></div></div>`;
+      <div class="sub">${label}${extra}</div>${c.problem ? `<div class="sub">${esc(c.problem)}</div>` : ''}<div class="sub url"><code>${esc(c.url)}</code></div></div>`;
   }).join('');
 }
 

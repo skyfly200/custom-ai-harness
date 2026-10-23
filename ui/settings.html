@@ -197,7 +197,7 @@ function renderRouterForm(router) {
   for (const b of ['rapply', 'rsave', 'rreload']) $(b).disabled = !ready;
   f.querySelectorAll('input, select').forEach(el => { el.disabled = !ready; });
   if (!ready) {
-    $('rdown').textContent = router?.ok ? 'This Router version has no admin endpoints; update router.py and restart it.' : 'The Router is down, so its settings can’t be read or changed.';
+    $('rdown').textContent = router?.problem || (router?.ok ? 'This Router version has no admin endpoints; update router.py and restart it.' : 'The Router is down, so its settings can’t be read or changed.');
     return;
   }
   $('rdown').textContent = '';

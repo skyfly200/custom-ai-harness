@@ -67,3 +67,14 @@ test('probe reports up, down, and optional components', async () => {
     assert.equal(down.optional, true);
     assert.ok(down.error);
 });
+
+test('routerProblem names the cause and the fix', () => {
+    const url = 'http://localhost:6060/health';
+    assert.equal(monitor.routerProblem({ url, ok: true, detail: { settings: {} } }), null);
+    assert.match(monitor.routerProblem({ url, ok: true, detail: {} }), /older version without admin endpoints.*git pull/);
+    assert.match(monitor.routerProblem({ url, ok: false, status: 404 }), /not the Router.*port 6060/);
+    const refused = monitor.routerProblem({ url, ok: false, status: null, error: 'ECONNREFUSED' }, 'win32');
+    assert.match(refused, /Nothing is listening at http:\/\/localhost:6060.*npm run all.*\.venv\\Scripts\\python router\.py.*ROUTER_URL=http:\/\/127\.0\.0\.1:6060/);
+    assert.doesNotMatch(monitor.routerProblem({ url: 'http://127.0.0.1:6060/health', ok: false, error: 'ECONNREFUSED' }, 'linux'), /::1/);
+    assert.match(monitor.routerProblem({ url, ok: false, error: 'TimeoutError' }), /still be starting/);
+});

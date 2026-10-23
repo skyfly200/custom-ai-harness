@@ -16,6 +16,8 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const LAYOUT_KEY = 'harness-routing-layout';
+const ZOOM_KEY = 'harness-routing-zoom';
+const MIN_ZOOM = 0.05;   // Tidy scales the canvas down to fit, but not below this
 const BACKEND_HELP = {
   routellm: 'RouteLLM BERT, in the Router process.',
   laya: 'Laya in the Router process.',
@@ -99,7 +101,9 @@ let newKeys = 0;     // keys for provider models added on this page (saved ones 
 let view = '';       // the strategy being shown: '' for the default, else a profile id
 let toolInfo = null; // MCP servers (GET api/tools)
 
+let zoom = 1;        // scale of the world (set by Tidy so every box is in view)
 try { positions = JSON.parse(localStorage.getItem(LAYOUT_KEY)) || {}; } catch {}
+try { const z = Number(localStorage.getItem(ZOOM_KEY)); if (z >= MIN_ZOOM && z <= 1) { zoom = z; $('world').style.transform = z === 1 ? '' : `scale(${z})`; $('world').style.transformOrigin = '0 0'; } } catch {}
 
 async function getJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -718,8 +722,17 @@ function placeNodes() {
     w = Math.max(w, p.x + nw);
     h = Math.max(h, top + nh);
   }
-  $('world').style.width = w + 200 + 'px';
-  $('world').style.height = h + 200 + 'px';
+  sizeWorld(w + 200, h + 200);
+}
+
+// The world's box is its unscaled size; negative margins take back the space the
+// scale removed, so the canvas scrolls over what is drawn and no more
+function sizeWorld(w, h) {
+  const el = $('world');
+  el.style.width = w + 'px';
+  el.style.height = h + 'px';
+  el.style.marginRight = -Math.round(w * (1 - zoom)) + 'px';
+  el.style.marginBottom = -Math.round(h * (1 - zoom)) + 'px';
 }
 
 // Tidy layout: columns that follow the lines of the strategy shown, left to
@@ -775,7 +788,7 @@ function tidy() {
   positions = {};
   let y = TOP;
   for (const id of ['entry', 'compress', 'router', 'tools']) { positions[id] = { x: LEFT, y }; y += (box(id)?.offsetHeight || 0) + GAP; }
-  const offset = (el, n) => { const a = el.getBoundingClientRect(), b = n.getBoundingClientRect(); return a.top - b.top + a.height / 2; };
+  const offset = (el, n) => { const a = el.getBoundingClientRect(), b = n.getBoundingClientRect(); return (a.top - b.top + a.height / 2) / zoom; };
   const portY = {};   // output dot -> y below its box's top
   const inY = {};     // model box -> y of its input dot below its top
   for (const n of world.querySelectorAll('.node')) {
@@ -825,7 +838,30 @@ function tidy() {
     if (col.length) x += Math.max(0, ...col.map(it => it.w)) + SPACE;
   }
   placeNodes();
+  fitView();
   drawWires();
+}
+
+// Scales the world so every box is inside the canvas (never above 100%, never
+// below MIN_ZOOM, where text stops being readable and the canvas scrolls
+// instead), and scrolls to the top left. Positions stay in unscaled units.
+function setZoom(z) {
+  zoom = z;
+  $('world').style.transform = z === 1 ? '' : `scale(${z})`;
+  $('world').style.transformOrigin = '0 0';
+  try { localStorage.setItem(ZOOM_KEY, String(z)); } catch {}
+}
+function fitView() {
+  const canvas = $('canvas');
+  setZoom(1);
+  let w = 0, h = 0;
+  for (const n of $('world').querySelectorAll('.node')) { w = Math.max(w, n.offsetLeft + n.offsetWidth); h = Math.max(h, n.offsetTop + n.offsetHeight); }
+  const pad = 30;
+  setZoom(Fit.fitZoom(w, h, canvas.clientWidth, canvas.clientHeight, { pad, min: MIN_ZOOM }));
+  // The scrollable area follows the scaled boxes, not the padding placeNodes adds
+  sizeWorld(w + pad, h + pad);
+  canvas.scrollLeft = 0;
+  canvas.scrollTop = 0;
 }
 
 // Reorders a column, in place, so the fewest lines coming into it cross: every
@@ -873,7 +909,7 @@ function wireList() {
 
 function pointIn(el) {
   const r = el.getBoundingClientRect(), w = $('world').getBoundingClientRect();
-  return { x: r.left - w.left + r.width / 2, y: r.top - w.top + r.height / 2 };
+  return { x: (r.left - w.left + r.width / 2) / zoom, y: (r.top - w.top + r.height / 2) / zoom };
 }
 
 function curve(a, b) {
@@ -908,7 +944,7 @@ function drawWires() {
 
 function worldPoint(e) {
   const w = $('world').getBoundingClientRect();
-  return { x: e.clientX - w.left, y: e.clientY - w.top };
+  return { x: (e.clientX - w.left) / zoom, y: (e.clientY - w.top) / zoom };
 }
 
 function modelAt(e) {

@@ -132,7 +132,29 @@
     return `${strong || '—'} ↔ ${weak || '—'}${r.threshold != null ? ` at ${r.threshold}` : ''}`;
   }
 
-  const api = { autoRoute, preset, describe, PRESETS };
+  // Quality numbers for models that have none, so routing can start before any
+  // benchmarks are set up: from price when at least two models have one (dearer
+  // is better), else from the model's name. Rated models keep their own numbers.
+  // Returns { stats, guessed } where guessed lists the names that were estimated.
+  const NAME_SCORES = [[/opus|ultra|\bmax\b|frontier|405b/i, 90], [/sonnet|\bpro\b|large|gpt-?[4-9]\b|70b/i, 75],
+    [/haiku|mini|flash|lite|small|nano|fast|instant|\b[1-9]b\b|8b/i, 40]];
+  const nameScore = (n) => (isLocal(n) ? 35 : (NAME_SCORES.find(([re]) => re.test(n)) || [0, 60])[1]);
+
+  function withGuesses(served, stats) {
+    const out = { ...stats };
+    const guessed = served.filter(n => typeof stats[n]?.quality !== 'number');
+    const priced = served.filter(n => Number.isFinite(price(stats[n] || {})));
+    const order = [...priced].sort((a, b) => price(stats[a]) - price(stats[b]));
+    for (const n of guessed) {
+      const rank = order.indexOf(n);
+      const quality = rank >= 0 && order.length >= 2 ? 30 + Math.round(60 * rank / (order.length - 1)) : nameScore(n);
+      // With no price either, assume dearer means better so the cheapest pick is the weakest
+      out[n] = { ...stats[n], quality, ...(Number.isFinite(price(stats[n] || {})) ? {} : { blended: quality / 10 }), guessed: true };
+    }
+    return { stats: out, guessed };
+  }
+
+  const api = { autoRoute, preset, describe, withGuesses, PRESETS };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AutoRoute = api;
 })(typeof window !== 'undefined' ? window : globalThis);

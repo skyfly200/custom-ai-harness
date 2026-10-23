@@ -237,11 +237,20 @@ function problems() {
       });
     }
   }
-  if (gatewayEditable()) {
-    const names = new Set(allFb().flatMap(f => Object.entries(f).flatMap(([src, targets]) => [src, ...targets])));
-    for (const name of names) if (!served(name)) out.push({ text: `“${name}” has fallback lines but no provider model: add one, or remove its box.`, routing: null, node: `m:${name}`, port: null });
-  }
   return out;
+}
+
+// Gateway fallback lines that name a model with no provider model (left over from
+// models removed by hand). They can't work, so Save drops them instead of refusing.
+function usableChains() {
+  const keep = (n) => served(n);
+  const all = chains(graph.fallbacks);
+  const out = {};
+  for (const [src, targets] of Object.entries(all)) {
+    const t = targets.filter(keep);
+    if (keep(src) && t.length) out[src] = t;
+  }
+  return { chains: out, dropped: Object.keys(all).length - Object.keys(out).length };
 }
 
 function connect(port, model) {
@@ -352,14 +361,16 @@ let autoPlan = null; // what the dialog is previewing: { r, plan }
 const servedModels = () => [...new Set(graph.deployments.map(d => d.name))];
 const presetHint = (id) => AutoRoute.PRESETS.find(p => p.id === id)?.hint || '';
 
-function autoPreview(opening) {
+function autoPreview() {
   const r = R();
   const preset = $('autoPreset').value || 'balanced';
-  const plan = AutoRoute.preset(preset, servedModels(), stats.models, r, graph.fallbacks);
+  const { stats: numbers, guessed } = AutoRoute.withGuesses(servedModels(), stats.models);
+  const plan = AutoRoute.preset(preset, servedModels(), numbers, r, graph.fallbacks);
+  if (plan && guessed.length) plan.notes.push(`No quality rating for ${guessed.join(', ')}: guessed from ${guessed.length === servedModels().length ? 'prices and names' : 'price and name'}. Press Edit on a model box to rate it, or set ARTIFICIAL_ANALYSIS_API_KEY in .env.`);
   $('autoPresetHint').textContent = presetHint(preset);
   if (!plan) {
     if ($('autoDialog').open) $('autoDialog').close();
-    note(preset === 'local' ? 'No Gateway model is named local-… so there is nothing local to use.' : 'Nothing to place: no model has a quality rating yet. Press Edit on a model box to type one, or add ARTIFICIAL_ANALYSIS_API_KEY to .env.', 'err');
+    note(preset === 'local' ? 'No Gateway model is named local-… so there is nothing local to use.' : 'Nothing to place: the Gateway serves no models yet. Add one with Add model.', 'err');
     return;
   }
   const after = Object.fromEntries(ROUTE_FIELDS.map(f => [f, r[f]]));
@@ -367,10 +378,10 @@ function autoPreview(opening) {
   const was = new Map(routeOuts(r).map(o => [o.port, o.model]));
   const now = routeOuts(after);
   const gone = routeOuts(r).filter(o => o.model && !now.some(x => x.port === o.port));
+  const fb = Object.entries(plan.fallbacks);
   autoPlan = { r, plan };
   $('autoFor').textContent = `for ${routingName(r)}`;
   const line = (label, a, b) => `<tr class="${a === b ? 'same' : ''}"><td>${esc(label)}</td><td>${a ? esc(a) : '—'}</td><td>${b ? esc(b) : '—'}</td></tr>`;
-  const fb = Object.entries(plan.fallbacks);
   $('autoBody').innerHTML = `<table><thead><tr><th>Output</th><th>Now</th><th>After</th></tr></thead><tbody>
       ${now.filter(o => o.model || was.get(o.port)).map(o => line(o.label, was.get(o.port) ?? null, o.model)).join('')}
       ${gone.map(o => line(o.label, o.model, null)).join('')}</tbody></table>
@@ -1151,9 +1162,11 @@ $('save').addEventListener('click', async () => {
     // The Gateway first: the Router may name a model that is only added here
     if (gatewayChanged()) {
       note('Writing config.yaml…');
-      info.gateway = await postJSON('api/gateway', { version: info.gateway.version, ...deploymentChanges(), fallbacks: chains(graph.fallbacks) });
+      const { chains: usable, dropped } = usableChains();
+      info.gateway = await postJSON('api/gateway', { version: info.gateway.version, ...deploymentChanges(), fallbacks: usable });
       graph.deployments = graphFrom(info).deployments;
-      done.push('Gateway models and fallbacks');
+      graph.fallbacks = clone(graphFrom(info).fallbacks);
+      done.push(`Gateway models and fallbacks${dropped ? ` (dropped ${dropped} fallback line${dropped === 1 ? '' : 's'} for models with no provider model)` : ''}`);
       loadStats().then(render);
       restart = true;
     }
@@ -1581,11 +1594,37 @@ $('addForm').addEventListener('submit', (e) => {
   });
   $('addDialog').close();
   changed();
+  if (!f.dataset.name) placeAdded(name);
   // Bring a new box into view
   const node = $('world').querySelector(`.node[data-id="${CSS.escape('m:' + name)}"]`);
   node?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   flash([`m:${name}`]);
 });
+
+// A new model starts routing at once when the strategy shown has nothing wired;
+// otherwise it points to Auto-route and leaves the routes alone.
+function placeAdded(name) {
+  const r = R();
+  const unwired = !r.pin && !r.strong && !r.weak;
+  if (unwired && (r !== graph || routerUp())) return wireBasic(r, `Added ${name}.`);
+  // A wired strategy is left as it is: the new box has no route yet, and Auto-route can place it
+  note(`Added ${name}. It has no route yet: connect it by hand, or press Auto-route to see where it would fit.`, 'ok');
+}
+
+// Balanced routing for a strategy with nothing wired, as an unsaved change
+function wireBasic(r, lead) {
+  const names = servedModels();
+  const { stats: numbers, guessed } = AutoRoute.withGuesses(names, stats.models);
+  const plan = AutoRoute.preset('balanced', names, numbers, r, graph.fallbacks);
+  if (!plan) return false;
+  Object.assign(r, plan.routes);
+  r.tiers = clone(plan.tiers);
+  for (const [m, t] of Object.entries(plan.fallbacks)) (r === graph ? graph.fallbacks : ownFb())[m] = t;
+  tidy();
+  changed();
+  note(`${lead} Wired ${routingName(r)} with a basic Balanced routing${guessed.length ? ' (quality guessed from price and name)' : ''}: ${plan.routes.strong} for hard requests, ${plan.routes.weak} for easy ones. Press Save to keep it, or change it with Auto-route.`, 'ok');
+  return true;
+}
 
 // ---- the guide ---------------------------------------------------------------
 
@@ -1630,6 +1669,9 @@ async function load() {
   updateButtons();
   if (fresh) tidy();
   note(issues.join(' '), issues.length ? 'err' : '');
+  // A default with nothing wired gets a basic routing, as a draft, so the first
+  // visit starts from something that works. One already wired is never touched.
+  if (!issues.length && routerUp() && !graph.pin && !graph.strong && !graph.weak) wireBasic(graph, 'The default strategy had no routing.');
 }
 
 function flash(ids) {

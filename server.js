@@ -976,6 +976,7 @@ app.use(toGateway);
 // fresh socket, and anything else is answered here.
 app.use((err, req, res, next) => {
     if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) {
+        req.harnessGuard?.clear(); // its watchdog would answer the retry
         req.harnessRetried = true;
         console.warn(`${req.path}: the Gateway reset the connection (${err.code}); retrying once`);
         return toGateway(req, res, next);

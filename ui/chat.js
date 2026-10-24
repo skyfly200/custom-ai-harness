@@ -677,16 +677,20 @@ function messageHtml(m, i, list) {
       <div class="meta-wrap">${m.streaming ? '' : metaHtml(m)}</div></div></div>`;
 }
 
-// Reply text with each round of tool calls where it happened
+// Reply text with all tool calls grouped where the first round happened
 function replyBodyHtml(m) {
   const rounds = m.rounds || [];
   const last = rounds.length ? rounds[rounds.length - 1].end : 0;
   const rest = m.content.slice(last);
   let html = '', from = 0;
-  rounds.forEach((r, k) => {
+  let toolsAdded = false;
+  rounds.forEach((r) => {
     const text = m.content.slice(from, r.end);
     if (text.trim()) html += `<div class="md">${render(text)}</div>`;
-    html += toolCallsHtml(r, k);
+    if (!toolsAdded) {
+      html += toolCallsHtml(rounds);
+      toolsAdded = true;
+    }
     from = r.end;
   });
   const empty = !m.content && !rounds.length && !m.streaming;
@@ -715,16 +719,20 @@ function prettyArgs(args) {
 }
 
 const SHOW_RESULT = 6000;
-function toolCallsHtml(r, k) {
-  return `<div class="tool-calls">${r.calls.map((c, j) => {
+function toolCallsHtml(rounds) {
+  const calls = rounds.flatMap((r, k) => r.calls.map((call, j) => ({ call, key: `tool-${k}-${j}` })));
+  if (!calls.length) return '';
+  const state = calls.some(({ call }) => call.result == null) ? 'now' : calls.some(({ call }) => call.isError) ? 'bad' : 'ok';
+  return `<details class="tool-calls ${state}" data-k="tools"><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
+      <span>Tool calls (${calls.length})</span></summary><div class="tool-list">${calls.map(({ call: c, key }) => {
     const [src, name] = toolLabel(c.name);
     const state = c.result == null ? 'now' : c.isError ? 'bad' : 'ok';
     const result = c.result == null ? '' : c.result.length > SHOW_RESULT ? `${c.result.slice(0, SHOW_RESULT)}\n… (${(c.result.length - SHOW_RESULT).toLocaleString()} more characters sent to the model)` : c.result;
-    return `<details class="tool-call ${state}" data-k="tool-${k}-${j}"><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
+    return `<details class="tool-call ${state}" data-k="${key}"><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
         ${src ? `<span class="src">${esc(src)}</span>` : ''}<code>${esc(name)}</code><span class="args">${esc(argsSummary(c.arguments))}</span>
         <span class="t">${c.ms != null ? fmtMs(c.ms) : state === 'now' ? 'running…' : ''}</span></summary>
       <div class="io"><b>Input</b><pre>${esc(prettyArgs(c.arguments))}</pre>${c.result != null ? `<b>Result</b><pre class="out">${esc(result)}</pre>` : ''}</div></details>`;
-  }).join('')}</div>`;
+  }).join('')}</div></details>`;
 }
 
 let stickToBottom = true;

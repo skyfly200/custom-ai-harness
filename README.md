@@ -81,7 +81,15 @@ If you'd rather have one window per part (easier to read when something goes wro
 
 ### Connect Claude Code
 
-In a fourth PowerShell window:
+Leave the harness running, open a fourth PowerShell window in the same folder and run:
+
+```powershell
+npm run claude
+```
+
+That sets the variables below for you and starts Claude Code in this folder. Add `--` to pass Claude Code its own options (`npm run claude -- -p "explain router.py"`). Set `HARNESS_URL` in `.env` to use a harness on another machine, and `HARNESS_API_KEY` to an API key from the Users page when the harness runs with `HARNESS_REQUIRE_LOGIN=1`. Set `CLAUDE_CODE_BIN` if `claude` is not the command on your PATH.
+
+The script only sets those variables; it does not install Claude Code. If the harness isn't answering it says so instead of starting Claude Code, so start `npm run all` first.
 
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://localhost:3000"
@@ -641,6 +649,8 @@ npm start
 Point an OpenAI-compatible assistant (Cursor, Aider, Continue, Cline) at `http://localhost:3000/v1`.
 
 ### Using Claude Code through the harness
+
+`npm run claude` from the repo folder sets this up and starts Claude Code in one step; this is what it sets:
 
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://localhost:3000"

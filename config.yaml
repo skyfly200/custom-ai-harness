@@ -8,16 +8,6 @@ model_list:
       model: openrouter/deepseek/deepseek-v4.1-flash-1017
       api_key: os.environ/OPENROUTER_API_KEY
 
-  - model_name: or-qwen3.7-flash
-    litellm_params:
-      model: openrouter/qwen/qwen3.7-flash
-      api_key: os.environ/OPENROUTER_API_KEY
-
-  - model_name: or-gemma-4-31b-it-free
-    litellm_params:
-      model: openrouter/google/gemma-4-31b-it:free
-      api_key: os.environ/OPENROUTER_API_KEY
-
   # Concurrency: max_parallel_requests caps in-flight calls per deployment;
   # extra requests queue instead of tripping provider rate limits.
   # Tier 1: your local engine (launch-local.sh: llama.cpp or vLLM on port 8000,
@@ -43,8 +33,6 @@ litellm_settings:
   # leaves unanswered (gatewayTimeoutMs in the dashboard, 5 minutes).
   request_timeout: 120
   fallbacks:
-    - {"or-deepseek-v4.1-flash-1017": ["or-qwen3.7-flash"]}
-    - {"or-gemma-4-31b-it-free":      ["or-qwen3.7-flash"]}
     # Tool-capable first: strong requests are mostly Claude Code, which needs tool calls.
     # A rate-limited free model must not end the chain: LiteLLM answers "No fallback
     # model group found" for a group with no entry here. Paid fast-openrouter is the last resort.

@@ -14,7 +14,7 @@
     "all": "node scripts/start-all.js",
     "all:ollama": "node scripts/start-all.js --ollama",
     "full": "npm run validate && npm test && node scripts/start-all.js",
-    "claude": "npx @anthropic-ai/claude-code"
+    "claude": "node scripts/claude.js"
   },
   "keywords": [],
   "author": "",

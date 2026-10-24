@@ -16,6 +16,11 @@ const KINDS = {
 
 const RATE_LIMIT_TEXT = /rate.?limit|quota|too many requests|free-models-per-(day|min)|requests per (day|minute)|tokens per minute|\bTPM\b|\bRPM\b|exceeded/i;
 
+// The connection to the Gateway broke instead of answering: a restart, or a
+// pooled socket the Gateway had already closed.
+const RESET_CODE = /^(ECONNRESET|EPIPE|ECONNABORTED)$/;
+const isReset = (err) => RESET_CODE.test(String(err?.code || ''));
+
 // The Gateway's error body is JSON with the provider's message somewhere inside
 function errorMessage(text) {
     try {
@@ -105,11 +110,15 @@ function guard({ req, res, proxyReq, firstByteMs, idleMs, onFail }) {
 /** Gateway unreachable or the call broke: answer the client if nothing was sent yet. */
 function answerProxyError(err, req, res) {
     const code = err?.code || '';
-    const down = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH/.test(code);
+    const dropped = isReset(err);
+    const refused = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH/.test(code);
+    const down = dropped || refused; // 502: the request never reached a model
     const kind = down ? KINDS.gatewayDown : KINDS.upstream;
-    const message = down
-        ? `the Gateway (LiteLLM) is not answering (${code}); is it running?`
-        : `the Gateway call failed: ${err?.message || code || 'unknown error'}`;
+    const message = dropped
+        ? `the Gateway (LiteLLM) dropped the connection (${code}): it restarted, or closed a connection the harness had pooled`
+        : refused
+            ? `the Gateway (LiteLLM) is not answering (${code}); is it running?`
+            : `the Gateway call failed: ${err?.message || code || 'unknown error'}`;
     if (res && typeof res.writeHead === 'function' && !res.writableEnded) {
         if (!res.headersSent) {
             res.writeHead(down ? 502 : 504, { 'content-type': 'application/json' });
@@ -123,4 +132,4 @@ function answerProxyError(err, req, res) {
     return { kind, message };
 }
 
-module.exports = { KINDS, classify, errorMessage, errorBody, streamError, guard, answerProxyError };
+module.exports = { KINDS, classify, errorMessage, errorBody, streamError, guard, answerProxyError, isReset };

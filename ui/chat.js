@@ -1977,16 +1977,28 @@ const dictation = {
   // Loudness of the microphone, so a pause can end a segment and be sent
   meterStart() {
     this.meterStop();
+    this.quietSince = 0;
+    let analyser = null;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       this.ctx = new Ctx();
       const source = this.ctx.createMediaStreamSource(this.stream);
-      this.analyser = this.ctx.createAnalyser();
-      this.analyser.fftSize = 1024;
-      source.connect(this.analyser);
-    } catch { this.analyser = null; return; }
-    this.quietSince = 0;
-    const buf = new Float32Array(this.analyser.fftSize);
+      analyser = this.ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+    } catch { this.meterStop(); }
+    // Without a loudness reading (no AudioContext), send every few seconds so
+    // dictation still works; there is just no pause detection to end a segment
+    if (!analyser) {
+      this.meter = setInterval(() => {
+        if (!this.media) return;
+        this.spoke = true;
+        if (Date.now() - this.segmentStart > 15000) this.cut();
+      }, 500);
+      return;
+    }
+    this.analyser = analyser;
+    const buf = new Float32Array(analyser.fftSize);
     this.meter = setInterval(() => {
       if (!this.analyser || !this.media) return;
       this.analyser.getFloatTimeDomainData(buf);
@@ -1996,7 +2008,7 @@ const dictation = {
       if (rms > 0.02) { this.spoke = true; this.quietSince = 0; return; }
       if (!this.spoke) return;
       if (!this.quietSince) this.quietSince = Date.now();
-      // a pause after speech ends the segment; so does a quarter minute
+      // a pause after speech ends the segment; so does 25 seconds of it
       if (Date.now() - this.quietSince > 1200 || Date.now() - this.segmentStart > 25000) this.cut();
     }, 100);
   },

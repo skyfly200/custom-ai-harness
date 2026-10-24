@@ -37,6 +37,8 @@ const { requirePassword, viaProxy } = require('./utils/access');
 const { createLogin } = require('./utils/login');
 const { parseAdmins, Users, FileStore } = require('./utils/users');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const path = require('path');
 
 const app = express();
@@ -216,12 +218,25 @@ function recordFailure(req, proxyRes) {
     });
 }
 
+// Sockets to the Gateway. The proxy's own agent keeps free sockets forever,
+// and LiteLLM (uvicorn) closes an idle one after a few seconds: reusing one in
+// that gap is a read ECONNRESET on a request that never reached a model. A
+// short timeout drops them first, and per-request reset retry covers the rest.
+const gatewayAgent = new (GATEWAY_URL.startsWith('https:') ? https : http).Agent({
+    keepAlive: true,
+    keepAliveMsecs: 1000,
+    timeout: 4000, // close an idle socket before the Gateway does
+    maxSockets: 256,
+    maxFreeSockets: 8,
+});
+
 // Everything goes to the Gateway (LiteLLM), which speaks both the OpenAI and
 // the Anthropic Messages formats and applies the fallback chain. The guard
 // fails a request the Gateway leaves hanging, so clients get an error instead.
 const toGateway = createProxyMiddleware({
     target: GATEWAY_URL,
     changeOrigin: true,
+    agent: gatewayAgent,
     on: {
         proxyReq: (proxyReq, req, res) => {
             for (const [name, value] of Object.entries(gatewayAuth)) proxyReq.setHeader(name, value);
@@ -238,9 +253,13 @@ const toGateway = createProxyMiddleware({
                     monitor.recordError(req.harnessEvent, new Error(message), kind);
                 },
             });
-            res.on('close', () => {
-                if (!res.writableFinished && !req.harnessFailed) monitor.recordCancel(req.harnessEvent);
-            });
+            // once per request: the retry below runs this hook again
+            if (!req.harnessCancelHook) {
+                req.harnessCancelHook = true;
+                res.on('close', () => {
+                    if (!res.writableFinished && !req.harnessFailed) monitor.recordCancel(req.harnessEvent);
+                });
+            }
         },
         proxyRes: (proxyRes, req) => {
             req.harnessGuard?.response(proxyRes);
@@ -254,6 +273,13 @@ const toGateway = createProxyMiddleware({
         error: (err, req, res) => {
             req.harnessGuard?.clear();
             if (req.harnessFailed) return; // the guard already answered
+            // A reset before the Gateway said anything is usually a socket it had
+            // already closed: the same request on a fresh one is safe to send.
+            if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) {
+                req.harnessRetried = true;
+                console.warn(`${req.path}: the Gateway reset the connection (${err.code}); retrying once`);
+                return toGateway(req, res, () => {});
+            }
             req.harnessFailed = true;
             const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
             console.warn(`${req.path}: ${message}`);

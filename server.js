@@ -731,6 +731,64 @@ app.post('/ui/api/tts', async (req, res) => {
     }
 });
 
+// Dictation for the chat page through an OpenAI-compatible transcription
+// endpoint (POST {STT_URL}/audio/transcriptions). The browser's own speech
+// service needs no server, but Brave and some Chromium builds ship without one
+// and always fail with "network". STT_URL points this at OpenRouter, Groq,
+// OpenAI, a local Whisper or the Gateway. STT_MODEL is the model to ask for and
+// STT_LANGUAGE the default language; the page can override both per request.
+const STT_URL = (process.env.STT_URL || (process.env.OPENROUTER_API_KEY ? OPENROUTER_URL : '')).replace(/\/+$/, '');
+const STT_OPENROUTER = /openrouter\.ai/.test(STT_URL);
+const STT_MODEL = process.env.STT_MODEL || (STT_OPENROUTER ? 'mistralai/voxtral-mini-transcribe-3-0' : 'whisper-1');
+const STT_LANGUAGE = process.env.STT_LANGUAGE || '';
+const STT_KEY = process.env.STT_API_KEY
+    || (STT_URL.startsWith(GATEWAY_URL) ? GATEWAY_KEY : '')
+    || (STT_OPENROUTER ? process.env.OPENROUTER_API_KEY || '' : '');
+
+app.get('/ui/api/stt', (req, res) => {
+    if (!STT_URL) return res.json({ configured: false });
+    res.json({ configured: true, model: STT_MODEL, language: STT_LANGUAGE, host: new URL(STT_URL).host });
+});
+
+// The page records with MediaRecorder and sends base64 JSON. Upstream it goes
+// as a multipart upload, which is what OpenAI, Groq, local Whisper servers and
+// OpenRouter all accept; 24 MB is OpenAI's cap and OpenRouter's too.
+const STT_FORMATS = { 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' };
+const STT_MAX_BYTES = 24 * 1024 * 1024;
+
+app.post('/ui/api/stt', async (req, res) => {
+    if (!STT_URL) return res.status(404).json({ error: 'No speech server: add OPENROUTER_API_KEY or STT_URL to .env' });
+    if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+    const { audio, format, language, model } = req.body || {};
+    if (typeof audio !== 'string' || !audio) return res.status(400).json({ error: 'audio is required' });
+    const bytes = Buffer.from(audio, 'base64');
+    if (!bytes.length) return res.status(400).json({ error: 'audio is empty' });
+    if (bytes.length > STT_MAX_BYTES) return res.status(413).json({ error: 'audio is longer than 24 MB' });
+    const type = String(format || 'audio/webm').split(';')[0].trim();
+    const ext = STT_FORMATS[type] || 'webm';
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type }), `dictation.${ext}`);
+    form.append('model', typeof model === 'string' && model ? model : STT_MODEL);
+    // transcription servers want an ISO-639-1 code: the page holds "en-US"
+    const lang = ((typeof language === 'string' && language.trim()) || STT_LANGUAGE).split(/[-_]/)[0];
+    if (lang) form.append('language', lang);
+    try {
+        const upstream = await fetch(`${STT_URL}/audio/transcriptions`, {
+            method: 'POST',
+            headers: STT_KEY ? { authorization: `Bearer ${STT_KEY}` } : {},
+            body: form,
+            signal: AbortSignal.timeout(120000),
+        });
+        const body = await upstream.text();
+        if (!upstream.ok) return res.status(502).json({ error: `Speech server answered HTTP ${upstream.status}: ${body.slice(0, 300)}` });
+        let text = body;
+        try { text = JSON.parse(body).text ?? ''; } catch {}
+        res.json({ text: String(text).trim() });
+    } catch (err) {
+        res.status(502).json({ error: `Speech server unreachable: ${err.cause?.code || err.message}` });
+    }
+});
+
 // Tools for the chat page: MCP servers from mcp-servers.json, and read-only
 // tools over a git repo a chat is linked to. The page runs the tool loop: it
 // sends the definitions with each request and calls back here to run a call.

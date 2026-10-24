@@ -110,6 +110,13 @@
         </fieldset>
         <fieldset>
           <legend>Voice</legend>
+          <label title="Auto uses this browser's speech service and falls back to the harness's speech model if the browser has none (Brave does not)">Dictation
+            <select id="sttEngine">
+              <option value="auto">Auto (browser, else server)</option>
+              <option value="browser">This browser</option>
+              <option value="server">Speech model</option>
+            </select>
+          </label>
           <label>Dictation language <input type="text" id="sttLang" placeholder="en-US"></label>
           <label class="check"><input type="checkbox" id="autoSend"> Send on pause</label>
           <label>Read aloud

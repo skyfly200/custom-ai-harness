@@ -141,7 +141,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll'];
+const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttEngine', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['maxTokens', 'temperature']) {
@@ -171,6 +171,7 @@ for (const id of PREF_FIELDS) {
     if (id === 'handsFree') drawHandsFree();
     if (id === 'autoSpeak' && !el.checked) speech.stop();
     if (id === 'ttsEngine') { speech.stop(); drawEngine(); }
+    if (id === 'sttEngine') { drawEngine(); if (dictation.want) { dictation.stop(); dictation.start(); } }
     if (id === 'serverModel') { speech.stop(); drawServerVoices(); prefs.serverVoice = $('serverVoice').value; store.set(PREF_KEY, prefs); drawEngine(); }
     drawHint();
   });
@@ -1794,9 +1795,10 @@ function drawEngine() {
   document.querySelector('[data-engine=browser]').hidden = server;
   const model = server && serverTTS.info.models.find(m => m.id === $('serverModel').value);
   $('voiceNote').textContent = [
-    !SR && 'Dictation needs Chrome or Edge.',
-    SR && !window.isSecureContext && 'The microphone works only on http://localhost or https.',
-    SR && 'Chrome and Edge send dictated audio to their speech service.',
+    !SR && !serverSTT.ok && 'Dictation needs Chrome or Edge, or a speech model (add OPENROUTER_API_KEY or STT_URL to .env).',
+    !window.isSecureContext && 'The microphone works only on http://localhost or https.',
+    serverSTT.ok ? 'Dictation goes to the speech model on the harness, not to the browser’s speech service.'
+      : SR && 'The browser answers dictation with its own speech service; Brave has none.',
     server ? `Replies are spoken by ${model?.name || $('serverModel').value} via ${serverTTS.info.host}${model?.free ? ' (free)' : ' (paid)'}.`
       : !browserTTS.ok ? 'This browser cannot read aloud.'
       : 'For browser voices, Edge’s ★ Natural voices sound best.',
@@ -1809,23 +1811,80 @@ $('testVoice').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Dictation (SpeechRecognition). Chrome and Edge have it; Firefox doesn't.
+// Dictation. Two engines: the browser's SpeechRecognition (Chrome and Edge
+// have it, and it is free and instant) or the harness's speech model
+// (/ui/api/stt), which Brave and other Chromium builds need because they ship
+// without a speech service and answer every attempt with "network".
 // ---------------------------------------------------------------------------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const MR = window.MediaRecorder;
+// set when this browser's own recognition fails for want of a speech service
+let browserBroken = false;
+
+// Harness STT server: GET /ui/api/stt says whether one is configured
+const serverSTT = {
+  info: null,
+  get ok() { return !!this.info?.configured; },
+};
+
+async function loadServerSTT() {
+  try {
+    serverSTT.info = await (await fetch('api/stt')).json();
+  } catch {
+    serverSTT.info = null;
+  }
+  drawEngine();
+  dictation.draw();
+}
+
 const dictation = {
-  rec: null,
+  rec: null,         // the browser's recogniser
   want: false,       // the user turned the mic on
   paused: false,     // paused while a reply is read aloud
   base: '',          // text in the box before this stretch of speech
   silence: null,
+  media: null,       // the recorder, for the server engine
+  starting: false,   // waiting on the microphone permission
+  stream: null,
+  chunks: [],
+  ctx: null,
+  analyser: null,
+  meter: null,
+  spoke: false,      // the segment has something in it worth sending
+  quietSince: 0,
+  discard: false,    // the next stop is a pause or a cancel: drop the audio
+  segmentStart: 0,
+
+  // Which engine to use now: the browser's own unless it has none, or the
+  // user picked the server
+  get engine() {
+    const choice = $('sttEngine').value;
+    if (choice === 'browser') return SR ? 'browser' : 'none';
+    if (choice === 'server') return serverSTT.ok ? 'server' : 'none';
+    const browser = SR && !browserBroken;
+    if (browser) return 'browser';
+    return serverSTT.ok ? 'server' : 'none';
+  },
+  get ok() { return this.engine !== 'none'; },
 
   start() {
-    if (!SR) return toast('Dictation needs Chrome or Edge.');
+    if (!this.ok) {
+      return toast(serverSTT.info === null || serverSTT.info?.configured === false
+        ? 'Dictation needs Chrome or Edge, or a speech model (OPENROUTER_API_KEY or STT_URL in .env).'
+        : 'Dictation needs a microphone.');
+    }
     speech.stop();
     this.want = true; this.paused = false;
-    this.listen();
+    this.begin();
   },
 
+  // Pick up after a pause, a cut segment or a broken browser recogniser
+  begin() {
+    if (!this.want || this.paused) return;
+    if (this.engine === 'server') this.listenServer(); else this.listen();
+  },
+
+  // --- the browser's own recognition -------------------------------------
   listen() {
     if (this.rec) return;
     const rec = new SR();
@@ -1857,25 +1916,160 @@ const dictation = {
     };
     rec.onerror = (e) => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
+      // No speech service in this browser (Brave, some Chromium builds): the
+      // harness's speech model does the same job, so carry on with that
+      if ((e.error === 'network' || e.error === 'service-not-allowed') && !browserBroken && serverSTT.ok) {
+        browserBroken = true;
+        this.rec = null;
+        toast('This browser has no speech service. Dictating through the harness instead.');
+        this.draw();
+        this.begin();
+        return;
+      }
       this.want = false;
+      this.rec = null;
       toast(e.error === 'not-allowed' || e.error === 'service-not-allowed'
         ? 'The microphone is blocked. Allow it for this page (it needs http://localhost or https).'
-        : `Dictation stopped: ${e.error}`);
+        : e.error === 'network'
+          ? 'This browser has no speech service. Pick “Speech model” under Options → Voice, or set OPENROUTER_API_KEY or STT_URL in .env.'
+          : `Dictation stopped: ${e.error}`);
+      this.draw();
     };
     rec.onend = () => {
       this.rec = null;
       // browsers end recognition after a pause; keep going while the mic is on
-      if (this.want && !this.paused) setTimeout(() => this.want && !this.paused && this.listen(), 150);
+      if (this.want && !this.paused) setTimeout(() => this.begin(), 150);
       this.draw();
     };
     try { rec.start(); this.rec = rec; } catch (err) { toast(`Dictation: ${err.message}`); this.want = false; }
     this.draw();
   },
 
+  // --- the harness's speech model ----------------------------------------
+  async listenServer() {
+    if (this.media || this.starting) return;
+    if (!MR || !navigator.mediaDevices?.getUserMedia) { this.want = false; this.draw(); return toast('This browser cannot record audio.'); }
+    this.starting = true;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (err) {
+      this.starting = false; this.want = false; this.draw();
+      return toast(err.name === 'NotAllowedError'
+        ? 'The microphone is blocked. Allow it for this page (it needs http://localhost or https).'
+        : `Microphone: ${err.message}`);
+    }
+    this.starting = false;
+    // the mic was turned off or paused while the permission prompt was up
+    if (!this.want || this.paused) { for (const t of stream.getTracks()) t.stop(); return; }
+    this.stream = stream;
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+      .find((t) => !MR.isTypeSupported || MR.isTypeSupported(t)) || '';
+    const rec = new MR(stream, type ? { mimeType: type } : undefined);
+    this.media = rec; this.chunks = []; this.spoke = false; this.segmentStart = Date.now();
+    rec.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data); };
+    rec.onstop = () => this.finishSegment(rec, type);
+    try { rec.start(1000); } catch (err) { this.media = null; for (const t of stream.getTracks()) t.stop(); toast(`Dictation: ${err.message}`); this.want = false; }
+    this.meterStart();
+    this.draw();
+  },
+
+  // Loudness of the microphone, so a pause can end a segment and be sent
+  meterStart() {
+    this.meterStop();
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new Ctx();
+      const source = this.ctx.createMediaStreamSource(this.stream);
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 1024;
+      source.connect(this.analyser);
+    } catch { this.analyser = null; return; }
+    this.quietSince = 0;
+    const buf = new Float32Array(this.analyser.fftSize);
+    this.meter = setInterval(() => {
+      if (!this.analyser || !this.media) return;
+      this.analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += v * v;
+      const rms = Math.sqrt(sum / buf.length);
+      if (rms > 0.02) { this.spoke = true; this.quietSince = 0; return; }
+      if (!this.spoke) return;
+      if (!this.quietSince) this.quietSince = Date.now();
+      // a pause after speech ends the segment; so does a quarter minute
+      if (Date.now() - this.quietSince > 1200 || Date.now() - this.segmentStart > 25000) this.cut();
+    }, 100);
+  },
+
+  meterStop() {
+    clearInterval(this.meter);
+    this.meter = null;
+    this.analyser = null;
+    try { this.ctx?.close(); } catch {}
+    this.ctx = null;
+  },
+
+  // End this stretch of recording; the rest arrives in onstop
+  cut() {
+    if (!this.media) return;
+    if (!this.spoke) { this.segmentStart = Date.now(); return; }
+    this.meterStop();
+    try { this.media.stop(); } catch {}
+  },
+
+  async finishSegment(rec, type) {
+    const chunks = this.chunks;
+    const spoke = this.spoke;
+    const discard = this.discard;
+    this.chunks = []; this.spoke = false; this.discard = false;
+    this.media = null;
+    this.meterStop();
+    const stream = this.stream;
+    this.stream = null;
+    for (const t of stream?.getTracks() || []) t.stop();
+    this.draw();
+    const blob = new Blob(chunks, { type: rec.mimeType || type || 'audio/webm' });
+    if (spoke && !discard && blob.size) await this.transcribe(blob);
+    if (this.want && !this.paused) setTimeout(() => this.begin(), 100);
+  },
+
+  async transcribe(blob) {
+    let text = '';
+    try {
+      const audio = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+        reader.onerror = () => reject(reader.error || new Error('could not read the recording'));
+        reader.readAsDataURL(blob);
+      });
+      const res = await fetch('api/stt', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ audio, format: blob.type, language: $('sttLang').value.trim() }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+      text = String(out.text || '').trim();
+    } catch (err) {
+      toast(`Dictation: ${err.message}`);
+    }
+    if (!text) return;
+    const box = $('input');
+    box.value = (box.value ? box.value.replace(/\s*$/, ' ') : '') + text;
+    autoGrow();
+    if ($('autoSend').checked && !running.has(chat.id)) {
+      const handsFree = $('handsFree').checked;
+      box.value = '';
+      submit();
+      if (handsFree) { this.want = true; this.paused = true; this.draw(); }
+    }
+  },
+
   stop() {
     this.want = false; this.paused = false;
     clearTimeout(this.silence);
     this.rec?.stop();
+    this.media?.stop(); // what was said so far is still transcribed
     this.draw();
   },
 
@@ -1885,24 +2079,29 @@ const dictation = {
     this.paused = true;
     clearTimeout(this.silence);
     this.rec?.abort();
+    if (this.media) { this.discard = true; this.media.stop(); }
     this.draw();
   },
 
   resume() {
-    if (!SR || !$('handsFree').checked) return;
+    if (!this.ok || !$('handsFree').checked) return;
     this.want = true; this.paused = false;
-    this.listen();
+    this.begin();
   },
 
   draw() {
+    const engine = this.engine;
     const on = this.want && !this.paused;
     $('mic').classList.toggle('listening', on);
-    $('mic').title = !SR ? 'Dictation needs Chrome or Edge' : on ? 'Stop dictating (Ctrl+M)' : 'Dictate (Ctrl+M)';
+    $('mic').disabled = engine === 'none';
+    $('mic').title = engine === 'none' ? 'Dictation needs Chrome, Edge, or a speech model'
+      : on ? 'Stop dictating (Ctrl+M)'
+      : engine === 'server' ? 'Dictate through the harness’s speech model (Ctrl+M)'
+      : 'Dictate (Ctrl+M)';
     drawHandsFree();
   },
 };
 $('mic').addEventListener('click', () => (dictation.want && !dictation.paused ? dictation.stop() : dictation.start()));
-if (!SR) $('mic').disabled = true;
 
 // The composer's hands-free button is the Options checkbox plus the mic:
 // turning it on starts listening now, turning it off stops listening and reading
@@ -1919,16 +2118,17 @@ function drawHandsFree() {
   btn.classList.toggle('on', on);
   btn.classList.toggle('live', on && dictation.want);
   btn.setAttribute('aria-pressed', String(on));
-  btn.title = !SR ? 'Hands-free needs Chrome or Edge'
+  btn.disabled = !dictation.ok;
+  btn.title = !dictation.ok ? 'Hands-free needs Chrome, Edge, or a speech model'
     : on && !dictation.want ? 'Hands-free is on but not listening. Click to start listening'
     : on ? 'Hands-free is on. Click to stop listening and reading'
     : 'Hands-free: talk, it sends when you pause, reads the reply, then listens again';
 }
 // on but idle (after a reload, or the mic was stopped): a click starts listening
 $('handsFreeBtn').addEventListener('click', () => setHandsFree(!$('handsFree').checked || !dictation.want));
-if (!SR) $('handsFreeBtn').disabled = true;
 drawHandsFree();
 loadServerTTS();
+loadServerSTT();
 
 // ---------------------------------------------------------------------------
 // Live activity: the Interceptor's feed of every request

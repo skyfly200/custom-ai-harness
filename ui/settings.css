@@ -1,0 +1,71 @@
+/* Settings page only (after style.css, bright.css, calm.css): settings are
+   grouped into titled panels, each with a save bar that stays in reach while
+   the panel is on screen, a clear mark for unsaved changes, and toggle
+   switches for the on/off settings. */
+
+main.settings { max-width: 1040px; }
+.tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#setFilter { width: 210px; border-radius: 999px; padding: 5px 12px; }
+@media (max-width: 620px) { .tools { width: 100%; } #setFilter { width: 100%; } }
+
+.notice { margin: 14px 0 0; font-size: 13px; }
+.notice a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.notice a:hover { text-decoration: underline; }
+
+/* ---- panels ---------------------------------------------------------------- */
+.panel { margin-top: 14px; transition: border-color .18s, box-shadow .18s; }
+.panel.dirty { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.panel-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.panel-head h2 { margin: 0; }
+.panel-note { flex: 1 1 260px; min-width: 0; font-size: 12px; }
+.panel-note code { color: var(--text); }
+
+.chip { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--border); color: var(--muted); }
+.chip[hidden] { display: none; }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, transparent); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+
+.down { margin: 0 0 10px; font-size: 12.5px; color: var(--warn); }
+.down:empty { display: none; }
+
+/* ---- groups of fields ------------------------------------------------------ */
+.form.grouped { display: flex; flex-direction: column; gap: 18px; }
+.group { min-width: 0; }
+.group-title { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; font-size: 11px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.group-title::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
+.group-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px 16px; }
+.group-grid.switches { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 12px; }
+.filtered-out { display: none !important; }
+
+/* ---- fields ---------------------------------------------------------------- */
+.form .field > span { font-size: 12.5px; }
+.field:focus-within > span { color: var(--accent); }
+.form .field > small { line-height: 1.35; }
+.form input[type=text], .form input[type=number], .form select { border-radius: 8px; }
+.form input[type=number] { font-variant-numeric: tabular-nums; }
+.form input::placeholder { color: var(--muted); opacity: .75; }
+
+/* on/off settings read as switches in a soft card */
+.form .field.check { flex-direction: row; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 10px;
+  border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 55%, transparent); transition: border-color .15s, background-color .15s; }
+.form .field.check:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.form .field.check:focus-within { border-color: var(--accent); }
+.form .field.check input[type=checkbox] { appearance: none; -webkit-appearance: none; flex: none; width: 34px; height: 20px;
+  margin: 0; border-radius: 999px; border: 1px solid var(--border); cursor: pointer; position: relative;
+  background: color-mix(in srgb, var(--muted) 30%, transparent); transition: background-color .18s, border-color .18s; }
+.form .field.check input[type=checkbox]::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .35); transition: transform .18s; }
+.form .field.check input[type=checkbox]:checked { background: linear-gradient(120deg, var(--glow-c), var(--glow-b)); border-color: transparent; }
+.form .field.check input[type=checkbox]:checked::after { transform: translateX(14px); }
+.form .field.check input[type=checkbox]:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+.form .field.check:has(input:disabled) { opacity: .55; }
+.form .field.check > span { font-weight: 600; }
+
+/* ---- save bars ------------------------------------------------------------- */
+.actions.bar { position: sticky; bottom: 0; z-index: 6; margin: 16px -12px -12px; padding: 10px 12px;
+  border-top: 1px solid var(--border); border-radius: 0 0 12px 12px;
+  background: var(--glass-strong); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.actions.bar .note { margin-left: 2px; }

@@ -274,12 +274,8 @@ const toGateway = createProxyMiddleware({
             req.harnessGuard?.clear();
             if (req.harnessFailed) return; // the guard already answered
             // A reset before the Gateway said anything is usually a socket it had
-            // already closed: the same request on a fresh one is safe to send.
-            if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) {
-                req.harnessRetried = true;
-                console.warn(`${req.path}: the Gateway reset the connection (${err.code}); retrying once`);
-                return toGateway(req, res, () => {});
-            }
+            // already closed: proxyErrors sends the same request again on a fresh one.
+            if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) return;
             req.harnessFailed = true;
             const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
             console.warn(`${req.path}: ${message}`);
@@ -973,6 +969,23 @@ app.post('/v1/messages', async (req, res, next) => {
 
 // Anything else (token counting, model listing) passes through untouched
 app.use(toGateway);
+
+// Errors the proxy hands on. It emits 'error' and then calls next with the same
+// error, so this runs after on.error, which leaves a reset unanswered: a
+// connection the Gateway dropped before saying anything is retried once, on a
+// fresh socket, and anything else is answered here.
+app.use((err, req, res, next) => {
+    if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) {
+        req.harnessRetried = true;
+        console.warn(`${req.path}: the Gateway reset the connection (${err.code}); retrying once`);
+        return toGateway(req, res, next);
+    }
+    if (res.headersSent || res.writableEnded) return;
+    req.harnessFailed = true;
+    const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
+    console.warn(`${req.path}: ${message}`);
+    monitor.recordError(req.harnessEvent, new Error(message), kind);
+});
 
 if (require.main === module) {
     app.listen(3000, () => console.log('Harness interceptor active on port 3000'));

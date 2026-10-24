@@ -8,10 +8,14 @@ const os = require('node:os');
 const path = require('node:path');
 
 let mode = 'ok';
+let calls = 0;         // Gateway calls since a test reset the counter
 let upstreamClosed = false;
 const gateway = http.createServer((req, res) => {
     upstreamClosed = false;
     res.on('close', () => { upstreamClosed = true; });
+    calls++;
+    // A Gateway that goes away mid-call: the socket dies before any headers
+    if (mode === 'reset' || (mode === 'reset-once' && calls === 1)) return req.socket.destroy();
     if (mode === 'hang') return;
     if (mode === 'stall') {
         res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -89,8 +93,28 @@ test('a down Gateway gets an error, not a hang', async () => {
     await new Promise((r) => gateway.listen(Number(new URL(saved).port), '127.0.0.1', r));
 });
 
+test('a connection the Gateway resets is retried once, and the retry answers', async () => {
+    mode = 'reset-once';
+    calls = 0;
+    const res = await send('/v1/chat/completions', chat);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).choices[0].message.content, 'hi');
+    assert.equal(calls, 2, 'the first call was dropped, the retry answered');
+});
+
+test('a Gateway that keeps resetting says so instead of "read ECONNRESET"', async () => {
+    mode = 'reset';
+    calls = 0;
+    const res = await send('/v1/chat/completions', chat);
+    assert.equal(res.status, 502);
+    assert.match((await res.json()).error.message, /dropped the connection \(ECONNRESET\)/);
+    assert.equal(latest().errorKind, 'gateway down');
+    assert.equal(calls, 2, 'one attempt, one retry, then the error');
+});
+
 test('a Gateway that never answers times out with an Anthropic-shaped error', async () => {
     mode = 'hang';
+    calls = 0;
     const res = await send('/v1/messages', messages);
     assert.equal(res.status, 504);
     const body = await res.json();

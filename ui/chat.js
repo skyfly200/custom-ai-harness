@@ -515,7 +515,7 @@ function traceHtml(m) {
   const steps = [];
   const now = Date.now();
   const live = m.streaming;
-  const step = (cls, text, t) => steps.push(`<li class="${cls}"><span class="st">${cls === 'ok' ? '✓' : cls === 'bad' ? '✕' : ''}</span><span>${text}</span><span class="t">${t ?? ''}</span></li>`);
+  const step = (cls, text, t) => steps.push({ cls, text, t });
 
   step('ok', 'Sent to the Interceptor', '');
   if (tr.routed) {
@@ -543,7 +543,11 @@ function traceHtml(m) {
     step('now', 'Waiting for the first token…', fmtMs(now - tr.start));
   }
   if (tr.error) step('bad', esc(tr.error), '');
-  return `<ul class="trace">${steps.join('')}</ul>`;
+  const row = ({ cls, text, t }) => `<li class="${cls}"><span class="st">${cls === 'ok' ? '✓' : cls === 'bad' ? '✕' : ''}</span><span>${text}</span><span class="t">${t ?? ''}</span></li>`;
+  const current = steps[steps.length - 1];
+  const history = steps.slice(0, -1);
+  return `<div class="trace-progress">${current ? `<div class="trace-current ${current.cls}"><span class="st">${current.cls === 'ok' ? '✓' : current.cls === 'bad' ? '✕' : ''}</span><span class="label">${current.text}</span><span class="t">${current.t ?? ''}</span></div>` : ''}
+    ${history.length ? `<details class="trace-history" data-k="trace-history"><summary>Earlier steps (${history.length})</summary><ul class="trace">${history.map(row).join('')}</ul></details>` : ''}</div>`;
 }
 
 function metaHtml(m) {

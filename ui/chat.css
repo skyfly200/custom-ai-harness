@@ -166,6 +166,8 @@ input[type=range] { width: 100%; }
 .tool-calls { border: 1px solid var(--border); border-radius: 7px; background: var(--bg); font-size: 12.5px; margin: 4px 0 10px; }
 .tool-calls > summary { display: flex; gap: 8px; align-items: baseline; padding: 5px 9px; cursor: pointer; list-style: none; min-width: 0; }
 .tool-calls > summary::-webkit-details-marker { display: none; }
+.tool-calls > summary::after, .tool-call summary::after { content: '▸'; color: var(--muted); margin-left: auto; transition: transform .15s; }
+.tool-calls[open] > summary::after, .tool-call[open] summary::after { transform: rotate(90deg); }
 .tool-calls > summary .st { width: 14px; flex: none; text-align: center; color: var(--ok); }
 .tool-calls.bad > summary .st { color: var(--bad); }
 .tool-calls.now > summary .st::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite; }

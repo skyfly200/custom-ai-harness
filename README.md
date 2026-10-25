@@ -729,6 +729,7 @@ How it keeps your work safe:
 - **Only chosen folders.** Repos must be inside `RUNNER_ROOTS` (default the `repos` folder next to the harness; set it in `.env`, separating folders with `;` on Windows). Files the agent reads and writes must stay inside its workspace, and `.git` is off limits.
 - **No keys.** Commands the agent runs get a trimmed environment, so they can't print the harness's API keys.
 - **Limits.** Each run stops after its max steps (40) or max minutes (30), and at most `RUNNER_MAX_RUNS` (2) run at once. **Stop** ends a run, even in the middle of a command.
+- **Retry and auto debug.** A finished run's page has **Retry run** (the same task again from the same commit, on a fresh `harness/<id>` branch) and, when it failed, gave up or ran out of steps, **Auto debug**: the new agent is told what the earlier attempt got wrong (the error, the failing test output, the last tools it ran and what they returned) and is asked to work out the real cause instead of repeating it. Tick **Auto debug a failed run** on the form (or set `RUNNER_AUTO_DEBUG=1`) and the runner does that by itself, at most 2 generations deep, so a failure it cannot fix stops and waits for you. The earlier run's branch is not deleted, so you can compare the two.
 
 To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Runs** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Type or paste the repo's path, pick a recent one, or press **Browse…** to walk through the allowed folders (repos are marked ◆). The agent runs the project's tests itself when the task calls for it.
 
@@ -764,7 +765,7 @@ The swarm's page lists its workers; click one to watch it or answer its approval
 Notes:
 
 - The runner is its own process (`node runner/server.js`, port 3100, only reachable from this machine). The Interceptor passes the Runs page's requests to it after its own login check, and `npm run all` sets a shared `RUNNER_TOKEN` so nothing else on the machine can drive it. If you start the parts yourself, set the same `RUNNER_TOKEN` in `.env` for both.
-- Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed.
+- Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed. The record is written to a temporary file and renamed into place; where Windows refuses the rename for a moment (a virus scanner or the indexer holding `run.json` open, `EPERM`) it retries, then writes in place, so a run is never lost to that.
 - It isn't in the Docker setup yet. Cloud sandboxes can replace the local worktree later.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
 

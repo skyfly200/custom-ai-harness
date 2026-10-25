@@ -16,16 +16,64 @@ const swarm = require('./swarm');
 const MAX_EVENTS = 2000;
 const EVENT_TEXT = 3000;
 const APPROVAL_WAIT_MS = 15 * 60 * 1000;
+const MAX_AUTO_DEBUG = 2;     // debug runs of a debug run, so a hopeless failure can't loop
+const MAX_DEBUG_DEPTH = 5;    // the deepest chain of retries a person may start by hand
+const DIAGNOSIS_CHARS = 6000; // how much of the failure a retry is told about
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
+const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const short = (v, n = EVENT_TEXT) => (typeof v === 'string' && v.length > n ? `${v.slice(0, n)}… [${v.length - n} more characters]` : v);
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * Write a file the way a reader never sees it half-written, but survive Windows:
+ * there a virus scanner or the search indexer can hold run.json open for a moment,
+ * and the rename fails with EPERM even though the file is ours. Try the rename a
+ * few times, then write in place.
+ */
+function writeAtomic(file, text) {
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, text);
+    for (let attempt = 0; ; attempt++) {
+        try { fs.renameSync(tmp, file); return; } catch (err) {
+            if (!LOCKED.has(err.code) || attempt >= 3) {
+                try { fs.rmSync(tmp, { force: true }); } catch { /* gone */ }
+                fs.writeFileSync(file, text);
+                return;
+            }
+            pause(20 * (attempt + 1));
+        }
+    }
+}
+
+/** What went wrong in a finished run, as a note to the next attempt. */
+function diagnosis(run) {
+    const parts = [`This is another attempt at the task above. The earlier attempt (${run.id}, branch ${run.branch}) ended as ${run.status}.`];
+    if (run.error) parts.push(`It stopped with this error:\n${run.error}`);
+    if (run.result?.summary) parts.push(`What it reported:\n${short(run.result.summary, 1500)}`);
+    if (run.result?.tests && !run.result.tests.passed) {
+        parts.push(`Its test command failed (${run.result.tests.command}${run.result.tests.timedOut ? ', timed out' : `, exit code ${run.result.tests.code}`}):\n${short(run.result.tests.output || '', 2000)}`);
+    }
+    const line = (e) => {
+        if (e.type === 'tool') return `- used ${e.name} ${e.args?.command ?? e.args?.path ?? ''}`.trim();
+        if (e.type === 'result') return `  → ${String(e.text || '').split('\n')[0].slice(0, 200)}`;
+        if (e.type === 'note') return `- ${e.text}`;
+        if (e.type === 'stage') return `- ${e.text}`;
+        return '';
+    };
+    const tail = run.events.slice(-40).map(line).filter(Boolean).join('\n');
+    if (tail) parts.push(`The last things it did:\n${tail}`);
+    parts.push('Work out from the above and from the code what actually went wrong, then finish the task. Do not repeat an approach that already failed; if the failure was environmental (a missing tool, a timeout, a file held open), say so and do the step again differently.');
+    const text = parts.join('\n\n');
+    return text.length > DIAGNOSIS_CHARS ? `${text.slice(0, DIAGNOSIS_CHARS)}\n… [cut]` : text;
+}
 
 class RunManager {
     /**
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000 }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, autoDebug = false }) {
         this.pollMs = pollMs;
         this.dir = dir;
         this.roots = roots.map((r) => { try { return fs.realpathSync(r); } catch { return path.resolve(r); } });
@@ -33,6 +81,7 @@ class RunManager {
         this.password = password;
         this.maxRuns = maxRuns;
         this.retryDelayMs = retryDelayMs;
+        this.autoDebugDefault = Boolean(autoDebug); // for new runs (RUNNER_AUTO_DEBUG)
         this.runs = new Map();      // id -> record
         this.live = new Map();      // id -> { sandbox, stop, resolve }
         this.queue = [];
@@ -59,8 +108,7 @@ class RunManager {
     save(run) {
         const file = path.join(this.dir, run.id, 'run.json');
         fs.mkdirSync(path.dirname(file), { recursive: true });
-        fs.writeFileSync(`${file}.tmp`, JSON.stringify(run));
-        fs.renameSync(`${file}.tmp`, file);
+        writeAtomic(file, JSON.stringify(run));
     }
 
     summary(run) {
@@ -132,6 +180,8 @@ class RunManager {
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             maxSteps: num(cfg.maxSteps, 1, 200, 40), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
+            autoDebug: num(cfg.autoDebug, 0, 1, this.autoDebugDefault ? 1 : 0) === 1,
+            debugOf: cfg.debugOf ? String(cfg.debugOf) : null, debugDepth: num(cfg.debugDepth, 0, 9, 0), debugRun: null,
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
             steps: 0, tokens: { in: 0, out: 0 }, pending: null, events: [], result: null, error: null,
         };
@@ -271,7 +321,34 @@ class RunManager {
             run.ended = new Date().toISOString();
             this.save(run);
             this.live.delete(run.id);
+            this.startAutoDebug(run);
             this.pump();
+        }
+    }
+
+    /** What the run being retried or debugged did and got wrong, for its successor. */
+    brief(id) {
+        const from = this.runs.get(id);
+        return from ? diagnosis(from) : '';
+    }
+
+    /**
+     * With auto debug on, a run that failed or gave up is followed by a debug run
+     * that is told what went wrong, and so on for at most MAX_AUTO_DEBUG
+     * generations, so a failure that cannot be fixed from here stops on its own.
+     */
+    startAutoDebug(run) {
+        if (!run.autoDebug || run.debugRun || run.parent || run.kind === 'swarm') return;
+        if (!['failed', 'incomplete'].includes(run.status)) return;
+        if (run.debugDepth >= MAX_AUTO_DEBUG) {
+            this.event(run, { type: 'note', text: `Auto debug has tried ${MAX_AUTO_DEBUG} times already; stopping here for a person to look.` });
+            return;
+        }
+        try {
+            const made = this.retry(run.id, { debug: true });
+            this.event(run, { type: 'note', text: `Auto debug started ${made.id}, which is told what went wrong here.` });
+        } catch (err) {
+            this.event(run, { type: 'note', text: `Auto debug could not start: ${err.message}` });
         }
     }
 
@@ -284,6 +361,9 @@ class RunManager {
     async runStages({ run, live, sandbox, workflow, context, deadline, nextN }) {
         const notes = [];
         const retries = {};
+        // a retry or a debug run is told what the attempt before it got wrong
+        const brief = run.debugOf && !run.briefGiven ? this.brief(run.debugOf) : '';
+        if (brief) run.briefGiven = true;
         let outcome = { status: 'finished', summary: '' };
         for (let i = 0; i < workflow.stages.length; i++) {
             const stage = workflow.stages[i];
@@ -300,7 +380,7 @@ class RunManager {
             outcome = await runAgent({
                 run: { goal: run.goal, maxSteps: Math.min(stage.maxSteps, run.maxSteps), deadline, stopped: () => live.stopped },
                 tools, system: stageSystem(stage), emit: (e) => this.event(run, { ...e, stage: stage.id }),
-                firstContext: `${context}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
+                firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
                 chat: (messages, defs) => this.chat(stageRun, messages, defs, nextN()),
             });
             notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
@@ -320,6 +400,38 @@ class RunManager {
         run.stage = null;
         if (workflow.stages.length > 1) outcome.summary = notes.map((n) => `${n.role}: ${n.summary}`).join('\n\n');
         return outcome;
+    }
+
+    /**
+     * Start the same task again, on a fresh branch from the same start, told what
+     * went wrong last time. `from` is the id of the run to retry (or to debug).
+     */
+    retry(id, { debug = false } = {}) {
+        const from = this.runs.get(id);
+        if (!from) throw new Error('no such run');
+        if (from.parent) throw new Error('this is one part of a swarm; retry the swarm instead');
+        if (['queued', 'running', 'waiting'].includes(from.status)) throw new Error('stop the run first');
+        if (from.kind === 'swarm' && !debug) throw new Error('a swarm cannot be retried as it is; use Debug');
+        if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
+        const cfg = {
+            goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
+            model: from.model, effort: from.effort, test: from.test, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
+            // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
+            ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
+        };
+        if (cfg.debugDepth > MAX_DEBUG_DEPTH) throw new Error(`this has already been retried ${cfg.debugDepth - 1} times`);
+        const made = this.createDebug(cfg, from, debug);
+        return made;
+    }
+
+    /** create() plus the record of which run it is retrying. */
+    createDebug(cfg, from, debug) {
+        const summary = this.create(cfg);
+        const run = this.runs.get(summary.id);
+        from.debugRun = run.id;
+        this.save(from);
+        this.event(run, { type: 'note', text: debug ? `Debugging ${from.id} (which ended as ${from.status}).` : `Retry of ${from.id}.` });
+        return summary;
     }
 
     approve(id, allow) {

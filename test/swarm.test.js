@@ -50,7 +50,8 @@ let manager, repo;
 test.before(async () => {
     repo = path.join(dir, 'repos', 'demo');
     fs.mkdirSync(repo, { recursive: true });
-    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'init', '-q');
+    git(repo, 'checkout', '-q', '-b', 'main');
     git(repo, 'config', 'user.email', 't@example.com');
     git(repo, 'config', 'user.name', 'T');
     fs.writeFileSync(path.join(repo, 'a.js'), 'exports.a = 1;\n');

@@ -26,7 +26,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function makeRepo() {
     fs.mkdirSync(repo, { recursive: true });
-    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'init', '-q');
+    git(repo, 'checkout', '-q', '-b', 'main'); // -b for init needs git 2.28; this works on older ones too
     git(repo, 'config', 'user.email', 't@example.com');
     git(repo, 'config', 'user.name', 'T');
     fs.writeFileSync(path.join(repo, 'app.js'), 'module.exports = (a, b) => a - b; // add\n');
@@ -63,7 +64,7 @@ test.before(async () => {
 test.after(() => fakeHarness.close());
 
 async function settle(id, states = ['done', 'failed', 'stopped', 'incomplete']) {
-    for (let i = 0; i < 400; i++) {
+    for (let i = 0; i < 1200; i++) {
         const run = manager.get(id);
         if (states.includes(run.status)) return run;
         await sleep(25);
@@ -130,11 +131,13 @@ test('the guard refuses dangerous commands and asks a person about risky ones', 
 });
 
 test('an approved command runs', async () => {
-    script = [{ calls: [['run_command', { command: 'rm -rf nothing-here' }]] }, { calls: [['finish', { summary: 'ok' }]] }];
+    // -r on its own (no -f): the command means the same thing in PowerShell as in a POSIX shell
+    script = [{ calls: [['run_command', { command: 'mkdir -p nothing-here; rm -r nothing-here' }]] }, { calls: [['finish', { summary: 'ok' }]] }];
     const { id } = start();
     for (let i = 0; i < 200 && manager.get(id).status !== 'waiting'; i++) await sleep(25);
     manager.approve(id, true);
     const run = await settle(id);
+    // -r on its own (no -f): the command means the same thing in PowerShell as in a POSIX shell
     assert.match(run.events.find((e) => e.type === 'result').text, /exit code 0/);
     assert.throws(() => manager.approve(id, true), /nothing is waiting/);
 });
@@ -186,6 +189,84 @@ test('a run ends as incomplete when it uses all its steps, and retries a busy mo
     const bad = await settle(start().id);
     assert.equal(bad.status, 'failed');
     assert.match(bad.error, /HTTP 400/);
+});
+
+test('a run that failed can be retried, and a debug run is told what went wrong', async () => {
+    script = [400];
+    const bad = await settle(start().id);
+    assert.equal(bad.status, 'failed');
+    // a retry is the same task on a fresh branch from the same start, with no excuses handed to it
+    script = [{ calls: [['finish', { summary: 'second try worked' }]] }];
+    const again = await settle(manager.retry(bad.id).id);
+    assert.equal(again.status, 'done');
+    assert.equal(again.goal, bad.goal);
+    assert.equal(again.workflow, bad.workflow);
+    assert.notEqual(again.branch, bad.branch);
+    assert.equal(again.debugOf, null);
+    assert.equal(manager.get(bad.id).debugRun, again.id);
+    // a debug run gets the error, the failed tests and the last things the run did
+    script = [400];
+    const broke = await settle(start({ test: 'node check.js' }).id);
+    script = [{ calls: [['finish', { summary: 'fixed' }]] }];
+    modelCalls = [];
+    const debug = await settle(manager.retry(broke.id, { debug: true }).id);
+    assert.equal(debug.debugOf, broke.id);
+    assert.equal(debug.debugDepth, 1);
+    const first = modelCalls[0].body.messages[1].content;
+    assert.match(first, /another attempt at the task above/);
+    assert.match(first, /HTTP 400/);
+    // the stage after it gets the reason too, without the brief being repeated
+    assert.equal(debug.events.filter((e) => e.type === 'note' && /Debugging r/.test(e.text)).length, 1);
+    // nothing to debug in a run that worked, and a run still going has to be stopped first
+    assert.throws(() => manager.retry(debug.id, { debug: true }), /did not fail/);
+    script = [{ calls: [['finish', { summary: 'done' }]] }];
+    const busy = start({ maxSteps: 20 }).id;
+    assert.throws(() => manager.retry(busy), /stop the run first/);
+    await settle(busy);
+});
+
+test('auto debug follows a failure on its own, but only so far', async () => {
+    const quiet = async () => {
+        for (let i = 0; i < 1200; i++) {
+            if (!manager.list().some((r) => ['queued', 'running', 'waiting'].includes(r.status))) return;
+            await sleep(25);
+        }
+        throw new Error('runs kept going');
+    };
+    script = Array.from({ length: 10 }, () => 400);
+    const first = await settle(start({ autoDebug: 1 }).id);
+    await quiet();
+    const chain = [];
+    for (let r = manager.get(first.id); r; r = r.debugRun ? manager.get(r.debugRun) : null) chain.push(r);
+    assert.deepEqual(chain.map((r) => r.debugDepth), [0, 1, 2], JSON.stringify(chain.map((r) => [r.id, r.status, r.autoDebug, r.debugRun, r.error])));
+    assert.ok(chain.every((r) => r.status === 'failed'));
+    assert.equal(chain.at(-1).debugRun, null);
+    assert.match(chain.at(-1).events.find((e) => e.type === 'note' && /Auto debug has tried/.test(e.text)).text, /stopping here/);
+    // off unless asked for
+    script = [400];
+    const plain = await settle(start().id);
+    assert.equal(plain.debugRun, null);
+});
+
+test('run.json is written even when the rename is refused (a scanner holding it open)', () => {
+    const id = 'rlocked';
+    const run = { id, status: 'done', created: '2020-01-01', events: [], tokens: { in: 0, out: 0 } };
+    manager.runs.set(id, run);
+    const folder = path.join(dir, 'runs', id);
+    fs.mkdirSync(folder, { recursive: true });
+    const file = path.join(folder, 'run.json');
+    const eperm = () => { const err = new Error('EPERM: operation not permitted, rename'); err.code = 'EPERM'; return err; };
+    const real = fs.renameSync;
+    let calls = 0;
+    fs.renameSync = (...args) => { if (++calls <= 2) throw eperm(); return real(...args); };
+    try { manager.save(run); } finally { fs.renameSync = real; }
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).id, id);
+    assert.equal(calls, 3);
+    fs.renameSync = () => { throw eperm(); };
+    try { manager.save({ ...run, status: 'failed' }); } finally { fs.renameSync = real; }
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).status, 'failed');
+    assert.deepEqual(fs.readdirSync(folder), ['run.json']); // no .tmp left behind
+    manager.runs.delete(id);
 });
 
 test('only repos inside the allowed folders can be used, and the form is checked', () => {

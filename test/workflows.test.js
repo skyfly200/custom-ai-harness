@@ -85,7 +85,8 @@ const fakeHarness = http.createServer((req, res) => {
 test('a multi-stage run hands summaries on and retries after a failed check', async () => {
     const repo = path.join(dir, 'repos', 'demo');
     fs.mkdirSync(repo, { recursive: true });
-    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'init', '-q');
+    git(repo, 'checkout', '-q', '-b', 'main');
     git(repo, 'config', 'user.email', 't@example.com');
     git(repo, 'config', 'user.name', 'T');
     fs.writeFileSync(path.join(repo, 'app.js'), 'module.exports = (a, b) => a - b;\n');

@@ -59,7 +59,7 @@ async function executeSwarm(manager, run, live) {
     run.children = plan.parts.map((p) => manager.create({
         goal: `${p.task}\n\nThis is one part of a larger task that several engineers do at once, each on their own branch: "${run.goal}". Do only your part and leave files that belong to other parts alone.`,
         repo: run.repo, base: run.base, workflow: p.workflow, profile: run.profile, model: run.model, effort: run.effort,
-        maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, parent: run.id,
+        maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, parent: run.id, autoDebug: run.autoDebug,
     }).id);
     manager.event(run, { type: 'note', text: `Started ${run.children.length} worker${run.children.length === 1 ? '' : 's'}.` });
     manager.save(run);

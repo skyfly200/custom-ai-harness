@@ -5,6 +5,8 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ACTIVE = new Set(['queued', 'running', 'waiting']);
+const RETRYABLE = new Set(['done', 'failed', 'incomplete', 'stopped']);
+const DEBUGGABLE = new Set(['failed', 'incomplete', 'stopped']);
 const TAGS = { done: 'ok', running: '', queued: '', waiting: 'warn', incomplete: 'warn', failed: 'bad', stopped: 'warn' };
 const NOTE_FOR = { done: 'finished', waiting: 'needs you' };
 
@@ -65,6 +67,8 @@ function renderDetail(run) {
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
     <div class="facts"><span>Repo <code>${esc(run.repo)}</code></span><span>Branch <code>${esc(run.branch)}</code></span>${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}</div>
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
+    ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
+    ${run.debugRun && runs.some((x) => x.id === run.debugRun) ? `<p class="muted">Auto debug (or a retry) started <a href="#${esc(run.debugRun)}" data-go="${esc(run.debugRun)}">${esc(run.debugRun)}</a>.</p>` : ''}
     ${run.children?.length ? `<div class="result"><strong>Workers</strong><div class="workers">${run.children.map((id, i) => {
       const c = runs.find((x) => x.id === id);
       return `<button class="worker" data-go="${esc(id)}"><span class="tag ${TAGS[c?.status] || ''}">${esc(NOTE_FOR[c?.status] || c?.status || '?')}</span> ${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} <span class="muted">step ${c?.steps ?? 0}</span></button>`;
@@ -75,7 +79,9 @@ function renderDetail(run) {
       ${r.diffStat ? `<pre>${esc(r.diffStat)}</pre>` : '<p class="muted">No files changed.</p>'}
       ${r.tests ? `<p>${r.tests.passed ? '<span class="tag ok">tests pass</span>' : `<span class="tag bad">tests fail${r.tests.timedOut ? ' (timed out)' : ''}</span>`} <code>${esc(r.tests.command)}</code></p><details data-k="tests"${openDetails.has('tests') ? ' open' : ''}><summary>Test output</summary><pre>${esc(r.tests.output)}</pre></details>` : ''}
       ${r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
-    <div class="actions">${active ? '<button data-act="stop">Stop</button>' : '<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>'}</div>
+    <div class="actions">${active
+      ? '<button data-act="stop">Stop</button>'
+      : `<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
     <div class="timeline">${run.events.map(eventHtml).join('')}</div>`;
   if (r?.commit && diffOpen) loadDiff(run.id);
 }
@@ -129,6 +135,10 @@ $('detail').addEventListener('click', async (e) => {
     if (act === 'allow') await post(`/${selected}/approve`, { allow: true });
     if (act === 'decline') await post(`/${selected}/approve`, { allow: false });
     if (act === 'stop') await post(`/${selected}/stop`);
+    if (act === 'retry' || act === 'debug') {
+      const made = await post(`/${selected}/retry`, { debug: act === 'debug' });
+      selected = made.id; location.hash = made.id; openDetails = new Set();
+    }
     if (act === 'remove') {
       if (!confirm('Delete this run? Its branch stays in your repo.')) return;
       await api(`/${selected}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
@@ -152,6 +162,8 @@ $('newRun').addEventListener('submit', async (e) => {
   const f = e.target;
   const body = Object.fromEntries(new FormData(f));
   for (const k of Object.keys(body)) if (body[k] === '') delete body[k];
+  // an unchecked box is absent from FormData, and the runner's default may be on
+  body.autoDebug = f.elements.autoDebug?.checked ? '1' : '0';
   try {
     $('startMsg').textContent = 'Starting…';
     if (body.workflow === 'auto') {

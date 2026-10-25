@@ -33,6 +33,7 @@ main.settings { max-width: 1040px; }
 /* ---- groups of fields ------------------------------------------------------ */
 .form.grouped { display: flex; flex-direction: column; gap: 18px; }
 .group { min-width: 0; }
+.group[hidden] { display: none; }
 .group-title { display: flex; align-items: center; gap: 8px; margin: 0 0 9px; font-size: 11px; font-weight: 700;
   letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
 .group-title::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
@@ -45,6 +46,7 @@ main.settings { max-width: 1040px; }
 .field:focus-within > span { color: var(--accent); }
 .form .field > small { line-height: 1.35; }
 .form input[type=text], .form input[type=number], .form select { border-radius: 8px; }
+.form .field select { width: 100%; }
 .form input[type=number] { font-variant-numeric: tabular-nums; }
 .form input::placeholder { color: var(--muted); opacity: .75; }
 
@@ -53,16 +55,24 @@ main.settings { max-width: 1040px; }
   border: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 55%, transparent); transition: border-color .15s, background-color .15s; }
 .form .field.check:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .form .field.check:focus-within { border-color: var(--accent); }
-.form .field.check input[type=checkbox] { appearance: none; -webkit-appearance: none; flex: none; width: 34px; height: 20px;
-  margin: 0; border-radius: 999px; border: 1px solid var(--border); cursor: pointer; position: relative;
-  background: color-mix(in srgb, var(--muted) 30%, transparent); transition: background-color .18s, border-color .18s; }
-.form .field.check input[type=checkbox]::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
-  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .35); transition: transform .18s; }
-.form .field.check input[type=checkbox]:checked { background: linear-gradient(120deg, var(--glow-c), var(--glow-b)); border-color: transparent; }
-.form .field.check input[type=checkbox]:checked::after { transform: translateX(14px); }
-.form .field.check input[type=checkbox]:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
-.form .field.check:has(input:disabled) { opacity: .55; }
 .form .field.check > span { font-weight: 600; }
+
+/* the switch itself: a knob over a track, drawn with two background layers so
+   no pseudo-element is needed on the input */
+.form .field.check input[type=checkbox] { appearance: none; -webkit-appearance: none; flex: none; width: 34px; height: 20px;
+  margin: 1px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+  background-color: color-mix(in srgb, var(--muted) 32%, transparent);
+  background-image: radial-gradient(circle, #fff 0 6.5px, transparent 7px), linear-gradient(transparent, transparent);
+  background-size: 16px 16px, 100% 100%; background-position: 2px center, 0 0; background-repeat: no-repeat;
+  transition: background-color .18s, background-position .18s, border-color .18s, box-shadow .18s; }
+.form .field.check input[type=checkbox]:checked { border-color: transparent;
+  background-color: var(--accent);
+  background-image: radial-gradient(circle, #fff 0 6.5px, transparent 7px), linear-gradient(120deg, var(--glow-c), var(--glow-b));
+  background-position: 16px center, 0 0; }
+.form .field.check input[type=checkbox]:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+.form .field.check input[type=checkbox]:disabled { cursor: default; }
+.form .field.check:has(input:disabled) { opacity: .55; }
+@media (prefers-reduced-motion: reduce) { .form .field.check input[type=checkbox] { transition: none; } }
 
 /* ---- save bars ------------------------------------------------------------- */
 .actions.bar { position: sticky; bottom: 0; z-index: 6; margin: 16px -12px -12px; padding: 10px 12px;

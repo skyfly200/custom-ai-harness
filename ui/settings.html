@@ -41,8 +41,8 @@
       <span class="panel-note muted fine">Applies from the next request; kept in <code>harness-settings.json</code>.</span>
     </div>
     <form id="isettings" class="form grouped" autocomplete="off">
-      <div class="group">
-        <div class="group-title">Routing</div>
+      <div class="group" role="group" aria-labelledby="gRoute">
+        <h3 class="group-title" id="gRoute">Routing</h3>
         <div class="group-grid">
           <label class="field"><span data-hint="Send every request to this model and skip the Router">Pin every request to a model</span>
             <input type="text" name="pinModel" list="models" placeholder="Off: the Router decides">
@@ -60,8 +60,8 @@
         </div>
       </div>
 
-      <div class="group">
-        <div class="group-title">Limits and timeouts</div>
+      <div class="group" role="group" aria-labelledby="gLimits">
+        <h3 class="group-title" id="gLimits">Limits and timeouts</h3>
         <div class="group-grid">
           <label class="field"><span data-hint="The most output any client may ask for">Max output tokens</span>
             <input type="number" name="maxOutputTokens" min="1" step="1">
@@ -75,8 +75,8 @@
         </div>
       </div>
 
-      <div class="group">
-        <div class="group-title">Prompt transforms</div>
+      <div class="group" role="group" aria-labelledby="gTransforms">
+        <h3 class="group-title" id="gTransforms">Prompt transforms</h3>
         <div class="group-grid switches">
           <label class="field check"><input type="checkbox" name="caveman">
             <span>Caveman prompt<br><small>Tell the model to be terse, to cut output tokens.</small></span></label>
@@ -87,8 +87,8 @@
         </div>
       </div>
 
-      <div class="group">
-        <div class="group-title">Auto strategy</div>
+      <div class="group" role="group" aria-labelledby="gAuto">
+        <h3 class="group-title" id="gAuto">Auto strategy</h3>
         <div class="group-grid switches">
           <label class="field check"><input type="checkbox" name="autoJev">
             <span>Auto strategy asks Jev<br><small>When no strategy's rules fit a request, Jev rates each strategy's description. Off: only the rules apply.</small></span></label>
@@ -100,11 +100,13 @@
         </div>
       </div>
 
-      <div class="group">
-        <div class="group-title">Command guard</div>
+      <div class="group" role="group" aria-labelledby="gGuard">
+        <h3 class="group-title" id="gGuard">Command guard</h3>
         <div class="group-grid switches">
           <label class="field check"><input type="checkbox" name="guardJev">
             <span>Command guard asks Jev<br><small>Commands the guard rules don't cover are rated by Jev. Off: only the rules apply.</small></span></label>
+          <label class="field check"><input type="checkbox" name="shellInRepo">
+            <span>Shell in a chat's linked repo<br><small>Lets a chat linked to a git repo run commands there. Each command goes past the guard, and a risky one waits in the chat for Allow. Off: chats only read the repo.</small></span></label>
           <label class="field"><span data-hint="How sure Jev must be that a command is risky before the agent has to ask you">Guard: ask you from</span>
             <input type="number" name="guardAskAt" min="0" max="1" step="0.05">
             <small>0.5: a command Jev rates 50% likely risky needs your OK.</small></label>
@@ -114,8 +116,8 @@
         </div>
       </div>
 
-      <div class="group">
-        <div class="group-title">Langfuse</div>
+      <div class="group" role="group" aria-labelledby="gLangfuse">
+        <h3 class="group-title" id="gLangfuse">Langfuse</h3>
         <div class="group-grid switches">
           <label class="field check"><input type="checkbox" name="langfuseContent">
             <span>Also log prompts and replies<br><small>Off: Langfuse gets the model, tokens, cost, timing and tags only. On: it also keeps the text of every prompt and reply (code, file contents). Only matters once Langfuse is set up (see above).</small></span></label>
@@ -125,7 +127,7 @@
     <div class="actions bar">
       <button class="primary" id="isave" data-hint="Use these settings from the next request on, and keep them across restarts">Save</button>
       <button id="ireset" data-hint="Put every Interceptor setting back to its default">Reset to defaults</button>
-      <span class="note" id="imsg"></span>
+      <span class="note" id="imsg" role="status" aria-live="polite"></span>
     </div>
   </section>
 
@@ -137,8 +139,8 @@
     </div>
     <p class="down" id="rdown"></p>
     <form id="rsettings" class="form grouped" autocomplete="off">
-      <div class="group">
-        <div class="group-title">Models it picks between</div>
+      <div class="group" role="group" aria-labelledby="gModels">
+        <h3 class="group-title" id="gModels">Models it picks between</h3>
         <div class="group-grid">
           <label class="field"><span data-hint="For requests the classifier rates hard">Strong model</span><input type="text" name="strong_model" list="models">
             <small>When the strong model's win rate reaches the threshold.</small></label>
@@ -151,8 +153,8 @@
         </div>
       </div>
 
-      <div class="group">
-        <div class="group-title">Classifier</div>
+      <div class="group" role="group" aria-labelledby="gClassifier">
+        <h3 class="group-title" id="gClassifier">Classifier</h3>
         <div class="group-grid">
           <label class="field"><span data-hint="The classifier that scores each request">Backend</span><select name="backend"></select>
             <small id="backendHelp"></small></label>
@@ -173,7 +175,7 @@
       <button class="primary" id="rapply" data-hint="Use these Router settings now, until the Router restarts">Apply</button>
       <button id="rsave" data-hint="Use them now and write them to the Router's config file">Apply and save to file</button>
       <button id="rreload" data-hint="Throw away unsaved Router changes and read its config file again">Reload from file</button>
-      <span class="note" id="rmsg"></span>
+      <span class="note" id="rmsg" role="status" aria-live="polite"></span>
     </div>
     <div class="sub" id="routerError"></div>
   </section>
@@ -193,7 +195,7 @@ const BACKEND_HELP = {
   llm: 'An OpenAI-compatible model rates difficulty 0 to 1.',
   custom: 'Your own scorer factory.',
 };
-let routerFormDirty = false, interceptorFormDirty = false;
+let routerFormDirty = false, interceptorFormDirty = false, lfShown = false;
 
 async function getJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -220,6 +222,8 @@ const markRouter = () => showDirty('rdirty', 'rPanel', routerFormDirty);
 // a group or panel left with nothing shown goes away too. A field the backend
 // choice hides stays hidden while a search is on (.filtered-out wins over the
 // inline display), and comes back with its group when the search is cleared.
+// The Save bars stay: a search is a way to find a setting, not to lose the
+// buttons that keep it.
 function filterSettings() {
   const q = $('setFilter').value.trim().toLowerCase();
   for (const form of [$('isettings'), $('rsettings')]) {
@@ -236,6 +240,9 @@ function filterSettings() {
     const shown = [...panel.querySelectorAll('.group')].some(g => !g.hidden);
     panel.hidden = !!q && !shown;
   }
+  // The Langfuse status card is not a setting: it steps aside while searching
+  // and comes back with the state it had.
+  $('langfuse').hidden = !!q || !lfShown;
 }
 $('setFilter').addEventListener('input', filterSettings);
 $('setFilter').addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('setFilter').value = ''; filterSettings(); } });
@@ -368,7 +375,8 @@ setInterval(refresh, 5000);
 async function loadLangfuse() {
   try {
     const lf = await getJSON('api/langfuse');
-    $('langfuse').hidden = false;
+    lfShown = true;
+    $('langfuse').hidden = !!$('setFilter').value.trim();
     if (!lf.configured) {
       $('lfState').textContent = 'is off';
       $('lfNote').innerHTML = 'Add <code>LANGFUSE_PUBLIC_KEY</code> and <code>LANGFUSE_SECRET_KEY</code> to <code>.env</code> and restart the Gateway to log every call. See the README, “Langfuse”.';
@@ -379,7 +387,7 @@ async function loadLangfuse() {
     $('lfNote').textContent = lf.content
       ? 'Prompts and replies are logged too (the setting below).'
       : 'Logging metadata only: model, tokens, cost, timing and tags. Prompt and reply text is left out (the setting below).';
-  } catch { $('langfuse').hidden = true; }
+  } catch { $('langfuse').hidden = true; lfShown = false; }
 }
 loadLangfuse();
 $('isave').addEventListener('click', () => setTimeout(loadLangfuse, 500));

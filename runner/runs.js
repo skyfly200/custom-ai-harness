@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
-const { LocalSandbox } = require('./sandbox');
+const { createSandbox, E2BSandbox, LocalSandbox } = require('./sandbox');
 const { makeTools } = require('./tools');
 const { runAgent, stageSystem } = require('./agent');
 const workflows = require('../utils/workflows');
@@ -73,7 +73,7 @@ class RunManager {
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, autoDebug = false }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, autoDebug = false, sandbox = 'local' }) {
         this.pollMs = pollMs;
         this.dir = dir;
         this.roots = roots.map((r) => { try { return fs.realpathSync(r); } catch { return path.resolve(r); } });
@@ -82,6 +82,7 @@ class RunManager {
         this.maxRuns = maxRuns;
         this.retryDelayMs = retryDelayMs;
         this.autoDebugDefault = Boolean(autoDebug); // for new runs (RUNNER_AUTO_DEBUG)
+        this.sandboxKind = sandbox === 'cloud' ? 'e2b' : sandbox; // local (a worktree here) or e2b (a cloud sandbox)
         this.runs = new Map();      // id -> record
         this.live = new Map();      // id -> { sandbox, stop, resolve }
         this.queue = [];
@@ -99,6 +100,8 @@ class RunManager {
                     run.pending = null;
                     run.ended = new Date().toISOString();
                     this.save(run);
+                    // its cloud sandbox would otherwise go on billing until E2B's own timeout
+                    if (run.sandboxId) E2BSandbox.destroyById(run.sandboxId).catch(() => {});
                 }
                 this.runs.set(run.id, run);
             } catch { /* not a run folder */ }
@@ -181,6 +184,7 @@ class RunManager {
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             maxSteps: num(cfg.maxSteps, 1, 200, 40), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
             autoDebug: num(cfg.autoDebug, 0, 1, this.autoDebugDefault ? 1 : 0) === 1,
+            sandbox: this.sandboxKind, sandboxId: null,
             debugOf: cfg.debugOf ? String(cfg.debugOf) : null, debugDepth: num(cfg.debugDepth, 0, 9, 0), debugRun: null,
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
             steps: 0, tokens: { in: 0, out: 0 }, pending: null, events: [], result: null, error: null,
@@ -281,10 +285,11 @@ class RunManager {
     }
 
     async plainRun(run, live, nextN) {
-        live.sandbox = await LocalSandbox.create({ repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
+        live.sandbox = await createSandbox({ kind: run.sandbox || this.sandboxKind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
         const sandbox = live.sandbox;
         run.base = sandbox.base;
-        this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}.` });
+        if (sandbox.kind === 'e2b') { run.sandboxId = sandbox.id; this.save(run); }
+        this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}${sandbox.kind === 'e2b' ? ` in an E2B sandbox (${sandbox.id})` : ''}.` });
         const files = (await sandbox.git(['ls-files'])).split('\n').filter(Boolean);
         const context = `The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
         const workflow = workflows.get(run.workflow) || workflows.get(workflows.FALLBACK);
@@ -321,6 +326,9 @@ class RunManager {
             run.ended = new Date().toISOString();
             this.save(run);
             this.live.delete(run.id);
+            // a cloud sandbox is billed by the minute, so it goes as soon as the run does; a local
+            // worktree stays, so the run page keeps working and its branch can still be inspected
+            if (live.sandbox?.kind === 'e2b') live.sandbox.destroy().catch(() => {});
             this.startAutoDebug(run);
             this.pump();
         }
@@ -472,7 +480,13 @@ class RunManager {
         if (!run) throw new Error('no such run');
         if (this.live.has(id) || run.status === 'queued') throw new Error('stop the run first');
         const dir = path.join(this.dir, id, 'work');
-        await new LocalSandbox({ dir, repo: run.repo, branch: run.branch, base: run.base }).destroy();
+        if (run.sandbox === 'e2b') {
+            // the sandbox is gone, and with it the only copy of the tree it worked in; the branch it
+            // handed back is what is left, so there is no worktree here to remove
+            if (run.sandboxId) await E2BSandbox.destroyById(run.sandboxId);
+        } else {
+            await new LocalSandbox({ dir, repo: run.repo, branch: run.branch, base: run.base }).destroy();
+        }
         fs.rmSync(path.join(this.dir, id), { recursive: true, force: true });
         this.runs.delete(id);
     }

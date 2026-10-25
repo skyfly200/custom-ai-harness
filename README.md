@@ -724,7 +724,7 @@ The **Runs** page gives an agent a goal, such as "fix the failing test in `utils
 
 How it keeps your work safe:
 
-- **Its own branch.** Each run is a `git worktree` of your repo on a new branch named `harness/<id>`. Your checked-out files are never touched. Review the branch with `git diff <start>..harness/<id>` (the page shows the exact command) and push it yourself if you like. Nothing is ever pushed or published for you.
+- **Its own branch.** Each run is a `git worktree` of your repo on a new branch named `harness/<id>`, or (with `RUNNER_SANDBOX=e2b`) a [cloud sandbox](#cloud-sandboxes-e2b) that gets the same branch. Your checked-out files are never touched. Review the branch with `git diff <start>..harness/<id>` (the page shows the exact command) and push it yourself if you like. Nothing is ever pushed or published for you.
 - **Every command and file write goes past the [command guard](#command-guard-jev-checks-commands-before-they-run).** Dangerous ones are refused, risky ones wait on the Runs page for you to **Allow** or **Decline** (no answer for 15 minutes counts as decline), and an unreachable guard counts as "ask".
 - **Only chosen folders.** Repos must be inside `RUNNER_ROOTS` (default the `repos` folder next to the harness; set it in `.env`, separating folders with `;` on Windows). Files the agent reads and writes must stay inside its workspace, and `.git` is off limits.
 - **No keys.** Commands the agent runs get a trimmed environment, so they can't print the harness's API keys.
@@ -766,8 +766,26 @@ Notes:
 
 - The runner is its own process (`node runner/server.js`, port 3100, only reachable from this machine). The Interceptor passes the Runs page's requests to it after its own login check, and `npm run all` sets a shared `RUNNER_TOKEN` so nothing else on the machine can drive it. If you start the parts yourself, set the same `RUNNER_TOKEN` in `.env` for both.
 - Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed. The record is written to a temporary file and renamed into place; where Windows refuses the rename for a moment (a virus scanner or the indexer holding `run.json` open, `EPERM`) it retries, then writes in place, so a run is never lost to that.
-- It isn't in the Docker setup yet. Cloud sandboxes can replace the local worktree later.
+- It isn't in the Docker setup yet.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
+
+#### Cloud sandboxes (E2B)
+
+A run can work in a sandbox in the cloud instead of a worktree on this machine: the agent's commands then run in a Linux VM from [E2B](https://e2b.dev), never on your PC. Set `RUNNER_SANDBOX=e2b` and `E2B_API_KEY` in `.env` (the key is on your E2B dashboard; get one from the free tier), keep the repo in `RUNNER_ROOTS` as usual, and start the runner as always. Nothing else changes: the same workflows, tools, guard and approvals apply, and the run page looks the same.
+
+How the branch gets there and back:
+
+1. The base commit of your repo is packed into a git bundle and written into a fresh sandbox (template `E2B_TEMPLATE`, default `base`), which checks it out on a branch `harness/<id>` of its own in `/home/user/work` (set `E2B_WORKDIR`).
+2. The agent works there; every file call and command goes to the sandbox.
+3. When the run ends, everything is committed and the branch is packed back into a bundle and fetched into your repo here, so `git diff`, **Retry** and pushing work exactly as with a local run. A swarm's own branch is handed back after its merges, and each worker's branch is handed *to* it before they are merged.
+4. The sandbox is killed as soon as the run ends (and if the runner is restarted mid-run), so nothing keeps billing. Its record keeps the sandbox id.
+
+Notes:
+
+- The cloud sandbox has no copy of your other branches, and `E2B_API_KEY` is never given to the commands the agent runs.
+- The run's own record and the branch stay here, in `runs/<id>/run.json` and your repo; delete the run to remove the record.
+- `apt-get install git` runs once in a new sandbox if the template has no git.
+- Reading files, listing folders and running commands are network calls now, so a cloud run is slower per step than a local one; `MAX_OUTPUT` trimming and the run's step and minute limits work as before.
 
 ### Langfuse (see every call, grouped by chat or run)
 

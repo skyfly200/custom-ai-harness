@@ -82,9 +82,11 @@ if (require.main === module) {
         password: process.env.HARNESS_PASSWORD || '',
         maxRuns: Number(process.env.RUNNER_MAX_RUNS) || 2,
         autoDebug: /^(1|true|yes|on)$/i.test(process.env.RUNNER_AUTO_DEBUG || ''),
+        // local: a git worktree on this machine. e2b: a cloud sandbox (E2B_API_KEY in .env)
+        sandbox: process.env.RUNNER_SANDBOX || 'local',
     });
     createApp(manager, { token: process.env.RUNNER_TOKEN || '', port }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {
-        console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}`);
+        console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}; sandbox: ${manager.sandboxKind}`);
     });
 }
 

@@ -29,7 +29,9 @@ const definitions = [
 ];
 
 /**
- * `sandbox` is a LocalSandbox. `check(kind, text)` is the guard: resolves
+ * `sandbox` is a LocalSandbox or an E2BSandbox (both: resolve, readFile,
+ * writeFile, listDir, exec; the file calls may be async). `check(kind, text)`
+ * is the guard: resolves
  * { decision, reason }. `approve({ kind, text, reason })` resolves true when a
  * person allows it. Returns { definitions, call(name, args) } where call
  * resolves { text, finished? }.
@@ -53,28 +55,28 @@ function makeTools({ sandbox, check, approve, toolset = 'all' }) {
     const numbered = (text, start = 1) => text.split('\n').map((l, i) => `${String(start + i).padStart(5)}  ${l}`).join('\n');
 
     const run = {
-        async list_files({ path = '.' }) { return sandbox.listDir(path).join('\n') || '(empty)'; },
+        async list_files({ path = '.' }) { return (await sandbox.listDir(path)).join('\n') || '(empty)'; },
         async read_file({ path, start, end }) {
-            const lines = sandbox.readFile(path).split('\n');
+            const lines = (await sandbox.readFile(path)).split('\n');
             const from = Math.max(1, start || 1), to = Math.min(lines.length, end || lines.length);
             let text = numbered(lines.slice(from - 1, to).join('\n'), from);
             if (text.length > MAX_READ) text = `${text.slice(0, MAX_READ)}\n[... cut at ${MAX_READ} characters; read the rest with start and end ...]`;
             return `${path} (${lines.length} lines)\n${text}`;
         },
         async write_file({ path, content }) {
-            const blocked = await gate('write', sandbox.resolve(path));
+            const blocked = await gate('write', await sandbox.resolve(path));
             if (blocked) return blocked;
-            sandbox.writeFile(path, String(content));
+            await sandbox.writeFile(path, String(content));
             return `Wrote ${path} (${String(content).length} characters).`;
         },
         async edit_file({ path, old: oldText, new: newText }) {
-            const content = sandbox.readFile(path);
+            const content = await sandbox.readFile(path);
             const at = content.indexOf(oldText);
             if (!oldText || at < 0) return `"old" was not found in ${path}. Read the file again and copy the text exactly.`;
             if (content.indexOf(oldText, at + 1) >= 0) return `"old" appears more than once in ${path}. Include more surrounding lines.`;
-            const blocked = await gate('write', sandbox.resolve(path));
+            const blocked = await gate('write', await sandbox.resolve(path));
             if (blocked) return blocked;
-            sandbox.writeFile(path, content.slice(0, at) + newText + content.slice(at + oldText.length));
+            await sandbox.writeFile(path, content.slice(0, at) + newText + content.slice(at + oldText.length));
             return `Edited ${path}.`;
         },
         async run_command({ command, timeout_seconds }) {

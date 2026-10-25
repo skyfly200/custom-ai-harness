@@ -66,6 +66,13 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
             fail(res, err, /no such run/.test(err.message) ? 404 : 409);
         }
     });
+    // The same run carried on after it ran out of steps or time: same id, same branch,
+    // not a new run (Retry is for a run that failed)
+    app.post('/runs/:id/continue', (req, res) => {
+        try { res.status(201).json(manager.continueRun(req.params.id)); } catch (err) {
+            fail(res, err, /no such run/.test(err.message) ? 404 : 409);
+        }
+    });
     app.delete('/runs/:id', async (req, res) => {
         try { await manager.remove(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }
     });

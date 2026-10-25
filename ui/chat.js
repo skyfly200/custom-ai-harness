@@ -1039,7 +1039,10 @@ async function runReply(c, turn) {
   const stream = $('stream').checked;
   // a command's turn carries no tools: a model named there may not call them
   const tools = turn?.tools === false ? [] : activeTools(c);
-  const maxRounds = Math.max(1, parseInt($('maxToolRounds').value, 10) || 12);
+  // 0 (or empty, or junk) means no limit: the round loop runs until the model
+  // stops asking for tools. The stall and no-reply timeouts still bound it.
+  const rawRounds = parseInt($('maxToolRounds').value, 10);
+  const maxRounds = Number.isFinite(rawRounds) && rawRounds > 0 ? rawRounds : 0;
   const history = apiMessages(c, c.messages.length - 1);
   const headers = { 'content-type': 'application/json' };
   Object.assign(headers, routeHeaders(c), turnHeaders(turn));
@@ -1141,8 +1144,8 @@ async function runReply(c, turn) {
       tr.toolsRunning = false;
       tr.lastData = Date.now();
       saveChat(c, { touch: false });
-      if (round + 1 >= maxRounds) {
-        reply.content += `${reply.content ? '\n\n' : ''}*(stopped after ${maxRounds} rounds of tool calls; raise the limit under Options to let it go on)*`;
+      if (maxRounds && round + 1 >= maxRounds) {
+        reply.content += `${reply.content ? '\n\n' : ''}*(stopped after ${maxRounds} rounds of tool calls; set Max tool rounds to 0 under Options for no limit)*`;
         break;
       }
     }

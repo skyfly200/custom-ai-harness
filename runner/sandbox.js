@@ -3,9 +3,11 @@
 // branch to inspect, test and push. Commands run here with a trimmed
 // environment (no API keys).
 //
-// Two sandboxes offer the same methods (create, resolve, readFile, writeFile,
-// listDir, exec, stop, git, commit, diffStat, diff, destroy), so the tools and
-// the runs never know which one they got:
+// Two sandboxes offer the same methods (create, attach, resolve, readFile,
+// writeFile, listDir, exec, stop, git, commit, diffStat, diff, destroy), so the
+// tools and the runs never know which one they got. create starts a run's branch
+// from a base commit; attach takes the branch as it stands, for carrying a run on
+// after it hit its step or time limit:
 //   LocalSandbox - a git worktree on this machine (the default).
 //   E2BSandbox   - a cloud sandbox from E2B (RUNNER_SANDBOX=e2b). It has no
 //                  copy of your repo to branch off, so the branch is made by
@@ -70,6 +72,36 @@ class LocalSandbox {
         fs.mkdirSync(path.dirname(dir), { recursive: true });
         await git(top, ['worktree', 'add', '-q', '-b', branch, dir, commit]);
         return new LocalSandbox({ dir: fs.realpathSync(dir), repo: top, branch, base: commit });
+    }
+
+    /**
+     * The worktree a run already has, for carrying it on: the same folder when it
+     * is still a worktree on the branch, or one made again from the branch (so the
+     * commits the earlier part made are there). `base` is where the run started,
+     * which the diff is measured from.
+     */
+    static async attach({ repo, dir, branch, base = 'HEAD' }) {
+        let top;
+        try {
+            top = (await git(repo, ['rev-parse', '--show-toplevel'])).trim();
+        } catch {
+            throw new Error(`${repo} is not a git repository`);
+        }
+        const start = (await git(top, ['rev-parse', '--verify', `${base}^{commit}`]).catch(() => { throw new Error(`${base} is not a commit in ${top}`); })).trim();
+        // a part that ended before it committed anything has no branch yet: start it again
+        if (!(await git(top, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]).then((s) => s.trim()).catch(() => ''))) {
+            await git(top, ['worktree', 'prune']).catch(() => {});
+            return LocalSandbox.create({ repo: top, dir, branch, base: start });
+        }
+        const here = fs.existsSync(dir) ? fs.realpathSync(dir) : null;
+        const on = here ? (await git(here, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim() : '';
+        if (on === branch) return new LocalSandbox({ dir: here, repo: top, branch, base: start });
+        // the folder is gone, or is a worktree of something else: make it again on the branch
+        if (here) await git(top, ['worktree', 'remove', '--force', dir]).catch(() => fs.rmSync(dir, { recursive: true, force: true }));
+        await git(top, ['worktree', 'prune']).catch(() => {});
+        fs.mkdirSync(path.dirname(dir), { recursive: true });
+        await git(top, ['worktree', 'add', '-q', dir, branch]);
+        return new LocalSandbox({ dir: fs.realpathSync(dir), repo: top, branch, base: start });
     }
 
     /** The absolute path of `rel` inside the workspace, or an Error if it leads outside (links included). */
@@ -167,16 +199,22 @@ class LocalSandbox {
 // ---------------------------------------------------------------------------
 
 const WORK_DIR = process.env.E2B_WORKDIR || '/home/user/work';
-const SANDBOX_LIFETIME_MS = 60 * 60 * 1000; // E2B kills it after this; a run ends long before
+// E2B kills the sandbox after this. A run's own limit (240 minutes at most) plus an
+// hour, so a run that is carried on after it ran out of time still has a sandbox.
+const SANDBOX_LIFETIME_MS = 5 * 60 * 60 * 1000;
 const HOST_TMP = (name) => path.join(os.tmpdir(), `harness-${process.pid}-${Date.now()}-${name}`);
 
-/** Pack `commit` and everything it needs into a bundle, for a sandbox that has no repo yet. */
-async function packRepo(repo, commit) {
+/**
+ * Pack `commit` and everything it needs into a bundle, for a sandbox that has no
+ * repo yet. `until` is the commit the sandbox already has, if any: what is packed
+ * then is only what came after it.
+ */
+async function packRepo(repo, commit, until = null) {
     const file = HOST_TMP('base.bundle');
     try {
         // a ref of its own, so a commit that is not a branch tip still packs with its full history
         await git(repo, ['update-ref', PACK_REF, commit]);
-        await git(repo, ['bundle', 'create', '-q', file, PACK_REF]);
+        await git(repo, ['bundle', 'create', '-q', file, PACK_REF, ...(until ? ['--not', until] : [])]);
         const bytes = fs.readFileSync(file);
         return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     } finally {
@@ -197,9 +235,18 @@ class E2BSandbox {
         this.id = sandbox.sandboxId;
     }
 
-    /** A fresh E2B sandbox with `branch` checked out at `base` (a commit in `repo` on this machine). */
-    static async create({ repo, branch, base = 'HEAD', template = process.env.E2B_TEMPLATE || 'base', lifetimeMs = SANDBOX_LIFETIME_MS }) {
-        let top, commit;
+    /**
+     * A fresh E2B sandbox with `branch` checked out.
+     *
+     * adapt is null for a new run's branch, which is made from `base` (a commit in
+     * `repo` on this machine) with its whole history. For a run carried on, adapt
+     * says which commits the branch already has from earlier: if it has any, the
+     * sandbox is given just the ones since `base` (so a part that ran out of time
+     * keeps the work it committed) and the branch is taken as it stands; if it has
+     * none, the branch starts at `base` as it did the first time.
+     */
+    static async create({ repo, branch, base = 'HEAD', adapt = null, template = process.env.E2B_TEMPLATE || 'base', lifetimeMs = SANDBOX_LIFETIME_MS }) {
+        let top, commit, start = null;
         try {
             top = (await git(repo, ['rev-parse', '--show-toplevel'])).trim();
         } catch {
@@ -210,6 +257,10 @@ class E2BSandbox {
         } catch {
             throw new Error(`${base} is not a commit in ${top}`);
         }
+        if (adapt) start = (await git(top, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]).then((s) => s.trim()).catch(() => '')) || null;
+        // a branch that is where it started has nothing of its own to send: send it all
+        if (start === commit) start = null;
+        const from = start || commit;
         const { Sandbox } = require('e2b');
         const sandbox = await Sandbox.create(template, { timeoutMs: lifetimeMs });
         const box = new E2BSandbox({ sandbox, repo: top, branch, base: commit });
@@ -217,7 +268,8 @@ class E2BSandbox {
             const remote = `/tmp/harness-base-${sandbox.sandboxId}.bundle`;
             await sandbox.files.makeDir(WORK_DIR);
             await box.exec('command -v git >/dev/null 2>&1 || (command -v apt-get >/dev/null 2>&1 && sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git)', { timeoutMs: 300000 });
-            await sandbox.files.write(remote, await packRepo(top, commit));
+            // a carried-on branch only needs the commits the earlier part made, on top of the base
+            await sandbox.files.write(remote, await packRepo(top, from, start ? commit : null));
             await box.git(['init', '-q', '.']);
             await box.git(['fetch', '-q', remote, `${PACK_REF}:refs/heads/${branch}`]);
             await box.git(['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
@@ -279,10 +331,11 @@ class E2BSandbox {
     }
 
     /**
-     * Fetch the branches named, so they can be merged here. The sandbox's own
-     * repo has no copy of them, so each one arrives as a bundle in a file.
-     * A branch that cannot be packed is skipped: its merge then fails and is
-     * reported, which is what a swarm does with a part that conflicts.
+     * Fetch the branches named from the repo on this machine, so they can be checked
+     * out or merged here. The sandbox's own repo has no copy of them, so each one
+     * arrives as a bundle in a file. A branch that cannot be packed is skipped: its
+     * merge then fails and is reported, which is what a swarm does with a part that
+     * conflicts.
      */
     async importBranches(branches) {
         for (const [i, branch] of branches.entries()) {
@@ -366,4 +419,19 @@ async function createSandbox({ kind = process.env.RUNNER_SANDBOX || 'local', ...
     return LocalSandbox.create(opts);
 }
 
-module.exports = { LocalSandbox, E2BSandbox, createSandbox, MAX_OUTPUT, trimOutput };
+/**
+ * The workspace a run carried on from an earlier part gets: the same branch, with
+ * the commits that part made. A cloud sandbox is always a new one (the earlier one
+ * was killed when its part ended); the branch is handed to it as it stands.
+ */
+async function attachSandbox({ kind = process.env.RUNNER_SANDBOX || 'local', ...opts } = {}) {
+    const cloud = String(kind).toLowerCase();
+    if (cloud === 'e2b' || cloud === 'cloud') {
+        if (!process.env.E2B_API_KEY) throw new Error('RUNNER_SANDBOX=e2b needs E2B_API_KEY in .env');
+        return E2BSandbox.create({ ...opts, adapt: true });
+    }
+    if (cloud !== 'local') throw new Error(`unknown sandbox ${kind}; use local or e2b`);
+    return LocalSandbox.attach(opts);
+}
+
+module.exports = { LocalSandbox, E2BSandbox, createSandbox, attachSandbox, MAX_OUTPUT, trimOutput };

@@ -17,6 +17,16 @@ Rules:
 
 const KEEP_RECENT = 12;       // tool results in the last N messages stay whole
 const OLD_RESULT_CHARS = 400; // older ones are cut to this
+const PARTIAL_CHARS = 2000;   // how much of what the model was saying a run carried on is told
+
+/** What the model was saying when the steps ran out: its last words that were not a tool call. */
+function partialNote(messages) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role === 'assistant' && typeof m.content === 'string' && m.content.trim()) return m.content.trim().slice(-PARTIAL_CHARS);
+    }
+    return '';
+}
 
 /** Cut the bodies of old tool results so a long run's history stays affordable. */
 function shrinkHistory(messages) {
@@ -29,14 +39,18 @@ function shrinkHistory(messages) {
  * run: { goal, maxSteps, deadline (ms epoch), stopped() }.
  * `chat(messages, tools)` resolves the model's reply { message, usage }.
  * `tools` from makeTools. `emit(event)` records what happens.
- * Resolves { status: 'finished' | 'out_of_steps' | 'out_of_time' | 'stopped', summary }.
+ * Resolves { status: 'finished' | 'out_of_steps' | 'out_of_time' | 'stopped', summary, partial },
+ * where partial (running out of steps only) is what the model was saying at the time.
+ * That is what a run carried on from this one is given, since nothing went wrong.
  */
 async function runAgent({ run, tools, chat, emit, firstContext = '', system = SYSTEM }) {
     const messages = [{ role: 'system', content: system }, { role: 'user', content: `Task:\n${run.goal}${firstContext ? `\n\n${firstContext}` : ''}` }];
     let nudges = 0;
-    for (let step = 1; step <= run.maxSteps; step++) {
+    // maxSteps of 0 means no step limit: only the deadline and the stop button end it.
+    const last = run.maxSteps > 0 ? run.maxSteps : Infinity;
+    for (let step = 1; step <= last; step++) {
         if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
-        if (Date.now() > run.deadline) return { status: 'out_of_time', summary: 'Ran out of time.' };
+        if (Date.now() > run.deadline) return { status: 'out_of_time', summary: 'Ran out of time.', partial: partialNote(messages) };
         emit({ type: 'step', step });
         const reply = await chat(shrinkHistory(messages), tools.definitions);
         const msg = reply.message;
@@ -47,6 +61,7 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
             messages.push({ role: 'user', content: 'Use a tool to continue, or call finish if you are done.' });
             continue;
         }
+        let ran = 0;
         for (const call of msg.tool_calls) {
             let args;
             try { args = JSON.parse(call.function.arguments || '{}'); } catch { args = null; }
@@ -56,11 +71,18 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
                 : await tools.call(call.function.name, args);
             emit({ type: 'result', name: call.function.name, text: result.text });
             messages.push({ role: 'tool', tool_call_id: call.id, content: result.text });
+            ran += 1;
             if (result.finished) return { status: 'finished', summary: result.text };
             if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
         }
+        // This was the last step. A reply that asked for more tools than there were steps
+        // left would leave some of them never run, and a tool call with no result after it
+        // is not a history a model can be given next time: leave them out of what is kept.
+        if (step === last && ran < msg.tool_calls.length) {
+            messages[messages.length - 1 - ran].tool_calls = msg.tool_calls.slice(0, ran);
+        }
     }
-    return { status: 'out_of_steps', summary: `Used all ${run.maxSteps} steps without finishing.` };
+    return { status: 'out_of_steps', summary: `Used all ${last === Infinity ? 'allowed' : last} steps without finishing.`, partial: partialNote(messages) };
 }
 
 /** The base rules plus what this stage of a workflow is for. */

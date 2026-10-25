@@ -111,7 +111,8 @@
           <label class="check" title="Let the model run commands in the linked repo with run_command. Every command goes past the command guard first, and a risky one waits in the chat for you to Allow or Decline. Commands run in your own working copy, so uncommitted work is not protected."><input type="checkbox" id="shellInRepo" checked> Shell in the linked repo</label>
           <div class="tools-head"><span>MCP servers</span><button type="button" id="mcpReload" class="mini" title="Read mcp-servers.json again and reconnect">Reload</button></div>
           <ul class="mcp-list" id="mcpList"><li class="muted small">Loading…</li></ul>
-          <label title="Stop a reply after this many rounds of tool calls">Max tool rounds <input type="number" id="maxToolRounds" min="1" max="50" value="12"></label>
+          <label title="Stop a reply after this many rounds of tool calls. 0 means no limit: the reply keeps going until the model stops calling tools or you press Stop (the stall and no-reply timeouts still apply).">Max tool rounds <input type="number" id="maxToolRounds" min="0" max="500" value="0" placeholder="0 = no limit"></label>
+          <div class="muted small">0 or empty: no limit.</div>
         </fieldset>
         <fieldset>
           <legend>Voice</legend>

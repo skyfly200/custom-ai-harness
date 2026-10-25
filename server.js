@@ -33,6 +33,7 @@ const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
 const repoTools = require('./utils/repoTools');
+const chatShell = require('./utils/chatShell');
 const { requirePassword, viaProxy } = require('./utils/access');
 const { createLogin } = require('./utils/login');
 const { parseAdmins, Users, FileStore } = require('./utils/users');
@@ -821,7 +822,7 @@ app.get('/ui/api/tools', async (req, res) => {
     const status = mcp.status();
     const definitions = {};
     for (const s of status.servers) definitions[s.name] = mcp.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
-    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions() });
+    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions(), shellDefinitions: settings.get().shellInRepo ? chatShell.definitions() : [] });
 });
 
 app.post('/ui/api/tools/reload', localJsonOnly, async (req, res) => {
@@ -837,14 +838,47 @@ app.post('/ui/api/repo', localJsonOnly, async (req, res) => {
     }
 });
 
+// Run one command for a chat linked to a repo, once the guard has been asked.
+// "allow" runs it and "deny" never does; "ask" runs only when the page says you
+// allowed it there, so a page that skips the question gets a refusal, not a run.
+async function shellCall(repo, args, confirmed) {
+    const { guardJev, guardAskAt, guardDenyAt, shellInRepo } = settings.get();
+    if (!shellInRepo) throw new Error('the shell is off: turn it on in the chat options or in the settings');
+    const command = String(args.command || '');
+    if (!command.trim()) throw new Error('command is required');
+    const root = chatShell.repoRoot(repo);
+    const verdict = await guard.check({ tool: 'bash', command }, { ask: askRouter, jev: guardJev, askAt: guardAskAt, denyAt: guardDenyAt });
+    monitor.live.emit('update', { type: 'guard', event: { ...verdict, from: 'chat' } });
+    if (verdict.decision === 'deny') throw new Error(`refused: ${verdict.reason}`);
+    if (verdict.decision === 'ask' && !confirmed) throw new Error(`needs your approval (${verdict.reason}) but the page sent no confirmation`);
+    const r = await chatShell.exec(root, command, { timeoutMs: (Number(args.timeout_seconds) || 120) * 1000 });
+    const status = r.timedOut ? `timed out after ${Math.round(r.ms / 1000)} s` : `exit code ${r.code}`;
+    return `${status}\n${r.output}`.trimEnd();
+}
+
+// A command the chat's shell wants to run, checked but not run: the page shows
+// the guard's verdict, asks you when it says "ask", then posts the command back
+// to /ui/api/tools/call with `confirmed`.
+app.post('/ui/api/tools/shell/check', localJsonOnly, async (req, res) => {
+    const { command } = req.body || {};
+    if (typeof command !== 'string' || !command.trim()) return res.status(400).json({ error: 'command is required' });
+    const { guardJev, guardAskAt, guardDenyAt, shellInRepo } = settings.get();
+    if (!shellInRepo) return res.json({ decision: 'deny', reason: 'the shell is off in the settings' });
+    const result = await guard.check({ tool: 'bash', command }, { ask: askRouter, jev: guardJev, askAt: guardAskAt, denyAt: guardDenyAt });
+    monitor.live.emit('update', { type: 'guard', event: { ...result, from: 'chat' } });
+    res.json(result);
+});
+
 // Run one tool call. A failing tool is an answer for the model, not an HTTP error.
 app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
-    const { name, arguments: args, repo } = req.body || {};
+    const { name, arguments: args, repo, confirmed } = req.body || {};
     if (typeof name !== 'string' || !name) return res.status(400).json({ error: 'name is required' });
     const started = Date.now();
     try {
         let result;
-        if (repoTools.isRepoTool(name)) {
+        if (chatShell.isShellTool(name)) {
+            result = { text: await shellCall(repo, args || {}, confirmed === true), isError: false };
+        } else if (repoTools.isRepoTool(name)) {
             if (!repo) throw new Error('this chat is not linked to a git repo');
             result = { text: await repoTools.call(repo, name, args || {}), isError: false };
         } else {

@@ -55,11 +55,13 @@ const store = {
 
 const PROJECTS_KEY = 'harness-projects';
 const SKILLS_KEY = 'harness-skills';
+const COMMANDS_KEY = 'harness-commands';
 const SCHEDULES_KEY = 'harness-schedules';
 
 let index = store.get(INDEX_KEY, []);   // [{id, title, updated, count, project}]
 let projects = store.get(PROJECTS_KEY, []);   // [{id, name, color, instructions, repo, skills, created}]
 let skills = store.get(SKILLS_KEY, []);       // [{id, name, description, body}]
+let commands = store.get(COMMANDS_KEY, []);   // [{id, name, description, body, model, effort}]
 let schedules = store.get(SCHEDULES_KEY, []); // [{id, name, prompt, repeat, next, target, project, last}]
 const unseen = new Set();                // chats that finished a reply while not open
 const cache = new Map();                 // id -> chat
@@ -141,7 +143,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttEngine', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll'];
+const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttEngine', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll', 'shellInRepo'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['maxTokens', 'temperature']) {
@@ -173,6 +175,8 @@ for (const id of PREF_FIELDS) {
     if (id === 'ttsEngine') { speech.stop(); drawEngine(); }
     if (id === 'sttEngine') { drawEngine(); if (dictation.want) { dictation.stop(); dictation.start(); } }
     if (id === 'serverModel') { speech.stop(); drawServerVoices(); prefs.serverVoice = $('serverVoice').value; store.set(PREF_KEY, prefs); drawEngine(); }
+    // the shell changes the tool list, so the panels and the repo note follow it
+    if (id === 'shellInRepo') { drawRepo(); drawKit(); drawTools(); }
     drawHint();
   });
 }
@@ -368,6 +372,7 @@ function openChat(id) {
   $('system').value = chat.system || '';
   $('notes').value = chat.notes || '';
   $('input').value = chat.draft || '';
+  if (typeof hideSlash === 'function') hideSlash();
   pending = chat.pendingAttachments || [];
   drawChips(); autoGrow(); drawContextSize(); drawRepo(); drawRoute(); drawTools(); drawEffort();
   drawList();
@@ -557,6 +562,7 @@ function metaHtml(m) {
   const bits = [
     model && `<code>${esc(model)}</code>`,
     (routeWhy(tr?.routed) || meta.route) && esc(routeWhy(tr?.routed) || meta.route),
+    m.turn?.command && `<span class="tag" title="Sent by the command /${esc(m.turn.command)}${turnNote(m.turn) ? `: ${esc(turnNote(m.turn))}` : ''}">/${esc(m.turn.command)}</span>`,
     tr?.answered?.fallbacks > 0 && `<span class="warn">${tr.answered.fallbacks} fallback${tr.answered.fallbacks > 1 ? 's' : ''}</span>`,
     (tr?.done ?? meta.ms) != null && fmtMs(tr?.done ?? meta.ms),
     tr?.usage && `${tr.usage.prompt_tokens ?? '?'} in · ${tr.usage.completion_tokens ?? '?'} out`,
@@ -663,7 +669,7 @@ function messageHtml(m, i, list) {
         <button data-act="copy" title="Copy">${ICONS.copy}</button>
         <button data-act="edit" title="Edit and resend">${ICONS.edit}</button>
         <button data-act="resend" title="Send this again (replies after it are replaced)">${ICONS.retry}</button></span></div>
-      ${attachmentsHtml(m.attachments)}${m.content ? `<div class="bubble">${esc(m.content)}</div>` : ''}</div>`;
+      ${attachmentsHtml(m.attachments)}${m.content || m.turn?.command ? `<div class="bubble">${m.turn?.command ? `<code>/${esc(m.turn.command)}</code>${m.content ? ` ${esc(m.content)}` : ''}` : esc(m.content)}</div>` : ''}</div>`;
   }
   if (m.role === 'error') {
     return `<div class="msg error" data-id="${m.id}"><div class="who">Error<span class="actions">
@@ -677,9 +683,22 @@ function messageHtml(m, i, list) {
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>
       ${lastAssistant && !m.streaming ? `<button data-act="retry" title="Regenerate">${ICONS.retry}</button>` : ''}</span></div>
     <div class="bubble${m.streaming ? ' working' : ''}"${m.streaming ? ` style="--spin-delay:-${(Date.now() - m.time) % 4000}ms"` : ''}><div class="live-trace">${m.streaming ? traceHtml(m) : ''}</div>
-      ${m.streaming && !m.content && !(m.rounds || []).length ? thinkingHtml(m) : ''}
+      ${m.streaming && !m.content && !(m.rounds || []).length && !m.reasoning ? thinkingHtml(m) : ''}
       ${replyBodyHtml(m)}
       <div class="meta-wrap">${m.streaming ? '' : metaHtml(m)}</div></div></div>`;
+}
+
+// What the model thought first, when the provider sends it back. It stays in
+// the chat and goes above the tool calls it led to, but is never sent back to
+// the model as part of the conversation.
+const REASONING_SHOWN = 20000;
+function reasoningHtml(m) {
+  const text = m.reasoning || '';
+  if (!text) return '';
+  const shown = text.length > REASONING_SHOWN ? `${text.slice(0, REASONING_SHOWN)}\n… (${(text.length - REASONING_SHOWN).toLocaleString()} more characters)` : text;
+  return `<details class="reasoning" data-k="reasoning"${m.streaming && !m.content ? ' open' : ''}><summary>
+      <span class="spark"><i></i><i></i><i></i></span><span>${m.streaming ? 'Thinking' : 'Thought'}</span>
+      <span class="t">${text.length.toLocaleString()} characters</span></summary><pre>${esc(shown)}</pre></details>`;
 }
 
 // Reply text with all tool calls grouped where the first round happened
@@ -687,7 +706,7 @@ function replyBodyHtml(m) {
   const rounds = m.rounds || [];
   const last = rounds.length ? rounds[rounds.length - 1].end : 0;
   const rest = m.content.slice(last);
-  let html = '', from = 0;
+  let html = reasoningHtml(m), from = 0;
   let toolsAdded = false;
   rounds.forEach((r) => {
     const text = m.content.slice(from, r.end);
@@ -707,6 +726,7 @@ function toolLabel(name) {
   const m = /^mcp__(.+?)__(.+)$/.exec(name);
   if (m) return [m[1], m[2]];
   if (name.startsWith('repo_')) return ['repo', name.slice(5)];
+  if (name === 'run_command') return ['shell', name];
   return ['', name];
 }
 
@@ -733,10 +753,15 @@ function toolCallsHtml(rounds) {
     const [src, name] = toolLabel(c.name);
     const state = c.result == null ? 'now' : c.isError ? 'bad' : 'ok';
     const result = c.result == null ? '' : c.result.length > SHOW_RESULT ? `${c.result.slice(0, SHOW_RESULT)}\n… (${(c.result.length - SHOW_RESULT).toLocaleString()} more characters sent to the model)` : c.result;
-    return `<details class="tool-call ${state}" data-k="${key}"><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
+    const ap = c.approval;
+    const asked = ap?.state === 'ask';
+    const approve = asked ? `<div class="approve"><span>${esc(ap.reason || 'The command guard is unsure about this command.')}</span>
+        <button type="button" data-approve="allow" data-call="${esc(c.id)}">Allow</button><button type="button" data-approve="decline" data-call="${esc(c.id)}">Decline</button></div>`
+      : ap ? `<div class="verdict ${ap.state === 'allowed' ? 'ok' : 'bad'}">${ap.state === 'allowed' ? 'You allowed it' : 'You declined it'}${ap.reason ? ` · ${esc(ap.reason)}` : ''}</div>` : '';
+    return `<details class="tool-call ${state}" data-k="${key}"${asked ? ' open' : ''}><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
         ${src ? `<span class="src">${esc(src)}</span>` : ''}<code>${esc(name)}</code><span class="args">${esc(argsSummary(c.arguments))}</span>
-        <span class="t">${c.ms != null ? fmtMs(c.ms) : state === 'now' ? 'running…' : ''}</span></summary>
-      <div class="io"><b>Input</b><pre>${esc(prettyArgs(c.arguments))}</pre>${c.result != null ? `<b>Result</b><pre class="out">${esc(result)}</pre>` : ''}</div></details>`;
+        <span class="t">${c.ms != null ? fmtMs(c.ms) : asked ? 'waiting for you' : state === 'now' ? 'running…' : ''}</span></summary>
+      <div class="io"><b>Input</b><pre>${esc(prettyArgs(c.arguments))}</pre>${approve}${c.result != null ? `<b>Result</b><pre class="out">${esc(result)}</pre>` : ''}</div></details>`;
   }).join('')}</div></details>`;
 }
 
@@ -808,6 +833,12 @@ $('log').addEventListener('change', (e) => {
 });
 
 $('log').addEventListener('click', async (e) => {
+  const appr = e.target.closest('[data-approve]');
+  if (appr) {
+    pendingApprovals.get(appr.dataset.call)?.(appr.dataset.approve === 'allow');
+    appr.closest('.approve')?.remove();
+    return;
+  }
   const sug = e.target.closest('[data-suggest]');
   if (sug) { $('input').value = sug.dataset.suggest; autoGrow(); $('input').focus(); return; }
   const codeBtn = e.target.closest('.copy-code');
@@ -831,7 +862,8 @@ $('log').addEventListener('click', async (e) => {
     case 'edit':
       if (running.has(chat.id)) return toast('Stop the current reply first.');
       if (i < chat.messages.length - 1 && !confirm('Edit this message? The replies after it will be removed.')) return;
-      $('input').value = m.content;
+      // editing a command's message puts the command back in the box
+      $('input').value = m.turn?.command ? `/${m.turn.command}${m.content ? ` ${m.content}` : ' '}` : m.content;
       pending = m.attachments || [];
       chat.messages.splice(i);
       saveChat(chat); drawLog(); drawChips(); autoGrow(); drawList();
@@ -867,8 +899,10 @@ function contextText(c) {
   }
   const repo = repoOf(c);
   if (repo) {
+    const shell = $('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length;
     parts.push(`This chat is linked to the git repository "${repo.name}" at ${repo.path}${repo.branch ? ` (branch ${repo.branch})` : ''}. `
-      + 'Use the repo_ tools to list, read and search its files and to look at its git history before answering questions about it. Paths are relative to the repository root.');
+      + 'Use the repo_ tools to list, read and search its files and to look at its git history before answering questions about it. Paths are relative to the repository root.'
+      + (shell ? ' The run_command tool runs a shell command in that repository, in the user\'s own working copy: every command goes past the command guard, and one it finds risky waits for the user to allow it. Prefer the repo_ tools for reading, and run_command for tests and build steps.' : ''));
   }
   return parts.join('\n\n');
 }
@@ -876,7 +910,7 @@ function contextText(c) {
 function userContent(m) {
   const files = (m.attachments || []).filter(a => a.kind === 'text');
   const images = (m.attachments || []).filter(a => a.kind === 'image');
-  const text = [m.content, ...files.map(f => `<file name="${f.name}">\n${f.text}\n</file>`)].filter(Boolean).join('\n\n');
+  const text = [m.turn?.command ? commandPrompt(m) : m.content, ...files.map(f => `<file name="${f.name}">\n${f.text}\n</file>`)].filter(Boolean).join('\n\n');
   if (!images.length) return text;
   return [{ type: 'text', text: text || '(see image)' }, ...images.map(a => ({ type: 'image_url', image_url: { url: a.dataUrl } }))];
 }
@@ -915,12 +949,18 @@ function busy(on) {
   $('send').classList.toggle('primary', !on);
 }
 
-async function send(text, attachments) {
+async function send(text, attachments, turn) {
   const c = chat;
   const r = $('send').getBoundingClientRect();
   window.Bright?.pulse(r.left + r.width / 2, r.top + r.height / 2, 1);
-  if (text || attachments.length) c.messages.push({ id: uid(), role: 'user', content: text, attachments: attachments.length ? attachments : undefined, time: Date.now() });
-  await runReply(c);
+  if (text || attachments.length) c.messages.push({ id: uid(), role: 'user', content: text, attachments: attachments.length ? attachments : undefined, time: Date.now(), ...(turn ? { turn } : {}) });
+  await runReply(c, turn);
+}
+
+// What a / command did to its turn, for the reply's footer
+function turnNote(turn) {
+  if (!turn) return '';
+  return [turn.model && `${turn.profile ? 'strategy' : 'model'} ${turn.model}`, turn.effort && `effort ${turn.effort}`, turn.tools === false && 'no tools'].filter(Boolean).join(' · ');
 }
 
 function regenerate() {
@@ -928,7 +968,10 @@ function regenerate() {
   if (running.has(c.id)) return;
   while (c.messages.length && c.messages[c.messages.length - 1].role !== 'user') c.messages.pop();
   if (!c.messages.length) return;
-  runReply(c);
+  // a command's answer is regenerated with the same command's model
+  const last = c.messages[c.messages.length - 1];
+  const command = last.turn?.command && commands.find(x => x.name === last.turn.command);
+  runReply(c, command ? commandTurn(command) : null);
 }
 
 // Send a user message again: stop any reply in progress, drop what came after it
@@ -942,7 +985,8 @@ async function resendFrom(c, m) {
   c.messages.splice(i + 1);
   saveChat(c);
   if (chat === c) drawLog();
-  runReply(c);
+  // a command's message goes again with the same command's model
+  runReply(c, m.turn?.command ? commandTurn(commands.find(x => x.name === m.turn.command) || { name: m.turn.command }) : null);
 }
 
 // Free models often stall or refuse once their daily or per-minute quota is used
@@ -950,18 +994,19 @@ const QUOTA_HINT = 'Free models often stall or refuse once their daily or per-mi
 const looksLikeQuota = (text) => /\b429\b|rate.?limit|quota|too many requests|exhausted|exceeded|capacity/i.test(text);
 const seconds = (id) => Math.max(0, Number($(id).value) || 0);
 
-async function runReply(c) {
-  const reply = { id: uid(), role: 'assistant', content: '', streaming: true, time: Date.now(), trace: { start: Date.now(), chunks: 0 } };
+async function runReply(c, turn) {
+  const reply = { id: uid(), role: 'assistant', content: '', streaming: true, time: Date.now(), trace: { start: Date.now(), chunks: 0 }, ...(turn ? { turn } : {}) };
   c.messages.push(reply);
   saveChat(c);
   if (chat === c) { drawLog(); $('title').placeholder = chatTitle(c); }
 
   const stream = $('stream').checked;
-  const tools = activeTools(c);
+  // a command's turn carries no tools: a model named there may not call them
+  const tools = turn?.tools === false ? [] : activeTools(c);
   const maxRounds = Math.max(1, parseInt($('maxToolRounds').value, 10) || 12);
   const history = apiMessages(c, c.messages.length - 1);
   const headers = { 'content-type': 'application/json' };
-  Object.assign(headers, routeHeaders(c));
+  Object.assign(headers, routeHeaders(c), turnHeaders(turn));
 
   const controller = new AbortController();
   let finish;
@@ -1038,6 +1083,7 @@ async function runReply(c) {
       } else {
         const j = await res.json();
         const msg = j.choices?.[0]?.message || {};
+        appendReasoning(reply, msg.reasoning_content ?? msg.reasoning ?? '');
         appendText(reply, msg.content ?? '');
         calls = (msg.tool_calls || []).map(t => ({ id: t.id, name: t.function?.name || '', arguments: t.function?.arguments || '' }));
         tr.firstToken = Date.now() - tr.start;
@@ -1087,6 +1133,8 @@ async function runReply(c) {
     clearInterval(watchdog);
     reply.streaming = false;
     delete reply.joinText;
+    delete reply.reasoningRound;
+    delete reply.reasoningCut;
     delete tr.toolsRunning;
     if (c.messages.includes(reply)) reply.cost = computeCost(reply);
     running.delete(c.id);
@@ -1100,6 +1148,22 @@ async function runReply(c) {
   }
 }
 
+// The model's thinking, when the provider streams or returns it. A new round
+// of tool calls starts a new paragraph of it. Kept in the chat (browser
+// storage), so it is capped: a runaway model can think for a long time.
+const REASONING_KEEP = 60000;
+function appendReasoning(reply, text) {
+  if (!text || reply.reasoningCut) return;
+  const round = reply.trace?.round || 0;
+  if (reply.reasoning && reply.reasoningRound !== round) reply.reasoning += '\n\n';
+  reply.reasoningRound = round;
+  reply.reasoning = (reply.reasoning || '') + text;
+  if (reply.reasoning.length > REASONING_KEEP) {
+    reply.reasoning = `${reply.reasoning.slice(0, REASONING_KEEP)}\n\n… (the rest of the thinking was dropped to keep the chat small)`;
+    reply.reasoningCut = true;
+  }
+}
+
 // Text from the model; the first text after a round of tool calls starts a new paragraph
 function appendText(reply, text) {
   if (!text) return;
@@ -1108,6 +1172,30 @@ function appendText(reply, text) {
     reply.joinText = false;
   }
   reply.content += text;
+}
+
+// A risky shell command waits here until you press Allow or Decline (a Stop also
+// ends it). Resolves true only for Allow.
+const pendingApprovals = new Map(); // call key -> resolve
+let approvalCount = 0;
+function askApproval(call, reason, onChange, signal) {
+  // the buttons in the chat find this by the call's id
+  const key = call.id || (call.id = `call_${++approvalCount}`);
+  call.approval = { state: 'ask', reason: reason || '' };
+  onChange();
+  return new Promise((resolve) => {
+    const settle = (allow) => {
+      pendingApprovals.delete(key);
+      signal?.removeEventListener('abort', onAbort);
+      call.approval = { state: allow ? 'allowed' : 'declined', reason: reason || '' };
+      onChange();
+      resolve(allow);
+    };
+    const onAbort = () => settle(false);
+    // Stop (or a timeout) ends the wait too, so the reply can't hang here
+    signal?.addEventListener('abort', onAbort, { once: true });
+    pendingApprovals.set(key, settle);
+  });
 }
 
 // Run one tool call through the harness (MCP server or repo tool)
@@ -1131,11 +1219,42 @@ async function runTool(call, c, signal, onChange) {
     call.ms = Date.now() - started;
     return onChange();
   }
+  let confirmed = false;
+  call.approval = null;
   try {
+    if (call.name === 'run_command') {
+      // Ask the command guard first: a risky command waits here for Allow or Decline
+      const check = await fetch('api/tools/shell/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ command: String(args.command || '') }),
+        signal,
+      });
+      const v = await check.json().catch(() => ({}));
+      if (!check.ok) throw new Error(v.error || `HTTP ${check.status}`);
+      if (v.decision === 'deny') {
+        call.result = `Error: the harness refused this command (${v.reason || 'blocked by a guard rule'}). Do not run it; find another way or ask the user.`;
+        call.isError = true;
+        call.ms = Date.now() - started;
+        onChange();
+        return;
+      }
+      if (v.decision === 'ask') {
+        const allow = await askApproval(call, v.reason, onChange, signal);
+        if (!allow) {
+          call.result = `Error: the user declined to run this command (${v.reason || 'the guard asked'}). Do not run it again; ask what they want instead.`;
+          call.isError = true;
+          call.ms = Date.now() - started;
+          onChange();
+          return;
+        }
+        confirmed = true;
+      }
+    }
     const res = await fetch('api/tools/call', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: call.name, arguments: args, repo: repoOf(c)?.path }),
+      body: JSON.stringify({ name: call.name, arguments: args, repo: repoOf(c)?.path, confirmed }),
       signal,
     });
     const j = await res.json().catch(() => ({ text: `Error: HTTP ${res.status}`, isError: true }));
@@ -1175,6 +1294,10 @@ async function readStream(stream, reply, c) {
       if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
       if (j.usage) tr.usage = j.usage;
       const d = j.choices?.[0]?.delta || {};
+      // Providers name the model's thinking differently: OpenRouter and most
+      // OpenAI-compatible servers say reasoning, others reasoning_content
+      const thought = d.reasoning_content ?? d.reasoning ?? '';
+      if (thought) { appendReasoning(reply, thought); redraw(reply); }
       const delta = d.content ?? '';
       if (delta) {
         if (tr.firstToken == null) tr.firstToken = Date.now() - tr.start;
@@ -1211,13 +1334,16 @@ $('compose').addEventListener('submit', (e) => {
 function submit() {
   const text = $('input').value.trim();
   if ((!text && !pending.length) || running.has(chat.id)) return;
+  // /advisor ... sends this one message to the command's model
+  const slash = slashCommand(text);
   dictation.stop();
   const attachments = pending;
   $('input').value = '';
   pending = [];
   chat.draft = ''; chat.pendingAttachments = [];
+  hideSlash();
   drawChips(); autoGrow();
-  send(text, attachments);
+  send(slash ? slash.text : text, attachments, slash ? commandTurn(slash.command) : null);
 }
 $('send').addEventListener('click', (e) => {
   const r = running.get(chat.id);
@@ -1230,9 +1356,170 @@ function autoGrow() {
   ta.style.height = Math.min(ta.scrollHeight + 2, 240) + 'px';
   drawHint();
 }
-$('input').addEventListener('input', autoGrow);
+
+// ---------------------------------------------------------------------------
+// Commands. Typing / lists them with the model each one sends to, and under
+// them the tools this chat can use. A command is one message sent with a
+// model, strategy or effort for that turn only, so /advisor can ask another
+// model and the next message goes back to the chat's own routing.
+// ---------------------------------------------------------------------------
+let slashItems = [];   // command names the menu shows, in order
+let slashPick = 0;     // the highlighted one
+
+// The half-typed query after a / (null when the box isn't a command)
+function slashQuery(value) {
+  const m = /^\/([^\n]*)$/.exec(value);
+  return m ? m[1].trim() : null;
+}
+
+// A command typed in full: { command, args }. The message keeps the command's
+// name and what was typed after it; the instructions it stands for are filled
+// in when the request is built, so editing a command changes what it says.
+function slashCommand(text) {
+  const m = /^\/([\w-]+)(?:\s+([\s\S]*))?$/.exec(text);
+  if (!m) return null;
+  const command = commands.find(c => c.name.toLowerCase() === m[1].toLowerCase());
+  return command ? { command, args: (m[2] || '').trim() } : null;
+}
+
+// The message a command stands for, as it is sent
+function commandPrompt(m) {
+  const command = commands.find(c => c.name.toLowerCase() === String(m.turn.command).toLowerCase());
+  if (!command) return m.content || '';
+  return expandCommand(command, m.content || '');
+}
+
+// {args} becomes what was typed after the name; a command with no {args} gets
+// it after its message
+function expandCommand(command, args) {
+  let body = command.body;
+  if (body.includes('{args}')) body = body.replace(/\{args\}/g, args || '(what the person is doing now)');
+  else if (args) body += `\n\n${args}`;
+  return body;
+}
+
+// A command's message as it is sent: its name and what was typed after it stand
+// in for the instructions, and what comes back is sent with the turn's route
+function commandPrompt(m) {
+  const c = commands.find(x => x.name.toLowerCase() === String(m.turn?.command || '').toLowerCase());
+  return c ? expandCommand(c, m.content || '') : m.content || '';
+}
+
+// A command's model box takes any model name, or the name of a strategy
+function commandModel(command) {
+  const w = (command.model || '').trim();
+  if (!w) return {};
+  const strategy = strategies.profiles.find(x => x.id === w || x.name.toLowerCase() === w.toLowerCase());
+  return strategy ? { profile: strategy.id, model: strategy.name } : { model: w };
+}
+
+// What a command does to its turn. A model named there may not call tools,
+// so the turn carries none and the reply comes back in words.
+function commandTurn(command) {
+  const pick = commandModel(command);
+  return { command: command.name, model: pick.model, profile: pick.profile, effort: command.effort || null, tools: false };
+}
+
+// A turn's own route, laid over the chat's for its one request
+function turnHeaders(turn) {
+  if (!turn) return {};
+  const out = {};
+  if (turn.profile) out['x-harness-profile'] = turn.profile; else if (turn.model) out['x-harness-model'] = turn.model;
+  if (turn.effort && turn.effort !== 'auto') out['x-harness-effort'] = turn.effort;
+  return out;
+}
+
+function commandItem(c) {
+  const where = commandModel(c);
+  const bits = [where.profile ? `strategy ${where.model}` : where.model, c.effort && `effort ${c.effort}`].filter(Boolean);
+  return `<div class="slash-item" role="option" data-kind="command" data-name="${esc(c.name)}" title="${esc(c.body.slice(0, 300))}">`
+    + `<b>/${esc(c.name)} <i>${esc(c.description || '')}</i></b><span class="tag">${esc(bits.join(' · '))}</span>`
+    + `<span>${esc(c.body.replace(/\s+/g, ' ').slice(0, 120))}</span></div>`;
+}
+
+function drawSlash() {
+  // the first / fills in the examples, so there is something to try
+  if (!commands.length) { commands = STARTER_COMMANDS.map(c => ({ id: uid(), ...c })); saveCommands(); }
+  const q = slashQuery($('input').value);
+  if (q === null || q.includes(' ')) return hideSlash(); // past the name: the message itself
+  const needle = q.toLowerCase();
+  const found = commands.filter(c => !needle || c.name.toLowerCase().includes(needle));
+  if (!found.length && needle) return hideSlash();
+  const rows = ['<div class="slash-sec">Commands</div>'];
+  rows.push(found.length
+    ? found.map(commandItem).join('')
+    : '<div class="slash-none">No commands yet. <button type="button" class="link" id="slashMake">Make one</button></div>');
+  // the tools this chat can use, so / shows what the next message may call
+  const live = chat ? activeTools(chat) : [];
+  if (live.length) {
+    rows.push('<div class="slash-sec">Tools this chat can use</div>');
+    rows.push(live.map(t => `<div class="slash-item" role="option" aria-disabled="true" data-kind="tool">`
+      + `<b>${esc(t.function.name)}</b><span>${esc(String(t.function.description || '').replace(/\s+/g, ' ').slice(0, 140))}</span></div>`).join(''));
+  }
+  $('slash').innerHTML = rows.join('');
+  slashItems = [...$('slash').querySelectorAll('[data-kind="command"]')].map(el => el.dataset.name);
+  slashPick = Math.min(slashPick, Math.max(0, slashItems.length - 1));
+  markSlash();
+  $('slash').hidden = false;
+}
+
+function markSlash() {
+  const els = $('slash').querySelectorAll('[data-kind="command"]');
+  els.forEach((el, i) => el.classList.toggle('on', i === slashPick));
+  els[slashPick]?.scrollIntoView({ block: 'nearest' });
+}
+
+function hideSlash() {
+  $('slash').hidden = true;
+  slashItems = [];
+  slashPick = 0;
+}
+
+// Put a command in the box, ready for what follows it
+function useSlash(name) {
+  const args = $('input').value.replace(/^\/[^\s]*\s?/, '');
+  const value = `/${name}${args ? ` ${args}` : ' '}`;
+  $('input').value = value;
+  hideSlash(); autoGrow();
+  $('input').focus();
+  $('input').setSelectionRange(value.length, value.length);
+}
+
+$('slash').addEventListener('mousedown', (e) => {
+  // mousedown, so the box keeps its focus
+  const item = e.target.closest('[data-kind="command"]');
+  if (item) { e.preventDefault(); useSlash(item.dataset.name); return; }
+  if (e.target.closest('#slashMake')) {
+    e.preventDefault();
+    const name = (slashQuery($('input').value) || '').trim();
+    $('input').value = '';
+    hideSlash(); autoGrow();
+    newCommand(name);
+  }
+});
+
+// The menu follows the box: / lists, a name filters, a space means the message
+$('input').addEventListener('input', () => {
+  if (slashQuery($('input').value) !== null) slashPick = 0;
+  autoGrow();
+  drawSlash();
+});
 $('input').addEventListener('keydown', (e) => {
+  if (!$('slash').hidden && slashItems.length) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); slashPick = (slashPick + 1) % slashItems.length; markSlash(); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); slashPick = (slashPick - 1 + slashItems.length) % slashItems.length; markSlash(); return; }
+    if (e.key === 'Tab' || e.key === 'Enter') {
+      e.preventDefault();
+      // Enter on a command typed in full sends it; either key completes a half-typed one
+      if (e.key === 'Enter' && slashCommand($('input').value.trim())) { submit(); return; }
+      useSlash(slashItems[slashPick]); return;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); hideSlash(); return; }
+  }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
+});
+document.addEventListener('click', (e) => {
+  if (!$('slash').hidden && !e.target.closest('#slash, #composeRow')) hideSlash();
 });
 
 function drawContextSize() {
@@ -1250,8 +1537,13 @@ function drawHint() {
   else if (route?.auto) bits.push('strategy: Auto');
   else if (route?.profile) bits.push(`strategy: ${esc(route.profile.name)}`);
   if (repoOf(chat)) bits.push(`linked to ${esc(repoOf(chat).name)}`);
+  if (repoOf(chat) && $('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length) bits.push('shell in the repo');
   const on = chat ? skillsOf(chat) : [];
   if (on.length) bits.push(`skill${on.length === 1 ? '' : 's'}: ${on.map(k => esc(k.name)).join(', ')}`);
+  // a command in the box sends this message with a model of its own
+  const typed = slashCommand($('input').value.trim());
+  const note = typed && turnNote(commandTurn(typed.command));
+  if (note) bits.push(`/${esc(typed.command.name)}: ${esc(note)}`);
   const toolCount = chat ? activeTools(chat).length : 0;
   if (toolCount) bits.push(`${toolCount} tool${toolCount === 1 ? '' : 's'} on`);
   if ($('handsFree').checked) bits.push('hands-free on');
@@ -1344,6 +1636,8 @@ function serverTools(c) {
     if (s.status === 'connected' && !off.has(s.name)) list.push(...(toolInfo.definitions?.[s.name] || []));
   }
   if (repoOf(c)) list.push(...(toolInfo.repoDefinitions || []));
+  // a shell in the linked repo, unless it is off in the options or the settings
+  if (repoOf(c) && $('shellInRepo').checked && (toolInfo.shellDefinitions || []).length) list.push(...toolInfo.shellDefinitions);
   return list;
 }
 function activeTools(c) {
@@ -1367,6 +1661,7 @@ async function loadTools() {
     toolInfo = null;
   }
   drawTools();
+  drawRepo();
   drawHint();
 }
 
@@ -1385,7 +1680,7 @@ function drawTools() {
         ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}</li>`;
   });
   if (toolInfo?.error) rows.unshift(`<li class="err">${esc(toolInfo.error)}</li>`);
-  $('mcpList').innerHTML = $('kitTools').innerHTML = rows.join('') || (toolInfo
+  $('mcpList').innerHTML = rows.join('') || (toolInfo
     ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. Add them to <code>${esc(toolInfo.file?.split(/[\\/]/).pop() || 'mcp-servers.json')}</code>.</li>`
     : '<li class="err">Could not reach the harness.</li>');
 }
@@ -1401,7 +1696,6 @@ function onToolToggle(e) {
   drawHint();
 }
 $('mcpList').addEventListener('change', onToolToggle);
-$('kitTools').addEventListener('change', onToolToggle);
 
 $('mcpReload').addEventListener('click', async () => {
   $('mcpReload').disabled = true;
@@ -1422,7 +1716,7 @@ function drawRepo() {
   $('repoPath').readOnly = !!r;
   $('repoLink').textContent = r ? 'Unlink' : 'Link';
   $('repoInfo').innerHTML = r
-    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model can read its files and history (read-only).`
+    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model can read its files and history${$('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length ? ', and run commands here (guarded)' : ''}.`
     : projectOf(chat)?.repo
       ? `Using the project's repo <b>${esc(projectOf(chat).repo.name)}</b>. Link another folder here to use that instead.`
       : 'Read-only for the model.';
@@ -1472,6 +1766,7 @@ function chatMarkdown(c) {
   for (const m of c.messages) {
     if (m.role === 'user') {
       out.push('## You', '');
+      if (m.turn?.command) out.push(`**/${m.turn.command}**${turnNote(m.turn) ? ` _(${turnNote(m.turn)})_` : ''}`, '');
       if (m.content) out.push(m.content, '');
       for (const a of m.attachments || []) {
         if (a.kind === 'image') out.push(`_Attached image: ${a.name}_`, '');
@@ -2560,7 +2855,12 @@ function drawKit() {
       <span><b>${esc(k.name)}</b>${fromProject.has(k.id) ? ' <span class="tag">project</span>' : ''}<br><span class="muted small">${esc(k.description || '')}</span></span></label></li>`).join('')
     || '<li class="muted small">No skills yet. Manage skills to add some.</li>';
   const repo = repoOf(chat);
-  $('kitRepo').innerHTML = repo ? `Git repo <b>${esc(repo.name)}</b> is linked${chat.repo ? '' : ' through the project'}: the model can read it.` : 'Link a git repo under Options to let the model read it.';
+  const shellOn = $('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length > 0;
+  $('kitShell').checked = shellOn;
+  $('kitShell').disabled = !repo || !(toolInfo?.shellDefinitions || []).length;
+  $('kitRepo').innerHTML = repo
+    ? `Git repo <b>${esc(repo.name)}</b> is linked${chat.repo ? '' : ' through the project'}: the model can ${shellOn ? 'read it and run commands in it' : 'read it'}.`
+    : 'Link a git repo under Options to let the model read it.';
   $('kitBtn').classList.toggle('on', skillsOf(chat).length > 0);
 }
 $('kitBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleKit(); });
@@ -2583,10 +2883,15 @@ $('kitSkills').addEventListener('change', (e) => {
 });
 $('skillTool').checked = !!prefs.skillTool;
 $('skillTool').addEventListener('change', () => { prefs.skillTool = $('skillTool').checked; store.set(PREF_KEY, prefs); drawHint(); });
-$('kitReload').addEventListener('click', () => $('mcpReload').click());
-$('input').addEventListener('input', () => {
-  if ($('input').value === '/') { $('input').value = ''; toggleKit(true); }
+// the panel's shell box is the same preference as the options' one
+$('kitShell').addEventListener('change', () => {
+  $('shellInRepo').checked = $('kitShell').checked;
+  prefs.shellInRepo = $('kitShell').checked;
+  store.set(PREF_KEY, prefs);
+  drawRepo(); drawKit(); drawHint();
 });
+// the panel keeps to skills and commands; servers stay under Options
+// a / in an empty box lists the commands (drawSlash, above)
 
 function drawSkillIndex() {
   $('skillIndex').innerHTML = skills.map(k => `<li data-kid="${k.id}" class="${k === editingSkill ? 'on' : ''}">${esc(k.name || '(no name)')}</li>`).join('')
@@ -2631,6 +2936,84 @@ $('skillDelete').addEventListener('click', () => {
   drawSkillIndex();
 });
 $('skillsDialog').addEventListener('close', () => { skills = skills.filter(k => k.name || k.body); saveSkills(); drawKit(); drawHint(); });
+
+// ---------------------------------------------------------------------------
+// Commands: a name, what it does, the model or strategy its turn goes to, its
+// effort, and the message it sends ({args} becomes what you type after it)
+// ---------------------------------------------------------------------------
+const STARTER_COMMANDS = [{
+  name: 'advisor',
+  description: 'A second opinion from another model',
+  model: '',
+  effort: 'max',
+  body: 'Give a second opinion, as a careful reviewer: what is wrong, missing or risky first, then what you would do instead. Be brief and concrete, and say plainly when it looks fine.\n\nWhat the person is asking now:\n{args}',
+}];
+let editingCommand = null;
+const saveCommands = () => store.set(COMMANDS_KEY, commands);
+
+function drawCommandIndex() {
+  $('commandIndex').innerHTML = commands.map(c => `<li data-cid="${c.id}" class="${c === editingCommand ? 'on' : ''}">/${esc(c.name || '(no name)')}</li>`).join('')
+    || '<li class="muted small">No commands yet.</li>';
+  $('commandEdit').hidden = !editingCommand;
+  if (editingCommand) {
+    $('cName').value = editingCommand.name || '';
+    $('cDesc').value = editingCommand.description || '';
+    $('cModel').value = editingCommand.model || '';
+    $('cEffort').value = editingCommand.effort || '';
+    $('cBody').value = editingCommand.body || '';
+  }
+}
+
+function openCommands() {
+  if (!commands.length) { commands = STARTER_COMMANDS.map(c => ({ id: uid(), ...c })); saveCommands(); }
+  editingCommand = commands[0] || null;
+  drawCommandIndex();
+  $('kit').hidden = true;
+  $('commandsDialog').showModal();
+}
+
+// a / with no command by that name offers to make it
+function newCommand(name) {
+  if (!commands.length) commands = STARTER_COMMANDS.map(c => ({ id: uid(), ...c }));
+  editingCommand = { id: uid(), name: name || `command-${commands.length + 1}`, description: '', model: '', effort: '', body: '' };
+  commands.push(editingCommand);
+  saveCommands();
+  drawCommandIndex();
+  $('kit').hidden = true;
+  $('commandsDialog').showModal();
+  $('cName').select();
+}
+
+$('manageCommands').addEventListener('click', openCommands);
+$('commandIndex').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-cid]');
+  if (li) { editingCommand = commands.find(c => c.id === li.dataset.cid); drawCommandIndex(); }
+});
+$('commandAdd').addEventListener('click', () => {
+  editingCommand = { id: uid(), name: `command-${commands.length + 1}`, description: '', model: '', effort: '', body: '' };
+  commands.push(editingCommand);
+  saveCommands(); drawCommandIndex(); $('cName').select();
+});
+for (const [id, key] of [['cName', 'name'], ['cDesc', 'description'], ['cModel', 'model'], ['cEffort', 'effort'], ['cBody', 'body']]) {
+  $(id).addEventListener('input', () => {
+    if (!editingCommand) return;
+    editingCommand[key] = key === 'name' ? $(id).value.trim().replace(/[\s/]+/g, '-') : $(id).value;
+    saveCommands();
+    if (key === 'name') drawCommandIndex();
+  });
+}
+$('commandDelete').addEventListener('click', () => {
+  if (!editingCommand || !confirm(`Delete the command “/${editingCommand.name}”?`)) return;
+  commands = commands.filter(c => c !== editingCommand);
+  saveCommands();
+  editingCommand = commands[0] || null;
+  drawCommandIndex();
+});
+$('commandsDialog').addEventListener('close', () => {
+  commands = commands.filter(c => c.name || c.body);
+  saveCommands();
+  drawHint();
+});
 
 // ---------------------------------------------------------------------------
 // Scheduled messages: sent while this page is open in a tab; a run missed

@@ -11,14 +11,19 @@ button.mini { padding: 2px 6px; font-size: 12px; border-radius: 5px; }
 
 /* Installed on a phone, the page runs edge to edge: keep clear of the notch and home bar */
 .app { padding: 0 env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0); }
-.app { display: grid; grid-template-columns: 260px minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+.app { display: grid; grid-template-columns: 0px minmax(0, 1fr) auto; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; }
+.app.side-open { grid-template-columns: 260px minmax(0, 1fr) auto; }
+.app { transition: grid-template-columns .18s ease; }
 .app > .top { grid-column: 1 / -1; grid-row: 1; }
-.app > .side { grid-column: 1; grid-row: 2; }
-.app > .convo { grid-column: 2; grid-row: 2; }
-.app > .activity { grid-column: 3; grid-row: 2; }
+.app > .chatbar { grid-column: 2 / -1; grid-row: 2; }
+.app > .side { grid-column: 1; grid-row: 2 / -1; }
+.app > .convo { grid-column: 2; grid-row: 3; }
+.app > .activity { grid-column: 3; grid-row: 3; }
+/* folded away, the chats panel takes no room and clips its contents */
+.app:not(.side-open) > .side { overflow: hidden; border-right: 0; }
 
 /* ---- sidebar: projects, scheduled, recent chats ---- */
-.side { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); min-height: 0; }
+.side { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); min-height: 0; min-width: 0; }
 .side-top { display: flex; flex-direction: column; gap: 8px; padding: 12px 10px 6px; }
 .side-top input { padding: 5px 9px; }
 .side-scroll { flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 6px; }
@@ -61,18 +66,19 @@ button.link.danger { color: var(--bad); }
 /* ---- conversation ---- */
 main.convo { max-width: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .top { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-wrap: nowrap; background: var(--panel); }
-/* the nav fills the chats column, so the title starts over the conversation */
-.top nav { flex: none; min-width: 228px; display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
+.top nav { flex: none; min-width: 0; display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
 .top nav h1 { margin: 0; font-size: 17px; }
+
+/* the chat bar, over the conversation only: this chat's name, context and controls */
+.chatbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); min-width: 0; }
+.chatbar .title { flex: 1; min-width: 80px; border-color: transparent; background: transparent; font-weight: 600; }
+.chatbar .title:hover, .chatbar .title:focus { border-color: var(--border); background: var(--bg); }
 .stats { flex: none; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; }
 .stats:empty { display: none; }
 .stats .meter { width: 60px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .stats .meter i { display: block; height: 100%; background: var(--ok); }
 .stats .meter.warn i { background: var(--warn); } .stats .meter.bad i { background: var(--bad); }
-.top .title { flex: 1; min-width: 80px; border-color: transparent; background: transparent; font-weight: 600; }
-.top .title:hover, .top .title:focus { border-color: var(--border); background: var(--bg); }
 .top-actions { display: flex; gap: 6px; flex: none; }
-.only-narrow { display: none !important; }
 
 .options { border-bottom: 1px solid var(--border); background: var(--panel); padding: 10px 16px 14px; max-height: 50vh; overflow-y: auto; }
 .opt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
@@ -271,19 +277,19 @@ input[type=range] { width: 100%; }
 
 /* narrow screens: chats slide over, activity covers the page */
 @media (max-width: 1100px) {
-  .app { grid-template-columns: 230px minmax(0, 1fr) auto; }
-  .top nav { min-width: 198px; }
+  .app.side-open { grid-template-columns: 230px minmax(0, 1fr) auto; }
   .activity { position: fixed; right: 0; top: 0; bottom: 0; z-index: 10; box-shadow: -4px 0 16px rgba(0,0,0,.15); max-width: 92vw; }
 }
 @media (max-width: 760px) {
-  .app { grid-template-columns: minmax(0, 1fr); }
+  .app, .app.side-open { grid-template-columns: minmax(0, 1fr); }
+  .app > .chatbar { grid-column: 1; }
   .app > .convo { grid-column: 1; }
   .top nav { min-width: 0; }
   .stats .meter, .stats .ctx-text { display: none; }
   .side { position: fixed; left: 0; top: 0; bottom: 0; width: 270px; max-width: 85vw; z-index: 11; transform: translateX(-100%); transition: transform .15s; box-shadow: 4px 0 16px rgba(0,0,0,.15); }
   .app.side-open .side { transform: none; }
-  .only-narrow { display: inline-flex !important; }
   .top { padding: 8px 12px; gap: 8px; }
+  .chatbar { padding: 8px 12px; gap: 8px; }
   .top nav a { display: none; }
   .top nav h1 { font-size: 16px; }
   .log { padding: 12px; }
@@ -296,17 +302,16 @@ input[type=range] { width: 100%; }
 @media (max-width: 760px) {
   .app:not(.side-open) .side { box-shadow: none; }
   .top-actions { gap: 2px; }
-  .top button.icon { width: 30px; height: 30px; padding: 5px; }
+  .top button.icon, .chatbar button.icon { width: 30px; height: 30px; padding: 5px; }
 }
 @media (max-width: 480px) {
   .top nav { display: none; }
 }
 
 /* ---- Bright Chat ---- */
-.top, .compose, .options { background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.top, .chatbar, .compose, .options { background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
 .activity { background: var(--glass-strong); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
 .top nav h1 { font-size: 17px; }
-.top nav { min-width: 248px; }
 .bubble { background: var(--glass); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border-radius: 14px; }
 .msg.user .bubble { background: linear-gradient(125deg, var(--glow-c), color-mix(in srgb, var(--glow-b) 85%, var(--glow-c))); border-color: transparent;
   box-shadow: 0 6px 22px -10px var(--glow-b); border-bottom-right-radius: 5px; }
@@ -366,7 +371,7 @@ kbd { font: 12px ui-monospace, Consolas, monospace; border: 1px solid var(--bord
 .proj-badge[hidden] { display: none; }
 button.stats { border: 1px solid transparent; background: none; padding: 3px 8px; border-radius: 999px; cursor: pointer; }
 button.stats:hover { border-color: var(--border); background: var(--glass); color: var(--text); }
-.top .title.renamed { animation: renamed 1.2s ease; }
+.chatbar .title.renamed { animation: renamed 1.2s ease; }
 @keyframes renamed { 0% { box-shadow: 0 0 0 0 var(--glow-b); color: var(--glow-b); } 100% { box-shadow: 0 0 0 10px transparent; } }
 
 /* popovers: skills and tools, chat usage */
@@ -399,7 +404,7 @@ button.stats:hover { border-color: var(--border); background: var(--glass); colo
 .slash-item[aria-disabled="true"]:hover { background: none; }
 .slash-none { padding: 8px; font-size: 12.5px; color: var(--muted); }
 button.icon.on { color: var(--accent); }
-.usage-pop { top: 52px; right: 16px; width: min(380px, calc(100vw - 32px)); padding: 12px 14px; display: grid; gap: 8px; font-size: 13px; }
+.usage-pop { top: 108px; right: 16px; width: min(380px, calc(100vw - 32px)); padding: 12px 14px; display: grid; gap: 8px; font-size: 13px; }
 .up-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .up-tiles div { display: flex; flex-direction: column; padding: 6px 8px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .up-tiles b { font-size: 16px; font-variant-numeric: tabular-nums; }
@@ -457,7 +462,7 @@ button.icon.on { color: var(--accent); }
 .skill-edit { display: flex; flex-direction: column; gap: 10px; }
 .skill-edit[hidden] { display: none; }
 @media (max-width: 600px) { .skills-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .top nav { min-width: 0; } .proj-badge { display: none; } }
+@media (max-width: 760px) { .proj-badge { display: none; } }
 @media (max-width: 760px) { .side { background: var(--panel); } }
 @media (max-width: 560px) { button.stats { display: none; } .bg-toggle { display: none; } }
 .cp-left .ok { color: var(--ok); } .cp-left .warn { color: var(--warn); }

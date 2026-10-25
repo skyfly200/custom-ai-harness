@@ -2,13 +2,13 @@
    focus. Only on devices that can hover; touch screens (phones) keep
    everything visible. Faded things stay in the layout and stay focusable. */
 @media (hover: hover) {
-  /* ---- chat: top bar ---- */
-  .top-actions > button.icon:not(#toggleOptions):not(#toggleActivity) { opacity: 0; transition: opacity .18s; }
+  /* ---- chat: the chat bar ---- */
+  .chatbar .top-actions > button.icon:not(#toggleOptions):not(#toggleActivity) { opacity: 0; transition: opacity .18s; }
   button.stats { opacity: .5; transition: opacity .18s, border-color .15s, background-color .15s; }
-  .top:hover .top-actions > button.icon,
-  .top:hover button.stats,
-  .top:focus-within .top-actions > button.icon,
-  .top:focus-within button.stats { opacity: 1; }
+  .chatbar:hover .top-actions > button.icon,
+  .chatbar:hover button.stats,
+  .chatbar:focus-within .top-actions > button.icon,
+  .chatbar:focus-within button.stats { opacity: 1; }
 
   /* ---- chat: sidebar ---- */
   .sec-add:not(.scope-clear), .side-foot { opacity: 0; transition: opacity .18s, color .15s; }

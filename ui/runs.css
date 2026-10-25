@@ -4,7 +4,7 @@
 #newRun .field.wide textarea { width: 100%; resize: vertical; font: inherit; }
 .split { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 12px; align-items: start; }
 @media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); } }
-.list { padding: 6px; max-height: 70vh; overflow: auto; }
+.list { padding: 6px; max-height: 70vh; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .run-item { display: block; width: 100%; text-align: left; padding: 8px 10px; margin: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; }
 .run-item:hover, .run-item.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .run-item .goal { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -237,6 +237,20 @@ let scope = store.get('harness-chat-scope', '');   // '' = every chat, else a pr
 if (scope && !projects.some(p => p.id === scope)) scope = '';
 const sideOpen = store.get('harness-side-sections', { projects: true, scheduled: true, recent: true });
 
+// The chats panel folds away to a button in the top bar; the choice is kept
+const narrow = () => matchMedia('(max-width: 760px)').matches;
+let panelOpen = store.get('harness-side-open', true);
+function setSide(open) {
+  panelOpen = !!open;
+  $('app').classList.toggle('side-open', panelOpen);
+  $('toggleSide').classList.toggle('on', panelOpen);
+  $('toggleSide').setAttribute('aria-expanded', String(panelOpen));
+  $('toggleSide').title = panelOpen ? 'Hide chats' : 'Show chats';
+  // a folded panel is still in the page, so keep it out of the tab order
+  $('side').inert = !panelOpen;
+  store.set('harness-side-open', panelOpen);
+}
+
 const projectOf = (c) => (c?.project ? projects.find(p => p.id === c.project) : null);
 const saveProjects = () => store.set(PROJECTS_KEY, projects);
 const saveSkills = () => store.set(SKILLS_KEY, skills);
@@ -337,7 +351,7 @@ $('chatList').addEventListener('click', (e) => {
     return;
   }
   const li = e.target.closest('li[data-id]');
-  if (li) { openChat(li.dataset.id); $('app').classList.remove('side-open'); }
+  if (li) { openChat(li.dataset.id); if (narrow()) setSide(false); }
 });
 $('projectList').addEventListener('click', (e) => {
   const edit = e.target.closest('[data-edit]');
@@ -398,7 +412,7 @@ function stepChat(dir) {
   if (next) openChat(next.id);
 }
 
-$('newChat').addEventListener('click', () => { openChat(null); $('app').classList.remove('side-open'); });
+$('newChat').addEventListener('click', () => { openChat(null); if (narrow()) setSide(false); });
 $('deleteChat').addEventListener('click', () => {
   if (!index.some(e => e.id === chat.id)) {
     // nothing saved yet: just clear what's typed
@@ -412,7 +426,7 @@ $('deleteAll').addEventListener('click', () => {
   if (!index.length) return toast('No saved chats to delete.');
   if (confirm(`Delete all ${index.length} saved chat${index.length === 1 ? '' : 's'} in this browser? This can't be undone. (Export all chats first to keep a copy.)`)) deleteAllChats();
 });
-$('toggleSide').addEventListener('click', () => $('app').classList.toggle('side-open'));
+$('toggleSide').addEventListener('click', () => setSide(!$('app').classList.contains('side-open')));
 $('title').addEventListener('change', () => { chat.title = $('title').value.trim(); saveChat(chat, { touch: false }); drawList(); });
 $('system').addEventListener('change', () => { chat.system = $('system').value; saveChat(chat); drawList(); drawContextSize(); });
 $('notes').addEventListener('change', () => { chat.notes = $('notes').value; saveChat(chat); drawList(); drawContextSize(); });
@@ -696,7 +710,7 @@ function reasoningHtml(m) {
   const text = m.reasoning || '';
   if (!text) return '';
   const shown = text.length > REASONING_SHOWN ? `${text.slice(0, REASONING_SHOWN)}\n… (${(text.length - REASONING_SHOWN).toLocaleString()} more characters)` : text;
-  return `<details class="reasoning" data-k="reasoning"${m.streaming && !m.content ? ' open' : ''}><summary>
+  return `<details class="reasoning" data-k="reasoning"><summary>
       <span class="spark"><i></i><i></i><i></i></span><span>${m.streaming ? 'Thinking' : 'Thought'}</span>
       <span class="t">${text.length.toLocaleString()} characters</span></summary><pre>${esc(shown)}</pre></details>`;
 }
@@ -791,15 +805,35 @@ function redraw(m) {
       const el = $('log').querySelector(`.msg[data-id="${msg.id}"]`);
       const i = chat.messages.indexOf(msg);
       const html = messageHtml(msg, i, chat.messages);
-      if (el) patch(el, html); else drawLog();
+      if (el) patch(el, html);
+      else { drawLog(); followThinking(); }
     }
     dirty.clear();
     if (stickToBottom && $('autoScroll').checked) $('log').scrollTop = $('log').scrollHeight;
   });
 }
+// A thinking pane that is open keeps its newest text in view while the reply
+// streams in, whatever the chat is doing
+function followThinking(root) {
+  const scope = root || $('log');
+  for (const pre of scope.querySelectorAll('.reasoning[open] > pre')) pre.scrollTop = pre.scrollHeight;
+}
+// Where a pane was scrolled to, so a redraw doesn't send you back to the top
+function reasoningPos(el) {
+  const pre = el.querySelector('.reasoning[open] > pre');
+  if (!pre) return null;
+  return { bottom: pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24, top: pre.scrollTop };
+}
+// Reopening a thinking pane mid-reply jumps to the latest thought
+$('log').addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (!d.classList?.contains('reasoning') || !d.open || !d.closest('.msg.streaming')) return;
+  followThinking(d.closest('.msg'));
+}, true);
 // Replace a message's content but keep its button row when that hasn't
 // changed, so a click on Stop isn't lost to a redraw mid-click
 function patch(el, html) {
+  const pos = reasoningPos(el);
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   const fresh = tmp.firstElementChild;
@@ -815,6 +849,8 @@ function patch(el, html) {
     el.append(...fresh.childNodes);
   }
   for (const k of open) { const d = el.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; }
+  const pre = el.querySelector('.reasoning[open] > pre');
+  if (pos && pre) pre.scrollTop = pos.bottom ? pre.scrollHeight : pos.top;
 }
 // keep elapsed times ticking while a reply is pending
 setInterval(() => {
@@ -3356,14 +3392,14 @@ setInterval(() => { drawCacheTimer(); drawCacheDots(); checkKeepAlive(); }, 1000
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); openChat(null); }
-  else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('app').classList.add('side-open'); $('search').focus(); $('search').select(); }
+  else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); setSide(true); $('search').focus(); $('search').select(); }
   else if (mod && e.key.toLowerCase() === 'm') { e.preventDefault(); $('mic').click(); }
   else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); stepChat(e.key === 'ArrowUp' ? -1 : 1); }
   else if (e.key === 'Escape') {
     if (!$('kit').hidden || !$('usagePop').hidden) { $('kit').hidden = $('usagePop').hidden = true; }
     else if (speech.current) speech.stop();
     else if (running.has(chat.id)) running.get(chat.id).controller.abort();
-    else $('app').classList.remove('side-open');
+    else if (narrow() && panelOpen) setSide(false);
   }
 });
 window.addEventListener('beforeunload', saveDraft);
@@ -3393,4 +3429,5 @@ setTimeout(checkSchedules, 1500);
 connectLive();
 loadRecent();
 setActivity(!!prefs.activity);
+setSide(narrow() ? false : panelOpen);
 setInterval(() => { drawList(); drawSchedules(); }, 60000);

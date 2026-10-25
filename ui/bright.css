@@ -54,6 +54,15 @@ input[type=text], input[type=number], input[type=search], input[type=datetime-lo
 input:focus-visible, textarea:focus-visible, select:focus-visible {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent), 0 0 18px -4px var(--glow-c); }
 
+/* ---- scroll areas: a thin bar that sits in the glass instead of a bright OS one ---- */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 35%, transparent); background-clip: padding-box;
+  border: 3px solid transparent; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 55%, transparent); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
 /* ---- edge glow: a bright rim near the pointer (bright.js sets --mx/--my) ---- */
 .card, .bubble, .glow-edge, fieldset { position: relative; }
 .card::before, .bubble::before, .glow-edge::before, fieldset::before {

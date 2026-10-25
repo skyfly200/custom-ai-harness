@@ -1382,11 +1382,11 @@ function slashCommand(text) {
   return command ? { command, args: (m[2] || '').trim() } : null;
 }
 
-// The message a command stands for, as it is sent
+// The message a command stands for, as it is sent: the instructions replace the
+// typed command, with {args} filled in from what followed it
 function commandPrompt(m) {
-  const command = commands.find(c => c.name.toLowerCase() === String(m.turn.command).toLowerCase());
-  if (!command) return m.content || '';
-  return expandCommand(command, m.content || '');
+  const c = commands.find(x => x.name.toLowerCase() === String(m.turn?.command || '').toLowerCase());
+  return c ? expandCommand(c, m.content || '') : m.content || '';
 }
 
 // {args} becomes what was typed after the name; a command with no {args} gets
@@ -1396,13 +1396,6 @@ function expandCommand(command, args) {
   if (body.includes('{args}')) body = body.replace(/\{args\}/g, args || '(what the person is doing now)');
   else if (args) body += `\n\n${args}`;
   return body;
-}
-
-// A command's message as it is sent: its name and what was typed after it stand
-// in for the instructions, and what comes back is sent with the turn's route
-function commandPrompt(m) {
-  const c = commands.find(x => x.name.toLowerCase() === String(m.turn?.command || '').toLowerCase());
-  return c ? expandCommand(c, m.content || '') : m.content || '';
 }
 
 // A command's model box takes any model name, or the name of a strategy

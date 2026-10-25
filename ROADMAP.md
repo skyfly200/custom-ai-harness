@@ -65,3 +65,6 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
 * **Parallel Worker Fan-Out:** Dispatch Ready Build Tickets to parallel Workers (local Qwen 3 Coder or Groq), each in its own branch and worktree.
 * **Adversarial Audit & Closed-Loop Refactoring:** Run a short Opus 5 Audit over each Worker's pull request. If rejected, route a concise JSON critique back to the Worker for refactoring without burning high-cost frontier output tokens.
 * **Cross-Session Context Handoff:** When work moves between Workers or models, pass hash pointers (`Ref ID`) and Git diffs instead of re-sending full workspace files, backed by a local cache.
+
+# Bugs
+* **Allow Tool Call messages should surface and show a clear indicator of user input being needed

@@ -31,6 +31,9 @@ services:
       HARNESS_USERS_FILE: /app/data/users.json
       ROUTER_URL: http://router:6060
       GATEWAY_URL: http://gateway:4000
+      # The task runner (COMPOSE_PROFILES=runs), reached over the compose network
+      RUNNER_URL: http://runner:3100
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
       HARNESS_SETTINGS_FILE: /app/data/harness-settings.json
       HARNESS_PROFILES_FILE: /app/data/routing-profiles.json
       HARNESS_USAGE_FILE: /app/data/harness-usage.json
@@ -70,6 +73,41 @@ services:
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+
+  # The task runner (the Runs page), only with COMPOSE_PROFILES=runs in .env.
+  # Each run's commands go to an E2B cloud sandbox (RUNNER_SANDBOX=e2b,
+  # E2B_API_KEY), so the agent works in a Linux VM rather than in this
+  # container; the runner here only packs the branch in and back out. Runs and
+  # branches land in ./runs and ./repos, as on your PC, so the Runs page's diff,
+  # Continue and Retry work the same. (RUNNER_SANDBOX=local also works here —
+  # the worktree is made from the copy of the repo in ./repos — but commands
+  # then run in this image, which has only Node and git.)
+  # Set RUNNER_TOKEN in .env (any long random text): the Interceptor sends it,
+  # and nothing else on the network can drive the runner without it.
+  runner:
+    build:
+      context: .
+      dockerfile: docker/runner.Dockerfile
+    profiles: [runs]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      RUNNER_HOST: 0.0.0.0
+      RUNNER_PORT: "3100"
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?set RUNNER_TOKEN in .env (any long random text)}
+      # Runner host check: it only answers a Host it was told about
+      RUNNER_ALLOWED_HOSTS: runner:3100,harness:3100
+      RUNNER_ROOTS: /repos
+      RUNNER_DIR: /app/runs
+      RUNNER_SANDBOX: ${RUNNER_SANDBOX:-e2b}
+      HARNESS_URL: http://harness:3000
+      HARNESS_PASSWORD: ${HARNESS_PASSWORD:-}
+      E2B_API_KEY: ${E2B_API_KEY:-}
+      E2B_TEMPLATE: ${E2B_TEMPLATE:-base}
+    volumes:
+      - ./runs:/app/runs       # run records and each run's worktree
+      - ./repos:/repos         # the repos a run may start in (RUNNER_ROOTS)
+    depends_on: [harness]
 
   # Local models with Ollama, only with COMPOSE_PROFILES=local in .env.
   # Downloads LOCAL_MODELS on start; the Gateway lists each as local-<name>.

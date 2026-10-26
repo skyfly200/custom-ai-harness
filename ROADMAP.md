@@ -45,6 +45,20 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 ## Ideas for Later
 * ✅ **Free VPS Hosting (Docker):** `docker compose up -d --build` runs the Interceptor, Router and Gateway as containers on a server; README "Run it on a server" walks through Oracle Cloud Always Free with Tailscale. About 450 MB of memory with the `systemone` Router, so 1 GB free tiers fit too; the RouteLLM BERT Router is a build option (`ROUTER_BACKENDS=routellm`, ~2 GB more). The local engine and Ollama don't run there, so strong requests use OpenRouter fallbacks.
   * ✅ **Access control:** `HARNESS_PASSWORD` locks every page and API (browser login box, or the agent's API key), and the Docker setup won't start without it.
+  * ✅ **Task runner as a container (`COMPOSE_PROFILES=runs`):** `docker/runner.Dockerfile` runs the runner beside the Interceptor, reached as `http://runner:3100` with a shared `RUNNER_TOKEN`; run records and branches stay in `./runs` and `./repos`. Agents work in an E2B cloud sandbox (`RUNNER_SANDBOX=e2b`), so the image needs no language toolchains and agent commands never run in a container that has the host's folders mounted.
+
+---
+
+# Runner: Cloud Sandboxes (E2B) ✅
+
+Agent runs can work in a Linux VM from [E2B](https://e2b.dev) instead of a worktree on this machine, so `run_command` and the file tools never touch the host. Set `RUNNER_SANDBOX=e2b` and `E2B_API_KEY` in `.env`; nothing else changes for workflows, tools, the command guard, approvals or the Runs page.
+
+* ✅ **`E2BSandbox` behind the `LocalSandbox` interface:** `runner/sandbox.js` exports both with the same methods (`resolve`, `readFile`, `writeFile`, `listDir`, `exec`, `git`, `commit`, `diffStat`, `diff`, `sync`, `destroy`), and `createSandbox`/`attachSandbox` pick one, so `runs.js`, `tools.js` and `swarm.js` never know which they got. The e2b module is required lazily, so a local setup needs no key and no network.
+* ✅ **Branch in and out as a git bundle:** the base commit is packed here and written into a fresh sandbox (`E2B_TEMPLATE`, default `base`), which checks it out on its own `harness/<id>` branch in `E2B_WORKDIR`; at the end everything is committed, packed back and fetched into the local repo, so `git diff`, **Continue**, **Retry** and pushing all work as with a local run. A base that is not a branch tip packs with its full history; a carried-on branch sends only the commits made since the base.
+* ✅ **Swarm support:** each worker's branch is handed *to* the swarm's sandbox before the merge, and the swarm's merged branch is handed back after.
+* ✅ **Billing stops with the run:** the sandbox is killed when the run ends and when a restart finds a run that was in progress; `destroyById` covers one whose process died. `E2B_API_KEY` is never passed into the commands the agent runs (the trimmed env allowlist applies here too).
+* ✅ **Tests:** `test/e2bSandbox.test.js` covers the start point, the handed-back branch, an unchanged run, exit codes and timeouts, workspace bounds, a swarm merge, `createSandbox`'s choice and error, and a non-tip base, with a stand-in for `e2b` so it needs neither network nor key.
+* **Not done:** no real-key smoke test yet (mocked only), and `E2B_WORKDIR`/template choice is per-runner, not per-run.
 
 ---
 
@@ -71,7 +85,7 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
 
 # Additional
 
-* **Advisor as a real command (`/advisor MODEL`):** Set a model as an advisor and give the cheaper model a tool to call it, as Claude Code does. `/advisor opus` binds the advisor; a short name (`opus`, `sonnet`, `haiku`) auto-matches the latest version (`opus` → `opus-5.5`) against the Gateway's model list. The chat's own (cheaper) model keeps the turn and gains an `ask_advisor` tool so it can pull a second opinion only when it needs one. Distinct from the current *advisor* starter command, which is just one message sent to another model with no tools.
+* ✅ **Advisor as a real command (`/advisor MODEL`):** Set a model as an advisor and give the chat's model an `ask_advisor` tool for second opinions. Short names match a served Gateway model; `/advisor` reports the current setting and `/advisor off` removes it. The advisor answers in one plain request with no tools of its own, and its cost is counted with the calling reply.
 * **Subagent spawning (`/subagent`):** Spawn a subagent for an individual task, with its own model — default a cheaper, lower tier than the chat's — and its own tool budget. The parent chat gets the subagent's summary back as a tool result, so research and grunt work run on the cheap model while the parent keeps the thread.
 * **Plan mode:** A mode in which the agent reads, searches and reasons but makes no changes. Every write and every mutating command is refused with "plan mode", the agent finishes with a plan instead of a diff, and a button turns the plan into a normal run. Fits the existing tool sets: plan mode is the `read`/`check` toolset plus a refusal in `makeTools`, not a new sandbox.
 * **One working tree per chat:** Chats linked to the same repo currently share the user's working copy, so a chat's `run_command` (and its uncommitted edits) interfere with other chats and with runs. Give each chat its own worktree on its own branch, created on link and reused across turns, so concurrent chats and runs never see each other's changes.

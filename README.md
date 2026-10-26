@@ -348,7 +348,7 @@ The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 | `launch-laya.sh` | CPU launcher for the self-hosted Laya server the Router classifies with |
 | `caveman-compress.js` | Standing context trimmer for `CLAUDE.md`, `.qwen/settings.json` |
 | `validate-config.js` | UTF-8 / non-breaking space validator for config directories |
-| `docker-compose.yml`, `Dockerfile`, `docker/` | The three parts as containers, for a server (see [Run it on a server](#run-it-on-a-server-docker)) |
+| `docker-compose.yml`, `Dockerfile`, `docker/` | The three parts as containers, for a server, plus the task runner as a fourth (`COMPOSE_PROFILES=runs`) (see [Run it on a server](#run-it-on-a-server-docker)) |
 | `utils/access.js` | The optional `HARNESS_PASSWORD` login |
 | `utils/login.js`, `utils/users.js`, `ui/users.html`, `scripts/hash-password.js` | Named logins with admins (see [Named logins](#named-logins-with-admins-harness_require_login)) |
 | `guard-rules.json`, `utils/guard.js`, `.claude/hooks/guard.js` | The command guard (see [Command guard](#command-guard-jev-checks-commands-before-they-run)) |
@@ -768,7 +768,7 @@ Notes:
 
 - The runner is its own process (`node runner/server.js`, port 3100, only reachable from this machine). The Interceptor passes the Runs page's requests to it after its own login check, and `npm run all` sets a shared `RUNNER_TOKEN` so nothing else on the machine can drive it. If you start the parts yourself, set the same `RUNNER_TOKEN` in `.env` for both.
 - Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed. The record is written to a temporary file and renamed into place; where Windows refuses the rename for a moment (a virus scanner or the indexer holding `run.json` open, `EPERM`) it retries, then writes in place, so a run is never lost to that.
-- It isn't in the Docker setup yet.
+- It runs under Docker with `COMPOSE_PROFILES=runs` (see [Cloud sandboxes](#cloud-sandboxes-e2b) for the setup), which on a server is how to use it.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
 
 #### Cloud sandboxes (E2B)
@@ -781,6 +781,7 @@ How the branch gets there and back:
 2. The agent works there; every file call and command goes to the sandbox.
 3. When the run ends, everything is committed and the branch is packed back into a bundle and fetched into your repo here, so `git diff`, **Continue**, **Retry** and pushing work exactly as with a local run. A swarm's own branch is handed back after its merges, and each worker's branch is handed *to* it before they are merged. A continued run gets a new sandbox holding its branch as it stands.
 4. The sandbox is killed as soon as the run ends (and if the runner is restarted mid-run), so nothing keeps billing. Its record keeps the sandbox id.
+5. On a Docker server, the runner is a container (`COMPOSE_PROFILES=runs`) whose commands all go to the sandbox; see below.
 
 Notes:
 
@@ -788,6 +789,17 @@ Notes:
 - The run's own record and the branch stay here, in `runs/<id>/run.json` and your repo; delete the run to remove the record.
 - `apt-get install git` runs once in a new sandbox if the template has no git.
 - Reading files, listing folders and running commands are network calls now, so a cloud run is slower per step than a local one; `MAX_OUTPUT` trimming and the run's step and minute limits work as before.
+
+**On a Docker server.** The runner has its own container. Set these in `.env` on the server, then `docker compose up -d --build`:
+
+```
+COMPOSE_PROFILES=runs
+RUNNER_TOKEN=any-long-random-text
+E2B_API_KEY=e2b_...
+RUNNER_SANDBOX=e2b            # the compose default for this container
+```
+
+The runner comes up beside the Interceptor (`http://runner:3100`, no ports published) and the Interceptor sends it the Runs page's requests with the same `RUNNER_TOKEN`, so nothing else on the network can drive it. Runs and their branches land in the `runs` and `repos` folders on the server, so **Continue**, **Retry** and `git diff` work as they do on your PC, and the branch is pushed from the server. Local mode is possible too but pointless there: the worktree is made from the copy of the repo in `repos`, and commands run inside the runner's image, which has only Node and git.
 
 ### Langfuse (see every call, grouped by chat or run)
 

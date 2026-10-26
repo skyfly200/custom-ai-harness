@@ -63,6 +63,8 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
         }
         let ran = 0;
         for (const call of msg.tool_calls) {
+            // a stop between two calls of one step leaves the rest unrun: the run has ended
+            if (run.stopped()) break;
             let args;
             try { args = JSON.parse(call.function.arguments || '{}'); } catch { args = null; }
             emit({ type: 'tool', name: call.function.name, args: args ?? call.function.arguments });
@@ -90,4 +92,20 @@ function stageSystem(stage) {
     return `${SYSTEM}\n\nYour role in this run: ${stage.role}. ${stage.prompt}`;
 }
 
-module.exports = { runAgent, shrinkHistory, stageSystem, SYSTEM };
+// Plan mode: the same rules, minus the changes. The agent reads what it needs
+// and answers with a plan the person decides on.
+const PLAN_RULES = `
+
+You are planning, not changing anything: this run may read and search the code but cannot write, edit or run commands that change the workspace. When you have read enough, call finish with your plan and nothing else:
+- What you would change and why, file by file.
+- The order to do it in, and what to check after each step.
+- The risks, the open questions, and anything you need a person to decide.
+Be concrete enough that the same plan could be carried out without you.`;
+
+/** The base rules, the stage's role, and plan mode's rules when it is on. */
+function systemFor(stage, { plan = false } = {}) {
+    const base = plan ? `${SYSTEM}${PLAN_RULES}` : SYSTEM;
+    return `${base}\n\nYour role in this run: ${stage.role}. ${stage.prompt}`;
+}
+
+module.exports = { runAgent, shrinkHistory, stageSystem, systemFor, PLAN_RULES, SYSTEM };

@@ -5,6 +5,7 @@
 
 const $ = (id) => document.getElementById(id);
 const { render, toSpeech, escape: esc } = window.Markdown;
+const modelAlias = window.ModelAlias;
 const speechText = (markdown) => toSpeech(markdown, { clear: $('speakClear').checked });
 
 const ICONS = {
@@ -76,8 +77,29 @@ function newChatObject() {
 function loadChat(id) {
   if (cache.has(id)) return cache.get(id);
   const c = store.get(CHAT_KEY(id), null);
-  if (c) cache.set(id, c);
+  if (c) { clearStaleStreams(c); cache.set(id, c); }
   return c;
+}
+
+// A reply saved while it was still arriving belongs to a page that has gone (it was
+// closed, reloaded or crashed): nothing is streaming it any more. Left as it is, its
+// thinking animation would play forever and its Stop button would do nothing. What
+// arrived is kept and the reply is marked as cut off.
+function clearStaleStreams(c) {
+  let changed = false;
+  for (const m of c.messages || []) {
+    if (m.role !== 'assistant' || !m.streaming) continue;
+    changed = true;
+    m.streaming = false;
+    for (const r of m.rounds || []) for (const call of r.calls || []) if (call.result == null) { call.result = 'Cut off before this tool finished.'; call.isError = true; }
+    delete m.joinText; delete m.reasoningRound; delete m.reasoningCut;
+    if (m.trace) { delete m.trace.toolsRunning; m.trace.done = m.trace.done ?? Date.now() - (m.trace.start || Date.now()); }
+    const note = m.trace?.error ? `cut off: ${m.trace.error}` : 'cut off when the page closed';
+    m.content = m.content ? `${m.content}\n\n*(${note})*` : `*(${note})*`;
+    m.cost = computeCost(m);
+  }
+  if (changed) { try { saveChat(c, { touch: false }); } catch {} }
+  return changed;
 }
 
 function saveChat(c, { touch = true } = {}) {
@@ -393,6 +415,8 @@ function openChat(id) {
   drawProjectBits();
   drawLog();
   busy(running.has(chat.id));
+  drawQueue();
+  drawAdvisor();
   try { localStorage.setItem('harness-chat-open', chat.id); } catch {}
   $('input').focus();
 }
@@ -779,17 +803,44 @@ function toolCallsHtml(rounds) {
   }).join('')}</div></details>`;
 }
 
+// Whether the conversation follows the newest text. Scrolling up leaves it where
+// you put it, even mid-reply; scrolling back to the end (or pressing the button
+// that appears while you are up there) follows again.
+const NEAR_BOTTOM = 60;   // how close to the end counts as being at the end
 let stickToBottom = true;
-$('log').addEventListener('scroll', () => {
+let jumpedAway = false;   // you scrolled up during a reply and haven't come back
+const atBottom = () => {
   const log = $('log');
-  stickToBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  return log.scrollHeight - log.scrollTop - log.clientHeight < NEAR_BOTTOM;
+};
+function drawJumpDown() {
+  const b = $('jumpDown');
+  const away = !atBottom();
+  b.hidden = !away;
+  b.classList.toggle('new', away && jumpedAway);
+}
+$('log').addEventListener('scroll', () => {
+  stickToBottom = atBottom();
+  if (stickToBottom) jumpedAway = false;
+  drawJumpDown();
+});
+$('jumpDown').addEventListener('click', () => {
+  stickToBottom = true;
+  jumpedAway = false;
+  $('log').scrollTop = $('log').scrollHeight;
+  drawJumpDown();
+  $('input').focus();
 });
 
 function drawLog() {
   const log = $('log');
+  // a chat that is redrawn from scratch (a new message arrived) follows the end again
+  const follow = stickToBottom || !jumpedAway;
   log.innerHTML = chat.messages.length ? chat.messages.map(messageHtml).join('') : emptyState();
-  stickToBottom = true;
-  log.scrollTop = log.scrollHeight;
+  stickToBottom = follow;
+  jumpedAway = false;
+  if (follow) log.scrollTop = log.scrollHeight;
+  drawJumpDown();
   drawHint();
 }
 
@@ -810,19 +861,26 @@ function redraw(m) {
     }
     dirty.clear();
     if (stickToBottom && $('autoScroll').checked) $('log').scrollTop = $('log').scrollHeight;
+    else if (!atBottom()) jumpedAway = true;
+    drawJumpDown();
   });
 }
 // A thinking pane that is open keeps its newest text in view while the reply
-// streams in, whatever the chat is doing
+// streams in, whatever the chat is doing. A pane you scrolled up in stays where
+// you put it, so reading an earlier thought isn't undone by the next one.
 function followThinking(root) {
   const scope = root || $('log');
-  for (const pre of scope.querySelectorAll('.reasoning[open] > pre')) pre.scrollTop = pre.scrollHeight;
+  for (const pre of scope.querySelectorAll('.reasoning[open] > pre')) {
+    if (pre.dataset.hold === '1') continue;
+    pre.scrollTop = pre.scrollHeight;
+  }
 }
 // Where a pane was scrolled to, so a redraw doesn't send you back to the top
 function reasoningPos(el) {
   const pre = el.querySelector('.reasoning[open] > pre');
   if (!pre) return null;
-  return { bottom: pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24, top: pre.scrollTop };
+  const bottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+  return { bottom, top: pre.scrollTop, hold: bottom ? '0' : '1' };
 }
 // Reopening a thinking pane mid-reply jumps to the latest thought
 $('log').addEventListener('toggle', (e) => {
@@ -850,7 +908,11 @@ function patch(el, html) {
   }
   for (const k of open) { const d = el.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; }
   const pre = el.querySelector('.reasoning[open] > pre');
-  if (pos && pre) pre.scrollTop = pos.bottom ? pre.scrollHeight : pos.top;
+  if (pos && pre) {
+    pre.scrollTop = pos.bottom ? pre.scrollHeight : pos.top;
+    // remember a pane the person scrolled up in, so streaming text leaves it alone
+    if (pos.hold === '1') pre.dataset.hold = '1'; else delete pre.dataset.hold;
+  }
 }
 // keep elapsed times ticking while a reply is pending
 setInterval(() => {
@@ -1140,7 +1202,13 @@ async function runReply(c, turn) {
       (reply.rounds ||= []).push(r);
       redraw(reply);
       tr.toolsRunning = true;
-      for (const call of r.calls) await runTool(call, c, controller.signal, () => redraw(reply));
+      for (const call of r.calls) {
+        await runTool(call, c, controller.signal, () => redraw(reply));
+        // what the advisor's own model cost is part of this reply's cost
+        if (typeof call.advisorCost === 'number') {
+          tr.usage = { ...(tr.usage || {}), cost: (tr.usage?.cost || 0) + call.advisorCost };
+        }
+      }
       tr.toolsRunning = false;
       tr.lastData = Date.now();
       saveChat(c, { touch: false });
@@ -1184,6 +1252,8 @@ async function runReply(c, turn) {
     if (reply.content && !reply.timedOut) nameChat(c);
     speech.endReply(reply);
     finish();
+    // a message typed while this reply was arriving goes next, as if you had just sent it
+    if (queues.get(c.id)?.length) setTimeout(() => drainQueue(c.id), 0);
   }
 }
 
@@ -1237,6 +1307,46 @@ function askApproval(call, reason, onChange, signal) {
   });
 }
 
+// Ask the advisor. One request, no tools and no streaming: the answer is text the
+// model reads. It goes through the Interceptor with the advisor's model named in
+// the headers, so its cost lands in this chat's totals like any other request.
+const ADVISOR_CTX = 12000;
+const ADVISOR_REPLY = 8000;
+// What the advisor is told: answer as a reviewer, briefly. A note the person saved
+// with the advisor (the command's message) is part of how it answers.
+function ADVISOR_SYSTEM(advisor) {
+  const note = String(advisor?.note || '').trim();
+  return `You are an advisor to another AI agent that is doing the actual work in a code repository. It asks you about the part it is unsure of. Answer as a careful senior engineer: say what is wrong, missing or risky first, then what you would do instead. Be brief and concrete, name the exact change or the next check to run, and say plainly when it looks fine. You cannot read the repo or run anything: work from what the agent sends you, and say what you would need to know if that is not enough.${note ? `\n\nHow this person wants advice: ${note}` : ''}`;
+}
+async function askAdvisor(advisor, args, signal, c) {
+  const question = String(args?.question || '').trim();
+  if (!question) throw new Error('the question was empty');
+  const context = String(args?.context || '').trim();
+  const cut = context.length > ADVISOR_CTX ? `${context.slice(0, ADVISOR_CTX)}\n… (cut at ${ADVISOR_CTX} characters)` : context;
+  const res = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-harness-model': advisor.model, ...(advisor.effort ? { 'x-harness-effort': advisor.effort } : {}) },
+    body: JSON.stringify({
+      model: advisor.model,
+      stream: false,
+      messages: [
+        { role: 'system', content: ADVISOR_SYSTEM(advisor) },
+        { role: 'user', content: context ? `${question}\n\nContext the agent sent:\n${cut}` : question },
+      ],
+    }),
+    signal,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error?.message || body.error || `HTTP ${res.status}`);
+  }
+  const body = await res.json().catch(() => ({}));
+  const said = String(body.choices?.[0]?.message?.content || '').trim();
+  const cost = body.usage?.cost ?? body.cost;
+  if (!said) return { text: 'The advisor answered with nothing. Work it out yourself, or ask again with the question in one sentence.', isError: true, cost: typeof cost === 'number' ? cost : null };
+  return { text: said.length > ADVISOR_REPLY ? `${said.slice(0, ADVISOR_REPLY)}\n… (cut at ${ADVISOR_REPLY} characters)` : said, isError: false, cost: typeof cost === 'number' ? cost : null };
+}
+
 // Run one tool call through the harness (MCP server or repo tool)
 async function runTool(call, c, signal, onChange) {
   const started = Date.now();
@@ -1256,6 +1366,29 @@ async function runTool(call, c, signal, onChange) {
     call.result = k ? k.body : `No skill named "${args.name}". Skills: ${skills.map(x => x.name).join(', ')}`;
     call.isError = !k;
     call.ms = Date.now() - started;
+    return onChange();
+  }
+  // The advisor is called from the page: one plain request to its own model
+  if (call.name === 'ask_advisor') {
+    const a = advisorOf(c);
+    if (!a) {
+      call.result = 'Error: no advisor is set for this chat. The person can set one with /advisor MODEL.';
+      call.isError = true;
+      call.ms = Date.now() - started;
+      return onChange();
+    }
+    try {
+      const r = await askAdvisor(a, args, signal, c);
+      call.result = r.text;
+      call.isError = r.isError;
+      call.ms = Date.now() - started;
+      if (r.cost != null) call.advisorCost = r.cost;
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      call.result = `Error: the advisor could not answer (${err.message})`;
+      call.isError = true;
+      call.ms = Date.now() - started;
+    }
     return onChange();
   }
   let confirmed = false;
@@ -1372,11 +1505,20 @@ $('compose').addEventListener('submit', (e) => {
 });
 function submit() {
   const text = $('input').value.trim();
-  if ((!text && !pending.length) || running.has(chat.id)) return;
-  // /advisor ... sends this one message to the command's model
+  if (!text && !pending.length) return;
+  // /advisor MODEL sets this chat's advisor and sends nothing
+  const asAdvice = advisorCommand(text);
+  if (asAdvice) return asAdvice;
+  // /subagent and /plan start a run of their own and send nothing to this chat
+  const asRun = subagentCommand(text);
+  if (asRun) return asRun;
+  // a command sends this one message to the command's model
   const slash = slashCommand(text);
-  dictation.stop();
   const attachments = pending;
+  // A reply is already arriving: keep this message and send it when that one ends,
+  // so typing while the model thinks doesn't throw the message away.
+  if (running.has(chat.id)) return queue(chat.id, slash ? slash.text : text, attachments, slash ? commandTurn(slash.command) : null);
+  dictation.stop();
   $('input').value = '';
   pending = [];
   chat.draft = ''; chat.pendingAttachments = [];
@@ -1384,9 +1526,170 @@ function submit() {
   drawChips(); autoGrow();
   send(slash ? slash.text : text, attachments, slash ? commandTurn(slash.command) : null);
 }
+
+// "/advisor MODEL" sets a better model this chat's own model may call for a second
+// opinion (it gets an ask_advisor tool), or "/advisor off" takes it away. A short
+// name finds the newest model the Gateway serves: "opus" -> claude-opus-5.5. The
+// setting is saved with the chat, so it lasts until you change it. Returns a
+// promise when the message was the advisor command, null when it was anything else.
+function advisorCommand(text) {
+  const m = /^\/advisor(?:\s+([\s\S]*))?$/i.exec(String(text || '').trim());
+  if (!m) return null;
+  const typed = (m[1] || '').trim();
+  const c = chat;
+  return (async () => {
+    if (!typed) {
+      const a = advisorOf(c);
+      toast(a ? `Advisor: ${a.model}. Type /advisor MODEL to change it, or /advisor off to remove it.` : 'Type /advisor MODEL, e.g. /advisor opus');
+      return;
+    }
+    if (/^(off|none|no)$/i.test(typed)) {
+      delete c.advisor;
+      saveChat(c, { touch: false });
+      drawAdvisor(); drawHint();
+      toast('Advisor removed');
+      return;
+    }
+    const pick = resolveModelName(typed);
+    if (!pick.model) {
+      const near = modelAlias.candidates(typed, gatewayModels || []).slice(0, 6);
+      const list = (gatewayModels || []).slice(0, 40).join(', ');
+      toast(near.length ? `No model matches "${typed}". Did you mean: ${near.join(', ')}?` : `No model matches "${typed}". Models: ${list}${(gatewayModels || []).length > 40 ? ', …' : ''}`);
+      return;
+    }
+    // the command's message becomes how the advisor is told to answer; its effort
+    // carries over too, so /advisor's saved settings still apply
+    const cmd = commands.find(x => x.name.toLowerCase() === 'advisor');
+    c.advisor = { model: pick.model, typed: pick.from !== pick.model ? pick.from : undefined, note: cmd?.body ? expandCommand(cmd, '').slice(0, 2000) : '', effort: cmd?.effort || null };
+    saveChat(c, { touch: false });
+    drawAdvisor(); drawHint();
+    toast(`Advisor set to ${pick.model}${pick.from !== pick.model ? ` (from "${pick.from}")` : ''}. This chat's model can ask it for a second opinion.`);
+  })();
+}
+
+// ---------------------------------------------------------------------------
+// Subagents: hand one task to an agent of its own, on its own branch, while this
+// chat carries on. It is an ordinary run of the Runs page (so it has its own page
+// entry, approvals and diff), started from here with the chat's repo, routing and
+// effort, and a model of its own if one is named: "subagent [model] task". A
+// cheaper model is the point: the chat does the thinking, the subagent does the
+// fetching, the searching, the mechanical edit.
+// ---------------------------------------------------------------------------
+
+// "/subagent [model] task" or "/subagent plan task". Returns a promise when the
+// message was this command, null otherwise.
+function subagentCommand(text) {
+  const m = /^\/(subagent|plan)(?:\s+([\s\S]*))?$/i.exec(String(text || '').trim());
+  if (!m) return null;
+  const plan = m[1].toLowerCase() === 'plan';
+  const typed = (m[2] || '').trim();
+  const c = chat;
+  return (async () => {
+    const repo = repoOf(c);
+    if (!repo) {
+      toast(`Link a git repo first (Options → Context): a ${plan ? 'plan' : 'subagent'} works in a copy of it.`);
+      return;
+    }
+    if (!typed) {
+      toast(plan
+        ? 'Type /plan TASK: an agent reads the repo and writes down what it would change, touching nothing.'
+        : 'Type /subagent TASK, or /subagent MODEL TASK to give it a cheaper model, e.g. /subagent haiku find the config loader');
+      return;
+    }
+    // a first word that names a model is the subagent's model; otherwise it is the task
+    let model = null, goal = typed;
+    if (!plan) {
+      const [first, ...rest] = typed.split(/\s+/);
+      const pick = rest.length ? resolveModelName(first) : { model: null };
+      if (pick.model) { model = pick.model; goal = rest.join(' '); }
+    }
+    const r = routeOf(c);
+    const body = {
+      goal, repo: repo.path, plan: plan ? '1' : '0',
+      // the chat's own routing, so the subagent follows the same rules
+      ...(r.model ? { model: r.model } : r.profile ? { profile: r.profile.id } : {}),
+      ...(c.effort && c.effort !== 'auto' ? { effort: c.effort } : {}),
+      ...(model ? { model } : {}),
+    };
+    try {
+      const res = await fetch('api/runs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const run = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(run.error || `HTTP ${res.status}`);
+      $('input').value = '';
+      chat.draft = '';
+      autoGrow();
+      const what = plan ? 'Plan' : 'Subagent';
+      toast(`${what} started: ${run.id}${model ? ` on ${model}` : ''}. It runs on its own branch; open Runs to watch it.`);
+      // the chat itself says what it started, so the conversation keeps the thread
+      const note = { id: uid(), role: 'assistant', content: `*${what} started: \`${run.id}\`${model ? ` on \`${model}\`` : ''}${plan ? ', changing nothing' : `, on branch \`${run.branch}\``}. Watch it on the [Runs page](runs.html#${run.id}).*`, time: Date.now(), meta: { note: true } };
+      c.messages.push(note);
+      saveChat(c);
+      if (chat === c) drawLog();
+    } catch (err) {
+      toast(err.message.includes('not running') ? 'The task runner is not running: start it with npm run all.' : `Could not start it: ${err.message}`);
+    }
+  })();
+}
+
+// Messages typed while a reply is still arriving. They belong to the chat's own id,
+// so leaving the chat and coming back doesn't lose them, and each is sent in turn.
+const queues = new Map();   // chat id -> [{ text, attachments, turn }]
+let draining = false;
+function queue(id, text, attachments, turn) {
+  if (!queues.has(id)) queues.set(id, []);
+  queues.get(id).push({ text, attachments, turn });
+  dictation.stop();
+  $('input').value = '';
+  if (chat?.id === id) { pending = []; chat.draft = ''; chat.pendingAttachments = []; hideSlash(); drawChips(); autoGrow(); }
+  drawQueue();
+  toast(queues.get(id).length === 1 ? 'Queued: it sends when this reply ends' : `Queued (${queues.get(id).length} waiting)`);
+}
+// The next message waits for the reply before it: the end of runReply calls this
+async function drainQueue(id) {
+  if (draining) return;
+  const q = queues.get(id);
+  if (!q?.length || running.has(id)) return;
+  const c = cache.get(id) || loadChat(id);
+  if (!c || c.deleted) { queues.delete(id); drawQueue(); return; }
+  const next = q.shift();
+  if (!q.length) queues.delete(id);
+  drawQueue();
+  if (chat?.id === id) { drawLog(); }
+  draining = true;
+  try {
+    c.messages.push({ id: uid(), role: 'user', content: next.text, attachments: next.attachments?.length ? next.attachments : undefined, time: Date.now(), ...(next.turn ? { turn: next.turn } : {}) });
+    saveChat(c);
+    await runReply(c, next.turn);
+  } finally {
+    draining = false;
+  }
+  if (queues.has(id)) drainQueue(id);
+}
+// How many of this chat's messages are waiting, shown under the composer
+function drawQueue() {
+  const n = queues.get(chat?.id)?.length || 0;
+  const el = $('queueNote');
+  if (!el) return;
+  el.hidden = !n;
+  el.innerHTML = n ? `<span>${n} message${n === 1 ? '' : 's'} waiting to send</span><button type="button" id="queueClear" title="Remove the waiting messages">Clear</button>` : '';
+}
 $('send').addEventListener('click', (e) => {
   const r = running.get(chat.id);
   if (r) { e.preventDefault(); r.controller.abort(); }
+});
+// Clear removes the messages waiting behind the current reply, without stopping it
+$('queueNote').addEventListener('click', (e) => {
+  if (!e.target.closest('#queueClear')) return;
+  queues.delete(chat.id);
+  drawQueue();
+  toast('Cleared the waiting messages');
+});
+$('advisorNote').addEventListener('click', (e) => {
+  if (!e.target.closest('#advisorOff')) return;
+  delete chat.advisor;
+  saveChat(chat, { touch: false });
+  drawAdvisor();
+  toast('Advisor removed');
 });
 
 function autoGrow() {
@@ -1469,18 +1772,33 @@ function commandItem(c) {
     + `<span>${esc(c.body.replace(/\s+/g, ' ').slice(0, 120))}</span></div>`;
 }
 
+// Commands the page itself handles (they do something rather than send a message):
+// setting the advisor, and starting a subagent or a plan.
+const BUILTIN_COMMANDS = [
+  { name: 'advisor', what: 'A better model this chat can ask for a second opinion', tag: 'set once', example: '/advisor opus' },
+  { name: 'subagent', what: 'Hand one task to an agent on its own branch, on a model of its own', tag: 'runs page', example: '/subagent haiku find the config loader' },
+  { name: 'plan', what: 'An agent writes down what it would change, touching nothing', tag: 'no changes', example: '/plan how would you add a --version flag?' },
+];
+function builtinItem(b) {
+  return `<div class="slash-item" role="option" data-kind="builtin" data-name="${esc(b.name)}" title="${esc(b.example)}">`
+    + `<b>/${esc(b.name)} <i>${esc(b.what)}</i></b><span class="tag">${esc(b.tag)}</span>`
+    + `<span>${esc(b.example)}</span></div>`;
+}
+
 function drawSlash() {
   // the first / fills in the examples, so there is something to try
   if (!commands.length) { commands = STARTER_COMMANDS.map(c => ({ id: uid(), ...c })); saveCommands(); }
   const q = slashQuery($('input').value);
   if (q === null || q.includes(' ')) return hideSlash(); // past the name: the message itself
   const needle = q.toLowerCase();
-  const found = commands.filter(c => !needle || c.name.toLowerCase().includes(needle));
-  if (!found.length && needle) return hideSlash();
+  // the page's own commands come first; they do something instead of sending a message
+  const builtins = BUILTIN_COMMANDS.filter(b => !needle || b.name.includes(needle));
+  const found = commands.filter(c => (!needle || c.name.toLowerCase().includes(needle)) && !BUILTIN_COMMANDS.some(b => b.name === c.name.toLowerCase()));
+  if (!found.length && !builtins.length && needle) return hideSlash();
   const rows = ['<div class="slash-sec">Commands</div>'];
-  rows.push(found.length
-    ? found.map(commandItem).join('')
-    : '<div class="slash-none">No commands yet. <button type="button" class="link" id="slashMake">Make one</button></div>');
+  if (builtins.length) rows.push(builtins.map(builtinItem).join(''));
+  if (found.length) rows.push(found.map(commandItem).join(''));
+  else if (!builtins.length) rows.push('<div class="slash-none">No commands yet. <button type="button" class="link" id="slashMake">Make one</button></div>');
   // the tools this chat can use, so / shows what the next message may call
   const live = chat ? activeTools(chat) : [];
   if (live.length) {
@@ -1489,14 +1807,14 @@ function drawSlash() {
       + `<b>${esc(t.function.name)}</b><span>${esc(String(t.function.description || '').replace(/\s+/g, ' ').slice(0, 140))}</span></div>`).join(''));
   }
   $('slash').innerHTML = rows.join('');
-  slashItems = [...$('slash').querySelectorAll('[data-kind="command"]')].map(el => el.dataset.name);
+  slashItems = [...$('slash').querySelectorAll('[data-kind="command"], [data-kind="builtin"]')].map(el => el.dataset.name);
   slashPick = Math.min(slashPick, Math.max(0, slashItems.length - 1));
   markSlash();
   $('slash').hidden = false;
 }
 
 function markSlash() {
-  const els = $('slash').querySelectorAll('[data-kind="command"]');
+  const els = $('slash').querySelectorAll('[data-kind="command"], [data-kind="builtin"]');
   els.forEach((el, i) => el.classList.toggle('on', i === slashPick));
   els[slashPick]?.scrollIntoView({ block: 'nearest' });
 }
@@ -1519,7 +1837,7 @@ function useSlash(name) {
 
 $('slash').addEventListener('mousedown', (e) => {
   // mousedown, so the box keeps its focus
-  const item = e.target.closest('[data-kind="command"]');
+  const item = e.target.closest('[data-kind="command"], [data-kind="builtin"]');
   if (item) { e.preventDefault(); useSlash(item.dataset.name); return; }
   if (e.target.closest('#slashMake')) {
     e.preventDefault();
@@ -1576,6 +1894,8 @@ function drawHint() {
   const typed = slashCommand($('input').value.trim());
   const note = typed && turnNote(commandTurn(typed.command));
   if (note) bits.push(`/${esc(typed.command.name)}: ${esc(note)}`);
+  const advisor = advisorOf(chat);
+  if (advisor) bits.push(`advisor ${esc(advisor.model)}`);
   const toolCount = chat ? activeTools(chat).length : 0;
   if (toolCount) bits.push(`${toolCount} tool${toolCount === 1 ? '' : 's'} on`);
   if ($('handsFree').checked) bits.push('hands-free on');
@@ -1660,6 +1980,45 @@ window.addEventListener('drop', (e) => {
 // tools for a repo the chat is linked to. Requests carry tools only when one
 // is on, since requests with tools go to models that can call them.
 // ---------------------------------------------------------------------------
+
+// The advisor: a better model this chat's model can call for a second opinion
+// (see utils/advisor.js). Set with "/advisor MODEL"; the setting lives with the
+// chat, and each call is one plain request to the advisor's model.
+const ADVISOR_TOOL = {
+  type: 'function',
+  function: {
+    name: 'ask_advisor',
+    description: 'Ask a stronger model for a second opinion on a hard part of this task: a design choice, a bug you cannot find, a piece of code you are unsure about. Send the question and the code or error text it needs. The advisor answers in words and cannot run tools or change files. Ask once or twice, not for every step.',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'What you want the advisor to weigh in on, as a clear question' },
+        context: { type: 'string', description: 'The code, error message or notes the advisor needs to answer. Paste it rather than naming a file: the advisor cannot read the repo.' },
+      },
+      required: ['question'],
+    },
+  },
+};
+const advisorOf = (c) => c?.advisor?.model ? c.advisor : null;
+// Shows in the composer's hint line and the kit, so a chat with an advisor says so
+function drawAdvisor() {
+  const a = advisorOf(chat);
+  const el = $('advisorNote');
+  if (el) {
+    el.hidden = !a;
+    el.innerHTML = a ? `<span>Advisor: <b>${esc(a.model)}</b>${a.typed ? ` (from "${esc(a.typed)}")` : ''} · its model can ask it for a second opinion</span><button type="button" id="advisorOff" title="Remove the advisor">Remove</button>` : '';
+  }
+  drawHint();
+}
+
+// A short name finds the newest model the Gateway serves (utils/modelAlias.js);
+// a full name or a Gateway name is used as typed.
+function resolveModelName(name) {
+  const models = gatewayModels || [];
+  if (!models.length) return { model: String(name || '').trim() };
+  const found = modelAlias.resolve(name, models);
+  return found ? { model: found, from: String(name || '').trim() } : { model: null, from: String(name || '').trim() };
+}
 function serverTools(c) {
   if (!toolInfo) return [];
   const off = new Set([...(prefs.mcpOff || []), ...routingMcpOff(c)]);
@@ -1674,6 +2033,8 @@ function serverTools(c) {
 }
 function activeTools(c) {
   const list = serverTools(c);
+  // a chat with an advisor set may call it for a second opinion
+  if (advisorOf(c)) list.push({ ...ADVISOR_TOOL });
   const more = loadableSkills(c);
   if (more.length) {
     list.push({ type: 'function', function: {

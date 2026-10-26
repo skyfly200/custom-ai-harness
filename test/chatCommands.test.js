@@ -1,0 +1,99 @@
+// The chat page's newer commands and the state they keep: /advisor, /subagent,
+// /plan, and the queue of messages typed while a reply is still arriving. Like
+// test/commands.test.js, the page's script is one browser file, so the helpers are
+// read out of it and run in a Node context with just what they need.
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const source = fs.readFileSync(path.join(__dirname, '..', 'ui', 'chat.js'), 'utf8');
+const modelAlias = require('../utils/modelAlias');
+
+const between = (from, to) => {
+  const a = source.indexOf(from);
+  const b = source.indexOf(to, a + from.length);
+  assert.ok(a > 0 && b > a, `could not find ${from}`);
+  return source.slice(a, b);
+};
+
+// Just enough of the page: the model list, a chat, a toast, and the two calls the
+// advisor command makes while it saves.
+function context({ chat = { id: 'c1', messages: [] }, models = [], commands = [] } = {}) {
+  const toasts = [];
+  const saved = [];
+  const ctx = {
+    chat, gatewayModels: models, commands, modelAlias, console, JSON, Date,
+    toast: (t) => toasts.push(t),
+    saveChat: (c) => saved.push(c),
+    drawAdvisor: () => {}, drawHint: () => {},
+    expandCommand: (c, args) => c.body.replace(/\{args\}/g, args || ''),
+    esc: (s) => String(s),
+    toasts, saved,
+  };
+  vm.createContext(ctx);
+  const run = (code, names) => {
+    vm.runInContext(`${code}\n${names.map(n => `this.${n} = ${n};`).join('\n')}`, ctx);
+    return ctx;
+  };
+  run(between('const advisorOf =', 'function drawAdvisor'), ['advisorOf']);
+  run(between('function resolveModelName(', 'function serverTools'), ['resolveModelName']);
+  run(between('function advisorCommand(', '// Messages typed while a reply'), ['advisorCommand']);
+  return ctx;
+}
+
+const SERVED = ['anthropic/claude-opus-5.5', 'anthropic/claude-sonnet-5.5', 'anthropic/claude-haiku-4.5', 'fast-openrouter'];
+
+test('/advisor is not a plain message: it sets the chat up and says so', async () => {
+  const ctx = context({ models: SERVED });
+  const handled = ctx.advisorCommand('/advisor opus');
+  assert.ok(handled && typeof handled.then === 'function', 'the command claims the message');
+  await handled;
+  assert.equal(ctx.chat.advisor.model, 'anthropic/claude-opus-5.5');
+  assert.equal(ctx.chat.advisor.typed, 'opus', 'what was typed is kept, to show it back');
+  assert.equal(ctx.saved.length, 1, 'the chat is saved with it');
+  assert.match(ctx.toasts.at(-1), /anthropic\/claude-opus-5\.5/);
+});
+
+test('anything else is left to the ordinary message path', () => {
+  const ctx = context({ models: SERVED });
+  for (const text of ['hello', '/advice', '/subagent opus do a thing', '/plan x']) {
+    assert.equal(ctx.advisorCommand(text), null, text);
+  }
+});
+
+test('a name nothing matches is refused and the near misses are offered', async () => {
+  const ctx = context({ models: SERVED });
+  await ctx.advisorCommand('/advisor gpt-9');
+  assert.equal(ctx.chat.advisor, undefined, 'nothing is set');
+  assert.match(ctx.toasts.at(-1), /No model matches/);
+});
+
+test('/advisor with no name says how to use it, and off removes it', async () => {
+  const ctx = context({ models: SERVED, chat: { id: 'c1', messages: [], advisor: { model: 'anthropic/claude-opus-5.5' } } });
+  await ctx.advisorCommand('/advisor');
+  assert.match(ctx.toasts.at(-1), /Advisor: anthropic\/claude-opus-5\.5/);
+  await ctx.advisorCommand('/advisor off');
+  assert.equal(ctx.chat.advisor, undefined);
+  assert.match(ctx.toasts.at(-1), /removed/);
+});
+
+test('a full model name is used as typed, short ones find the newest', () => {
+  const ctx = context({ models: SERVED });
+  assert.equal(ctx.resolveModelName('opus').model, 'anthropic/claude-opus-5.5');
+  assert.equal(ctx.resolveModelName('fast-openrouter').model, 'fast-openrouter');
+  assert.equal(ctx.resolveModelName('nope').model, null);
+});
+
+test('the advisor is asked with its model and no tools, and a short answer comes back', () => {
+  const advisor = require('../utils/advisor');
+  const r = advisor.request({ model: 'anthropic/claude-opus-5.5' }, { question: 'Is this right?', context: 'a = 1' });
+  assert.equal(r.model, 'anthropic/claude-opus-5.5');
+  assert.equal(r.stream, false);
+  assert.equal(r.tools, undefined, 'the advisor has no tools of its own');
+  const out = advisor.answer({ choices: [{ message: { content: 'It is.' } }] });
+  assert.equal(out.text, 'It is.');
+  assert.equal(out.isError, false);
+});

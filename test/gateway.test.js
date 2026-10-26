@@ -68,7 +68,9 @@ test('a working Gateway answers normally', async () => {
 
 test('tokens Headroom takes out of tool results are counted for the Usage page', async () => {
     mode = 'ok';
-    const big = 'line of tool output\n'.repeat(2000); // 40,000 characters; Headroom keeps 4,000
+    // far bigger than the cap, so Headroom cuts it down to the cap whatever that is
+    const cap = require('../utils/messageTransforms').HEADROOM_MAX_TOOL_CHARS;
+    const big = 'line of tool output\n'.repeat(Math.ceil((cap * 4) / 20));
     const res = await send('/v1/chat/completions', { messages: [
         { role: 'user', content: 'run it' },
         { role: 'assistant', content: null, tool_calls: [{ id: 't1', type: 'function', function: { name: 'run', arguments: '{}' } }] },
@@ -79,7 +81,9 @@ test('tokens Headroom takes out of tool results are counted for the Usage page',
     await new Promise((r) => setTimeout(r, 50));
     const { rows } = await (await fetch(`${base}/ui/api/usage?days=1`)).json();
     const saved = rows.reduce((sum, r) => sum + (r.savedHeadroom || 0), 0);
-    assert.ok(saved > 8000 && saved < 10000, `about 36,000 characters / 4, got ${saved}`);
+    // about what was cut, over 4 characters a token
+    const cut = big.length - cap;
+    assert.ok(saved > cut / 8 && saved < cut / 2, `about ${Math.round(cut / 4)} tokens cut, got ${saved}`);
 });
 
 test('a down Gateway gets an error, not a hang', async () => {

@@ -58,6 +58,9 @@ class LocalSandbox {
         this.child = null;
         this.kind = 'local';
         this.id = null;
+        // set by stop(): a worktree that is stopped starts no more commands, so a stop that
+        // lands between two steps of a run can't be undone by the next command it asks for
+        this.stopped = false;
     }
 
     /** A worktree of `repo` at `dir` on new branch `branch`, starting from `base` (default: the repo's current commit). */
@@ -131,6 +134,7 @@ class LocalSandbox {
 
     /** Run a shell command in the workspace. Resolves { code, output, timedOut, ms }; never rejects. */
     exec(command, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+        if (this.stopped) return Promise.resolve({ code: -1, output: 'the workspace was stopped, so the command did not run', timedOut: false, ms: 0 });
         return new Promise((resolve) => {
             const started = Date.now();
             const win = process.platform === 'win32';
@@ -160,6 +164,7 @@ class LocalSandbox {
     }
 
     kill(child = this.child) {
+        this.stopped = true;
         if (!child?.pid) return;
         try {
             if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
@@ -167,7 +172,7 @@ class LocalSandbox {
         } catch { /* already gone */ }
     }
 
-    stop() { this.kill(); }
+    stop() { this.stopped = true; this.kill(); }
 
     git(args) { return git(this.dir, args); }
 

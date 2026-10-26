@@ -129,7 +129,9 @@ test('admins manage users; plain users get chat and API but not Settings or cont
     const stored = fs.readFileSync(usersFile, 'utf8');
     assert.doesNotMatch(stored, /carol-password/);
     assert.match(stored, /scrypt\./);
-    assert.equal(fs.statSync(usersFile).mode & 0o077, 0, 'file is private');
+    // Windows has no file modes to speak of: chmod there changes the read-only flag,
+    // not who may read the file. The check means something on POSIX only.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(usersFile).mode & 0o077, 0, 'file is private');
 
     const carol = (await signIn('carol', 'carol-password')).cookie;
     assert.equal((await fetch(`${base}/ui/api/status`, as(carol))).status, 200);

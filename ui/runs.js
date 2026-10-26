@@ -67,7 +67,7 @@ function renderDetail(run) {
   $('detail').innerHTML = `
     <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
-    <div class="facts"><span>Repo <code>${esc(run.repo)}</code></span><span>Branch <code>${esc(run.branch)}</code></span>${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}</div>
+    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}</div>
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
     ${run.legs ? `<p class="muted">Carried on ${run.legs === 1 ? 'once' : `${run.legs} times`} after running out of ${run.outOfSteps ? 'steps' : 'time'}; every part worked on this one branch.</p>` : ''}
@@ -78,8 +78,8 @@ function renderDetail(run) {
     }).join('')}</div></div>` : ''}
     ${run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
     ${run.error ? `<div class="result"><span class="tag bad">error</span> ${esc(run.error)}</div>` : ''}
-    ${r ? `<div class="result"><p class="summary">${esc(r.summary)}</p>
-      ${r.diffStat ? `<pre>${esc(r.diffStat)}</pre>` : '<p class="muted">No files changed.</p>'}
+    ${r ? `<div class="result">${run.plan ? '<p class="muted">Plan only: nothing was changed, so there is no branch to review.</p>' : ''}<p class="summary">${esc(r.summary)}</p>
+      ${run.plan ? '' : r.diffStat ? `<pre>${esc(r.diffStat)}</pre>` : '<p class="muted">No files changed.</p>'}
       ${r.tests ? `<p>${r.tests.passed ? '<span class="tag ok">tests pass</span>' : `<span class="tag bad">tests fail${r.tests.timedOut ? ' (timed out)' : ''}</span>`} <code>${esc(r.tests.command)}</code></p><details data-k="tests"${openDetails.has('tests') ? ' open' : ''}><summary>Test output</summary><pre>${esc(r.tests.output)}</pre></details>` : ''}
       ${r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
     <div class="actions">${active
@@ -169,6 +169,7 @@ $('newRun').addEventListener('submit', async (e) => {
   for (const k of Object.keys(body)) if (body[k] === '') delete body[k];
   // an unchecked box is absent from FormData, and the runner's default may be on
   body.autoDebug = f.elements.autoDebug?.checked ? '1' : '0';
+  body.plan = f.elements.plan?.checked ? '1' : '0';
   try {
     $('startMsg').textContent = 'Starting…';
     if (body.workflow === 'auto') {

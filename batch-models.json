@@ -1,0 +1,12 @@
+{
+  "_comment": "OpenRouter models that take its Batch API (about half price, results within 24 h). Exact ids, or 'vendor/*'. data/batch-models.json (not in git) replaces this list when it exists; HARNESS_BATCH_MODELS_FILE replaces both.",
+  "models": [
+    "anthropic/claude-haiku-5.5",
+    "anthropic/claude-sonnet-5.5",
+    "openai/*",
+    "google/*",
+    "meta-llama/*",
+    "mistralai/*",
+    "deepseek/*"
+  ]
+}

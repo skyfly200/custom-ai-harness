@@ -49,6 +49,8 @@
     </div>
     <label class="check" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
       <input type="checkbox" name="autoDebug" value="1"><span>Auto debug a failed run</span></label>
+    <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
+      <input type="checkbox" name="plan" value="1"><span>Plan only, change nothing</span></label>
     <div class="actions"><button class="primary" type="submit">Start run</button><span class="note" id="startMsg"></span></div>
     <p class="sub muted fine">Risky commands and writes wait here for your OK. Nothing is pushed; the result is a branch.</p>
   </form>

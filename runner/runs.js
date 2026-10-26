@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { createSandbox, attachSandbox, E2BSandbox, LocalSandbox } = require('./sandbox');
 const { makeTools } = require('./tools');
-const { runAgent, stageSystem } = require('./agent');
+const { runAgent, systemFor } = require('./agent');
 const workflows = require('../utils/workflows');
 const swarm = require('./swarm');
 
@@ -246,6 +246,9 @@ class RunManager {
             id, goal, repo, kind: isSwarm ? 'swarm' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
+            // Plan mode: the agent may read and search, but changes nothing. It
+            // finishes with a plan instead of an edit, and the branch gets no commit.
+            plan: cfg.plan === true || cfg.plan === 1 || cfg.plan === 'true' || cfg.plan === 'plan',
             // 0 means no step limit: the agent runs until it calls finish, runs out of
             // time or is stopped. maxMinutes still bounds it, so it cannot run forever.
             maxSteps: num0(cfg.maxSteps, 0, 10000, 0), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
@@ -378,11 +381,13 @@ class RunManager {
         let n = 0;
         try {
             const { sandbox, outcome } = run.kind === 'swarm' ? await this.swarmRun(run, live) : await this.plainRun(run, live, () => ++n);
-            let commit = await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
+            // Plan mode changes nothing, so there is nothing to commit and no branch to
+            // hand back: the plan itself is the result.
+            let commit = run.plan ? null : await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
             // a swarm's changes are already committed as merges
             if (!commit && run.kind === 'swarm') { const head = (await sandbox.git(['rev-parse', 'HEAD'])).trim(); if (head !== run.base) commit = head; }
-            const result = { summary: outcome.summary, commit, diffStat: await sandbox.diffStat(), tests: null };
-            if (run.test && !live.stopped) {
+            const result = { summary: outcome.summary, commit, diffStat: run.plan ? '' : await sandbox.diffStat(), tests: null };
+            if (run.test && !live.stopped && !run.plan) {
                 this.event(run, { type: 'note', text: `Running the test command: ${run.test}` });
                 const t = await sandbox.exec(run.test, { timeoutMs: 600000 });
                 result.tests = { command: run.test, passed: t.code === 0 && !t.timedOut, code: t.code, timedOut: t.timedOut, output: t.output.slice(-4000) };
@@ -456,7 +461,7 @@ class RunManager {
             run.stage = stage.id;
             this.event(run, { type: 'stage', stage: stage.id, role: stage.role, text: `Stage ${i + 1} of ${workflow.stages.length}: ${stage.role}` });
             const tools = makeTools({
-                sandbox, toolset: stage.tools,
+                sandbox, toolset: run.plan ? 'check' : stage.tools,
                 check: (kind, text) => this.guard(kind, text),
                 approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
             });
@@ -465,7 +470,7 @@ class RunManager {
             const stageRun = run.effort || !stage.effort ? run : { ...run, effort: stage.effort };
             outcome = await runAgent({
                 run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped },
-                tools, system: stageSystem(stage), emit: (e) => this.event(run, { ...e, stage: stage.id }),
+                tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
                 chat: (messages, defs) => this.chat(stageRun, messages, defs, nextN()),
             });

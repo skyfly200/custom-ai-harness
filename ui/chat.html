@@ -150,6 +150,7 @@
     </section>
 
     <div class="log" id="log"></div>
+    <button type="button" class="jump-down" id="jumpDown" hidden title="Scroll to the newest message" aria-label="Scroll to bottom"></button>
 
     <form class="compose" id="compose">
       <div class="chips" id="chips"></div>
@@ -182,6 +183,8 @@
         </div>
         <div class="slash" id="slash" hidden></div>
       </div>
+      <div class="queue-note muted small" id="queueNote" hidden></div>
+      <div class="advisor-note muted small" id="advisorNote" hidden></div>
       <div class="compose-hint muted small" id="hint"></div>
     </form>
   </main>
@@ -302,6 +305,7 @@
 <script src="markdown.js"></script>
 <script src="cachetimer.js"></script>
 <script src="costs.js"></script>
+<script src="modelAlias.js"></script>
 <script src="chat.js"></script>
 <script src="bright.js"></script>
 </body>

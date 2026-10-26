@@ -1,4 +1,7 @@
-require('dotenv').config();
+// A test run must not pick up the developer's .env: the tests set the variables
+// they need themselves, and a value left over from .env (a master key, say) would
+// silently reach a fake Gateway and make a test pass or fail for the wrong reason.
+if (!process.env.NODE_TEST_CONTEXT) require('dotenv').config();
 const express = require('express');
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 const { countTokens, isEnabled, recordObservation } = require('./utils/tokenCounter');
@@ -271,12 +274,23 @@ const toGateway = createProxyMiddleware({
         },
         // Replaces http-proxy-middleware's own error answer, so it must answer
         // the client itself: without that a down Gateway left clients waiting forever.
+        // It also does the reset retry: with an on.error handler, http-proxy-middleware
+        // resolves its promise instead of calling next(err), so the error middleware
+        // further down never sees the failure.
         error: (err, req, res) => {
             req.harnessGuard?.clear();
             if (req.harnessFailed) return; // the guard already answered
             // A reset before the Gateway said anything is usually a socket it had
-            // already closed: proxyErrors sends the same request again on a fresh one.
-            if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) return;
+            // already closed: send the same request again, on a fresh one.
+            if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) {
+                req.harnessRetried = true;
+                console.warn(`${req.path}: the Gateway reset the connection (${err.code}); retrying once`);
+                // the body was read once already: the proxy writes req.body again from
+                // what the body parser kept, which is still here
+                req.harnessGuard?.clear();
+                toGateway(req, res, () => {});
+                return;
+            }
             req.harnessFailed = true;
             const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
             console.warn(`${req.path}: ${message}`);

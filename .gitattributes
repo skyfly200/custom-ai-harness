@@ -1,0 +1,6 @@
+# One line ending everywhere. config.yaml is read and rewritten line by line by
+# the routing editor, and the tests compare those lines, so a Windows checkout
+# must not turn its LF into CRLF (git's core.autocrlf default).
+* text=auto eol=lf
+*.png binary
+*.ico binary

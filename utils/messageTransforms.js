@@ -213,4 +213,5 @@ module.exports = {
     applyHeadroom,
     headroomCompressText,
     applyContextAnchor,
+    HEADROOM_MAX_TOOL_CHARS,
 };

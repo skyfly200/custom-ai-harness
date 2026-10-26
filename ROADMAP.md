@@ -75,8 +75,11 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
     * **Voice-Mode Prompting:** When `GRILL_VOICE` is set, instruct the grilling skill to ask one short question per turn, state its recommended answer in one sentence, and avoid tables and option menus.
     * **Glossary-Primed Transcription:** Run Whisper (local or Groq free tier) with `CONTEXT.md` glossary terms in its `prompt` parameter so domain words (Orchestrator, Build Ticket, ADR) transcribe correctly.
     * **Gateway Audio Routes (optional):** Add `/v1/audio/transcriptions` and `/v1/audio/speech` pass-through to the Interceptor so audio calls use LiteLLM fallbacks like chat does. Only if dictation accuracy becomes a real problem.
-* **Pre-triage (Qwen 3 Coder):** Before an Escalation, have local Qwen 3 Coder (`http://localhost:8080` / `11434`) attempt a concrete failure (broken build, failing test, error log).
-* **Parallel Worker Fan-Out:** Dispatch Ready Build Tickets to parallel Workers (local Qwen 3 Coder or Groq), each in its own branch and worktree.
+
+* **Parallel Worker Fan-Out:** Dispatch Ready Build Tickets to parallel Workers, each in its own branch and worktree.
+
+* **Agentic Teams (ChatDev vs. build in-house):** Evaluate ChatDev against extending the existing Runner/Orchestrator with collaborating specialist agents. Compare integration effort, fit with isolated worktrees and ticket state, model flexibility, and operational overhead; choose an approach and define a small MVP before committing to a framework.
+
 * **Adversarial Audit & Closed-Loop Refactoring:** Run a short Opus 5 Audit over each Worker's pull request. If rejected, route a concise JSON critique back to the Worker for refactoring without burning high-cost frontier output tokens.
 * **Cross-Session Context Handoff:** When work moves between Workers or models, pass hash pointers (`Ref ID`) and Git diffs instead of re-sending full workspace files, backed by a local cache.
 

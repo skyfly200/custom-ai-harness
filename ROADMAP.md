@@ -66,7 +66,7 @@ Agent runs can work in a Linux VM from [E2B](https://e2b.dev) instead of a workt
 
 Optional, higher-level operation built on top of the Model Layer. State lives on GitHub issues ([ADR 0001](docs/adr/0001-tracker-is-the-orchestrators-only-state.md)).
 
-* **Multi-Session Orchestration (`/wayfinder` via Claude Sonnet 4.6):** Invoke Sonnet 4.6 to map project destinations, track "fog of war" domain questions, and break goals down into a JSON/DAG ticket matrix.
+* **Multi-Session Orchestration (`/wayfinder` via Claude Sonnet 4.6):** ✅ Claude Code command maps project destinations, records "fog of war" domain questions, and drafts a topologically ordered JSON ticket matrix. The draft is review-only; GitHub issue creation and dispatch remain future work.
 * **Interactive State Interrogation (`/grill-me` & `/grill-with-docs` via Claude Opus 5):** Run multi-round interview sessions on architectural decision tickets to update domain models, `CONTEXT.md`, and Architectural Decision Records (ADRs) prior to writing code. Grilling is HITL and happens in the human's own session.
   * **Voice Grilling (STT/TTS):** Voice lives client-side in Claude Code, not in the Orchestrator or Model Layer.
     * ✅ **MVP TTS:** `.claude/hooks/speak.js` Stop hook reads each reply aloud via Windows `System.Speech` when `GRILL_VOICE=1` is set; strips code blocks and markdown, and cuts off stale speech when a new reply arrives.

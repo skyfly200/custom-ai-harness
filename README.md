@@ -100,6 +100,10 @@ claude
 
 These settings only last for that window. Other tools such as Cursor, Aider, Continue or Cline connect to `http://localhost:3000/v1` as an "OpenAI-compatible" endpoint.
 
+### Draft an orchestration plan
+
+In Claude Code, run `/wayfinder <goal>` to map a goal into project destinations, unresolved domain questions, and a dependency-ordered JSON ticket draft. Wayfinder is planning-only: it does not edit the repository or create GitHub issues, and every drafted ticket remains not Ready until a person reviews and enters it in the tracker.
+
 ### Install Bright Chat as an app
 
 Bright Chat can be installed so it opens in its own window, with its own icon, like any other app. It needs the page to be opened at `http://localhost:3000/ui/chat.html` or over `https://` (a server behind a tunnel or Tailscale `serve`; see [Reach it from your phone](#reach-it-from-your-phone)); a plain `http://` address on your network can't be installed.

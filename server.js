@@ -4,7 +4,6 @@
 if (!process.env.NODE_TEST_CONTEXT) require('dotenv').config();
 const express = require('express');
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
-const { countTokens, isEnabled, recordObservation } = require('./utils/tokenCounter');
 const {
     latestUserText,
     latestUserHasImage,
@@ -163,26 +162,6 @@ function logRoute(path, { model, threshold, winRate, reason, tier, effort }) {
     }
 }
 
-/**
- * Token counting (opt‑in). When enabled we log estimated in/out tokens and
- * feed the actual output count back into the correction factor so the estimate
- * learns from real data.
- */
-function logTokens(req, label) {
-    if (!isEnabled) return;
-    const inText = JSON.stringify(req.body);
-    const inTok = countTokens(inText);
-    console.info(`[tokens] ${label} in=${inTok}`);
-    const oldSend = res.send;
-    res.send = function (body) {
-        try {
-            const outText = typeof body === 'string' ? body : JSON.stringify(body);
-            const outTok = countTokens(outText);
-        } catch {}
-        return oldSend.call(this, body);
-    };
-}
-
 // Token counts from a routed request's reply, for the Usage page. Failed
 // calls carry no usage and aren't counted.
 function recordUsage(req, proxyRes) {
@@ -196,6 +175,7 @@ function recordUsage(req, proxyRes) {
             servedBy: event.servedBy,
             upstream,
             usage: counts,
+            // no counts in the reply: the request's own size and the text that came back
             estimate: { input: req.harnessInputEstimate, outputChars },
             saved: req.harnessSaved,
         });

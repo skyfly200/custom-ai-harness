@@ -7,6 +7,5 @@ repos
 harness-settings.json
 harness-usage.json
 mcp-servers.json
-tokenCounterState.json
 **/__pycache__
 .laya

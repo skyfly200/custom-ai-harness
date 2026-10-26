@@ -6,6 +6,7 @@
 const $ = (id) => document.getElementById(id);
 const { render, toSpeech, escape: esc } = window.Markdown;
 const modelAlias = window.ModelAlias;
+const Tokens = window.Tokens;   // usage readings and estimates, shared with the Interceptor
 const speechText = (markdown) => toSpeech(markdown, { clear: $('speakClear').checked });
 
 const ICONS = {
@@ -235,7 +236,8 @@ function flashCopied(btn) {
 }
 
 const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
-const approxTokens = (chars) => Math.round(chars / 4);
+// About 4 characters a token, the Interceptor's own rule (ui/tokens.js)
+const approxTokens = (chars) => Math.max(0, Math.round(chars / 4));
 function ago(t) {
   const s = (Date.now() - t) / 1000;
   if (s < 60) return 'just now';
@@ -302,7 +304,11 @@ function liveStatus(id) {
     const call = (m.rounds || []).flatMap(x => x.calls).find(x => x.result == null);
     return call ? `tool · ${toolLabel(call.name)[1]}` : 'using tools';
   }
-  if (tr.firstToken != null) return `writing · ${fmtTok(tr.usage?.completion_tokens ?? tr.chunks ?? 0)}`;
+  if (tr.firstToken != null) {
+    // tokens the provider has counted so far, else the text that has arrived
+    const out = Tokens.usage(tr.usage)?.output ?? approxTokens(tr.textChars || 0);
+    return `writing · ${fmtTok(out)}${Tokens.usage(tr.usage) ? '' : '~'}`;
+  }
   if (tr.answered) return 'thinking';
   if (tr.routed) return 'waiting';
   return 'routing';
@@ -579,11 +585,13 @@ function traceHtml(m) {
   }
   if (tr.firstToken != null) {
     const done = tr.done != null;
-    const tok = tr.usage?.completion_tokens ?? tr.chunks;
+    // what the provider counted, else the text that has arrived (marked ~)
+    const u = Tokens.usage(tr.usage);
+    const tok = u?.output ?? approxTokens(tr.textChars || 0);
     const secs = ((done ? tr.done : now - tr.start) - tr.firstToken) / 1000;
     const rate = secs > 0.2 && tok ? ` · ${(tok / secs).toFixed(0)} tok/s` : '';
     const why = tr.finish ? ` · stopped because ${tr.finish === 'length' ? 'it hit the output cap' : tr.finish === 'tool_calls' ? 'it asked for a tool' : tr.finish === 'stop' ? 'it was done' : tr.finish === 'content_filter' ? 'of the content filter' : tr.finish}` : '';
-    step(done ? 'ok' : 'now', `${done ? 'Reply finished' : 'Writing'} · ${tok ?? 0} ${tr.usage ? 'tokens' : 'chunks'}${rate}${done ? why : ''}`, `first token ${fmtMs(tr.firstToken)}`);
+    step(done ? 'ok' : 'now', `${done ? 'Reply finished' : 'Writing'} · ${u ? '' : '~'}${tok ?? 0} tokens${rate}${done ? why : ''}`, `first token ${fmtMs(tr.firstToken)}`);
   } else if (live && tr.answered) {
     step('now', 'Waiting for the first token…', fmtMs(now - tr.start));
   }
@@ -596,6 +604,15 @@ function traceHtml(m) {
     ${history.length ? `<details class="trace-history" data-k="trace-history"><summary>Earlier steps (${history.length})</summary><ul class="trace">${history.map(row).join('')}</ul></details>` : ''}</div>`;
 }
 
+// "1,234 in · 567 out", with a ~ when the provider sent no counts and the
+// numbers were worked out from the prompt and the reply
+function replyUsageHtml(m) {
+  const k = usageOf(m);
+  if (!k) return '';
+  const tilde = k.exact ? '' : '~';
+  return `<span title="${k.exact ? 'Counted by the provider' : 'Estimated: the provider sent no counts, so this is about 4 characters a token'}">${tilde}${k.input.toLocaleString()} in · ${tilde}${k.output.toLocaleString()} out</span>`;
+}
+
 function metaHtml(m) {
   const tr = m.trace, meta = m.meta || {};
   const model = tr?.answered?.servedBy || tr?.routed?.model || meta.model;
@@ -605,7 +622,7 @@ function metaHtml(m) {
     m.turn?.command && `<span class="tag" title="Sent by the command /${esc(m.turn.command)}${turnNote(m.turn) ? `: ${esc(turnNote(m.turn))}` : ''}">/${esc(m.turn.command)}</span>`,
     tr?.answered?.fallbacks > 0 && `<span class="warn">${tr.answered.fallbacks} fallback${tr.answered.fallbacks > 1 ? 's' : ''}</span>`,
     (tr?.done ?? meta.ms) != null && fmtMs(tr?.done ?? meta.ms),
-    tr?.usage && `${tr.usage.prompt_tokens ?? '?'} in · ${tr.usage.completion_tokens ?? '?'} out`,
+    replyUsageHtml(m),
     costHtml(m),
   ].filter(Boolean);
   if (!bits.length) return '';
@@ -620,23 +637,35 @@ const replyModel = (m) => m?.trace?.answered?.servedBy || m?.trace?.routed?.mode
 const fmtTok = (n) => n < 1000 ? String(n) : n < 1e6 ? `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`;
 const fmtUsd = (n) => n === 0 ? '$0' : n < 0.0001 ? '<$0.0001' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`;
 
+// Tokens of anything one request or one reply reported, in one shape whatever
+// the provider called its fields (ui/tokens.js): { input, output, cacheRead,
+// cacheWrite, cost, exact }. A reply whose rounds reported counts is the sum of
+// its rounds (runReply keeps that in tr.usageParts); anything the provider left
+// out is filled from what did arrive, and marked inexact.
+function usageOf(x) {
+  const tr = x?.trace || {};
+  const k = tr.usageParts ? { ...tr.usageParts } : Tokens.usage(tr.usage);
+  if (!k) return null;
+  // Some providers stream the text without ever counting it (an OpenAI stream
+  // without include_usage). Then the prompt we sent and the text that arrived
+  // are the best numbers there are, at about 4 characters a token.
+  if (!k.input) { k.input = approxTokens(tr.sentChars ?? 0); k.exact = false; }
+  if (!k.output && tr.textChars) { k.output = approxTokens(tr.textChars); k.exact = false; }
+  return k;
+}
+
 // { usd, free, estimated } or null when the price isn't known. The provider's
 // own figure wins (OpenRouter's usage.cost, LiteLLM's cost header); else the
 // tokens times the Gateway's price list.
 function computeCost(m) {
   const tr = m.trace || {};
-  const u = tr.usage;
-  if (typeof u?.cost === 'number') return { usd: u.cost, free: u.cost === 0 };
+  const k = usageOf(m);
+  if (typeof k?.cost === 'number') return { usd: k.cost, free: k.cost === 0 };
   if (tr.headerCost > 0) return { usd: tr.headerCost, free: false };
   const info = modelInfo[replyModel(m)];
   if (info?.free) return { usd: 0, free: true };
-  if (!info || info.inputCost == null || !u) return null;
-  return { usd: tokensCost(u, info), free: false, estimated: true };
-}
-// Tokens times the price list, cached input at the provider's cache price (ui/costs.js)
-function tokensCost(u, info) {
-  const k = CacheTimer.cacheUsage(u);
-  return Costs.rowCost({ input: k.prompt, output: u.completion_tokens ?? u.output_tokens ?? 0, cacheRead: k.read, cacheWrite: k.write }, info).cost;
+  if (!info || info.inputCost == null || !k) return null;
+  return { usd: Costs.rowCost(k, info).cost, free: false, estimated: !k.exact };
 }
 const replyCost = (m) => (m.cost !== undefined && !m.streaming ? m.cost : computeCost(m));
 
@@ -647,38 +676,73 @@ function costHtml(m) {
   return `<span class="cost" title="${c.estimated ? 'Worked out from the Gateway’s price list' : 'Reported by the provider'}">${c.estimated ? '≈ ' : ''}${fmtUsd(c.usd)}</span>`;
 }
 
-// Tokens the next request will send: context, history, attachments and the box
+// Tokens the next request will send, counted where it is put together: every
+// context block, the history with its attachments and tool calls, the tool
+// schemas (however small) and the box. Images are noted separately: their size
+// in tokens depends on the model.
+function requestPrompt() {
+  if (!chat) return { chars: 0, images: 0 };
+  let images = 0;
+  // a text attachment goes in as a <file> block
+  const fileChars = (list) => (list || []).reduce((n, a) => (
+    a.kind === 'image' ? n : n + `<file name="${a.name}">\n${a.text || ''}\n</file>`.length), 0);
+  // a user message as it will be sent: a command's own message, then its file blocks
+  const userChars = (m) => {
+    const text = [m.turn?.command ? commandPrompt(m) : m.content,
+      ...(m.attachments || []).filter(a => a.kind === 'text').map(f => `<file name="${f.name}">\n${f.text}\n</file>`)].filter(Boolean);
+    return JSON.stringify(text).length;
+  };
+  // images are counted, not measured: their size in tokens depends on the model
+  const countImages = (list) => { images += (list || []).filter(a => a.kind === 'image').length; };
+  // what will be sent, not what is stored: a command's message, the attachments
+  // written out as file blocks, and the tool calls and results of each round
+  let chars = contextText(chat).length;
+  for (const m of chat.messages) {
+    if (m.role === 'user') { chars += userChars(m); countImages(m.attachments); }
+    else if (m.role === 'assistant' && !m.streaming) {
+      chars += assistantMessages(m, true).reduce((k, a) => k + JSON.stringify(a).length, 0);
+    }
+  }
+  // the tool schemas go with every request, small ones included
+  const tools = JSON.stringify(activeTools(chat));
+  if (tools && tools !== '[]') chars += tools.length;
+  return { chars: chars + fileChars(pending) + $('input').value.length, images };
+}
 function requestTokens() {
-  if (!chat) return 0;
-  const files = (list) => (list || []).reduce((n, a) => n + (a.text?.length || 0), 0);
-  const ctx = contextText(chat).length + files(pending);
-  const hist = chat.messages.filter(m => m.role === 'user' || m.role === 'assistant')
-    .reduce((n, m) => n + String(m.content).length + files(m.attachments)
-      + (m.rounds || []).reduce((k, r) => k + r.calls.reduce((x, t) => x + (t.arguments?.length || 0) + (t.result?.length || 0), 0), 0), 0);
-  const tools = JSON.stringify(activeTools(chat)).length;
-  return approxTokens(ctx + hist + (tools > 2 ? tools : 0) + $('input').value.length);
+  return approxTokens(requestPrompt().chars);
 }
 
-// Header: tokens and cost so far in this chat, and how full the context is
-function drawStats() {
+// Header: tokens and cost so far in this chat, and how full the context is.
+// Counts come from what each provider reported; a reply still arriving counts
+// what it has reported so far, so the numbers move as it writes.
+// countNext false keeps the last "next request" size: while a reply streams it
+// can't change, and recounting the whole history 4 times a second is wasted work.
+let nextTokens = null;
+function drawStats(countNext = true) {
   const el = $('chatStats');
   if (!chat) return;
-  const replies = chat.messages.filter(m => m.role === 'assistant' && !m.streaming);
-  let input = 0, output = 0, usd = 0, paid = 0, free = 0, unknown = 0;
+  const replies = chat.messages.filter(m => m.role === 'assistant');
+  const sent = chat.messages.filter(m => m.role === 'user');
+  let input = 0, output = 0, usd = 0, paid = 0, free = 0, unknown = 0, estimated = 0, requests = 0;
   for (const m of replies) {
-    const u = m.trace?.usage;
-    if (u) { input += u.prompt_tokens || 0; output += u.completion_tokens || 0; }
+    const k = usageOf(m);
+    if (k) {
+      requests++;
+      input += k.input; output += k.output;
+      if (!k.exact) estimated++;
+    }
     const c = replyCost(m);
     if (!c) unknown++; else if (c.free) free++; else { paid++; usd += c.usd; }
   }
-  const next = requestTokens();
+  const next = (countNext || nextTokens == null) ? (nextTokens = requestTokens()) : nextTokens;
   const model = routeOf(chat).model || replyModel(replies[replies.length - 1]);
   const max = modelInfo[model]?.maxInput;
-  const lastSent = [...replies].reverse().find(m => m.trace?.usage?.prompt_tokens)?.trace.usage.prompt_tokens;
+  const lastSent = [...replies].reverse().map(usageOf).find(k => k?.input)?.input;
   if (!replies.length && !next) { el.innerHTML = ''; return; }
   const pct = max ? Math.min(100, Math.round(next / max * 100)) : null;
+  const tilde = estimated ? '~' : '';
   const bits = [];
-  if (input + output) bits.push(`<span>${fmtTok(input + output)} tokens</span>`);
+  if (input + output) bits.push(`<span title="${estimated ? `${estimated} of ${requests} request${requests === 1 ? '' : 's'} had no counts from the provider, so those are estimated` : 'Counted by the providers'}">${tilde}${fmtTok(input + output)} tokens</span>`);
   if (paid) bits.push(`<span>${fmtUsd(usd)}${unknown ? '+' : ''}</span>`);
   else if (free && !unknown) bits.push('<span class="ok">free</span>');
   bits.push(max
@@ -686,7 +750,8 @@ function drawStats() {
     : `<span class="ctx-text">context ≈ ${fmtTok(next)}</span>`);
   el.innerHTML = bits.join('');
   el.title = [
-    `This chat: ${input.toLocaleString()} tokens in, ${output.toLocaleString()} out over ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}.`,
+    `This chat: ${tilde}${input.toLocaleString()} tokens in, ${tilde}${output.toLocaleString()} out over ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}${estimated ? ` (${estimated} estimated: the provider sent no counts)` : ''}.`,
+    `You sent ${sent.length} message${sent.length === 1 ? '' : 's'}; each reply re-sends the whole history, so input tokens grow faster than the chat does.`,
     `Cost: ${fmtUsd(usd)} for ${paid} paid repl${paid === 1 ? 'y' : 'ies'}${free ? `, ${free} free` : ''}${unknown ? `, ${unknown} with no known price` : ''}.`,
     `Next request: about ${next.toLocaleString()} tokens${max ? ` of ${model}'s ${max.toLocaleString()} (${pct}%)` : model ? ` (no context size known for ${model})` : ''}.`,
     lastSent ? `The last reply was sent ${lastSent.toLocaleString()} tokens.` : '',
@@ -920,6 +985,8 @@ function patch(el, html) {
 setInterval(() => {
   for (const { reply } of running.values()) if (chat.messages.includes(reply)) redraw(reply);
   if (running.size) drawLiveStatus();
+  // the header's counts move while a reply writes, not just when it ends
+  if (running.has(chat?.id)) drawStats(false);
 }, 250);
 
 $('log').addEventListener('change', (e) => {
@@ -1143,15 +1210,28 @@ async function runReply(c, turn) {
   }, 1000);
   const giveUp = (why) => { reply.timedOut = why; controller.abort(); };
   const clientIds = [];
-  const total = { prompt_tokens: 0, completion_tokens: 0, cost: 0, costKnown: true, any: false };
-  const addUsage = (u, headerCost) => {
-    if (!u) { total.costKnown = false; return; }
-    total.any = true;
-    total.prompt_tokens += u.prompt_tokens || 0;
-    total.completion_tokens += u.completion_tokens || 0;
-    if (typeof u.cost === 'number') total.cost += u.cost;
+  // What every request of this reply reported, added up (ui/tokens.js reads a
+  // provider's usage whatever shape it comes in). A request that reported nothing
+  // is filled in from the prompt it sent and the text it wrote, at about 4
+  // characters a token, and the total is then marked inexact.
+  const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, exact: true };
+  const addUsage = (k, headerCost, tr) => {
+    if (!k) {
+      k = {
+        input: approxTokens(tr.sentChars || 0),
+        output: approxTokens(tr.textChars || 0),
+        cacheRead: 0, cacheWrite: 0, cost: null, exact: false,
+      };
+      if (!k.input && !k.output) return;
+    }
+    total.input += k.input;
+    total.output += k.output;
+    total.cacheRead += k.cacheRead;
+    total.cacheWrite += k.cacheWrite;
+    if (!k.exact) total.exact = false;
+    if (typeof k.cost === 'number') total.cost += k.cost;
     else if (headerCost > 0) total.cost += headerCost;
-    else total.costKnown = false;
+    else total.exactCost = false;
   };
   try {
     let toolRounds = 0;  // rounds that really ran tools, for Max tool rounds
@@ -1185,6 +1265,8 @@ async function runReply(c, turn) {
         fallbacks: parseInt(res.headers.get('x-litellm-attempted-fallbacks'), 10) || tr.answered?.fallbacks || 0,
       };
       tr.headerCost = parseFloat(res.headers.get('x-litellm-response-cost')) || 0;
+      // how big the prompt this request sends is, for a provider that reports no counts
+      tr.sentChars = JSON.stringify(body).length;
       reply.meta = { model: tr.routed.model, route: routeWhy(tr.routed) };
       redraw(reply);
       if (!res.ok) {
@@ -1205,10 +1287,12 @@ async function runReply(c, turn) {
         tr.finish = j.choices?.[0]?.finish_reason;
         tr.firstToken = Date.now() - tr.start;
         tr.usage = j.usage || null;
+        // the text and tool arguments this request generated, for an estimate
+        tr.textChars = Tokens.charsOf(j);
         speech.feed(reply);
       }
       tr.done = Date.now() - tr.start;
-      addUsage(tr.usage, tr.headerCost);
+      addUsage(Tokens.usage(tr.usage), tr.headerCost, tr);
       noteCache(c, tr);
       // a call whose name never arrived (a provider cut it off mid-stream) cannot be run
       if (calls.some(t => !t.name)) tr.droppedCalls = calls.filter(t => !t.name).length;
@@ -1234,9 +1318,7 @@ async function runReply(c, turn) {
       for (const call of r.calls) {
         await runTool(call, c, controller.signal, () => redraw(reply));
         // what the advisor's own model cost is part of this reply's cost
-        if (typeof call.advisorCost === 'number') {
-          tr.usage = { ...(tr.usage || {}), cost: (tr.usage?.cost || 0) + call.advisorCost };
-        }
+        if (typeof call.advisorCost === 'number') total.cost += call.advisorCost;
       }
       tr.toolsRunning = false;
       tr.lastData = Date.now();
@@ -1246,16 +1328,30 @@ async function runReply(c, turn) {
         break;
       }
     }
-    // one total for the whole reply, whatever number of requests it took
-    if (reply.rounds?.length && total.any) {
-      tr.usage = { prompt_tokens: total.prompt_tokens, completion_tokens: total.completion_tokens, ...(total.costKnown ? { cost: total.cost } : {}) };
+    // One total for the whole reply, whatever number of requests and rounds it
+    // took, kept on the reply itself (tr.usageParts). Left out only when no
+    // request of it reported anything and nothing arrived to estimate from.
+    if (total.input || total.output) {
+      tr.usageParts = {
+        input: total.input, output: total.output, cacheRead: total.cacheRead, cacheWrite: total.cacheWrite,
+        exact: total.exact, ...(total.exactCost === false ? {} : { cost: total.cost }),
+      };
       tr.headerCost = 0;
     }
+    drawStats();
     // Nothing came back even on the second try: say why, rather than leaving
     // "(empty reply)" with no way to tell what went wrong.
     if (!reply.content.trim() && !reply.rounds?.length && !reply.timedOut) reply.content = emptyNote(reply, tr);
   } catch (err) {
     tr.done = Date.now() - tr.start;
+    // a stopped or failed reply still used what it used, so the counts are kept
+    if (total.input || total.output) {
+      tr.usageParts = {
+        input: total.input, output: total.output, cacheRead: total.cacheRead, cacheWrite: total.cacheWrite,
+        exact: total.exact, ...(total.exactCost === false ? {} : { cost: total.cost }),
+      };
+      tr.headerCost = 0;
+    }
     for (const r of reply.rounds || []) for (const call of r.calls) if (call.result == null) { call.result = 'Stopped before this tool finished.'; call.isError = true; }
     const message = err.name === 'AbortError' && reply.timedOut ? `${reply.timedOut}, so the page stopped waiting.` : err.message;
     if (err.name === 'AbortError' && !reply.timedOut) {
@@ -1498,6 +1594,10 @@ async function readStream(stream, reply, c) {
   const calls = [];
   const byIndex = new Map(); // stream index -> call (some providers reuse index 0 for every call)
   let buffer = '', lastSave = Date.now();
+  // Streams report usage in pieces and counts only grow, so the largest of each
+  // is kept (ui/tokens.js); counting the pieces too gives an estimate for a
+  // provider that sends no usage at all
+  tr.textChars = tr.textChars || 0;
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -1511,7 +1611,8 @@ async function readStream(stream, reply, c) {
       let j;
       try { j = JSON.parse(data); } catch { continue; }
       if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
-      if (j.usage) tr.usage = j.usage;
+      if (j.usage) tr.usage = Tokens.merge(Tokens.usage(tr.usage), Tokens.usage(j.usage));
+      tr.textChars += Tokens.charsOf(j);
       const choice = j.choices?.[0];
       // why it stopped: "length" means the output cap cut the answer off
       if (choice?.finish_reason) tr.finish = choice.finish_reason;
@@ -1930,8 +2031,9 @@ function drawContextSize() {
 
 function drawHint() {
   const bits = [];
-  const total = requestTokens();
-  if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${pending.some(a => a.kind === 'image') ? ' plus images' : ''}`);
+  const { chars, images } = requestPrompt();
+  const total = approxTokens(chars);
+  if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${images ? ` plus ${images} image${images === 1 ? '' : 's'}` : ''}`);
   const route = chat ? routeOf(chat) : null;
   if (route?.model) bits.push(`straight to ${esc(route.model)}`);
   else if (route?.auto) bits.push('strategy: Auto');
@@ -3185,10 +3287,10 @@ function projectUsage(id) {
     chats++;
     for (const m of c.messages) {
       if (m.role !== 'assistant') continue;
-      const u = m.trace?.usage;
-      if (u) { input += u.prompt_tokens || 0; output += u.completion_tokens || 0; }
+      const k = usageOf(m);
+      if (k) { input += k.input; output += k.output; }
       const cost = replyCost(m);
-      if (cost) usd += cost.usd; else if (u) priced = false;
+      if (cost) usd += cost.usd; else if (k) priced = false;
     }
   }
   return { chats, input, output, usd, priced };
@@ -3553,8 +3655,13 @@ setInterval(checkSchedules, 15000);
 // This chat's tokens and cost, opened from the numbers in the top bar
 // ---------------------------------------------------------------------------
 function drawUsagePop() {
-  const replies = chat.messages.filter(m => m.role === 'assistant' && !m.streaming);
-  const rows = replies.map((m, i) => ({ i: i + 1, model: replyModel(m) || '?', input: m.trace?.usage?.prompt_tokens || 0, output: m.trace?.usage?.completion_tokens || 0, cost: replyCost(m) }));
+  // a reply still arriving counts what it has reported so far
+  const replies = chat.messages.filter(m => m.role === 'assistant');
+  const rows = replies.map((m, i) => {
+    const k = usageOf(m) || { input: 0, output: 0, exact: true };
+    return { i: i + 1, model: replyModel(m) || '?', input: k.input, output: k.output, exact: k.exact, cost: replyCost(m) };
+  });
+  const approx = rows.some(r => !r.exact) ? '~' : '';
   const byModel = new Map();
   for (const r of rows) {
     const t = byModel.get(r.model) || { n: 0, input: 0, output: 0, usd: 0, free: true, unknown: false };
@@ -3571,18 +3678,19 @@ function drawUsagePop() {
   const pu = p ? projectUsage(p.id) : null;
   $('usagePop').innerHTML = `
     <div class="up-tiles">
-      <div><b>${fmtTok(tot.input + tot.output)}</b><span>tokens</span></div>
+      <div><b>${approx}${fmtTok(tot.input + tot.output)}</b><span>tokens</span></div>
       <div><b>${fmtTok(tot.input)}</b><span>sent</span></div>
       <div><b>${fmtTok(tot.output)}</b><span>written</span></div>
       <div><b>${tot.usd ? fmtUsd(tot.usd) : 'free'}</b><span>cost</span></div>
     </div>
+    <div class="small muted">Sent counts every request this chat made: each reply re-sends the whole history, so it grows faster than the chat.${approx ? ' Values marked ~ are estimated: the provider sent no counts.' : ''}</div>
     ${rows.length ? `<div class="up-head">Each reply <span class="muted">sent · written</span></div>
-    <div class="up-bars">${rows.map(r => `<div class="up-bar" title="Reply ${r.i} · ${esc(r.model)}\n${r.input.toLocaleString()} in · ${r.output.toLocaleString()} out${r.cost ? ` · ${r.cost.free ? 'free' : fmtUsd(r.cost.usd)}` : ''}">
+    <div class="up-bars">${rows.map(r => `<div class="up-bar" title="Reply ${r.i} · ${esc(r.model)}\n${r.exact ? '' : '~'}${r.input.toLocaleString()} in · ${r.exact ? '' : '~'}${r.output.toLocaleString()} out${r.cost ? ` · ${r.cost.free ? 'free' : fmtUsd(r.cost.usd)}` : ''}">
       <i class="in" style="height:${100 * r.input / max}%"></i><i class="out" style="height:${100 * r.output / max}%"></i></div>`).join('')}</div>
     <div class="up-head">By model</div>
     <table class="up-table"><tbody>${[...byModel].map(([k, t]) => `<tr><td><code>${esc(k)}</code></td><td>${t.n}×</td><td>${fmtTok(t.input)} / ${fmtTok(t.output)}</td><td>${t.free && !t.unknown ? '<span class="ok">free</span>' : `${fmtUsd(t.usd)}${t.unknown ? '+' : ''}`}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">No replies yet.</p>'}
     <div class="up-head">Next message</div>
-    <div class="small">About ${next.toLocaleString()} tokens${ctxMax ? ` of ${esc(model)}'s ${ctxMax.toLocaleString()}` : ''}.</div>
+    <div class="small">About ${next.toLocaleString()} tokens${ctxMax ? ` of ${esc(model)}'s ${ctxMax.toLocaleString()}` : ''}${requestPrompt().images ? `, plus ${requestPrompt().images} image${requestPrompt().images === 1 ? '' : 's'}` : ''}.</div>
     ${ctxMax ? `<div class="up-meter"><i style="width:${Math.min(100, 100 * next / ctxMax)}%"></i></div>` : ''}
     ${pu ? `<div class="up-head">Project “${esc(p.name)}”</div><div class="small">${pu.chats} chats · ${fmtTok(pu.input + pu.output)} tokens · ${pu.usd ? fmtUsd(pu.usd) : 'free'}${pu.priced ? '' : '+'}</div>` : ''}
     <a class="small" href="usage.html">Every client's usage and costs →</a>`;
@@ -3601,9 +3709,9 @@ $('chatStats').addEventListener('click', (e) => {
 // to each model is kept on the chat: c.caches[model] = { at, read, write, long, prompt }
 function noteCache(c, tr) {
   const model = tr.answered?.servedBy || tr.routed?.model;
-  const u = CacheTimer.cacheUsage(tr.usage);
+  const u = Tokens.usage(tr.usage);
   if (!model || !u) return;
-  (c.caches ||= {})[model] = { at: tr.start, ...u };
+  (c.caches ||= {})[model] = { at: tr.start, read: u.cacheRead, write: u.cacheWrite, long: 0, prompt: u.input };
   if (c === chat) drawCacheTimer();
 }
 
@@ -3766,7 +3874,7 @@ async function keepAlive(c, model) {
     const headerCost = parseFloat(res.headers.get('x-litellm-response-cost')) || 0;
     const st = (c.keepAliveStats ||= { count: 0, usd: 0 });
     st.count++;
-    const cost = pingCost(tr.usage, headerCost, model);
+    const cost = pingCost(Tokens.usage(tr.usage), headerCost, model);
     if (cost) { st.usd += cost.usd; st.estimated ||= cost.estimated; }
     noteCache(c, tr);
     saveChat(c, { touch: false });
@@ -3778,13 +3886,14 @@ async function keepAlive(c, model) {
   }
 }
 
-// What a keep-alive cost: the provider's figure, else tokens at the price list's cache prices
-function pingCost(u, headerCost, model) {
-  if (typeof u?.cost === 'number') return { usd: u.cost };
+// What a keep-alive cost: the provider's figure, else its tokens at the price
+// list's cache prices (ui/costs.js)
+function pingCost(k, headerCost, model) {
+  if (typeof k?.cost === 'number') return { usd: k.cost };
   if (headerCost > 0) return { usd: headerCost };
   const info = modelInfo[model];
-  if (!u || info?.inputCost == null) return null;
-  return { usd: tokensCost(u, info), estimated: true };
+  if (!k || info?.inputCost == null) return null;
+  return { usd: Costs.rowCost(k, info).cost, estimated: !k.exact };
 }
 
 function checkKeepAlive() {

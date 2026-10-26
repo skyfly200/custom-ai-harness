@@ -68,3 +68,24 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
 
 # Bugs
 * **Allow Tool Call messages should surface and show a clear indicator of user input being needed
+
+# Additional
+
+* **Advisor as a real command (`/advisor MODEL`):** Set a model as an advisor and give the cheaper model a tool to call it, as Claude Code does. `/advisor opus` binds the advisor; a short name (`opus`, `sonnet`, `haiku`) auto-matches the latest version (`opus` → `opus-5.5`) against the Gateway's model list. The chat's own (cheaper) model keeps the turn and gains an `ask_advisor` tool so it can pull a second opinion only when it needs one. Distinct from the current *advisor* starter command, which is just one message sent to another model with no tools.
+* **Subagent spawning (`/subagent`):** Spawn a subagent for an individual task, with its own model — default a cheaper, lower tier than the chat's — and its own tool budget. The parent chat gets the subagent's summary back as a tool result, so research and grunt work run on the cheap model while the parent keeps the thread.
+* **Plan mode:** A mode in which the agent reads, searches and reasons but makes no changes. Every write and every mutating command is refused with "plan mode", the agent finishes with a plan instead of a diff, and a button turns the plan into a normal run. Fits the existing tool sets: plan mode is the `read`/`check` toolset plus a refusal in `makeTools`, not a new sandbox.
+* **One working tree per chat:** Chats linked to the same repo currently share the user's working copy, so a chat's `run_command` (and its uncommitted edits) interfere with other chats and with runs. Give each chat its own worktree on its own branch, created on link and reused across turns, so concurrent chats and runs never see each other's changes.
+* **Queue a message into a thinking chat:** Sending into a chat that is still replying is refused ("Stop the current reply first"). Instead queue the message; when the reply finishes, the queued one is sent in order, with the queued messages shown in the composer.
+* **Thinking pane keeps its place:** While a reply streams, an open thinking pane jumps to the newest text on every redraw, so scrolling up is impossible. Follow only while you are at the bottom; once you scroll up, stay where you are and show a **scroll to bottom** button in the pane to jump back (and re-arm following).
+* **Fix the thinking animation that outlives the thinking:** `.spark i { animation-delay: inherit }` in `ui/chat.css` inherits the `.thinking` frame delay, so the dots keep hopping after the reply stops streaming. Give them their own delays, and stop the animation when the message is no longer streaming.
+
+## Failing tests to fix
+
+From `testout.txt` (264/282 passing):
+
+* **`access.test.js` (2):** the harness password and API keys sent as `x-api-key`/`Bearer` reach the Gateway instead of being stripped (`seen.authorization`, `seen['x-api-key']`).
+* **`login.test.js` (2):** same credential leak through the login gate, and `users.json` is created world-readable (`mode & 0o077` is `54`, not `0`).
+* **`gateway.test.js` (2):** a Gateway that resets the connection is not retried — the error never reaches the retry middleware, so the request hangs until the client times out.
+* **`gatewayConfig.test.js` (3):** resolved for the shipped `config.yaml` (its fallback chains had been deleted and are restored); the remaining fixture assertions depend on LF line endings — see `.gitattributes`.
+* **`calm.test.js` (1):** the test's `@media (hover: hover)` stripping regex misses the blocks in `ui/calm.css`, so hiding rules look like they sit outside the media query.
+* **`mcp.test.js` (1):** a stdio server that times out once is not retried — the second connect never lists tools (`test/fixtures/flaky-mcp-server.js`).

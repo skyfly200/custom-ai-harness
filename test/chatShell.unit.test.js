@@ -15,6 +15,7 @@ const plain = path.join(dir, 'plain');
 fs.mkdirSync(repo);
 fs.mkdirSync(plain);
 execFileSync('git', ['init', '-q'], { cwd: repo });
+test.after(() => chatShell.closePowerShellSessions());
 
 test('one run_command tool, with a required command', () => {
     const [def] = chatShell.definitions();
@@ -41,6 +42,14 @@ test('a command that runs too long is killed and said to have timed out', async 
     const r = await chatShell.exec(repo, sleeper, { timeoutMs: 1000 });
     assert.equal(r.timedOut, true);
     assert.ok(r.ms < 15000, `took ${r.ms} ms`);
+});
+
+test('Windows reuses its shell while resetting each command to the repository root', { skip: process.platform !== 'win32' }, async () => {
+    const first = await chatShell.exec(repo, "$global:harnessSessionValue = 'retained'; Set-Location ..; Write-Output ready");
+    assert.match(first.output, /ready/);
+    const second = await chatShell.exec(repo, 'Write-Output $global:harnessSessionValue; Get-Location');
+    assert.match(second.output, /retained/);
+    assert.match(second.output, new RegExp(repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
 });
 
 test('the environment is trimmed, so a command cannot print an API key', async () => {

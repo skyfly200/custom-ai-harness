@@ -18,6 +18,7 @@ const guard = require('../utils/guard');
 const { RunManager } = require('../runner/runs');
 const { createApp } = require('../runner/server');
 const { shrinkHistory } = require('../runner/agent');
+const { LocalSandbox } = require('../runner/sandbox');
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
 const reposDir = path.join(dir, 'repos');
@@ -61,7 +62,22 @@ test.before(async () => {
     await new Promise((r) => fakeHarness.listen(0, '127.0.0.1', r));
     manager = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposDir], harnessUrl: `http://127.0.0.1:${fakeHarness.address().port}`, retryDelayMs: 5 });
 });
-test.after(() => fakeHarness.close());
+test.after(async () => {
+    fakeHarness.close();
+    await require('../utils/powershellSession').closeAll();
+});
+
+test('a local Windows run reuses PowerShell between commands', { skip: process.platform !== 'win32' }, async () => {
+    const sandbox = await LocalSandbox.create({
+        repo, dir: path.join(dir, 'shell-worktree'), branch: 'harness/shell-test',
+    });
+    try {
+        assert.match((await sandbox.exec("$global:harnessSessionValue = 'kept'; Write-Output ready")).output, /ready/);
+        assert.match((await sandbox.exec('Write-Output $global:harnessSessionValue')).output, /kept/);
+    } finally {
+        await sandbox.destroy();
+    }
+});
 
 async function settle(id, states = ['done', 'failed', 'stopped', 'incomplete']) {
     for (let i = 0; i < 1200; i++) {

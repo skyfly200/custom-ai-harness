@@ -20,6 +20,7 @@ const os = require('os');
 const path = require('path');
 const posix = path.posix;
 const { spawn, execFile } = require('child_process');
+const { PowerShellSession } = require('../utils/powershellSession');
 
 const MAX_OUTPUT = 20000;
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -58,6 +59,7 @@ class LocalSandbox {
         this.child = null;
         this.kind = 'local';
         this.id = null;
+        this.powershell = null;
         // set by stop(): a worktree that is stopped starts no more commands, so a stop that
         // lands between two steps of a run can't be undone by the next command it asks for
         this.stopped = false;
@@ -135,16 +137,22 @@ class LocalSandbox {
     /** Run a shell command in the workspace. Resolves { code, output, timedOut, ms }; never rejects. */
     exec(command, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
         if (this.stopped) return Promise.resolve({ code: -1, output: 'the workspace was stopped, so the command did not run', timedOut: false, ms: 0 });
+        if (process.platform === 'win32') {
+            if (!this.powershell) {
+                const env = Object.fromEntries(ENV_ALLOW.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
+                this.powershell = new PowerShellSession(this.dir, env);
+            }
+            return this.powershell.run(command, timeoutMs).then((result) => ({ ...result, output: trimOutput(result.output) }));
+        }
         return new Promise((resolve) => {
             const started = Date.now();
-            const win = process.platform === 'win32';
             const env = Object.fromEntries(ENV_ALLOW.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
-            const [bin, args] = win ? ['powershell', ['-NoProfile', '-NonInteractive', '-Command', command]] : ['bash', ['-c', command]];
+            const [bin, args] = ['bash', ['-c', command]];
             let output = '';
             let timedOut = false;
             let child;
             try {
-                child = spawn(bin, args, { cwd: this.dir, env, detached: !win, stdio: ['ignore', 'pipe', 'pipe'] });
+                child = spawn(bin, args, { cwd: this.dir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
             } catch (err) {
                 return resolve({ code: -1, output: `could not start ${bin}: ${err.message}`, timedOut: false, ms: 0 });
             }
@@ -165,11 +173,17 @@ class LocalSandbox {
 
     kill(child = this.child) {
         this.stopped = true;
+        this.close();
         if (!child?.pid) return;
         try {
-            if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
-            else process.kill(-child.pid, 'SIGKILL');
+            process.kill(-child.pid, 'SIGKILL');
         } catch { /* already gone */ }
+    }
+
+    close() {
+        const session = this.powershell;
+        this.powershell = null;
+        return session?.close() || Promise.resolve();
     }
 
     stop() { this.stopped = true; this.kill(); }
@@ -193,7 +207,9 @@ class LocalSandbox {
 
     /** Remove the worktree; the branch stays in the repo. */
     async destroy() {
-        this.kill();
+        this.stopped = true;
+        await this.close();
+        if (this.child?.pid) this.kill(this.child);
         await git(this.repo, ['worktree', 'remove', '--force', this.dir]).catch(() => fs.rmSync(this.dir, { recursive: true, force: true }));
         await git(this.repo, ['worktree', 'prune']).catch(() => {});
     }

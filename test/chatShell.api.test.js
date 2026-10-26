@@ -36,7 +36,11 @@ test.before(async () => {
     base = `http://127.0.0.1:${harness.address().port}`;
 });
 
-test.after(async () => { harness?.close(); await require('../server').mcp.close(); });
+test.after(async () => {
+    harness?.close();
+    await require('../utils/chatShell').closePowerShellSessions();
+    await require('../server').mcp.close();
+});
 
 const post = (url, body) => fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 const shell = (body) => post('/ui/api/tools/call', { name: 'run_command', repo, ...body }).then((r) => r.json());

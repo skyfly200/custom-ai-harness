@@ -411,6 +411,7 @@ class RunManager {
             // a cloud sandbox is billed by the minute, so it goes as soon as the run does; a local
             // worktree stays, so the run page keeps working and its branch can still be inspected
             if (live.sandbox?.kind === 'e2b') live.sandbox.destroy().catch(() => {});
+            else await live.sandbox?.close?.();
             this.startAutoDebug(run);
             this.pump();
         }

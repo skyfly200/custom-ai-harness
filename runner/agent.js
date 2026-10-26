@@ -19,6 +19,8 @@ const KEEP_RECENT = 12;       // tool results in the last N messages stay whole
 const OLD_RESULT_CHARS = 400; // older ones are cut to this
 const PARTIAL_CHARS = 2000;   // how much of what the model was saying a run carried on is told
 
+const READ_TOOLS = new Set(['list_files', 'read_file']);
+
 /** What the model was saying when the steps ran out: its last words that were not a tool call. */
 function partialNote(messages) {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -33,6 +35,19 @@ function shrinkHistory(messages) {
     const cutoff = messages.length - KEEP_RECENT;
     return messages.map((m, i) => (m.role === 'tool' && i < cutoff && m.content.length > OLD_RESULT_CHARS
         ? { ...m, content: `${m.content.slice(0, OLD_RESULT_CHARS)}\n[... older output cut to save space ...]` } : m));
+}
+
+function toolArgs(call) {
+    try { return JSON.parse(call.function.arguments || '{}'); } catch { return null; }
+}
+
+async function runTool(call, args, tools, emit) {
+    emit({ type: 'tool', name: call.function.name, args: args ?? call.function.arguments });
+    const result = args === null
+        ? { text: 'Error: the arguments were not valid JSON. Send them again.' }
+        : await tools.call(call.function.name, args);
+    emit({ type: 'result', name: call.function.name, text: result.text });
+    return result;
 }
 
 /**
@@ -62,16 +77,19 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
             continue;
         }
         let ran = 0;
-        for (const call of msg.tool_calls) {
+        const calls = msg.tool_calls;
+        if (calls.length > 1 && calls.every(call => READ_TOOLS.has(call.function.name))) {
+            if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
+            const results = await Promise.all(calls.map(call => runTool(call, toolArgs(call), tools, emit)));
+            for (let i = 0; i < calls.length; i++) {
+                messages.push({ role: 'tool', tool_call_id: calls[i].id, content: results[i].text });
+                ran++;
+            }
+            if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
+        } else for (const call of calls) {
             // a stop between two calls of one step leaves the rest unrun: the run has ended
             if (run.stopped()) break;
-            let args;
-            try { args = JSON.parse(call.function.arguments || '{}'); } catch { args = null; }
-            emit({ type: 'tool', name: call.function.name, args: args ?? call.function.arguments });
-            const result = args === null
-                ? { text: 'Error: the arguments were not valid JSON. Send them again.' }
-                : await tools.call(call.function.name, args);
-            emit({ type: 'result', name: call.function.name, text: result.text });
+            const result = await runTool(call, toolArgs(call), tools, emit);
             messages.push({ role: 'tool', tool_call_id: call.id, content: result.text });
             ran += 1;
             if (result.finished) return { status: 'finished', summary: result.text };

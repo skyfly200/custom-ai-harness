@@ -1021,7 +1021,9 @@ if (require.main === module) {
     mcp.start().then(() => {
         for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);
     });
-    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => mcp.close().finally(() => process.exit(0)));
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
+        Promise.all([chatShell.closePowerShellSessions(), mcp.close()]).finally(() => process.exit(0));
+    });
 }
 
 module.exports = { app, mcp, applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking };

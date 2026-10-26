@@ -582,10 +582,12 @@ function traceHtml(m) {
     const tok = tr.usage?.completion_tokens ?? tr.chunks;
     const secs = ((done ? tr.done : now - tr.start) - tr.firstToken) / 1000;
     const rate = secs > 0.2 && tok ? ` · ${(tok / secs).toFixed(0)} tok/s` : '';
-    step(done ? 'ok' : 'now', `${done ? 'Reply finished' : 'Writing'} · ${tok ?? 0} ${tr.usage ? 'tokens' : 'chunks'}${rate}`, `first token ${fmtMs(tr.firstToken)}`);
+    const why = tr.finish ? ` · stopped because ${tr.finish === 'length' ? 'it hit the output cap' : tr.finish === 'tool_calls' ? 'it asked for a tool' : tr.finish === 'stop' ? 'it was done' : tr.finish === 'content_filter' ? 'of the content filter' : tr.finish}` : '';
+    step(done ? 'ok' : 'now', `${done ? 'Reply finished' : 'Writing'} · ${tok ?? 0} ${tr.usage ? 'tokens' : 'chunks'}${rate}${done ? why : ''}`, `first token ${fmtMs(tr.firstToken)}`);
   } else if (live && tr.answered) {
     step('now', 'Waiting for the first token…', fmtMs(now - tr.start));
   }
+  if (tr.droppedCalls) step('bad', `${tr.droppedCalls} tool call${tr.droppedCalls > 1 ? 's' : ''} arrived with no name and could not run`, '');
   if (tr.error) step('bad', esc(tr.error), '');
   const row = ({ cls, text, t }) => `<li class="${cls}"><span class="st">${cls === 'ok' ? '✓' : cls === 'bad' ? '✕' : ''}</span><span>${text}</span><span class="t">${t ?? ''}</span></li>`;
   const current = steps[steps.length - 1];
@@ -1100,7 +1102,16 @@ async function runReply(c, turn) {
 
   const stream = $('stream').checked;
   // a command's turn carries no tools: a model named there may not call them
-  const tools = turn?.tools === false ? [] : activeTools(c);
+  let tools = turn?.tools === false ? [] : activeTools(c);
+  // The tool list comes from the harness at page load. A page that failed to get
+  // it (or got an empty one) sends a prompt saying "use the repo_ tools" with no
+  // tools at all, and the model then promises to read the file and stops with
+  // nothing it can call. Load the list again before sending.
+  if (!tools.length && turn?.tools !== false) {
+    await loadTools();
+    tools = activeTools(c);
+  }
+  reply.toolsMissing = turn?.tools !== false && !tools.length && !!repoOf(c);
   // 0 (or empty, or junk) means no limit: the round loop runs until the model
   // stops asking for tools. The stall and no-reply timeouts still bound it.
   const rawRounds = parseInt($('maxToolRounds').value, 10);
@@ -1143,8 +1154,11 @@ async function runReply(c, turn) {
     else total.costKnown = false;
   };
   try {
+    let toolRounds = 0;  // rounds that really ran tools, for Max tool rounds
+    let moreRoom = 0;    // output cap for a second try after a "length" stop
     for (let round = 0; ; round++) {
       // each round of tool calls is a request of its own, routed and logged like any other
+      const before = reply.content.length;
       if (round > 0) {
         reply.trace = tr = { start: Date.now(), chunks: 0, lastData: Date.now(), round };
         reply.joinText = true; // a blank line between the text before and after the tools
@@ -1156,7 +1170,8 @@ async function runReply(c, turn) {
       if (stream) body.stream_options = { include_usage: true };
       if (tools.length) body.tools = tools;
       const maxTokens = parseInt($('maxTokens').value, 10);
-      if (maxTokens > 0) body.max_tokens = maxTokens;
+      if (moreRoom) { body.max_tokens = moreRoom; moreRoom = 0; }
+      else if (maxTokens > 0) body.max_tokens = maxTokens;
       if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
 
       const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
@@ -1187,6 +1202,7 @@ async function runReply(c, turn) {
         appendReasoning(reply, msg.reasoning_content ?? msg.reasoning ?? '');
         appendText(reply, msg.content ?? '');
         calls = (msg.tool_calls || []).map(t => ({ id: t.id, name: t.function?.name || '', arguments: t.function?.arguments || '' }));
+        tr.finish = j.choices?.[0]?.finish_reason;
         tr.firstToken = Date.now() - tr.start;
         tr.usage = j.usage || null;
         speech.feed(reply);
@@ -1194,7 +1210,20 @@ async function runReply(c, turn) {
       tr.done = Date.now() - tr.start;
       addUsage(tr.usage, tr.headerCost);
       noteCache(c, tr);
+      // a call whose name never arrived (a provider cut it off mid-stream) cannot be run
+      if (calls.some(t => !t.name)) tr.droppedCalls = calls.filter(t => !t.name).length;
       calls = calls.filter(t => t.name);
+      // A round that gave back nothing at all: no text, no tool call. Some models
+      // spend the whole answer thinking and stop, or plan a tool call and never
+      // send it. Try once more, with more room when the output cap was the cause.
+      if (!calls.length && !reply.content.slice(before).trim() && !reply.emptyRetried) {
+        reply.emptyRetried = true;
+        // keep the second try's thinking apart from the first's in the pane
+        if (reply.reasoning) reply.reasoning += '\n\n';
+        if (tr.finish === 'length') moreRoom = Math.min(Math.max(maxTokens, 1024) * 2, 32768);
+        continue;
+      }
+      if (calls.length) toolRounds++;
       if (!calls.length) break;
 
       // run the tools, then send their results back for the next round
@@ -1212,7 +1241,7 @@ async function runReply(c, turn) {
       tr.toolsRunning = false;
       tr.lastData = Date.now();
       saveChat(c, { touch: false });
-      if (maxRounds && round + 1 >= maxRounds) {
+      if (maxRounds && toolRounds >= maxRounds) {
         reply.content += `${reply.content ? '\n\n' : ''}*(stopped after ${maxRounds} rounds of tool calls; set Max tool rounds to 0 under Options for no limit)*`;
         break;
       }
@@ -1222,6 +1251,9 @@ async function runReply(c, turn) {
       tr.usage = { prompt_tokens: total.prompt_tokens, completion_tokens: total.completion_tokens, ...(total.costKnown ? { cost: total.cost } : {}) };
       tr.headerCost = 0;
     }
+    // Nothing came back even on the second try: say why, rather than leaving
+    // "(empty reply)" with no way to tell what went wrong.
+    if (!reply.content.trim() && !reply.rounds?.length && !reply.timedOut) reply.content = emptyNote(reply, tr);
   } catch (err) {
     tr.done = Date.now() - tr.start;
     for (const r of reply.rounds || []) for (const call of r.calls) if (call.result == null) { call.result = 'Stopped before this tool finished.'; call.isError = true; }
@@ -1242,6 +1274,8 @@ async function runReply(c, turn) {
     delete reply.joinText;
     delete reply.reasoningRound;
     delete reply.reasoningCut;
+    delete reply.emptyRetried;
+    delete reply.toolsMissing;
     delete tr.toolsRunning;
     if (c.messages.includes(reply)) reply.cost = computeCost(reply);
     running.delete(c.id);
@@ -1271,6 +1305,19 @@ function appendReasoning(reply, text) {
     reply.reasoning = `${reply.reasoning.slice(0, REASONING_KEEP)}\n\n… (the rest of the thinking was dropped to keep the chat small)`;
     reply.reasoningCut = true;
   }
+}
+
+// Why a reply that gave back nothing at all did: a model that spends its whole
+// answer thinking and stops, plans a tool call and never sends it (or sends it
+// nameless), or is cut off by the output cap. Shown in place of "(empty reply)".
+function emptyNote(reply, tr) {
+  const thought = (reply.reasoning || '').length;
+  const why = tr.finish === 'length' ? 'the output cap cut it off before it said anything, so raise Max tokens'
+    : tr.finish === 'content_filter' ? 'the provider’s content filter stopped it'
+    : tr.droppedCalls ? `it asked for a tool, but ${tr.droppedCalls > 1 ? `${tr.droppedCalls} calls` : 'the call'} arrived with no name, so nothing could run`
+    : reply.toolsMissing ? 'this chat is linked to a repo, but its tool list could not be loaded, so it had no tool to call: reload the page'
+    : `it stopped without answering (${tr.finish ? `finish reason: ${tr.finish}` : 'no finish reason'})`;
+  return `*(no answer: ${why}${thought ? ` · it thought for ${thought.toLocaleString()} characters first` : ''}. It was tried twice; Regenerate to try again.)*`;
 }
 
 // Text from the model; the first text after a round of tool calls starts a new paragraph
@@ -1465,7 +1512,10 @@ async function readStream(stream, reply, c) {
       try { j = JSON.parse(data); } catch { continue; }
       if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
       if (j.usage) tr.usage = j.usage;
-      const d = j.choices?.[0]?.delta || {};
+      const choice = j.choices?.[0];
+      // why it stopped: "length" means the output cap cut the answer off
+      if (choice?.finish_reason) tr.finish = choice.finish_reason;
+      const d = choice?.delta || {};
       // Providers name the model's thinking differently: OpenRouter and most
       // OpenAI-compatible servers say reasoning, others reasoning_content
       const thought = d.reasoning_content ?? d.reasoning ?? '';

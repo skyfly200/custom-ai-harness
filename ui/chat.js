@@ -1067,9 +1067,9 @@ function contextText(c) {
   const repo = repoOf(c);
   if (repo) {
     const shell = $('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length;
-    parts.push(`This chat is linked to the git repository "${repo.name}" at ${repo.path}${repo.branch ? ` (branch ${repo.branch})` : ''}. `
+    parts.push(`This chat is linked to the git repository "${repo.name}" at ${repo.path}${repo.branch ? ` (branch ${repo.branch})` : ''}. Its tools use this chat's own persistent Git worktree, so edits and commands do not affect the original working copy or other chats. `
       + 'Use the repo_ tools to list, read and search its files and to look at its git history before answering questions about it. Paths are relative to the repository root.'
-      + (shell ? ' The run_command tool runs a shell command in that repository, in the user\'s own working copy: every command goes past the command guard, and one it finds risky waits for the user to allow it. Prefer the repo_ tools for reading, and run_command for tests and build steps.' : ''));
+      + (shell ? ' The run_command tool runs a shell command in this chat\'s worktree: every command goes past the command guard, and one it finds risky waits for the user to allow it. Prefer the repo_ tools for reading, and run_command for tests and build steps.' : ''));
   }
   return parts.join('\n\n');
 }
@@ -1542,7 +1542,7 @@ async function runTool(call, c, signal, onChange) {
       const check = await fetch('api/tools/shell/check', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ command: String(args.command || '') }),
+        body: JSON.stringify({ command: String(args.command || ''), chatId: c.id, repo: repoOf(c)?.path }),
         signal,
       });
       const v = await check.json().catch(() => ({}));
@@ -1569,7 +1569,7 @@ async function runTool(call, c, signal, onChange) {
     const res = await fetch('api/tools/call', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: call.name, arguments: args, repo: repoOf(c)?.path, confirmed }),
+      body: JSON.stringify({ name: call.name, arguments: args, repo: repoOf(c)?.path, chatId: c.id, confirmed }),
       signal,
     });
     const j = await res.json().catch(() => ({ text: `Error: HTTP ${res.status}`, isError: true }));
@@ -2261,7 +2261,7 @@ function drawRepo() {
   $('repoPath').readOnly = !!r;
   $('repoLink').textContent = r ? 'Unlink' : 'Link';
   $('repoInfo').innerHTML = r
-    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model can read its files and history${$('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length ? ', and run commands here (guarded)' : ''}.`
+    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model uses this chat's private worktree to read its files and history${$('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length ? ', and run guarded commands' : ''}.`
     : projectOf(chat)?.repo
       ? `Using the project's repo <b>${esc(projectOf(chat).repo.name)}</b>. Link another folder here to use that instead.`
       : 'Read-only for the model.';
@@ -2281,10 +2281,10 @@ $('repoLink').addEventListener('click', async () => {
   if (!path) return toast('Type the path of a folder inside a git repo.');
   $('repoLink').disabled = true;
   try {
-    const res = await fetch('api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) });
+    const res = await fetch('api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path, chatId: c.id }) });
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-    c.repo = { path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote };
+    c.repo = { path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote, ...(j.workspacePath ? { workspacePath: j.workspacePath, workspaceBranch: j.workspaceBranch } : {}) };
     $('repoPath').dataset.typed = '';
     saveChat(c, { touch: false });
     if (chat === c) toast(`Linked to ${j.name}.`);

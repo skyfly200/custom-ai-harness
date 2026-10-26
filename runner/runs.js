@@ -248,7 +248,7 @@ class RunManager {
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             // Plan mode: the agent may read and search, but changes nothing. It
             // finishes with a plan instead of an edit, and the branch gets no commit.
-            plan: cfg.plan === true || cfg.plan === 1 || cfg.plan === 'true' || cfg.plan === 'plan',
+            plan: cfg.plan === true || cfg.plan === 1 || cfg.plan === '1' || cfg.plan === 'true' || cfg.plan === 'plan',
             // 0 means no step limit: the agent runs until it calls finish, runs out of
             // time or is stopped. maxMinutes still bounds it, so it cannot run forever.
             maxSteps: num0(cfg.maxSteps, 0, 10000, 0), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
@@ -462,7 +462,7 @@ class RunManager {
             run.stage = stage.id;
             this.event(run, { type: 'stage', stage: stage.id, role: stage.role, text: `Stage ${i + 1} of ${workflow.stages.length}: ${stage.role}` });
             const tools = makeTools({
-                sandbox, toolset: run.plan ? 'check' : stage.tools,
+                sandbox, toolset: run.plan ? 'read' : stage.tools,
                 check: (kind, text) => this.guard(kind, text),
                 approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
             });

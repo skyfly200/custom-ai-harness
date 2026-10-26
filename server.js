@@ -36,6 +36,7 @@ const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
+const chatWorktrees = require('./utils/chatWorktrees');
 const { requirePassword, viaProxy } = require('./utils/access');
 const { createLogin } = require('./utils/login');
 const { parseAdmins, Users, FileStore } = require('./utils/users');
@@ -826,7 +827,9 @@ app.post('/ui/api/tools/reload', localJsonOnly, async (req, res) => {
 
 app.post('/ui/api/repo', localJsonOnly, async (req, res) => {
     try {
-        res.json(await repoTools.inspect(req.body?.path));
+        const repo = await repoTools.inspect(req.body?.path);
+        const workspace = req.body?.chatId ? await chatWorktrees.create(repo.path, req.body.chatId) : null;
+        res.json({ ...repo, ...(workspace ? { workspacePath: workspace.path, workspaceBranch: workspace.branch } : {}) });
     } catch (err) {
         res.status(400).json({ error: err.message });
     }
@@ -865,16 +868,19 @@ app.post('/ui/api/tools/shell/check', localJsonOnly, async (req, res) => {
 
 // Run one tool call. A failing tool is an answer for the model, not an HTTP error.
 app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
-    const { name, arguments: args, repo, confirmed } = req.body || {};
+    const { name, arguments: args, repo, chatId, confirmed } = req.body || {};
     if (typeof name !== 'string' || !name) return res.status(400).json({ error: 'name is required' });
     const started = Date.now();
     try {
+        const needsRepo = chatShell.isShellTool(name) || repoTools.isRepoTool(name);
+        const workspace = needsRepo && repo && chatId ? await chatWorktrees.create(repo, chatId) : null;
+        const toolRepo = workspace?.path || repo;
         let result;
         if (chatShell.isShellTool(name)) {
-            result = { text: await shellCall(repo, args || {}, confirmed === true), isError: false };
+            result = { text: await shellCall(toolRepo, args || {}, confirmed === true), isError: false };
         } else if (repoTools.isRepoTool(name)) {
-            if (!repo) throw new Error('this chat is not linked to a git repo');
-            result = { text: await repoTools.call(repo, name, args || {}), isError: false };
+            if (!toolRepo) throw new Error('this chat is not linked to a git repo');
+            result = { text: await repoTools.call(toolRepo, name, args || {}), isError: false };
         } else {
             await mcp.start();
             result = await mcp.call(name, args || {});

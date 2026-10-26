@@ -17,11 +17,17 @@ test.before(async () => {
     fs.mkdirSync(repo);
     fs.mkdirSync(plain);
     execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repo });
+    fs.writeFileSync(path.join(repo, 'source.txt'), 'original\n');
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', 'start'], { cwd: repo });
     process.env.MCP_CONFIG = path.join(dir, 'mcp.json');
     fs.writeFileSync(process.env.MCP_CONFIG, JSON.stringify({ mcpServers: {} }));
     process.env.HARNESS_SETTINGS_FILE = path.join(dir, 'settings.json');
     process.env.HARNESS_USAGE_FILE = path.join(dir, 'usage.json');
     process.env.HARNESS_GUARD_RULES = path.join(dir, 'guard-rules.json');
+    process.env.CHAT_WORKTREES_DIR = path.join(dir, 'chat-worktrees');
     // Jev off (no model needed here) and one deny rule to prove a blocked command never runs
     fs.writeFileSync(process.env.HARNESS_GUARD_RULES, JSON.stringify({
         bash: [{ id: 'no-blocked', decision: 'deny', pattern: 'blocked-cmd' }, { id: 'ask-write', decision: 'ask', pattern: '>' }],
@@ -36,10 +42,26 @@ test.before(async () => {
     base = `http://127.0.0.1:${harness.address().port}`;
 });
 
+test('each chat shell runs in a persistent worktree isolated from the source and other chats', async () => {
+    const first = await shell({ arguments: { command: 'pwd' }, chatId: 'chat-one' });
+    const second = await shell({ arguments: { command: 'pwd' }, chatId: 'chat-two' });
+    const again = await shell({ arguments: { command: 'pwd' }, chatId: 'chat-one' });
+    assert.equal(first.isError, false);
+    assert.equal(second.isError, false);
+    const firstPath = first.text.split('\n').at(-1);
+    const secondPath = second.text.split('\n').at(-1);
+    assert.notEqual(firstPath, repo);
+    assert.notEqual(firstPath, secondPath);
+    assert.match(firstPath, /chat-worktrees/);
+    assert.equal(again.text.split('\n').at(-1), firstPath);
+    assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }).trim(), '');
+});
+
 test.after(async () => {
     harness?.close();
     await require('../utils/chatShell').closePowerShellSessions();
     await require('../server').mcp.close();
+    fs.rmSync(dir, { recursive: true, force: true });
 });
 
 const post = (url, body) => fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });

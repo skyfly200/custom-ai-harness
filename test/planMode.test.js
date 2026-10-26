@@ -61,14 +61,15 @@ async function settle(id) {
 test('a plan run is offered only reading tools, and may not write', async () => {
     script = [];
     calls = [];
-    // The agent tries to write first. The tool must not be offered, and a call for it
-    // must come back as an unknown tool, so the file never changes; then it plans.
+    // The agent tries to write, then tries a shell command. Neither is offered;
+    // both calls come back as unknown tools, so the workspace cannot be changed.
     script = [
         [['read_file', { path: 'a.js' }]],
         [['write_file', { path: 'a.js', content: 'exports.a = 99;\n' }]],
+        [['run_command', { command: 'echo changed > a.js' }]],
         [['finish', { summary: 'Plan: change a to 2 in a.js, then run the tests.' }]],
     ];
-    const { id } = manager.create({ goal: 'Change a', repo, plan: true });
+    const { id } = manager.create({ goal: 'Change a', repo, plan: '1' });
     const run = await settle(id);
     assert.equal(run.plan, true);
     assert.equal(run.status, 'done', run.error);
@@ -76,11 +77,12 @@ test('a plan run is offered only reading tools, and may not write', async () => 
     assert.equal(run.result.diffStat, '', 'and has no diff');
     assert.match(run.result.summary, /Plan: change a to 2/);
 
-    // the tools the model was offered: reading only, no write_file or edit_file
+    // the tools the model was offered: reading only, no shell or file writes
     const offered = calls[0].tools.map((t) => t.function.name);
-    assert.deepEqual(offered.sort(), ['finish', 'list_files', 'read_file', 'run_command'].sort());
+    assert.deepEqual(offered.sort(), ['finish', 'list_files', 'read_file'].sort());
     assert.ok(!offered.includes('write_file'));
     assert.ok(!offered.includes('edit_file'));
+    assert.ok(!offered.includes('run_command'));
 
     // the file on disk is untouched, and the branch (the worktree's, made by git)
     // has no commit of its own: it still points at where the run started

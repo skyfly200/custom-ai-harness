@@ -44,6 +44,37 @@ function context({ chat = { id: 'c1', messages: [] }, models = [], commands = []
   return ctx;
 }
 
+function subagentContext({ models = SERVED, response = { id: 'r1', branch: 'harness/r1' } } = {}) {
+  const toasts = [];
+  const saved = [];
+  const requests = [];
+  const chat = { id: 'c1', messages: [] };
+  const ctx = {
+    chat, gatewayModels: models, modelAlias, console, JSON, Date,
+    repoOf: () => ({ path: 'C:\\repos\\demo', name: 'demo' }),
+    routeOf: () => ({ model: 'auto' }),
+    toast: (t) => toasts.push(t),
+    saveChat: (c) => saved.push(c),
+    drawLog: () => {},
+    autoGrow: () => {},
+    uid: () => 'note-1',
+    $: () => ({ value: 'command text' }),
+    fetch: async (url, options) => {
+      requests.push({ url, options, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => response };
+    },
+    toasts, saved, requests,
+  };
+  vm.createContext(ctx);
+  const run = (code, names) => {
+    vm.runInContext(`${code}\n${names.map(n => `this.${n} = ${n};`).join('\n')}`, ctx);
+    return ctx;
+  };
+  run(between('function resolveModelName(', 'function serverTools'), ['resolveModelName']);
+  run(between('function subagentCommand(', '// Messages typed while a reply'), ['subagentCommand']);
+  return ctx;
+}
+
 const SERVED = ['anthropic/claude-opus-5.5', 'anthropic/claude-sonnet-5.5', 'anthropic/claude-haiku-4.5', 'fast-openrouter'];
 
 test('/advisor is not a plain message: it sets the chat up and says so', async () => {
@@ -85,6 +116,27 @@ test('a full model name is used as typed, short ones find the newest', () => {
   assert.equal(ctx.resolveModelName('opus').model, 'anthropic/claude-opus-5.5');
   assert.equal(ctx.resolveModelName('fast-openrouter').model, 'fast-openrouter');
   assert.equal(ctx.resolveModelName('nope').model, null);
+});
+
+test('/subagent starts a separate run with the selected model and the chat route', async () => {
+  const ctx = subagentContext();
+  await ctx.subagentCommand('/subagent haiku find the config loader');
+  assert.equal(ctx.requests[0].url, 'api/runs');
+  assert.equal(ctx.requests[0].body.goal, 'find the config loader');
+  assert.equal(ctx.requests[0].body.repo, 'C:\\repos\\demo');
+  assert.equal(ctx.requests[0].body.model, 'anthropic/claude-haiku-4.5');
+  assert.equal(ctx.requests[0].body.plan, '0');
+  assert.match(ctx.toasts.at(-1), /Subagent started: r1/);
+  assert.match(ctx.chat.messages[0].content, /Runs page/);
+});
+
+test('/plan starts a no-change run without treating the task as a model name', async () => {
+  const ctx = subagentContext();
+  await ctx.subagentCommand('/plan inspect the config loader');
+  assert.equal(ctx.requests[0].body.goal, 'inspect the config loader');
+  assert.equal(ctx.requests[0].body.plan, '1');
+  assert.equal(ctx.requests[0].body.model, 'auto');
+  assert.match(ctx.toasts.at(-1), /Plan started/);
 });
 
 test('the advisor is asked with its model and no tools, and a short answer comes back', () => {

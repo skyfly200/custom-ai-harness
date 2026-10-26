@@ -55,7 +55,7 @@ async function harnessUp(env) {
 
 function claudeCommand(platform = process.platform, env = process.env) {
     if (env.CLAUDE_CODE_BIN) return env.CLAUDE_CODE_BIN;
-    return platform === 'win32' ? 'claude.cmd' : 'claude';
+    return 'claude';
 }
 
 async function main() {
@@ -71,7 +71,7 @@ async function main() {
 
     console.log(`[claude] Talking to the harness at ${env.ANTHROPIC_BASE_URL}`);
     const args = process.argv.slice(2);
-    // shell on Windows: `claude` is a .cmd, which spawn can't run directly
+    // shell on Windows lets cmd.exe resolve either claude.exe or claude.cmd.
     const child = spawn(claudeCommand(process.platform, process.env), args, {
         cwd: ROOT,
         env,

@@ -89,7 +89,7 @@ npm run claude
 
 That sets the variables below for you and starts Claude Code in this folder. Add `--` to pass Claude Code its own options (`npm run claude -- -p "explain router.py"`). Set `HARNESS_URL` in `.env` to use a harness on another machine, and `HARNESS_API_KEY` to an API key from the Users page when the harness runs with `HARNESS_REQUIRE_LOGIN=1`. Set `CLAUDE_CODE_BIN` if `claude` is not the command on your PATH.
 
-The script only sets those variables; it does not install Claude Code. If the harness isn't answering it says so instead of starting Claude Code, so start `npm run all` first.
+The script only sets those variables; it does not install Claude Code. Install Claude Code and make sure its command is on your PATH first. On Windows, the launcher resolves either `claude.exe` or `claude.cmd`; if it is installed somewhere else, set `CLAUDE_CODE_BIN` to its full path. If the harness isn't answering it says so instead of starting Claude Code, so start `npm run all` first.
 
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://localhost:3000"

@@ -28,9 +28,10 @@ test('a HARNESS_GUARD_URL you set yourself is left alone', () => {
     assert.strictEqual(harnessEnv({ HARNESS_GUARD_URL: 'http://other:9000/v1/guard' }).HARNESS_GUARD_URL, 'http://other:9000/v1/guard');
 });
 
-test('finds the Windows claude.cmd and the plain claude elsewhere', () => {
-    assert.strictEqual(claudeCommand('win32', {}), 'claude.cmd');
+test('uses the Claude Code command name on every platform', () => {
+    assert.strictEqual(claudeCommand('win32', {}), 'claude');
     assert.strictEqual(claudeCommand('linux', {}), 'claude');
+    assert.strictEqual(claudeCommand('darwin', {}), 'claude');
     assert.strictEqual(claudeCommand('linux', { CLAUDE_CODE_BIN: '/opt/claude' }), '/opt/claude');
 });
 

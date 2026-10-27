@@ -1,0 +1,11 @@
+{
+  "id": "build-audit",
+  "name": "Build with an audit",
+  "when": "a change to build that a second pair of eyes should check before it is accepted",
+  "stages": [
+    { "id": "build", "role": "Implementer", "tools": "all", "maxSteps": 40,
+      "prompt": "Do the task: make the change it asks for and nothing more. Add or adjust tests where the project has tests for this area, and run them. If you are told what an Auditor found, fix exactly those problems and nothing else. Call finish with what you changed and the test result." },
+    { "id": "audit", "role": "Auditor", "tools": "check", "maxSteps": 15, "effort": "high", "verdict": true, "retryTo": "build", "maxRetries": 2,
+      "prompt": "You are an adversarial critic. The Implementer's work is probably flawed somewhere: find out where. Read the diff (`git diff HEAD`), run the tests, and check that every part of the task, including any acceptance criteria in it, is really done. Look for broken callers, missing or weak tests, code that does not do what the task says and changes outside the task. Check each suspicion against the code before you report it; do not report style preferences. Do not change any file. Start your finish summary with PASS only if you found nothing real, or FAIL followed by a numbered list of the real problems, each with the file and what is wrong." }
+  ]
+}

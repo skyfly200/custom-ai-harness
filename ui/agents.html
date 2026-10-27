@@ -96,6 +96,8 @@
       <input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
     <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
       <input type="checkbox" name="autoDebug" value="1"><span>Auto debug a failed run</span></label>
+    <label class="check oneoff" id="auditField" hidden data-hint="Swarm only: each worker's change is checked by an Auditor, who sends it back to the worker (up to 2 times) until nothing real is left. Slower and dearer, safer">
+      <input type="checkbox" name="auditParts" value="1"><span>Audit each part of the swarm</span></label>
     <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
       <input type="checkbox" name="plan" value="1"><span>Plan only, change nothing</span></label>
     <div class="actions"><button class="primary" type="submit" id="startBtn">Start run</button><span class="note" id="startMsg"></span></div>

@@ -210,3 +210,25 @@ test('tickets in the shape of Matt Pocock’s wayfinder are read, and a draft ca
     // and what we export reads back in
     assert.deepEqual(parseTickets(JSON.stringify(out.tickets)).tickets.map((t) => t.id), ['b']);
 });
+
+test('with audit each part, a ticket worker is checked by an Auditor and sent back once', async () => {
+    modelCalls = [];
+    script = [
+        [['write_file', { path: 'a.js', content: 'exports.a = 5;\n' }]], [['finish', { summary: 'a is 5' }]],
+        [['finish', { summary: 'FAIL: 1. a.js should be 2, not 5' }]],
+        [['write_file', { path: 'a.js', content: 'exports.a = 2;\n' }]], [['finish', { summary: 'a is 2' }]],
+        [['finish', { summary: 'PASS' }]],
+        [['finish', { summary: 'PASS: whole.' }]],
+    ];
+    const tickets = { tickets: [{ id: 'a', kind: 'build', title: 'A', description: 'set a to 2' }] };
+    const { id } = manager.create({ goal: 'a', repo, workflow: 'swarm', tickets: JSON.stringify(tickets), auditParts: '1' });
+    const run = await settle(id);
+    assert.equal(run.status, 'done', run.error);
+    assert.equal(manager.get(run.children[0]).workflow, 'build-audit');
+    assert.equal(git(repo, 'show', `${run.branch}:a.js`).trim(), 'exports.a = 2;');
+    assert.ok(modelCalls.some((c) => /a\.js should be 2/.test(JSON.stringify(c.messages))), 'the worker was told what the Auditor found');
+    // and without the option the worker keeps the plain workflow
+    script = [[['finish', { summary: 'nothing to do' }]], [['finish', { summary: 'PASS' }]]];
+    const plain = await settle(manager.create({ goal: 'a', repo, workflow: 'swarm', tickets: JSON.stringify(tickets) }).id);
+    assert.equal(manager.get(plain.children[0]).workflow, 'general');
+});

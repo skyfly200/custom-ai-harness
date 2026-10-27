@@ -339,6 +339,7 @@ $('newRun').addEventListener('submit', async (e) => {
   // an unchecked box is absent from FormData, and the runner's default may be on
   body.autoDebug = f.elements.autoDebug?.checked ? '1' : '0';
   body.plan = f.elements.plan?.checked ? '1' : '0';
+  body.auditParts = f.elements.auditParts?.checked ? '1' : '0';
   body.escalate = f.elements.escalate?.checked ? '1' : '0';
   try {
     $('startMsg').textContent = 'Starting…';
@@ -389,7 +390,7 @@ async function initWorkflows() {
     $('workflow').insertAdjacentHTML('beforeend', '<option value="swarm" title="A planner splits the goal, workers do the parts at the same time on their own branches, the branches are merged, and a reviewer checks the result">Swarm (several agents at once)</option><option value="chatdev" title="Runs ChatDev (an external multi-agent tool) in a cloud sandbox with its models routed through this harness; needs CHATDEV_HARNESS_URL">ChatDev (in a cloud sandbox)</option>');
   } catch { /* auto still works without the list */ }
   $('newRun').elements.goal.addEventListener('input', schedulePick);
-  $('workflow').addEventListener('change', () => { $('ticketsField').hidden = $('workflow').value !== 'swarm'; $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });
+  $('workflow').addEventListener('change', () => { applyMode(); $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });
 }
 
 // Repo picker: type or paste a path, pick a recent one, or browse the allowed folders
@@ -519,7 +520,7 @@ function applyMode() {
   const f = $('newRun');
   const a = agentOf(agentSel);
   for (const el of f.querySelectorAll('.oneoff')) {
-    el.hidden = Boolean(a) || (el.id === 'ticketsField' && $('workflow').value !== 'swarm');
+    el.hidden = Boolean(a) || (['ticketsField', 'auditField'].includes(el.id) && $('workflow').value !== 'swarm');
     for (const input of el.querySelectorAll('input, select, textarea')) input.disabled = Boolean(a);
   }
   $('formTitle').textContent = a ? `Give ${a.name} a task` : 'Start a run';

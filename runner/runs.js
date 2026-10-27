@@ -15,6 +15,7 @@ const swarm = require('./swarm');
 const chatdev = require('./chatdev');
 const { parseTickets } = require('./tickets');
 const { createPricer } = require('../utils/runCost');
+const { PreviewManager } = require('./preview');
 const { AgentStore } = require('./agents');
 
 const MAX_EVENTS = 2000;
@@ -30,6 +31,7 @@ const PARTIAL_CHARS = 8000;   // how much of what it was saying when it ran out 
 const MAX_CONTINUES = 50;     // four times what a run of 200 steps and 240 minutes needs
 const AGENT_HISTORY = 6;      // how many of an agent's earlier tasks a new one is told about
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
+const escalation = require('./escalate');
 const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const short = (v, n = EVENT_TEXT) => (typeof v === 'string' && v.length > n ? `${v.slice(0, n)}… [${v.length - n} more characters]` : v);
@@ -126,6 +128,7 @@ class RunManager {
         this.runs = new Map();      // id -> record
         this.active = new Map();    // id -> the part a continued run is working as now
         this.live = new Map();      // id -> { sandbox, stop, resolve }
+        this.previews = new PreviewManager(); // a run's dev server, for looking at its work
         this.queue = [];
         fs.mkdirSync(dir, { recursive: true });
         this.agents = new AgentStore(path.join(dir, '_agents'));
@@ -263,6 +266,8 @@ class RunManager {
         const run = {
             id, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, source: cfg.source || null, kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
+            // escalate: on a failure, ask for more effort (up to two rungs); maxTier caps the tier it can reach
+            escalate: !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false'), bumps: 0, maxTier: cfg.maxTier ? String(cfg.maxTier).trim().slice(0, 40) : null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             // Plan mode: the agent may read and search, but changes nothing. It
             // finishes with a plan instead of an edit, and the branch gets no commit.
@@ -326,38 +331,64 @@ class RunManager {
         return Object.fromEntries(Object.entries(args).map(([k, v]) => [k, short(v, 600)]));
     }
 
-    headers(run, n, stageModel = null) {
+    headers(run, n, baseEffort = run.effort, stageModel = null) {
         const h = { 'content-type': 'application/json', 'x-harness-request-id': `run-${run.id}-${n}` };
         if (this.password) h['x-harness-password'] = this.password;
         if (run.model || stageModel) h['x-harness-model'] = run.model || stageModel;
         if (run.profile) h['x-harness-profile'] = run.profile;
-        if (run.effort) h['x-harness-effort'] = run.effort;
+        // a run that has escalated asks for more effort than the person set
+        const effort = run.bumps ? escalation.effortAfter(baseEffort, run.bumps) : baseEffort;
+        if (effort) h['x-harness-effort'] = effort;
+        if (run.maxTier) h['x-harness-max-tier'] = run.maxTier;
         return h;
     }
 
-    async chat(run, messages, tools, n, stageModel = null) {
+    /**
+     * One model call. When it fails in a way a stronger model might not (the harness
+     * is down or overloaded after its retries, the reply is empty), the run climbs one
+     * effort rung and asks again, up to escalation.MAX_BUMPS times in all.
+     */
+    async chat(run, messages, tools, n, effort = run.effort, stageModel = null) {
+        for (;;) {
+            try { return await this.chatOnce(run, messages, tools, n, effort, stageModel); } catch (err) {
+                if (!escalation.worthEscalating(err) || !escalation.canClimb(run, effort)) throw err;
+                this.escalate(run, effort, `the model call failed (${short(err.message, 160)})`);
+            }
+        }
+    }
+
+    /** Climb one effort rung and say so in the run's log. */
+    escalate(run, base, why) {
+        run.bumps = (run.bumps || 0) + 1;
+        this.event(run, { type: 'note', text: `Trying a stronger model: ${why}. Effort is now ${escalation.effortAfter(base, run.bumps)}${run.maxTier ? `, no higher than ${run.maxTier}` : ''}.` });
+    }
+
+    async chatOnce(run, messages, tools, n, effort, stageModel = null) {
         let lastError;
         await this.pricer.refresh();
         for (let attempt = 0; attempt < 3; attempt++) {
             if (attempt) await sleep(this.retryDelayMs * attempt * attempt);
             try {
                 const res = await fetch(`${this.harnessUrl}/v1/chat/completions`, {
-                    method: 'POST', headers: this.headers(run, n, stageModel), signal: AbortSignal.timeout(6 * 60 * 1000),
+                    method: 'POST', headers: this.headers(run, n, effort, stageModel), signal: AbortSignal.timeout(6 * 60 * 1000),
                     body: JSON.stringify({ model: 'auto', messages, tools, tool_choice: 'auto', stream: false }),
                 });
                 const body = await res.json().catch(() => ({}));
                 if (res.ok) {
                     const message = body.choices?.[0]?.message;
-                    if (!message) throw new Error('the model answered with no message');
+                    if (!message) throw Object.assign(new Error('the model answered with no message'), { escalatable: true });
+                    if (!message.content && !message.tool_calls?.length) throw Object.assign(new Error('the model answered with an empty reply'), { escalatable: true });
                     return { message, usage: body.usage, model: body.model };
                 }
                 lastError = new Error(`the harness answered HTTP ${res.status}: ${short(JSON.stringify(body.error || body), 300)}`);
                 if (![429, 502, 503, 504].includes(res.status)) throw lastError;
             } catch (err) {
                 lastError = err;
+                if (err.escalatable) throw err;
                 if (err.message.startsWith('the harness answered HTTP') && !/HTTP (429|50[234])/.test(err.message)) throw err;
             }
         }
+        lastError.escalatable = true; // out of retries on a busy or failing upstream
         throw lastError;
     }
 
@@ -527,7 +558,7 @@ class RunManager {
         const source = cfg?.source && typeof cfg.source === 'object'
             ? { chat: cfg.source.chat ? { id: String(cfg.source.chat.id || '').slice(0, 80), title: String(cfg.source.chat.title || '').slice(0, 120) } : null } : null;
         return this.create({
-            goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, sandbox: agent.sandbox || undefined,
+            goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
         });
@@ -627,12 +658,12 @@ class RunManager {
             });
             const handoff = notes.map((n) => `## ${n.role} (${n.stage})\n${n.summary}`).join('\n\n');
             // the stage's effort replaces the run's only when the person set none
-            const stageRun = run.effort || !stage.effort ? run : { ...run, effort: stage.effort };
+            const stageEffort = run.effort || stage.effort || null;
             outcome = await runAgent({
                 run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
-                chat: (messages, defs) => this.chat(stageRun, messages, defs, nextN(), stage.model),
+                chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
             });
             if (outcome.status === 'out_of_steps') run.partialSummary = outcome.summary;
             notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
@@ -641,6 +672,7 @@ class RunManager {
                 retries[stage.id] = (retries[stage.id] || 0) + 1;
                 if (retries[stage.id] <= stage.maxRetries) {
                     this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo} (round ${retries[stage.id] + 1} of ${stage.maxRetries + 1}).` });
+                    if (escalation.canClimb(run, stageEffort)) this.escalate(run, stageEffort, `${stage.role} said FAIL`);
                     i = workflow.stages.findIndex((s) => s.id === stage.retryTo) - 1;
                     continue;
                 }
@@ -669,7 +701,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };
@@ -771,9 +803,30 @@ class RunManager {
     }
 
     /** Remove a finished run's workspace and record. The branch stays in the repo. */
+    /**
+     * Start the app's dev server in a local run's worktree so its work can be looked at.
+     * The command goes past the guard first, like any command the agent would run.
+     */
+    async startPreview(id, { command, port, approved } = {}) {
+        const run = this.get(id);
+        if (!run) throw new Error('no such run');
+        if (isCloud(run.sandbox)) throw new Error('previews work for local runs for now; this one ran in a cloud sandbox');
+        if (run.plan) throw new Error('a plan-only run changes nothing, so there is nothing to preview');
+        const dir = path.join(this.dir, id, 'work');
+        if (!fs.existsSync(dir)) throw new Error('this run has no workspace to preview');
+        const verdict = await this.guard('bash', String(command || '').replaceAll('{port}', '0'));
+        if (verdict.decision === 'deny') throw new Error(`the command guard blocked it: ${verdict.reason || 'not allowed'}`);
+        if (verdict.decision === 'ask' && approved !== true) throw Object.assign(new Error(`the command guard asks for your OK: ${verdict.reason || 'risky'}`), { needsApproval: true });
+        return this.previews.start(id, dir, command, { port });
+    }
+
+    previewStatus(id) { return this.previews.status(id); }
+    stopPreview(id) { this.previews.stop(id); }
+
     async remove(id) {
         const run = this.get(id);
         if (!run) throw new Error('no such run');
+        this.previews.stop(id);
         if (this.live.has(id) || run.status === 'queued') throw new Error('stop the run first');
         const dir = path.join(this.dir, id, 'work');
         if (isCloud(run.sandbox)) {

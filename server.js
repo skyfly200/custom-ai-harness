@@ -23,6 +23,7 @@ const langfuse = require('./utils/langfuse');
 const autoStrategy = require('./utils/autoStrategy');
 const workflows = require('./utils/workflows');
 const tiers = require('./utils/tiers');
+const jevQuestions = require('./utils/jevQuestions');
 const guard = require('./utils/guard');
 const { askText, DEFAULT_WINDOW } = require('./utils/jevAsk');
 const usage = require('./utils/usage');
@@ -143,7 +144,7 @@ async function routeModel(body, requested, profile, effort, maxTier) {
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
     const fixed = profile ? profile.threshold : config.fixedThreshold;
     const threshold = fixed ?? deriveThreshold(messages);
-    const shift = tiers.effortShift(effort);
+    let shift = tiers.effortShift(effort);
     const base = { threshold, winRate: null, tools: hasTools, ...(profile && { profile: profile.name }), ...(shift && { effort: shift }) };
     // A client can name a model in the x-harness-model header (the chat page does)
     if (requested && !profiles.isClaudeAlias(requested)) return { ...base, model: requested, reason: 'chosen by the client' };
@@ -153,6 +154,16 @@ async function routeModel(body, requested, profile, effort, maxTier) {
     // since an images model that can't call tools would end the agent's loop
     const images = profile ? profile.images : config.imagesModel;
     if (images && !hasTools && latestUserHasImage(messages)) return { ...base, model: images, tier: 'Images', reason: 'the message has an image' };
+    // Extra yes/no questions put to Jev (utils/jevQuestions.js): they can lean the effort or pick a model
+    if (config.jevQuestions.length) {
+        const got = await jevQuestions.ask(config.jevQuestions, latestUserText(messages), askRouter);
+        const effect = jevQuestions.apply(config.jevQuestions, got.answers, { tools: hasTools });
+        const asked = { answers: got.answers, hits: effect.hits.map(h => h.id), ...(got.error && { error: got.error }) };
+        shift = Math.max(-1, Math.min(1, shift + effect.shift));
+        if (shift) base.effort = shift; else delete base.effort;
+        base.asked = asked;
+        if (effect.model) return { ...base, model: effect.model, tier: 'Question', reason: `Jev said yes to ${effect.by} (${Math.round(effect.hits.find(h => h.id === effect.by).p * 100)}%)` };
+    }
     try {
         const tokens = estimateTokens(body);
         // Effort moves the score; moving the threshold the other way makes the Router's own pick agree
@@ -395,8 +406,8 @@ async function forwardToRouter(req, res, routerPath) {
 // through here so it sits behind the same login. Starting, approving, stopping
 // and deleting runs are controls, so they get the same local-or-password check.
 const RUNNER_URL = (process.env.RUNNER_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
-// /ui/api/runs and /ui/api/agents are the runner's /runs and /agents
-for (const part of ['runs', 'agents']) {
+// /ui/api/runs, /ui/api/agents and /ui/api/tickets are the runner's /runs, /agents and /tickets
+for (const part of ['runs', 'agents', 'tickets']) {
     app.use(`/ui/api/${part}`, (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
         const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
         try {

@@ -79,3 +79,11 @@ main.settings { max-width: 1040px; }
   border-top: 1px solid var(--border); border-radius: 0 0 12px 12px;
   background: var(--glass-strong); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .actions.bar .note { margin-left: 2px; }
+
+/* Extra Jev questions (Interceptor settings) */
+.jq-rows { display: grid; gap: .6rem; margin: .6rem 0; }
+.jq-row { display: grid; grid-template-columns: 9rem minmax(14rem, 1fr) repeat(4, 7rem) auto; gap: .4rem; align-items: end; }
+.jq-row label { display: grid; gap: .15rem; font-size: .8rem; color: var(--muted, inherit); }
+.jq-row input { min-width: 0; }
+.jq-del { align-self: end; }
+@media (max-width: 900px) { .jq-row { grid-template-columns: 1fr 1fr; } .jq-row .jq-ask { grid-column: 1 / -1; } }

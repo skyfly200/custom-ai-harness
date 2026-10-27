@@ -3,7 +3,8 @@
 // agent loop with a role, a tool set (read | check | all), a step budget and
 // an optional effort. A stage with "verdict" must start its summary with PASS
 // or FAIL; FAIL sends the run back to "retryTo" (at most maxRetries times, 5 at most).
-// A stage may name its own Gateway "model", so a critic can be a different model than
+// A stage with "canWait" is one request with no tools, sent as a half-price OpenRouter batch
+// (utils/openrouterBatch.js) and waited for. A stage may name its own Gateway "model", so a critic can be a different model than
 // the one whose work it checks (the run's own pinned model still wins).
 // pick() lets Jev choose from the goal the same way autoStrategy picks a
 // routing: one yes/no question per workflow built from its "when" line.
@@ -32,6 +33,7 @@ function clean(raw, file) {
         if (!s.prompt) throw new Error(`${file}: stage ${sid} needs a prompt`);
         if (s.tools && !TOOLSETS.has(s.tools)) throw new Error(`${file}: stage ${sid} tools must be read, check or all`);
         if (s.effort && !EFFORTS.has(s.effort)) throw new Error(`${file}: stage ${sid} effort is not valid`);
+        if (s.canWait && !s.model) throw new Error(`${file}: stage ${sid} has canWait, so it needs a "model" (an OpenRouter batch model id)`);
         if (s.model && !MODEL_RE.test(String(s.model))) throw new Error(`${file}: stage ${sid} model must be a model name`);
         return {
             id: sid, role: String(s.role || sid), prompt: String(s.prompt), tools: s.tools || 'all',
@@ -39,6 +41,8 @@ function clean(raw, file) {
             maxSteps: Math.min(10000, Math.max(0, Number.isFinite(Math.floor(Number(s.maxSteps))) ? Math.floor(Number(s.maxSteps)) : 30)), effort: s.effort || null,
             verdict: Boolean(s.verdict), retryTo: s.retryTo || null, maxRetries: Math.min(MAX_RETRIES, Math.max(0, Math.floor(Number(s.maxRetries)) || 0)),
             model: s.model ? String(s.model) : null,
+            // canWait: one request, no tools, sent as a half-price batch and waited for (maxWaitMinutes); diff: put the working diff in it
+            canWait: Boolean(s.canWait), diff: Boolean(s.diff), maxWaitMinutes: Math.min(1440, Math.max(1, Math.floor(Number(s.maxWaitMinutes)) || 120)),
         };
     });
     for (const s of stages) if (s.retryTo && !stages.some((t) => t.id === s.retryTo)) throw new Error(`${file}: stage ${s.id} retryTo names no stage`);

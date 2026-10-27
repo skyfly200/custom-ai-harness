@@ -13,11 +13,11 @@ Run the harness on [Fly.io](https://fly.io) at your own address, with chats and 
    iwr https://fly.io/install.ps1 -useb | iex
    fly auth login
    ```
-2. **Pick the app name.** Names are shared by all of Fly, so open `fly.toml` and change `app = "skyler-agents"` to one nobody has taken. If `fly platform regions` doesn't list Denver (`den`), change `primary_region` to `dfw`.
+2. **Pick the app name.** Names are shared by all of Fly, so open `fly.toml` and change `app = "skyler-agents"` to one nobody has taken. Fly has no Denver region, so the files use Dallas (`dfw`), the closest to Colorado.
 3. **Create the app and its volume** (use your region code; the volume must be in the Machine's region):
    ```powershell
    fly apps create YOUR-APP-NAME
-   fly volumes create agents_data --app YOUR-APP-NAME --region den --size 1
+   fly volumes create agents_data --app YOUR-APP-NAME --region dfw --size 1
    ```
 4. **Set the secrets.** These stay in Fly, not in the repo or the image:
    ```powershell

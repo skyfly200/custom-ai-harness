@@ -147,4 +147,6 @@ Approving pushes the run's branch, opens a pull request and merges it on GitHub 
 
 `ui/agent-widget.js` is already on every harness UI page (`<script src="agent-widget.js" data-app-name="Harness UI" defer>`). It shows a **Change this page** button only when an app with that name (or `data-app="<id>"`) is registered on the Agents page, so register the repo as "Harness UI" with editable paths such as `ui/**` to turn it on. You write what should change, optionally click **Pick an element**, and it starts a change run with the page, the picked element, selected text and recent console errors as context (the agent is told this is untrusted data). Progress shows in the panel; preview, approve and undo are on the Agents page. For another app served from the same address, add the script with its own `data-app-name`.
 
-Self-improvement proposals come in a later step.
+### Proposals
+
+The widget's **Propose a fix only** (or `POST /apps/:id/proposals` with `kind` `error` or `feedback`, a `note` and the page `context`) runs a change that can only end as an **open pull request**: never merged, never deployed, a draft when it touches sensitive files. A page that hit console errors sends them as the problem; without errors it is a "this is confusing" note. It needs `GITHUB_TOKEN` like shipping; without it the branch is left in the repo and the run log says so. Limits: 3 proposals an hour per app (`RUNNER_PROPOSALS_PER_HOUR`), and the same problem is not proposed again while its earlier proposal is open or running (HTTP 429).

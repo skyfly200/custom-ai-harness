@@ -81,6 +81,18 @@ class Shipper {
         return { pr: pr.number, url: pr.html_url, mergeCommit: merged.sha };
     }
 
+    /** Push the branch and open a pull request, without merging. A draft when it touches sensitive files. */
+    async openPr({ run, app, repoDir, base, draft = false }) {
+        const slug = await this.repoOf(app, repoDir);
+        await git(repoDir, ['push', 'origin', `${run.branch}:refs/heads/${run.branch}`]);
+        const kind = run.proposal?.kind === 'error' ? 'Fix' : 'Improve';
+        const pr = await this.gh('POST', `/repos/${slug}/pulls`, {
+            title: `${kind}: ${app.name} (proposed by the in-app agent)`, head: run.branch, base, draft,
+            body: `Proposed from inside ${app.name} (run ${run.id}); nobody asked for this change in so many words, so it needs a person's review and is never merged or deployed automatically.\n\n${run.result?.summary || ''}`,
+        });
+        return { pr: pr.number, url: pr.html_url, slug };
+    }
+
     async ship({ run, app, repoDir, base }) {
         const slug = await this.repoOf(app, repoDir);
         const title = `${app.name}: ${run.goal.split('\n')[0].replace(/^Change the app "[^"]*": /, '').slice(0, 70)}`;

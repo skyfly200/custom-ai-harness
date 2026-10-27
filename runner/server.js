@@ -116,6 +116,9 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
     app.post('/runs/:id/undo', async (req, res) => {
         try { res.status(201).json(await manager.undoChange(req.params.id)); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 409); }
     });
+    app.post('/apps/:id/proposals', (req, res) => {
+        try { res.status(201).json(manager.askProposal(req.params.id, req.body)); } catch (err) { fail(res, err, /no such app/.test(err.message) ? 404 : /already|at most/.test(err.message) ? 429 : 400); }
+    });
     app.get('/runs/:id', (req, res) => {
         const run = manager.get(req.params.id);
         return run ? res.json(run) : fail(res, new Error('no such run'), 404);

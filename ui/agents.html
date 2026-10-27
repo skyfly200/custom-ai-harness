@@ -57,6 +57,11 @@
       <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
       <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
     </div>
+    <div class="row">
+      <label class="field"><span data-hint="The highest routing tier this run may use, by name (for example Strong). Blank means no cap. Stronger-model retries stay under it">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
+    </div>
+    <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so the harness picks a stronger model. Up to two steps up, never above Highest tier">
+      <input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
     <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
       <input type="checkbox" name="autoDebug" value="1"><span>Auto debug a failed run</span></label>
     <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
@@ -82,8 +87,10 @@
       <div class="row">
         <label class="field"><span data-hint="Most model calls a task may use. Blank or 0: no limit besides the minutes">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
         <label class="field"><span>Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+        <label class="field"><span data-hint="The highest routing tier its tasks may use, by name. Blank means no cap">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
         <label class="field"><span data-hint="A chat project this agent belongs to. Chats in that project can hand it work with /agent, and the project lists it">Chat project</span><select name="project" id="agentProject"><option value="">None</option></select></label>
       </div>
+      <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so a stronger model answers"><input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
       <div class="picker-foot"><span class="note" id="agentMsg"></span><button type="submit" class="primary" id="agentSave">Save agent</button></div>
     </form>
   </dialog>

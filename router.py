@@ -240,6 +240,26 @@ def env_overrides(environ) -> dict:
     return out
 
 
+def federation_overrides(environ) -> dict:
+    """With OPENROUTER_FEDERATION_POLICY_ID set, the harness holds the short-lived OpenRouter tokens: this
+    process calls OpenRouter through the harness's /openrouter-proxy, with the proxy key as its key."""
+    if not environ.get("OPENROUTER_FEDERATION_POLICY_ID", "").strip():
+        return {}
+    key = (environ.get("OPENROUTER_PROXY_KEY") or environ.get("LITELLM_MASTER_KEY") or "").strip()
+    if not key:
+        log.warning("OPENROUTER_FEDERATION_POLICY_ID is set but OPENROUTER_PROXY_KEY (or LITELLM_MASTER_KEY) is not")
+    return {"proxy": environ.get("OPENROUTER_PROXY_URL", "http://127.0.0.1:3000").rstrip("/") + "/openrouter-proxy", "key": key}
+
+
+def apply_federation(new_config: dict, environ) -> None:
+    fed = federation_overrides(environ)
+    base = str(new_config.get("base_url") or "")
+    if fed and re.match(r"https?://(www\.)?openrouter\.ai/", base + "/"):
+        new_config["base_url"] = fed["proxy"] + re.sub(r"^https?://[^/]+/api", "", base).rstrip("/")
+        new_config["api_key_env"] = "OPENROUTER_PROXY_KEY"
+        environ["OPENROUTER_PROXY_KEY"] = fed["key"]
+
+
 def load_config(path: str) -> None:
     """Read the YAML config and build the configured backend's scorer."""
     global scorer, config_path, last_error
@@ -249,6 +269,7 @@ def load_config(path: str) -> None:
     if overrides:
         log.info("settings from the environment: %s", overrides)
         new_config.update(overrides)
+    apply_federation(new_config, os.environ)
     for key in MODEL_KEYS & new_config.keys():
         new_config[key] = RENAMED.get(new_config[key], new_config[key])
     # Build the scorer before swapping, so a bad file leaves the running config in place

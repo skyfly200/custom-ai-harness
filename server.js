@@ -33,7 +33,9 @@ const batchModels = require('./utils/batchModels');
 const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
-const { McpManager } = require('./utils/mcp');
+const { McpManager, readConfig, writeConfig } = require('./utils/mcp');
+const mcpAdmin = require('./utils/mcpAdmin');
+const mcpCatalog = require('./utils/mcpCatalog');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
 const chatWorktrees = require('./utils/chatWorktrees');
@@ -321,13 +323,20 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // anyone who gave it), and only to JSON: a plain cross-site form can't send
 // that without a CORS preflight, so another web page can't change settings either.
 function localJsonOnly(req, res, next) {
+    localOnly(req, res, () => {
+        if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+        next();
+    });
+}
+
+// Who may use the controls: admins when logins are on, otherwise this machine or a HARNESS_PASSWORD login
+function localOnly(req, res, next) {
     // With logins on, controls are for admins, wherever they sit
     if (req.harnessLogin && req.harnessUser.role !== 'admin') return res.status(403).json({ error: 'admins only' });
     // A request through a tunnel or proxy on this machine looks like loopback, but isn't "this machine"
     if (!req.harnessLogin && (!LOOPBACK.has(req.socket.remoteAddress) || viaProxy(req)) && !req.harnessAuthenticated) {
         return res.status(403).json({ error: 'controls work only from this machine, or with HARNESS_PASSWORD set' });
     }
-    if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
     next();
 }
 
@@ -823,6 +832,99 @@ app.get('/ui/api/tools', async (req, res) => {
 app.post('/ui/api/tools/reload', localJsonOnly, async (req, res) => {
     await mcp.reload();
     res.json(mcp.status());
+});
+
+// The Tools page: add, edit, test, switch off and remove MCP servers. Admin-only
+// (a stdio server is a program this machine runs); literal env and header
+// values are never sent back, only that they are set.
+function mcpList() {
+    const status = new Map(mcp.status().servers.map(s => [s.name, s]));
+    const tools = mcp.allTools();
+    return {
+        file: mcp.file,
+        error: mcp.configError || null,
+        servers: Object.entries(readConfig(mcp.file)).map(([name, spec]) => ({
+            name,
+            spec: mcpAdmin.describeSpec(spec),
+            status: status.get(name)?.status || (spec.disabled ? 'disabled' : 'connecting'),
+            error: status.get(name)?.error || null,
+            tools: tools.get(name) || [],
+        })),
+        catalog: mcpCatalog,
+    };
+}
+
+async function mcpEdit(res, change) {
+    try {
+        await mcp.start();
+        const servers = readConfig(mcp.file);
+        change(servers);
+        writeConfig(servers, mcp.file);
+        await mcp.sync();
+        res.json(mcpList());
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.message });
+    }
+}
+
+app.get('/ui/api/mcp', localOnly, async (req, res) => {
+    try {
+        await mcp.start();
+        res.json(mcpList());
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Add a server, or edit one (`from` is the name it had; a new name renames it)
+app.post('/ui/api/mcp/save', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+    const { from, name, spec } = req.body || {};
+    mcpAdmin.checkName(name);
+    if (from && servers[from] === undefined) throw Object.assign(new Error(`no server named ${from}`), { status: 404 });
+    if ((!from || from !== name) && servers[name] !== undefined) throw Object.assign(new Error(`a server named ${name} already exists`), { status: 409 });
+    const built = mcpAdmin.buildSpec(spec, from ? servers[from] : {});
+    if (from && from !== name) {
+        // keep the file's order when renaming
+        const entries = Object.entries(servers).map(([k, v]) => (k === from ? [name, built] : [k, v]));
+        for (const k of Object.keys(servers)) delete servers[k];
+        Object.assign(servers, Object.fromEntries(entries));
+    } else {
+        servers[name] = built;
+    }
+}));
+
+// Switch a server on or off, or choose which of its tools the model is offered
+app.post('/ui/api/mcp/patch', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+    const { name, disabled, disabledTools } = req.body || {};
+    const spec = servers[name];
+    if (!spec) throw Object.assign(new Error(`no server named ${name}`), { status: 404 });
+    if (disabled !== undefined) {
+        if (disabled) spec.disabled = true;
+        else delete spec.disabled;
+    }
+    if (disabledTools !== undefined) {
+        if (!Array.isArray(disabledTools) || disabledTools.some(t => typeof t !== 'string')) throw Object.assign(new Error('disabledTools must be a list of tool names'), { status: 400 });
+        if (disabledTools.length) spec.disabledTools = disabledTools;
+        else delete spec.disabledTools;
+    }
+}));
+
+app.post('/ui/api/mcp/remove', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+    const { name } = req.body || {};
+    if (servers[name] === undefined) throw Object.assign(new Error(`no server named ${name}`), { status: 404 });
+    delete servers[name];
+}));
+
+// Try an entry without saving it: connect, list the tools, disconnect
+app.post('/ui/api/mcp/test', localJsonOnly, async (req, res) => {
+    try {
+        const { from, spec } = req.body || {};
+        const stored = from ? readConfig(mcp.file)[from] : undefined;
+        const built = mcpAdmin.buildSpec(spec, stored || {});
+        res.json(await mcp.probe(built));
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.message });
+    }
 });
 
 app.post('/ui/api/repo', localJsonOnly, async (req, res) => {

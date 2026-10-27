@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bright Chat · Tools</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="tools.css">
+</head>
+<body>
+<main class="tools-page">
+  <header>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Tools</span></h1><a href="./">Dashboard</a><a href="chat.html">Chat</a><a href="settings.html">Settings</a></nav>
+    <div class="bar">
+      <button id="add" class="primary" type="button">Add a server</button>
+      <button id="reload" type="button" title="Disconnect every server and connect them again">Reconnect all</button>
+    </div>
+  </header>
+
+  <p class="muted lead">MCP servers give the model in Bright Chat extra tools: files, the web, GitHub and more. They are the same servers Claude Code uses, kept in <code id="file">mcp-servers.json</code>. Claude Code itself uses its own list (<code>.mcp.json</code>), not this one.</p>
+  <div id="msg" class="muted" role="status" aria-live="polite"></div>
+
+  <section id="list" class="list"></section>
+
+  <form id="editor" class="card editor" autocomplete="off" hidden>
+    <div class="panel-head"><h2 id="editorTitle">Add a server</h2><button type="button" id="close" class="quiet" aria-label="Close">Close</button></div>
+    <div class="form">
+      <label class="field"><span>Name</span><input name="name" required maxlength="40" pattern="[A-Za-z0-9_.\-]+" placeholder="github" autocapitalize="none"><small>Letters, digits, dots, dashes. It becomes part of each tool name.</small></label>
+      <label class="field"><span>Kind</span>
+        <select name="type"><option value="stdio">Program on this computer (stdio)</option><option value="http">Web address (HTTP)</option><option value="sse">Web address (SSE, older)</option></select></label>
+    </div>
+    <div class="form kind" data-kind="stdio">
+      <label class="field"><span>Command</span><input name="command" placeholder="npx" autocapitalize="none" spellcheck="false"><small>Usually <code>npx</code> (Node) or <code>uvx</code> (uv).</small></label>
+      <label class="field wide"><span>Arguments, one per line</span><textarea name="args" rows="3" spellcheck="false" placeholder="-y&#10;@modelcontextprotocol/server-memory"></textarea><small>Don't paste keys here: use a variable below, or <code>${NAME}</code> from .env.</small></label>
+      <label class="field"><span>Folder to run in (optional)</span><input name="cwd" placeholder="Defaults to the harness folder" spellcheck="false"></label>
+      <div class="field wide"><span>Environment variables</span><div class="rows" data-rows="env"></div><button type="button" class="quiet" data-addrow="env">Add a variable</button>
+        <small>Saved values are hidden and never shown again. <code>${NAME}</code> reads from .env and is shown as is.</small></div>
+    </div>
+    <div class="form kind" data-kind="http sse" hidden>
+      <label class="field wide"><span>Address</span><input name="url" placeholder="https://api.githubcopilot.com/mcp/" spellcheck="false" autocapitalize="none"></label>
+      <div class="field wide"><span>Headers</span><div class="rows" data-rows="headers"></div><button type="button" class="quiet" data-addrow="headers">Add a header</button>
+        <small>For a key: <code>Authorization</code> = <code>Bearer ${GITHUB_TOKEN}</code>. Saved values are hidden.</small></div>
+    </div>
+    <details class="more"><summary>Timeouts</summary>
+      <div class="form">
+        <label class="field"><span>Connect timeout (ms)</span><input name="timeoutMs" type="number" min="1000" step="1000" placeholder="Automatic"></label>
+        <label class="field"><span>More tries after a timeout</span><input name="retries" type="number" min="0" step="1" placeholder="Automatic"></label>
+        <label class="field"><span>One tool call (ms)</span><input name="callTimeoutMs" type="number" min="1000" step="1000" placeholder="120000"></label>
+      </div>
+    </details>
+    <div id="testResult" class="test" role="status" hidden></div>
+    <div class="actions">
+      <button type="button" id="test">Test connection</button>
+      <button type="submit" class="primary" id="save">Save</button>
+    </div>
+  </form>
+
+  <h2>Popular servers</h2>
+  <p class="muted lead">One click adds the ones that need nothing from you. The others open the form with what to change.</p>
+  <section id="catalog" class="catalog"></section>
+</main>
+<script src="tools.js"></script>
+<script src="bright.js"></script>
+</body>
+</html>

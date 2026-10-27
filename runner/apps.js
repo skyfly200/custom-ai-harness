@@ -63,10 +63,12 @@ class AppStore {
         const out = {};
         const has = (k) => cfg[k] !== undefined;
         if (has('name')) { out.name = clean(cfg.name, 60); if (!out.name) throw new Error('an app needs a name'); }
-        for (const [k, n] of [['installCommand', 500], ['devCommand', 500], ['testCommand', 500], ['deployHook', 500]]) {
+        for (const [k, n] of [['installCommand', 500], ['devCommand', 500], ['testCommand', 500], ['deployHook', 500], ['githubRepo', 100], ['baseBranch', 100]]) {
             if (has(k)) out[k] = clean(cfg[k], n) || null;
         }
         if (has('deployHook') && out.deployHook && !/^https?:\/\//i.test(out.deployHook)) throw new Error('deployHook must be an http(s) URL');
+        if (out.githubRepo && !/^[\w.-]+\/[\w.-]+$/.test(out.githubRepo)) throw new Error('GitHub repo must look like owner/name');
+        if (out.baseBranch && !/^[\w./-]+$/.test(out.baseBranch)) throw new Error('base branch has odd characters');
         if (has('deploy')) {
             if (!DEPLOYS.has(cfg.deploy)) throw new Error(`deploy must be one of ${[...DEPLOYS].join(', ')}`);
             out.deploy = cfg.deploy;
@@ -90,7 +92,7 @@ class AppStore {
         if (!base.editablePaths?.length) throw new Error('say which paths the agent may edit, for example ui/**');
         const now = new Date().toISOString();
         const app = {
-            installCommand: null, devCommand: null, testCommand: null, deploy: 'merge', deployHook: null, previewPort: null,
+            installCommand: null, devCommand: null, testCommand: null, deploy: 'merge', deployHook: null, githubRepo: null, baseBranch: null, previewPort: null,
             ...base, id: `p${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, created: now, updated: now,
         };
         this.apps.set(app.id, app);

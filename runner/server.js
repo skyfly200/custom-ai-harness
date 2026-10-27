@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { RunManager } = require('./runs');
 const { listDrivers } = require('./sandbox');
+const ticketFiles = require('./ticketFiles');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -48,6 +49,26 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
     });
     app.post('/runs', (req, res) => {
         try { res.status(201).json(manager.create(req.body)); } catch (err) { fail(res, err); }
+    });
+    // Write a ticket draft as wayfinder markdown files in the repo. Without confirm: true it
+    // only says what would be written, so a page can show it and ask first.
+    app.post('/tickets/files', (req, res) => {
+        try {
+            const { tickets, repo, confirm } = req.body || {};
+            const dir = manager.checkRepo(repo);
+            const plan = ticketFiles.plan(tickets);
+            if (confirm !== true) return res.json({ repo: dir, folder: `${ticketFiles.ROOT}/${plan.folder}`, files: plan.files.map((f) => ({ name: f.name, title: f.title })) });
+            res.status(201).json(ticketFiles.writeFiles(tickets, dir));
+        } catch (err) { fail(res, err); }
+    });
+    // Read a wayfinder folder (relative to the repo) back into a ticket draft
+    app.post('/tickets/read', (req, res) => {
+        try {
+            const dir = manager.checkRepo(req.body?.repo);
+            const target = path.resolve(dir, String(req.body?.folder || ''));
+            if (target !== dir && !target.startsWith(dir + path.sep)) throw new Error('the folder must be inside the repo');
+            res.json(ticketFiles.readTicketFiles(target));
+        } catch (err) { fail(res, err); }
     });
     // Agents: named, long-lived; their tasks are runs
     app.get('/agents', (req, res) => res.json({ agents: manager.listAgents() }));

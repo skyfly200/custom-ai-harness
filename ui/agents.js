@@ -215,6 +215,35 @@ $('detail').addEventListener('toggle', (e) => {
   if (k === 'diff' && e.target.open && selected) loadDiff(selected);
 }, true);
 
+// Save the ticket draft as markdown files in the repo (preview, ask, write), or load a folder back
+async function ticketCall(path, body) {
+  const res = await fetch(`api/tickets/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+  return out;
+}
+$('fileTickets').addEventListener('click', async () => {
+  const f = $('newRun'), msg = $('ticketsMsg');
+  const body = { tickets: f.elements.tickets.value, repo: f.elements.repo.value.trim() };
+  try {
+    msg.textContent = 'Checking…';
+    const plan = await ticketCall('files', { ...body, confirm: false });
+    if (!confirm(`Write ${plan.files.length} files into ${plan.repo}/${plan.folder}?\n\n${plan.files.map((x) => `· ${x.name}`).join('\n')}`)) { msg.textContent = ''; return; }
+    const made = await ticketCall('files', { ...body, confirm: true });
+    msg.textContent = `Wrote ${made.files.length} files to ${made.relative}. Commit them when you are happy.`;
+  } catch (err) { msg.textContent = err.message; }
+});
+$('loadTickets').addEventListener('click', async () => {
+  const f = $('newRun'), msg = $('ticketsMsg');
+  const folder = prompt('Folder inside the repo, for example wayfinder/add-export');
+  if (!folder) return;
+  try {
+    const draft = await ticketCall('read', { repo: f.elements.repo.value.trim(), folder });
+    f.elements.tickets.value = JSON.stringify({ tickets: draft.tickets }, null, 2);
+    msg.textContent = `Loaded ${draft.tickets.length} tickets${draft.skipped.length ? `; skipped ${draft.skipped.join(', ')}` : ''}.`;
+  } catch (err) { msg.textContent = err.message; }
+});
+
 $('newRun').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;

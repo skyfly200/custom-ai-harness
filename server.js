@@ -395,8 +395,8 @@ async function forwardToRouter(req, res, routerPath) {
 // through here so it sits behind the same login. Starting, approving, stopping
 // and deleting runs are controls, so they get the same local-or-password check.
 const RUNNER_URL = (process.env.RUNNER_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
-// /ui/api/runs and /ui/api/agents are the runner's /runs and /agents
-for (const part of ['runs', 'agents']) {
+// /ui/api/runs, /ui/api/agents and /ui/api/tickets are the runner's /runs, /agents and /tickets
+for (const part of ['runs', 'agents', 'tickets']) {
     app.use(`/ui/api/${part}`, (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
         const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
         try {

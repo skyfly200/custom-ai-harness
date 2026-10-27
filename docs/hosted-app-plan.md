@@ -7,7 +7,7 @@ Written 2026-10-27 for Skyler. Updated the same day with Skyler's answers: invit
 PR 2 (database layer), PR 4 (chats in Neon) and PR 5 (sign-in) shipped in [PR #98](https://github.com/skyfly200/custom-ai-harness/pull/98); see [Chats and sign-in in Neon](neon.md). They differ from this plan in three ways, and where the two disagree below, `neon.md` and the code are right:
 
 - **Sign-in uses Neon Auth** (managed Better Auth) for the Google and GitHub buttons, invite-only, with `HARNESS_ADMIN_EMAILS` for admins. This plan recommended self-hosted OAuth; the managed option was chosen instead. Users, API keys and invites sit in `harness_store`, sessions in `sessions`.
-- **Chats are stored as the page keeps them**, one row per chat in `chats` (plus `user_data` for projects, skills, commands, schedules and prefs), not one row per message. The browser still works from localStorage and syncs about 1.5 s after each save. A message-per-row table and server-side message saving are not done.
+- **Chats are stored as the page keeps them**, one row per chat in `chats` (plus `user_data` for projects, skills, commands, schedules and prefs), not one row per message. The staged move to message rows is in [Moving chats to message rows](#moving-chats-to-message-rows). The browser still works from localStorage and syncs about 1.5 s after each save. A message-per-row table and server-side message saving are not done.
 - **`DATABASE_DRIVER=http`** (Neon's HTTPS driver) exists for hosts that only allow port 443.
 
 **Next: PR 3, the Fly deploy to `agents.skylerfly.com`.** `fly.toml` and a Fly Dockerfile don't exist yet. Still not done: 3a (Stop button and idle stop), 6 to 11.
@@ -141,6 +141,8 @@ Fly Machine about $6.70 if left running all month (much less if it sleeps; see a
 
 ## Data model
 
+**Shipped in #98 (what the database holds today):** `harness_store(name, data jsonb)` for users, keys and invites; `sessions(id_hash, name, expires)`; `chats(owner, id, title, project, updated bigint, data jsonb, deleted_at)`, one row per chat holding the whole chat object the page keeps, with `owner` the user's *name*; `user_data(owner, key, value jsonb, updated)` for projects, skills, commands, schedules and prefs. Newer wins by the page's own millisecond clock (a stale copy gets a 409). The sketch below is the **target** shape; [Moving chats to message rows](#moving-chats-to-message-rows) is the plan for getting from one to the other, in steps, only as far as is needed.
+
 All ids are UUIDs (or ULIDs, so they sort). Times are `timestamptz`. Every user-owned row has `user_id` and every query filters on it.
 
 ```sql
@@ -186,7 +188,36 @@ Notes:
 4. **Offline and local mode.** With no `DATABASE_URL`, the page keeps using localStorage exactly as now (`ui/chat.js` gets a `ChatStore` with a localStorage implementation and an API implementation, same methods). The local install loses nothing.
 5. **Migration.** A one-time **Import from this browser** button on first sign-in: reads `harness-chats`, `harness-chat:*`, `harness-projects`, `harness-skills`, `harness-commands`, `harness-schedules` and `harness-chat-prefs`, POSTs them in batches, shows progress, and marks them imported (does **not** delete localStorage; offers "clear local copy" afterwards). Big chats go one at a time to stay under request size limits. Also add **Export all** as JSON (Markdown export exists per chat), so a user can always take their data out.
 6. **Device-only preferences stay in localStorage:** zoom, layout, background, which chat is open, and similar (`bright-*`, `harness-chat-open`). Settings that should follow the person (default routing, voice, effort) go to `user_settings`.
-7. **Schedules and keep-alive pings** currently run in the open browser tab. In a hosted app they should run on the server (a timer in the Interceptor reading `skills` rows of kind `schedule`), or they stop whenever the tab closes. Treat as a follow-up; it is the main "works anywhere" gain after chats.
+7. **Schedules and keep-alive pings** (they need stage 2 of [Moving chats to message rows](#moving-chats-to-message-rows)) currently run in the open browser tab. In a hosted app they should run on the server (a timer in the Interceptor reading `skills` rows of kind `schedule`), or they stop whenever the tab closes. Treat as a follow-up; it is the main "works anywhere" gain after chats.
+
+## Moving chats to message rows
+
+Skyler asked (2026-10-27) for a plan to move the storage to the message-rows model above, or to update this plan to the shipped one. The doc now does both: the shipped model is described as current, and this section is the staged path to rows. **Recommendation: keep whole-chat rows for now and move in stages, starting only when something needs the server to write messages** (stage 2). Nothing here changes the page for anyone until stage 3.
+
+**What whole-chat rows cost today (all real, none urgent):**
+
+1. **Every save rewrites the whole chat** (about 1.5 s after a change). A long chat with tool output and, until the attachments PR, images is megabytes per save, which spends Neon compute and egress for no reason.
+2. **Two devices can lose work.** Newer-wins is per chat: a stale tab's save is refused (409), and a newer save from another device replaces messages the first one added.
+3. **Only the browser saves.** Close the tab mid-reply and the reply is gone; the server never wrote it. Server-side schedules (PR 10), persistent Agents linked to chat projects, and Runs reporting back into a chat all need the server to append messages, which the whole-chat model can't do safely (two writers, one document).
+4. **No per-message facts on the server** (model, tokens, cost), which per-user limits and the guest cap can get from `usage_events` instead, so this one is not a blocker.
+5. **`owner` is the user's name**, not a stable id. As far as I can see users have only a name today, so renaming or removing and re-adding one would orphan or hand over chats. Fix when adding ids.
+
+**Why not move at once:** whole-chat sync works, is tested against Neon, and matches the local-storage format, so local mode and the Markdown export stay trivial. A big-bang rewrite of `ui/chat.js` sync plus a data migration is the riskiest change in this plan.
+
+**Stages** (each shippable alone, each reversible until stage 4):
+
+| Stage | Change | Done when |
+|---|---|---|
+| 1. Add tables | Migration `003`: `chat_messages(owner, chat_id, seq, id, role, content jsonb, meta jsonb, created_at, revised_at, deleted_at)` with unique `(owner, chat_id, id)`; `chats` gains `version`; a stable `user_id` is added to users and `owner` is mapped to it. Backfill splits each stored `chats.data.messages` into rows. Whole-chat `data` keeps being written, so nothing reads the new table yet | Backfill row counts match message counts per chat; run it first on a Neon branch of production, not on production |
+| 2. Server writes messages | The page sends `x-harness-chat-id` and a message id on each request. The Interceptor writes the user message before forwarding and the assistant message when the stream ends (and every few seconds while it streams), by message id so the page's own save and the server's never double up. Schedules, Agents and Runs can now append with the same call | A reply finishes and appears on another device with the first tab closed |
+| 3. Page syncs deltas | `GET /ui/api/sync/chats/:id?after=seq` and message upserts by id replace whole-chat pushes; chat settings and title stay last-write-wins on `version`. The page keeps localStorage as its cache. Behind `HARNESS_CHAT_ROWS=1` so it can be switched off | Two devices add messages to one chat without losing either; long chats save only what changed |
+| 4. Stop writing the blob | Drop `data.messages` from new saves (keep the column and the last full copy for one release), load the last N messages first and the rest on scroll | Export all still round-trips; old chats open unchanged |
+
+**Edits and retries.** A retry or edit replaces the tail of a chat. Stage 2 marks replaced messages `deleted_at` and appends the new ones with higher `seq`, in one transaction, so history stays and the page shows the live branch. If branches turn out to matter, add `parent_id` later; don't build it now.
+
+**Safety:** an Export all (JSON) before stage 1 goes live on production; stage 1 tested on a Neon branch; the whole-chat copy keeps being written until stage 4, so rolling back to it is a flag change. Local mode (no `DATABASE_URL`) is untouched at every stage.
+
+**Where it sits in the PR order:** stage 1 and 2 as PR 4b, right after the Fly deploy and Stop button; stage 3 and 4 as PR 4c. PR 10 (server-side schedules) must come after stage 2.
 
 ## Per-user settings, routings and tools
 
@@ -258,14 +289,16 @@ Each is a separate PR that works on its own and keeps the local, no-database set
 2. **Database layer.** *(Done, #98.)* `utils/db.js`, `migrations/`, `npm run migrate`, `DATABASE_URL` optional. A `PgStore` for users, API keys and sessions behind the existing `Store` interface, with sessions in the database. Tests against a throwaway Postgres (Docker, or Neon branch in CI; the repo has no CI today, so local first). Hosted mode off by default.
 3. **Fly deploy.** (With `auto_start_machines`/`auto_stop_machines` set, so it sleeps when idle from day one.) `Dockerfile.fly`, `fly.toml`, secrets list, volume, `trust proxy`, health check, `docs/fly.md` with step by step commands for Windows. Usable immediately with the current named logins. This is the first point where Skyler can reach it from a phone without Tailscale or a tunnel.
 3a. **Stop button and idle stop.** Admin-only Stop on the Dashboard (Fly Machines API with a scoped token), `HARNESS_IDLE_STOP_MIN`, an idle check that sees streams, Runs and pending approvals. Optional later: the always-on Start page.
-4. **Chats in the database (text only).** *(Done in #98 as whole-chat rows, not message rows.)* Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import". Attachments are not part of it.
+4. **Chats in the database (text only).** *(Done in #98 as whole-chat rows, not message rows.)*
+4b. **Chat rows, stages 1 and 2.** Message table, user ids, server-side message saving. See [Moving chats to message rows](#moving-chats-to-message-rows).
+4c. **Chat rows, stages 3 and 4.** Delta sync, then stop writing the blob. Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import". Attachments are not part of it.
 5. **OAuth sign-in.** *(Done in #98 through Neon Auth; Google by default, GitHub with its own OAuth app.)* GitHub and Google, `identities`, invite-only users page, `HARNESS_ADMIN_EMAILS`, account page (link or unlink providers, make API keys), sign-in page buttons.
 6. **Per-user settings, routings and MCP.** Global versus user split, encrypted MCP secrets, hosted lockdown for stdio MCP and shells.
 7. **Usage, limits and guest accounts.** `usage_events`, per-user spend, optional caps and a Users page column, 429 handling in chat, and the guest account (below): only an admin can make one, it uses your shared key with a hard $1 lifetime cap.
 8. **OpenRouter workload identity federation per user (the main credential path).** The harness as an OIDC issuer (discovery and JWKS), per-user JWTs, a policy id in Account settings, per-request credential in `/openrouter-proxy`. Needs an OpenRouter Business org, so it starts with a one-issuer, one-policy trial in your org.
 8b. **Pasted OpenRouter key (optional).** Encrypted static key per user, for anyone without an org. Small; build only if someone needs it.
 9. **Attachments (separate goal).** Object storage, `attachments` table, signed uploads, size limits, moving attachment bytes out of the browser, import of existing attachments.
-10. **Server-side schedules and keep-alive** (so they run with the tab closed).
+10. **Server-side schedules and keep-alive** (after 4b) (so they run with the tab closed).
 11. **Runs on Fly.** Runner Machine, Postgres run records, GitHub-token clone and push, per-user quotas.
 
 Steps 3 and 4 can swap if you would rather have chats in the database before the first deploy; 3 first gives the earliest real use.

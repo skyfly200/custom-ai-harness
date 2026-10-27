@@ -44,7 +44,10 @@ The threshold is encoded as `router-bert-<threshold>` — the strict three-part 
 ## Tests
 
 ```bash
-npm test                                   # Interceptor (Node)
+npm test                                   # Interceptor (Node): about 430 tests, ~25 s
+npm run test:for                           # only the Node tests that mention files you changed
+npm run test:for -- utils/guard.js         # ...or files you name
+node --test test/guard.test.js             # one file
 pip install -r requirements-test.txt
 python -m pytest test/                     # Router: contract tests and every backend end to end
 ```

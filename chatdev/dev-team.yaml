@@ -1,0 +1,56 @@
+# A small software team for ChatDev 2.0: a planner, a programmer and a reviewer,
+# with the review loop sending the code back until the reviewer writes ACCEPT.
+# ${BASE_URL}, ${API_KEY} and ${MODEL_NAME} come from the .env the harness writes
+# in the sandbox, so every call goes through the harness's routing.
+# Written from ChatDev's workflow authoring guide, not yet run against a real
+# ChatDev: if its validator rejects a field, fix it here (make validate-yamls).
+version: 0.4.0
+graph:
+  id: harness_dev_team
+  description: Plan, write and review a small program.
+  start: [Planner]
+  end: [Reviewer]
+  nodes:
+    - id: Planner
+      type: agent
+      config:
+        provider: openai
+        base_url: ${BASE_URL}
+        api_key: ${API_KEY}
+        name: ${MODEL_NAME}
+        role: |
+          You are the product planner. Turn the task into a short plan: the
+          files to create, what each does, and how to run it. Be concrete.
+    - id: Programmer
+      type: agent
+      config:
+        provider: openai
+        base_url: ${BASE_URL}
+        api_key: ${API_KEY}
+        name: ${MODEL_NAME}
+        role: |
+          You are the programmer. Write the complete code for the plan, file by
+          file. If the reviewer sent problems back, fix every one of them.
+    - id: Reviewer
+      type: agent
+      config:
+        provider: openai
+        base_url: ${BASE_URL}
+        api_key: ${API_KEY}
+        name: ${MODEL_NAME}
+        role: |
+          You are the code reviewer. Check the code against the plan and the
+          task. If it is complete and correct, reply with ACCEPT and a one line
+          summary. Otherwise list exactly what must change.
+  edges:
+    - from: Planner
+      to: Programmer
+    - from: Programmer
+      to: Reviewer
+    - from: Reviewer
+      to: Programmer
+      condition:
+        type: keyword
+        config:
+          none: [ACCEPT]
+          case_sensitive: false

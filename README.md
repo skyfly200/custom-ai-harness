@@ -129,6 +129,7 @@ Everything past the quick start lives in `docs/`. Each page starts with a one-li
 | [Dashboard, settings and usage](docs/control-ui.md) | The dashboard, the Settings page, the Usage page |
 | [Routing](docs/routing.md) | The routing editor, named strategies, tiers, effort, and how a request gets its model |
 | [Task runner](docs/task-runner.md) | Agents that do a whole task: workflows, swarm, E2B cloud sandboxes |
+| [ChatDev](docs/chatdev.md) | Run the ChatDev multi-agent tool in a Fly Sprite with its models routed through the harness |
 | [Run it on a server](docs/server-docker.md) | Docker, Oracle and Google Cloud free tiers, Tailscale, `HARNESS_MODE` and local models |
 | [Phone and installable app](docs/phone-and-app.md) | Install Bright Chat as an app, and a Cloudflare tunnel for your phone |
 | [Named logins and API keys](docs/logins.md) | `HARNESS_REQUIRE_LOGIN`, admins and per-program keys |

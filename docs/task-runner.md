@@ -37,6 +37,10 @@ A run is a one-off. An **agent** is a named, long-lived worker for one repo that
 
 ### Workflows (recipes the agent follows)
 
+### Stronger model on failure
+
+A run climbs one effort step (and so, usually, one routing tier) when a model call fails after its usual retries, when a model answers with nothing, or when a Verifier stage says FAIL and the run goes back to retry. It can climb at most twice. **Highest tier** on the run or agent (sent as `x-harness-max-tier`) caps how high it may go, so a retry never costs more than you allowed. Untick **Try a stronger model when something fails** (or send `escalate: false`) to turn it off. Each climb is a note in the run's log, and the run shows `Escalated N×`. A request the harness rejects outright (HTTP 400, 401) does not escalate.
+
 A workflow is a short list of stages. Each stage is its own agent loop with a role, the tools it may use, a step budget and optionally an effort, and it is handed what the stages before it found. The recipes live in `workflows/*.json`, one file each:
 
 | Workflow | Stages | Fits |

@@ -57,6 +57,8 @@ class AgentStore {
             if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
             out.effort = cfg.effort || null;
         }
+        if (has('maxTier')) out.maxTier = cfg.maxTier ? clean(cfg.maxTier, 40) : null;
+        if (has('escalate')) out.escalate = !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false');
         for (const [k, lo, hi] of [['maxSteps', 0, 10000], ['maxMinutes', 1, 240]]) {
             if (!has(k)) continue;
             if (cfg[k] === null || cfg[k] === '') { out[k] = null; continue; }

@@ -54,3 +54,26 @@ test('a swarm and its workers are one job: their cost and tokens add up, per age
     assert.deepEqual([b.agents[0].cost, b.agents[0].unpriced], [4, 3]);
     assert.deepEqual([b.totals.cost, b.totals.unpriced], [4, 3]);
 });
+
+test('daily spend: stacked by agent per day, small agents and no-agent runs fold into Other', () => {
+    const now = new Date(2026, 9, 27, 15, 0, 0);
+    const at = (dayOffset) => new Date(2026, 9, 27 + dayOffset, 10, 0, 0).toISOString();
+    const runs = [
+        run({ id: '1', agent: 'a', cost: 3, started: at(0) }),
+        run({ id: '2', agent: 'b', cost: 1, started: at(0) }),
+        run({ id: '3', cost: 0.5, started: at(0) }),
+        run({ id: '4', agent: 'a', cost: 2, started: at(-2) }),
+        run({ id: '5', agent: 'a', cost: 9, started: at(-8) }), // outside the window
+        run({ id: 'p', kind: 'swarm', cost: 1, started: at(-1) }),
+        run({ id: 'c', parent: 'p', cost: 4, started: at(-1) }),
+    ];
+    const d = require('../ui/agentBoard').daily(runs, [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], { days: 7, keep: 1, now });
+    assert.equal(d.days.length, 7);
+    assert.deepEqual(d.series.map((s) => s.name), ['A', 'Other']);
+    const today = d.days.at(-1);
+    assert.deepEqual(today.parts.map((p) => [p.name, p.cost]), [['A', 3], ['Other', 1.5]]);
+    assert.equal(d.days.at(-2).total, 5); // the swarm and its worker
+    assert.equal(d.days.at(-3).parts[0].cost, 2);
+    assert.equal(d.total, 11.5);
+    assert.equal(d.max, 5);
+});

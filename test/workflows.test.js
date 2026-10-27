@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 test('the shipped recipes all load, and exactly one is the fallback', () => {
     const { list, problems } = workflows.load();
     assert.deepEqual(problems, []);
-    assert.deepEqual(list.map((w) => w.id).sort(), ['build-feature', 'fix-bug', 'general', 'quick-answer', 'refactor', 'research', 'review']);
+    assert.deepEqual(list.map((w) => w.id).sort(), ['audit-refactor', 'build-feature', 'change-app', 'fix-bug', 'general', 'quick-answer', 'refactor', 'research', 'review']);
     assert.deepEqual(list.filter((w) => w.fallback).map((w) => w.id), ['general']);
     for (const w of list.filter((x) => !x.fallback)) assert.ok(w.when, `${w.id} needs a "when" line for Jev`);
 });

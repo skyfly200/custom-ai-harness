@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const tiers = require('./tiers');
+const jevQuestions = require('./jevQuestions');
 const langfuse = require('./langfuse');
 
 const FILE = process.env.HARNESS_SETTINGS_FILE || path.join(__dirname, '..', 'harness-settings.json');
@@ -23,6 +24,7 @@ const DEFAULTS = Object.freeze({
     routerDownToolsModel: 'fallback-openrouter-tools',  // same, for requests that need tool calls
     mcpOff: [],               // MCP servers the chat page doesn't offer on the default routing
     tiers: [],                // extra tiers of the default routing beside the Router's strong and weak (utils/tiers.js)
+    jevQuestions: [],         // extra yes/no questions Jev answers per request; each leans the effort or picks a model (utils/jevQuestions.js)
     imagesModel: null,        // Gateway model for requests whose latest user turn carries an image
     autoJev: true,            // Auto routing (utils/autoStrategy.js): ask Jev which routing fits when no routing's rules do
     autoFirst: 'jev',         // which Auto tries first: 'jev' (rules only if Jev finds no fit) or 'rules'
@@ -74,6 +76,7 @@ const VALIDATORS = {
         return [...new Set(v)];
     },
     tiers: (v) => tiers.clean(v, 'The default routing'),
+    jevQuestions: (v) => jevQuestions.clean(v),
     imagesModel: optionalName('imagesModel'),
     autoJev: bool('autoJev'),
     autoFirst: (v) => { if (v !== 'jev' && v !== 'rules') throw new Error('autoFirst must be jev or rules'); return v; },

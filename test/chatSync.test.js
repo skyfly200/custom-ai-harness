@@ -1,30 +1,20 @@
-// Chat sync routes against an in-memory stand-in for Postgres
+// Chat sync routes against a real Postgres (PGlite) running the repo migrations
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const express = require('express');
 
-const chats = new Map(); // owner/id -> row
-const data = new Map();
+const fs = require('fs');
+const path = require('path');
+const { PGlite } = require('@electric-sql/pglite');
 const db = require('../utils/db');
-db.query = async (text, p) => {
-    if (/FROM chats WHERE owner = \$1 ORDER/.test(text)) return { rows: [...chats.values()].filter((r) => r.owner === p[0]).map((r) => ({ id: r.id, title: r.title, project: r.project, updated: String(r.updated), deleted: r.deleted })) };
-    if (/FROM user_data/.test(text)) return { rows: [...data.values()].filter((r) => r.owner === p[0]).map((r) => ({ key: r.key, value: r.value, updated: String(r.updated) })) };
-    if (/SELECT data FROM chats/.test(text)) { const r = chats.get(`${p[0]}/${p[1]}`); return { rows: r && !r.deleted ? [{ data: r.data }] : [] }; }
-    if (/INSERT INTO chats/.test(text)) {
-        const k = `${p[0]}/${p[1]}`, old = chats.get(k);
-        if (old && old.updated > p[4]) return { rows: [] };
-        chats.set(k, { owner: p[0], id: p[1], title: p[2], project: p[3], updated: p[4], data: JSON.parse(p[5]), deleted: false });
-        return { rows: [{ id: p[1] }] };
+// A real (in-process) Postgres, with the repo's own migrations applied
+const pg = new PGlite();
+const ready = (async () => {
+    for (const f of fs.readdirSync(path.join(__dirname, '..', 'migrations')).filter((x) => x.endsWith('.sql')).sort()) {
+        await pg.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', f), 'utf8'));
     }
-    if (/UPDATE chats SET deleted_at/.test(text)) { const r = chats.get(`${p[0]}/${p[1]}`); if (r) { r.deleted = true; r.data = {}; } return { rows: [] }; }
-    if (/INSERT INTO user_data/.test(text)) {
-        const k = `${p[0]}/${p[1]}`, old = data.get(k);
-        if (old && old.updated > p[3]) return { rows: [] };
-        data.set(k, { owner: p[0], key: p[1], value: JSON.parse(p[2]), updated: p[3] });
-        return { rows: [{ key: p[1] }] };
-    }
-    throw new Error(`unexpected query ${text}`);
-};
+})();
+db.query = async (text, params) => { await ready; return pg.query(text, params); };
 const { createChatSync } = require('../utils/chatSync');
 
 async function withApp(user, fn) {
@@ -68,4 +58,85 @@ test('bad ids, bodies and data keys are refused', async () => {
         assert.equal(got.owner, 'local');
         assert.deepEqual(got.data['harness-projects'], { value: [{ id: 'p' }], updated: 5 });
     });
+});
+
+const msg = (id, content, time) => ({ id, role: id.startsWith('a') ? 'assistant' : 'user', content, time });
+const meta = (id, updated, extra = {}) => ({ id, title: 't', updated, ...extra });
+
+test('delta: a new chat, then only the changed message is sent, and the order can shrink', async () => {
+    await withApp('dana', async (call) => {
+        let r = await call('PUT', '/ui/api/sync/chats/d1/delta', { chat: meta('d1', 10), order: ['u1', 'a1'], upserts: [msg('u1', 'hi', 1), msg('a1', 'hello', 2)], base: 0 });
+        assert.deepEqual(await r.json(), { ok: true, version: 1 });
+        r = await call('PUT', '/ui/api/sync/chats/d1/delta', { chat: meta('d1', 11), order: ['u1', 'a1', 'u2'], upserts: [msg('u2', 'more', 3)], base: 1 });
+        assert.equal((await r.json()).version, 2);
+        let got = await (await call('GET', '/ui/api/sync/chats/d1')).json();
+        assert.deepEqual(got.messages.map((m) => m.id), ['u1', 'a1', 'u2']);
+        assert.equal(got.messages[1].content, 'hello');
+        assert.equal(got.syncVersion, 2);
+        // a retry drops the last reply and writes a new one
+        r = await call('PUT', '/ui/api/sync/chats/d1/delta', { chat: meta('d1', 12), order: ['u1', 'a1b'], upserts: [msg('a1b', 'again', 4)], base: 2 });
+        assert.equal(r.status, 200);
+        got = await (await call('GET', '/ui/api/sync/chats/d1')).json();
+        assert.deepEqual(got.messages.map((m) => m.id), ['u1', 'a1b']);
+        assert.equal((await pg.query("SELECT count(*)::int AS n FROM chat_messages WHERE chat_id = 'd1'")).rows[0].n, 2);
+    });
+});
+
+test('delta: a save from a stale version is refused and writes nothing', async () => {
+    await withApp('erin', async (call) => {
+        await call('PUT', '/ui/api/sync/chats/e1/delta', { chat: meta('e1', 10), order: ['u1'], upserts: [msg('u1', 'one', 1)], base: 0 });
+        await call('PUT', '/ui/api/sync/chats/e1/delta', { chat: meta('e1', 11), order: ['u1', 'a1'], upserts: [msg('a1', 'from phone', 2)], base: 1 });
+        const stale = await call('PUT', '/ui/api/sync/chats/e1/delta', { chat: meta('e1', 12, { title: 'laptop' }), order: ['u1', 'u9'], upserts: [msg('u9', 'from laptop', 3)], base: 1 });
+        assert.equal(stale.status, 409);
+        assert.deepEqual(await stale.json(), { ok: false, version: 2 });
+        const got = await (await call('GET', '/ui/api/sync/chats/e1')).json();
+        assert.deepEqual(got.messages.map((m) => m.id), ['u1', 'a1']);
+        assert.equal(got.title, 't');
+        // a chat the server has never seen needs base 0
+        assert.equal((await call('PUT', '/ui/api/sync/chats/e2/delta', { chat: meta('e2', 1), order: [], upserts: [], base: 5 })).status, 409);
+    });
+});
+
+test('delta: bad bodies are refused', async () => {
+    await withApp('fay', async (call) => {
+        assert.equal((await call('PUT', '/ui/api/sync/chats/f1/delta', { chat: meta('f1', 1), order: ['u1'], upserts: [], base: 'x' })).status, 400);
+        assert.equal((await call('PUT', '/ui/api/sync/chats/f1/delta', { chat: meta('other', 1), order: [], upserts: [], base: 0 })).status, 400);
+        assert.equal((await call('PUT', '/ui/api/sync/chats/f1/delta', { chat: meta('f1', 1), order: ['u1'], upserts: [msg('zz', 'not in order', 1)], base: 0 })).status, 400);
+        assert.equal((await call('PUT', '/ui/api/sync/chats/f1/delta', { chat: meta('f1', 1), order: ['bad id!'], upserts: [], base: 0 })).status, 400);
+    });
+});
+
+test('the whole-chat PUT still works and is stored as rows; delete removes them', async () => {
+    await withApp('gus', async (call) => {
+        await call('PUT', '/ui/api/sync/chats/g1', { id: 'g1', title: 'whole', updated: 5, messages: [msg('u1', 'a', 1), msg('a1', 'b', 2)] });
+        assert.equal((await pg.query("SELECT count(*)::int AS n FROM chat_messages WHERE chat_id = 'g1'")).rows[0].n, 2);
+        const got = await (await call('GET', '/ui/api/sync/chats/g1')).json();
+        assert.deepEqual(got.messages.map((m) => m.content), ['a', 'b']);
+        assert.equal((await call('PUT', '/ui/api/sync/chats/g1', { id: 'g1', title: 'older', updated: 1, messages: [] })).status, 409);
+        await call('DELETE', '/ui/api/sync/chats/g1');
+        assert.equal((await pg.query("SELECT count(*)::int AS n FROM chat_messages WHERE chat_id = 'g1'")).rows[0].n, 0);
+        assert.equal((await call('GET', '/ui/api/sync/chats/g1')).status, 404);
+    });
+});
+
+test('the migration splits whole-chat rows into messages, keeping order and giving id-less messages an id', async () => {
+    const legacy = new PGlite();
+    const dir = path.join(__dirname, '..', 'migrations');
+    const files = fs.readdirSync(dir).filter((x) => x.endsWith('.sql')).sort();
+    for (const f of files.filter((x) => x < '003')) await legacy.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
+    await legacy.query(`INSERT INTO chats (owner, id, title, updated, data) VALUES ('hal', 'h1', 'old', 9, $1::jsonb), ('hal', 'h2', 'empty', 9, '{"id":"h2","messages":[]}'::jsonb)`,
+        [JSON.stringify({ id: 'h1', title: 'old', system: 'be brief', messages: [{ id: 'x1', role: 'user', content: 'q' }, { role: 'assistant', content: 'no id' }, { id: 'x3', role: 'user', content: 'again' }] })]);
+    await legacy.exec(fs.readFileSync(path.join(dir, files.find((x) => x.startsWith('003'))), 'utf8'));
+    const chat = (await legacy.query("SELECT data, msg_order FROM chats WHERE id = 'h1'")).rows[0];
+    assert.deepEqual(chat.msg_order, ['x1', 'm2', 'x3']);
+    assert.equal(chat.data.messages, undefined);
+    assert.equal(chat.data.system, 'be brief');
+    const rows = (await legacy.query("SELECT id, data FROM chat_messages WHERE chat_id = 'h1' ORDER BY id")).rows;
+    assert.deepEqual(rows.map((r) => r.id), ['m2', 'x1', 'x3']);
+    assert.equal(rows.find((r) => r.id === 'm2').data.id, 'm2');
+    assert.deepEqual((await legacy.query("SELECT msg_order FROM chats WHERE id = 'h2'")).rows[0].msg_order, []);
+    assert.equal((await legacy.query('SELECT count(*)::int AS n FROM chats_before_rows')).rows[0].n, 2);
+    // running it again changes nothing
+    await legacy.exec(fs.readFileSync(path.join(dir, files.find((x) => x.startsWith('003'))), 'utf8'));
+    assert.equal((await legacy.query('SELECT count(*)::int AS n FROM chat_messages')).rows[0].n, 3);
 });

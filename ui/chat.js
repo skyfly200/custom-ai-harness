@@ -72,7 +72,39 @@ const sync = {
       try { const r = await fn(); if (r && r.status >= 500) throw new Error(r.status); this.failed = false; } catch { this.failed = true; }
     }, 1500));
   },
-  pushChat(c) { this.queue(`c:${c.id}`, () => this.api(`/chats/${c.id}`, { method: 'PUT', body: c })); },
+  snaps: new Map(), // chat id -> { version the server is at, known: Map(message id -> fingerprint of the copy it has) }
+  pushChat(c) { this.queue(`c:${c.id}`, () => this.saveChat(c.id)); },
+  flushNow(id) { clearTimeout(this.timers.get(`c:${id}`)); this.timers.delete(`c:${id}`); this.saveChat(id).catch(() => { this.failed = true; }); },
+  // Send only the messages that changed since the last save, with the version this copy is based on. If the
+  // server has moved on (another device, or the server itself added messages) it answers 409: pull, join, retry.
+  async saveChat(id, attempt = 0) {
+    const c = cache.get(id) || store.get(CHAT_KEY(id), null);
+    if (!c || c.deleted) return;
+    const snap = this.snaps.get(id) || { version: Number(c.syncVersion) || 0, known: new Map() };
+    const { upserts, order, fingerprints } = ChatMerge.delta(c.messages || [], snap.known);
+    const { messages, syncVersion, ...chatMeta } = c;
+    const r = await this.api(`/chats/${id}/delta`, { method: 'PUT', body: { chat: chatMeta, order, upserts, base: snap.version } });
+    if (r.status === 409 && attempt < 2) {
+      const got = await this.api(`/chats/${id}`);
+      if (got.status === 404) { this.snaps.delete(id); c.syncVersion = 0; return this.saveChat(id, attempt + 1); }
+      if (!got.ok) return got;
+      const remote = await got.json();
+      const merged = ChatMerge.mergeChats(c, remote);
+      const { messages: joined, ...rest } = merged;
+      Object.assign(c, rest);
+      c.messages.splice(0, c.messages.length, ...joined);
+      this.noteSaved(c.id, remote.syncVersion, remote.messages);
+      return this.saveChat(id, attempt + 1);
+    }
+    if (!r.ok) return r;
+    const { version } = await r.json();
+    this.snaps.set(id, { version, known: fingerprints });
+    c.syncVersion = version;
+    try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(c)); } catch {} // remember the version, without another push
+  },
+  noteSaved(id, version, messages) {
+    this.snaps.set(id, { version, known: new Map((messages || []).map(m => [m.id, ChatMerge.fingerprint(m)])) });
+  },
   pushData(key, value) {
     const updated = Date.now();
     try { localStorage.setItem(`harness-sync-ts:${key}`, String(updated)); } catch {}
@@ -104,6 +136,7 @@ const sync = {
         if (!r.ok) continue;
         const c = await r.json();
         raw(CHAT_KEY(c.id), c);
+        this.noteSaved(c.id, c.syncVersion, c.messages);
         cache.delete(c.id);
         const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches };
         const i = index.findIndex(x => x.id === c.id);
@@ -1349,7 +1382,10 @@ async function runReply(c, turn) {
       else if (maxTokens > 0) body.max_tokens = maxTokens;
       if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
 
-      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
+      // with a database, the server also keeps the reply if this page goes away before it ends (utils/chatReplies.js)
+      const keep = round === 0 && sync.on ? { 'x-harness-chat-id': c.id, 'x-harness-message-id': reply.id } : {};
+      if (keep['x-harness-chat-id']) sync.flushNow(c.id); // so the server has the chat, and your message, before the reply starts
+      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, ...keep, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
       // the same facts the live feed sends, from the headers, in case it's not connected
       tr.routed = tr.routed || { model: res.headers.get('x-harness-model'), reason: res.headers.get('x-harness-route') };
       tr.answered = {
@@ -3784,6 +3820,40 @@ $('commandsDialog').addEventListener('close', () => {
   saveCommands();
   drawHint();
 });
+
+// Claude Code's own commands and skills (.claude/commands, .claude/skills), one click to copy in
+let claudeKit = null;
+async function drawImport(kind) {
+  const ul = $(kind === 'command' ? 'importCommandsList' : 'importSkillsList');
+  if (!claudeKit) {
+    ul.innerHTML = '<li class="muted small">Looking…</li>';
+    try {
+      const r = await fetch('/ui/api/claude-kit', { credentials: 'same-origin' });
+      claudeKit = r.ok ? (await r.json()).items : [];
+      if (!r.ok) ul.innerHTML = `<li class="muted small">${esc((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)}</li>`;
+    } catch { claudeKit = []; }
+  }
+  const have = new Set((kind === 'command' ? commands : skills).map(x => x.name.toLowerCase()));
+  const items = claudeKit.filter(i => i.kind === kind);
+  ul.innerHTML = items.map((i, n) => `<li class="muted small" title="${esc(i.body.slice(0, 300))}">${kind === 'command' ? '/' : ''}${esc(i.name)} <span class="muted">(${esc(i.source)})</span>${i.description ? ` · ${esc(i.description)}` : ''} <button type="button" class="mini" data-import="${n}"${have.has(i.name.toLowerCase()) ? ' disabled' : ''}>${have.has(i.name.toLowerCase()) ? 'Added' : 'Add'}</button></li>`).join('')
+    || '<li class="muted small">Nothing found in .claude/commands or .claude/skills (here or in your home folder).</li>';
+}
+for (const [id, kind] of [['importCommands', 'command'], ['importSkills', 'skill']]) {
+  $(id).addEventListener('toggle', () => { if ($(id).open) drawImport(kind); });
+  $(`${id}List`).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-import]');
+    if (!b) return;
+    const i = claudeKit.filter(x => x.kind === kind)[Number(b.dataset.import)];
+    if (kind === 'command') {
+      commands.push({ id: uid(), name: i.name, description: i.description, model: '', effort: '', body: i.body });
+      saveCommands(); editingCommand = commands[commands.length - 1]; drawCommandIndex();
+    } else {
+      skills.push({ id: uid(), name: i.name, description: i.description, body: i.body });
+      saveSkills(); editingSkill = skills[skills.length - 1]; drawSkillIndex();
+    }
+    drawImport(kind);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Scheduled messages: sent while this page is open in a tab; a run missed

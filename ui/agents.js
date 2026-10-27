@@ -12,6 +12,8 @@ const CONTINUABLE = new Set(['incomplete']);
 const DEBUGGABLE = new Set(['failed', 'stopped']);
 const TAGS = { done: 'ok', running: '', queued: '', waiting: 'warn', incomplete: 'warn', failed: 'bad', stopped: 'warn' };
 const NOTE_FOR = { done: 'finished', waiting: 'needs you' };
+// a run stopped at its cost limit is "incomplete" to the runner; say why
+const statusWord = (r) => (r.status === 'incomplete' && r.outOfBudget ? 'cost limit' : NOTE_FOR[r.status] || r.status);
 
 let selected = location.hash.slice(1) || null;
 let runs = [];
@@ -70,7 +72,7 @@ function renderList() {
   if (!list.length) { $('list').innerHTML = `<p class="muted">${agentSel ? 'No tasks yet. Give it one above.' : 'No runs yet.'}</p>`; return; }
   $('list').innerHTML = list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(NOTE_FOR[r.status] || r.status)}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
 }
 
 function eventHtml(e) {
@@ -98,13 +100,13 @@ function renderDetail(run) {
   const r = run.result;
   const diffOpen = openDetails.has('diff');
   $('detail').innerHTML = `
-    <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
+    <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status === 'incomplete' && run.outOfBudget ? 'cost limit' : run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
-    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
+    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
-    ${run.legs ? `<p class="muted">Carried on ${run.legs === 1 ? 'once' : `${run.legs} times`} after running out of ${run.outOfSteps ? 'steps' : 'time'}; every part worked on this one branch.</p>` : ''}
+    ${run.legs ? `<p class="muted">Carried on ${run.legs === 1 ? 'once' : `${run.legs} times`} after running out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}; every part worked on this one branch.</p>` : ''}
     ${run.debugRun && runs.some((x) => x.id === run.debugRun) ? `<p class="muted">Auto debug (or a retry) started <a href="#${esc(run.debugRun)}" data-go="${esc(run.debugRun)}">${esc(run.debugRun)}</a>.</p>` : ''}
     ${run.children?.length ? `<div class="result"><strong>Workers</strong><div class="workers">${run.children.map((id, i) => {
       const c = runs.find((x) => x.id === id);
@@ -119,7 +121,7 @@ function renderDetail(run) {
       ${r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
     <div class="actions">${active
       ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
-      : `<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
+      : `<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
     <div class="timeline">${run.events.map(eventHtml).join('')}</div>`;
   if (r?.commit && diffOpen) loadDiff(run.id);
 }
@@ -144,6 +146,89 @@ function drawTerminal(run) {
 }
 $('termPanel').addEventListener('toggle', () => { if ($('termPanel').open) setTimeout(() => runTerminal?.refit(), 0); });
 
+// Preview: the run's dev server. Drawn outside the detail pane so the form keeps what you typed.
+let previewFor = null;
+const PREVIEW_KEY = 'harness-preview-command';
+async function drawPreview(run) {
+  const panel = $('previewPanel');
+  const ok = run && run.kind === 'run' && !run.plan && (!run.sandbox || run.sandbox === 'local') && run.status !== 'queued';
+  panel.hidden = !ok;
+  if (!ok) { previewFor = null; return; }
+  if (previewFor !== run.id) {
+    previewFor = run.id;
+    try { $('previewCmd').value = localStorage.getItem(PREVIEW_KEY) || ''; } catch { $('previewCmd').value = ''; }
+    $('previewMsg').textContent = '';
+  }
+  const st = await api(`/${run.id}/preview`).catch(() => ({ running: false }));
+  $('previewStop').hidden = !st.running;
+  $('previewStart').disabled = Boolean(st.running);
+  $('previewInfo').innerHTML = st.url ? `<p>${st.running ? (st.ready ? '<span class="tag ok">running</span>' : '<span class="tag">starting</span>') : `<span class="tag bad">exited (${esc(st.exited)})</span>`} <a href="${esc(st.url)}" target="_blank" rel="noopener">${esc(st.url)}</a> <code>${esc(st.command)}</code></p><pre>${esc((st.log || []).join('\n'))}</pre>` : '';
+}
+// Ship and undo: only for a change to a registered app. Shows what the checks found, and the
+// buttons stay off while something blocks it.
+let shipFor = null;
+async function drawShip(run) {
+  const panel = $('shipPanel');
+  const ok = run && run.app && ['done', 'incomplete'].includes(run.status);
+  panel.hidden = !ok;
+  if (!ok) { shipFor = null; return; }
+  if (shipFor !== run.id) { shipFor = run.id; $('shipMsg').textContent = ''; }
+  let v;
+  try { v = await api(`/${run.id}/ship`); } catch (err) { $('shipInfo').textContent = err.message; return; }
+  const lines = [];
+  lines.push(`<p>${v.files.length} file${v.files.length === 1 ? '' : 's'}, ${v.lines} lines changed · tests ${v.tests === null ? 'not run' : v.tests ? '<span class="tag ok">pass</span>' : '<span class="tag bad">fail</span>'}</p>`);
+  for (const b of v.blocked) lines.push(`<p class="tag bad">${esc(b)}</p>`);
+  for (const n of v.notes) lines.push(`<p class="muted">${esc(n)}</p>`);
+  if (v.shipped) lines.push(`<p><span class="tag ok">shipped</span> <a href="${esc(v.shipped.url)}" target="_blank" rel="noopener">pull request ${esc(v.shipped.pr)}</a> merged into ${esc(v.shipped.base)}</p>`);
+  if (v.undone) lines.push(`<p><span class="tag">undone</span> <a href="${esc(v.undone.url)}" target="_blank" rel="noopener">revert pull request ${esc(v.undone.pr)}</a></p>`);
+  $('shipInfo').innerHTML = lines.join('');
+  $('shipBtn').disabled = !v.canShip || Boolean(v.shipped);
+  $('undoBtn').hidden = !v.shipped || Boolean(v.undone);
+}
+async function shipAction(path, ask) {
+  if (!selected || !confirm(ask)) return;
+  $('shipMsg').textContent = 'Working…';
+  try {
+    const res = await fetch(`api/runs/${selected}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    $('shipMsg').textContent = 'Done.';
+    shipFor = null;
+    await drawShip(await api(`/${selected}`));
+  } catch (err) { $('shipMsg').textContent = err.message; }
+}
+$('shipBtn').addEventListener('click', () => shipAction('ship', 'Merge this change into the app on GitHub? Its normal pipeline then deploys it.'));
+$('undoBtn').addEventListener('click', () => shipAction('undo', 'Open and merge a revert pull request for this change?'));
+
+$('previewForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const command = $('previewCmd').value.trim();
+  if (!selected) return;
+  try { if (command) localStorage.setItem(PREVIEW_KEY, command); } catch { /* fine */ }
+  const start = (approved) => fetch(`api/runs/${selected}/preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command, approved }) });
+  try {
+    $('previewMsg').textContent = 'Starting…';
+    let res = await start(false);
+    let body = await res.json().catch(() => ({}));
+    if (res.status === 409 && body.needsApproval) {
+      if (!confirm(`${body.error}\n\nRun this command in the workspace?\n${command}`)) { $('previewMsg').textContent = ''; return; }
+      res = await start(true);
+      body = await res.json().catch(() => ({}));
+    }
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    $('previewMsg').textContent = body.ready ? '' : 'It has not answered yet; see the log below.';
+    previewFor = null;
+    await drawPreview(await api(`/${selected}`));
+  } catch (err) { $('previewMsg').textContent = err.message; }
+});
+$('previewStop').addEventListener('click', async () => {
+  try {
+    await fetch(`api/runs/${selected}/preview`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+    previewFor = null;
+    await drawPreview(await api(`/${selected}`));
+  } catch (err) { $('previewMsg').textContent = err.message; }
+});
+
 async function refresh() {
   if (busy) return;
   busy = true;
@@ -159,7 +244,9 @@ async function refresh() {
       const run = await api(`/${selected}`).catch(() => null);
       renderDetail(run);
       drawTerminal(run);
-    } else drawTerminal(null);
+      drawPreview(run);
+      drawShip(run);
+    } else { drawTerminal(null); drawPreview(null); drawShip(null); }
     $('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('down').hidden = false;
@@ -215,6 +302,35 @@ $('detail').addEventListener('toggle', (e) => {
   if (k === 'diff' && e.target.open && selected) loadDiff(selected);
 }, true);
 
+// Save the ticket draft as markdown files in the repo (preview, ask, write), or load a folder back
+async function ticketCall(path, body) {
+  const res = await fetch(`api/tickets/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+  return out;
+}
+$('fileTickets').addEventListener('click', async () => {
+  const f = $('newRun'), msg = $('ticketsMsg');
+  const body = { tickets: f.elements.tickets.value, repo: f.elements.repo.value.trim() };
+  try {
+    msg.textContent = 'Checking…';
+    const plan = await ticketCall('files', { ...body, confirm: false });
+    if (!confirm(`Write ${plan.files.length} files into ${plan.repo}/${plan.folder}?\n\n${plan.files.map((x) => `· ${x.name}`).join('\n')}`)) { msg.textContent = ''; return; }
+    const made = await ticketCall('files', { ...body, confirm: true });
+    msg.textContent = `Wrote ${made.files.length} files to ${made.relative}. Commit them when you are happy.`;
+  } catch (err) { msg.textContent = err.message; }
+});
+$('loadTickets').addEventListener('click', async () => {
+  const f = $('newRun'), msg = $('ticketsMsg');
+  const folder = prompt('Folder inside the repo, for example wayfinder/add-export');
+  if (!folder) return;
+  try {
+    const draft = await ticketCall('read', { repo: f.elements.repo.value.trim(), folder });
+    f.elements.tickets.value = JSON.stringify({ tickets: draft.tickets }, null, 2);
+    msg.textContent = `Loaded ${draft.tickets.length} tickets${draft.skipped.length ? `; skipped ${draft.skipped.join(', ')}` : ''}.`;
+  } catch (err) { msg.textContent = err.message; }
+});
+
 $('newRun').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
@@ -223,6 +339,7 @@ $('newRun').addEventListener('submit', async (e) => {
   // an unchecked box is absent from FormData, and the runner's default may be on
   body.autoDebug = f.elements.autoDebug?.checked ? '1' : '0';
   body.plan = f.elements.plan?.checked ? '1' : '0';
+  body.escalate = f.elements.escalate?.checked ? '1' : '0';
   try {
     $('startMsg').textContent = 'Starting…';
     if (body.workflow === 'auto') {
@@ -231,7 +348,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -269,7 +386,7 @@ async function initWorkflows() {
     const { workflows } = await (await fetch('api/workflows')).json();
     workflowList = workflows;
     $('workflow').insertAdjacentHTML('beforeend', workflows.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join(''));
-    $('workflow').insertAdjacentHTML('beforeend', '<option value="swarm" title="A planner splits the goal, workers do the parts at the same time on their own branches, the branches are merged, and a reviewer checks the result">Swarm (several agents at once)</option>');
+    $('workflow').insertAdjacentHTML('beforeend', '<option value="swarm" title="A planner splits the goal, workers do the parts at the same time on their own branches, the branches are merged, and a reviewer checks the result">Swarm (several agents at once)</option><option value="chatdev" title="Runs ChatDev (an external multi-agent tool) in a cloud sandbox with its models routed through this harness; needs CHATDEV_HARNESS_URL">ChatDev (in a cloud sandbox)</option>');
   } catch { /* auto still works without the list */ }
   $('newRun').elements.goal.addEventListener('input', schedulePick);
   $('workflow').addEventListener('change', () => { $('ticketsField').hidden = $('workflow').value !== 'swarm'; $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });
@@ -443,7 +560,8 @@ async function initAgentDialog() {
     const body = Object.fromEntries(new FormData(f));
     const link = chatProjects().find((p) => p.id === body.project);
     body.project = link ? { id: link.id, name: link.name } : (body.project && editingAgent?.project?.id === body.project ? editingAgent.project : null);
-    for (const k of ['maxSteps', 'maxMinutes']) if (body[k] === '') body[k] = null;
+    for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier']) if (body[k] === '') body[k] = null;
+    body.escalate = f.elements.escalate.checked;
     $('agentMsg').textContent = 'Saving…';
     try {
       const saved = editingAgent ? await sendAgent('PATCH', `/${editingAgent.id}`, body) : await sendAgent('POST', '', body);
@@ -472,7 +590,7 @@ function openAgentDialog(agent) {
   const projects = chatProjects();
   const linked = agent?.project && !projects.some((p) => p.id === agent.project.id) ? [{ id: agent.project.id, name: `${agent.project.name || 'A project'} (not in this browser)` }] : [];
   $('agentProject').innerHTML = '<option value="">None</option>' + [...projects, ...linked].map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-  const v = agent || { name: '', repo: recentRepos()[0] || '', instructions: '', workflow: 'general', profile: '', effort: '', maxSteps: '', maxMinutes: '', project: null };
+  const v = agent || { name: '', repo: recentRepos()[0] || '', instructions: '', workflow: 'general', profile: '', effort: '', maxSteps: '', maxMinutes: '', maxCost: '', project: null };
   f.elements.name.value = v.name;
   f.elements.repo.value = v.repo;
   f.elements.instructions.value = v.instructions || '';
@@ -482,6 +600,9 @@ function openAgentDialog(agent) {
   f.elements.sandbox.value = v.sandbox || '';
   f.elements.maxSteps.value = v.maxSteps ?? '';
   f.elements.maxMinutes.value = v.maxMinutes ?? '';
+  f.elements.maxCost.value = v.maxCost ?? '';
+  f.elements.maxTier.value = v.maxTier || '';
+  f.elements.escalate.checked = v.escalate !== false;
   f.elements.project.value = v.project?.id || '';
   $('agentDialog').showModal();
   f.elements.name.focus();

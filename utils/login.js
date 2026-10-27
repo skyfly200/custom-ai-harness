@@ -66,7 +66,9 @@ function createLogin({ users, legacyPassword = '', sessionStore = null }) {
     const fails = new Map(); // key -> [timestamps]
     const basicOk = new Map(); // sha(name\0password) -> { name, expires }, spares scrypt on every API call
 
-    const ipOf = (req) => req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '';
+    // On Fly every request arrives from Fly's proxy, so the address that counts is the one it puts in Fly-Client-IP
+    // (only believed on Fly itself, where FLY_APP_NAME is set; anywhere else a caller could write that header)
+    const ipOf = (req) => (process.env.FLY_APP_NAME && req.headers['fly-client-ip']) || req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '';
     const failKeys = (req, name) => [`ip:${ipOf(req)}`, `user:${String(name || '').toLowerCase()}`];
     function recent(key) {
         const now = Date.now();

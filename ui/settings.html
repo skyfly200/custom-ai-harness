@@ -101,6 +101,14 @@
         </div>
       </div>
 
+      <div class="group" role="group" aria-labelledby="gJq">
+        <h3 class="group-title" id="gJq">Extra Jev questions</h3>
+        <p class="muted fine">Questions Jev answers about every request, beside the Router's “needs a strong model?”. When its yes reaches the bar, the question either leans the effort (like the Effort button: up for risky or hard work, down for small talk) or sends the request to a model. Leave empty to ask nothing extra. All questions share one call, and the Router waits for it, so each request is a little slower.</p>
+        <div id="jqRows" class="jq-rows"></div>
+        <div class="actions"><button type="button" id="jqAdd" data-hint="Add a blank question">Add a question</button>
+          <button type="button" id="jqExample" data-hint="Add Risky, Reasoning and Small talk, ready to use">Add the examples</button></div>
+      </div>
+
       <div class="group" role="group" aria-labelledby="gGuard">
         <h3 class="group-title" id="gGuard">Command guard</h3>
         <div class="group-grid switches">
@@ -250,8 +258,50 @@ $('setFilter').addEventListener('keydown', (e) => { if (e.key === 'Escape') { $(
 
 // ---- Interceptor settings --------------------------------------------------
 
+const PRESET_QUESTIONS = [
+  { id: 'risky', ask: 'Would carrying out this request be risky, hard to undo, or easy to get subtly wrong?', from: 0.6, effort: 0.3 },
+  { id: 'reasoning', ask: 'Does this request need careful step-by-step reasoning, such as maths, logic or debugging?', from: 0.6, effort: 0.2 },
+  { id: 'small-talk', ask: 'Is this just small talk, a greeting or a trivial question with an obvious short answer?', from: 0.7, effort: -0.4 },
+];
+const escAttr = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+function jqRow(q = {}) {
+  const row = document.createElement('div');
+  row.className = 'jq-row';
+  row.innerHTML = `<input type="text" class="jq-id" placeholder="name" maxlength="31" aria-label="Question name" value="${escAttr(q.id)}">
+    <input type="text" class="jq-ask" placeholder="Is this …?" maxlength="300" aria-label="Question for Jev" value="${escAttr(q.ask)}">
+    <label>Bar <input class="jq-from" type="number" min="0.05" max="1" step="0.05" value="${escAttr(q.from ?? 0.6)}"></label>
+    <label>Effort <input class="jq-effort" type="number" min="-1" max="1" step="0.1" value="${escAttr(q.effort || '')}" placeholder="0"></label>
+    <label>Model <input type="text" class="jq-model" list="models" placeholder="optional" value="${escAttr(q.model)}"></label>
+    <label>Model with tools <input type="text" class="jq-toolsModel" list="models" placeholder="optional" value="${escAttr(q.toolsModel)}"></label>
+    <button type="button" class="jq-del" aria-label="Remove this question">×</button>`;
+  return row;
+}
+function renderQuestions(list) {
+  const box = $('jqRows');
+  box.replaceChildren(...(list || []).map(jqRow));
+}
+function readQuestions() {
+  return [...$('jqRows').children].map((r) => {
+    const v = (c) => r.querySelector(`.jq-${c}`).value.trim();
+    return { id: v('id'), ask: v('ask'), from: v('from'), effort: v('effort'), model: v('model'), toolsModel: v('toolsModel') };
+  });
+}
+function addQuestions(list) {
+  const have = new Set(readQuestions().map((q) => q.id));
+  for (const q of list) if (!have.has(q.id)) $('jqRows').append(jqRow(q));
+  interceptorFormDirty = true; markInterceptor();
+}
+$('jqAdd').addEventListener('click', () => addQuestions([{ id: `question-${$('jqRows').children.length + 1}`, ask: '', from: 0.6 }]));
+$('jqExample').addEventListener('click', () => addQuestions(PRESET_QUESTIONS));
+$('jqRows').addEventListener('click', (e) => {
+  if (!e.target.closest('.jq-del')) return;
+  e.target.closest('.jq-row').remove();
+  interceptorFormDirty = true; markInterceptor();
+});
+
 function fillInterceptorForm(s) {
   const f = $('isettings');
+  renderQuestions(s.jevQuestions);
   for (const [k, v] of Object.entries(s)) {
     const el = f.elements[k];
     if (!el) continue;
@@ -262,7 +312,7 @@ function fillInterceptorForm(s) {
 }
 
 function readInterceptorForm() {
-  const f = $('isettings'), out = {};
+  const f = $('isettings'), out = { jevQuestions: readQuestions() };
   for (const el of f.elements) {
     if (!el.name) continue;
     out[el.name] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (el.value === '' ? null : Number(el.value)) : el.value.trim();
@@ -395,5 +445,6 @@ $('isave').addEventListener('click', () => setTimeout(loadLangfuse, 500));
 </script>
 <script>fetch('/ui/api/me').then((r) => r.ok && (document.getElementById('usersLink').hidden = false)).catch(() => {});</script>
 <script src="bright.js"></script>
+<script src="agent-widget.js" data-app-name="Harness UI" defer></script>
 </body>
 </html>

@@ -1,0 +1,11 @@
+{
+  "id": "audit-refactor",
+  "name": "Refactor with an audit loop",
+  "when": "a large or risky refactor or clean-up across many files that a second pair of eyes should check, repeatedly, until nothing is left to fix",
+  "stages": [
+    { "id": "refactor", "role": "Refactorer", "tools": "all", "maxSteps": 40,
+      "prompt": "Run the project's tests first so you know the starting state. Then refactor as the task asks, in small steps, running the tests after each. Do not change behaviour and do not add features. If you are told what an Auditor found, fix exactly those problems and nothing else. Call finish with what you changed and the test result." },
+    { "id": "audit", "role": "Auditor", "tools": "check", "maxSteps": 15, "effort": "high", "verdict": true, "retryTo": "refactor", "maxRetries": 3,
+      "prompt": "You are an adversarial critic. The Refactorer's work is probably flawed somewhere: find out where. Read the diff (`git diff HEAD`), run the tests, and look for behaviour that changed, code that was lost or duplicated, broken callers, dead leftovers, missing or weakened tests and anything the task asked for that was not done. Check each suspicion against the code before you report it; do not report style preferences. Do not change any file. Start your finish summary with PASS only if you found nothing real, or FAIL followed by a numbered list of the real problems, each with the file and what is wrong." }
+  ]
+}

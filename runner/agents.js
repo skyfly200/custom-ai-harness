@@ -57,12 +57,22 @@ class AgentStore {
             if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
             out.effort = cfg.effort || null;
         }
+        if (has('maxTier')) out.maxTier = cfg.maxTier ? clean(cfg.maxTier, 40) : null;
+        if (has('escalate')) out.escalate = !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false');
         for (const [k, lo, hi] of [['maxSteps', 0, 10000], ['maxMinutes', 1, 240]]) {
             if (!has(k)) continue;
             if (cfg[k] === null || cfg[k] === '') { out[k] = null; continue; }
             const n = Math.floor(Number(cfg[k]));
             if (!Number.isFinite(n)) throw new Error(`${k} must be a number`);
             out[k] = Math.min(hi, Math.max(lo, n));
+        }
+        if (has('maxCost')) {
+            if (cfg.maxCost === null || cfg.maxCost === '') out.maxCost = null;
+            else {
+                const n = Number(cfg.maxCost);
+                if (!Number.isFinite(n) || n < 0) throw new Error('maxCost must be a number of dollars');
+                out.maxCost = Math.min(1000, Math.round(n * 100) / 100) || null;
+            }
         }
         // the chat project (they live in the browser) this agent belongs to: its id and name
         if (has('project')) {
@@ -78,7 +88,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, project: null,
+            instructions: '', profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

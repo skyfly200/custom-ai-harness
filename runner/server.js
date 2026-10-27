@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { RunManager } = require('./runs');
 const { listDrivers } = require('./sandbox');
+const ticketFiles = require('./ticketFiles');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -49,6 +50,26 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
     app.post('/runs', (req, res) => {
         try { res.status(201).json(manager.create(req.body)); } catch (err) { fail(res, err); }
     });
+    // Write a ticket draft as wayfinder markdown files in the repo. Without confirm: true it
+    // only says what would be written, so a page can show it and ask first.
+    app.post('/tickets/files', (req, res) => {
+        try {
+            const { tickets, repo, confirm } = req.body || {};
+            const dir = manager.checkRepo(repo);
+            const plan = ticketFiles.plan(tickets);
+            if (confirm !== true) return res.json({ repo: dir, folder: `${ticketFiles.ROOT}/${plan.folder}`, files: plan.files.map((f) => ({ name: f.name, title: f.title })) });
+            res.status(201).json(ticketFiles.writeFiles(tickets, dir));
+        } catch (err) { fail(res, err); }
+    });
+    // Read a wayfinder folder (relative to the repo) back into a ticket draft
+    app.post('/tickets/read', (req, res) => {
+        try {
+            const dir = manager.checkRepo(req.body?.repo);
+            const target = path.resolve(dir, String(req.body?.folder || ''));
+            if (target !== dir && !target.startsWith(dir + path.sep)) throw new Error('the folder must be inside the repo');
+            res.json(ticketFiles.readTicketFiles(target));
+        } catch (err) { fail(res, err); }
+    });
     // Agents: named, long-lived; their tasks are runs
     app.get('/agents', (req, res) => res.json({ agents: manager.listAgents() }));
     app.post('/agents', (req, res) => {
@@ -67,6 +88,37 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
     app.post('/agents/:id/tasks', (req, res) => {
         try { res.status(201).json(manager.assign(req.params.id, req.body)); } catch (err) { fail(res, err, /no such agent/.test(err.message) ? 404 : 400); }
     });
+    // Apps: registered apps whose own agent changes them, limited to editable paths
+    app.get('/apps', (req, res) => res.json({ apps: manager.listApps() }));
+    app.post('/apps', (req, res) => {
+        try { res.status(201).json(manager.createApp(req.body)); } catch (err) { fail(res, err); }
+    });
+    app.get('/apps/:id', (req, res) => {
+        const a = manager.getApp(req.params.id);
+        return a ? res.json(a) : fail(res, new Error('no such app'), 404);
+    });
+    app.patch('/apps/:id', (req, res) => {
+        try { res.json(manager.updateApp(req.params.id, req.body)); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 400); }
+    });
+    app.delete('/apps/:id', (req, res) => {
+        try { manager.removeApp(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 409); }
+    });
+    app.post('/apps/:id/changes', (req, res) => {
+        try { res.status(201).json(manager.askChange(req.params.id, req.body)); } catch (err) { fail(res, err, /no such app/.test(err.message) ? 404 : 400); }
+    });
+    // Ship and undo a change to an app (merge on GitHub; undo is a revert pull request)
+    app.get('/runs/:id/ship', async (req, res) => {
+        try { res.json(await manager.shipStatus(req.params.id)); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 400); }
+    });
+    app.post('/runs/:id/ship', async (req, res) => {
+        try { res.status(201).json(await manager.shipChange(req.params.id)); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 409); }
+    });
+    app.post('/runs/:id/undo', async (req, res) => {
+        try { res.status(201).json(await manager.undoChange(req.params.id)); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 409); }
+    });
+    app.post('/apps/:id/proposals', (req, res) => {
+        try { res.status(201).json(manager.askProposal(req.params.id, req.body)); } catch (err) { fail(res, err, /no such app/.test(err.message) ? 404 : /already|at most/.test(err.message) ? 429 : 400); }
+    });
     app.get('/runs/:id', (req, res) => {
         const run = manager.get(req.params.id);
         return run ? res.json(run) : fail(res, new Error('no such run'), 404);
@@ -75,6 +127,15 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
         if (!manager.get(req.params.id)) return fail(res, new Error('no such run'), 404);
         res.type('text/plain').send(await manager.diff(req.params.id));
     });
+    // Preview: the run's dev server, so its work can be looked at (local runs)
+    app.post('/runs/:id/preview', async (req, res) => {
+        try { res.status(201).json(await manager.startPreview(req.params.id, req.body)); } catch (err) {
+            if (err.needsApproval) return res.status(409).json({ error: err.message, needsApproval: true });
+            fail(res, err, /no such run/.test(err.message) ? 404 : 400);
+        }
+    });
+    app.get('/runs/:id/preview', (req, res) => (manager.get(req.params.id) ? res.json(manager.previewStatus(req.params.id)) : fail(res, new Error('no such run'), 404)));
+    app.delete('/runs/:id/preview', (req, res) => { manager.stopPreview(req.params.id); res.json({ ok: true }); });
     app.post('/runs/:id/approve', (req, res) => {
         try { manager.approve(req.params.id, req.body?.allow === true); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }
     });
@@ -114,6 +175,7 @@ if (require.main === module) {
         // cloud sandbox (E2B_API_KEY). sprites: a Fly Sprite (SPRITES_TOKEN).
         sandbox: process.env.RUNNER_SANDBOX || 'local',
     });
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { manager.previews.stopAll(); process.exit(0); });
     createApp(manager, { token: process.env.RUNNER_TOKEN || '', port }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {
         console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}; sandbox: ${manager.sandboxKind}`);
     });

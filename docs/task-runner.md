@@ -31,11 +31,15 @@ A run is a one-off. An **agent** is a named, long-lived worker for one repo that
 - **One task at a time.** Tasks given while it is busy wait their turn, in order. Different agents (and one-off runs) work side by side, up to `RUNNER_MAX_RUNS`.
 - **Deleting an agent** keeps its tasks as ordinary runs and leaves their branches in the repo. Changing an agent's repo starts its work over from that repo.
 - **Old runs keep working.** Runs made before agents existed are one-off runs under **All runs**.
-- **Storage.** One JSON file per agent in `runs/_agents/`, read and written only by `runner/agents.js`, so it can be replaced by a database table later. The API is `GET/POST /ui/api/agents`, `GET/PATCH/DELETE /ui/api/agents/<id>` and `POST /ui/api/agents/<id>/tasks` (`goal`, optional `plan`, `maxSteps`, `maxMinutes`); `/ui/api/runs` is unchanged.
+- **Storage.** One JSON file per agent in `runs/_agents/`, read and written only by `runner/agents.js`, so it can be replaced by a database table later. The API is `GET/POST /ui/api/agents`, `GET/PATCH/DELETE /ui/api/agents/<id>` and `POST /ui/api/agents/<id>/tasks` (`goal`, optional `plan`, `maxSteps`, `maxMinutes`, `maxCost`); `/ui/api/runs` is unchanged.
 
 **Agents and chat projects.** A chat project (see [Chat](chat.md)) can have agents. Tick them under **Agents in this project** in the project settings, or choose the **Chat project** in the agent's own form; the agent stores the project's id and name (projects live in your browser, agents in the runner). In a chat, `/agent TASK` hands the task to the project's agent (`/agent NAME TASK` when the project has several; outside a project it picks from all agents). The task carries the last six messages of the chat as context, the chat gets a note linking to the task, and the task on the Agents page links back to the chat. An agent's project name on the Agents page opens that project's chats. An agent belongs to at most one project. `/subagent` still starts a one-off run.
 
 ### Workflows (recipes the agent follows)
+
+### Stronger model on failure
+
+A run climbs one effort step (and so, usually, one routing tier) when a model call fails after its usual retries, when a model answers with nothing, or when a Verifier stage says FAIL and the run goes back to retry. It can climb at most twice. **Highest tier** on the run or agent (sent as `x-harness-max-tier`) caps how high it may go, so a retry never costs more than you allowed. Untick **Try a stronger model when something fails** (or send `escalate: false`) to turn it off. Each climb is a note in the run's log, and the run shows `Escalated N×`. A request the harness rejects outright (HTTP 400, 401) does not escalate.
 
 A workflow is a short list of stages. Each stage is its own agent loop with a role, the tools it may use, a step budget and optionally an effort, and it is handed what the stages before it found. The recipes live in `workflows/*.json`, one file each:
 
@@ -45,11 +49,16 @@ A workflow is a short list of stages. Each stage is its own agent loop with a ro
 | Fix a bug | Investigator (reads, runs tests), Implementer, Verifier | a bug report or failing test |
 | Build a feature | Planner (high effort), Implementer, Verifier | new behaviour |
 | Refactor | Planner (runs the tests first), Implementer, Verifier | restructuring without changing behaviour |
+| Refactor with an audit loop | Refactorer, Auditor (an adversarial critic) | a big or risky refactor; the critic sends it back up to 3 times until it finds nothing real |
 | Review | Reviewer, Skeptic (tries to disprove each finding) | "review this branch", changes nothing |
 | Research the code | Reader, Writer | how something works, changes nothing |
 | Do the task | Engineer | anything else (the fallback) |
 
 Tool sets: `read` (list, read), `check` (also run commands) and `all` (also write files). A **Verifier** starts its summary with PASS or FAIL; FAIL sends the run back to the Implementer once, with what was wrong, and a second FAIL stops the run for you to look at.
+
+**Audit loop.** *Refactor with an audit loop* is a Refactorer and an Auditor whose job is to prove the work wrong: it reads the diff, runs the tests and reports only problems it checked. Its `FAIL` list goes back to the Refactorer, and this repeats for up to 4 rounds in all (`maxRetries: 3`; any verdict stage may set up to 5). The run log says which round it is. If the Auditor still says FAIL after the last round, the run ends `incomplete` for you to look at, with the Auditor's list as the summary. A stage may set `"model": "some-gateway-model"` so the critic is a different model than the one whose work it checks (add it to `workflows/audit-refactor.json`; a model pinned on the run itself overrides it).
+
+**Batch stages (half price, can wait).** A stage with `"canWait": true` and a `"model"` (an OpenRouter id) is one request with no tools, sent through OpenRouter's Batch API at about half price and waited for. It gets the task, what earlier stages found and, with `"diff": true`, the workspace's `git diff`. That suits a critic, a summary or a review of finished work, not an implementer that needs tools. Example stage: `{ "id": "critic", "role": "Critic", "canWait": true, "model": "anthropic/claude-sonnet-5.5", "diff": true, "verdict": true, "retryTo": "implement", "prompt": "..." }`. The run polls every 30 s (`RUNNER_BATCH_POLL_MS`) and holds its place while it waits; Stop works. Batches usually finish in minutes but may take up to 24 h; after `maxWaitMinutes` (default 120) the stage gives up and asks the model normally. It also asks normally, with a note in the log, when the model is not listed in `batch-models.json`, there is no OpenRouter key, or the batch fails. The run's cost counts the batch at half price and the run shows what that saved. The Interceptor talks to OpenRouter directly (`POST /v1/batch`, `GET /v1/batch/:id`) because LiteLLM's batch support does not cover OpenRouter. Not yet done: pooling several runs' requests into one batch, and swarm fan-out. Checked only against a fake OpenRouter: the request body follows OpenRouter's docs, but the result entry's exact shape is read defensively and may need a fix on first real use.
 
 On the Runs page the Workflow box is **Jev picks (auto)** by default. A moment after you stop typing the goal, Jev is asked one yes/no question per recipe ("Is this task a bug report, a failing test or an error message...?"), the best answer at 50% or more wins (otherwise "Do the task"), and the pick is shown under the box. Choose another workflow in the box to override it. To add your own recipe, copy a file in `workflows/`, change the `id`, `name`, `when` (the sentence Jev is asked about) and `stages`; a file with a mistake is skipped and listed by `GET /ui/api/workflows` under `problems`. Set `HARNESS_WORKFLOWS_DIR` to keep recipes elsewhere.
 
@@ -64,9 +73,11 @@ Choose **Swarm (several agents at once)** in the Workflow box for a task that sp
 
 The swarm's page lists its workers; click one to watch it or answer its approval. Stopping the swarm stops every worker. A swarm is marked finished only when every part merged and the reviewer said PASS. Raise `RUNNER_MAX_RUNS` for more workers at once (each one is a stream of model calls, so mind your rate limits).
 
-**From a ticket draft.** `/wayfinder GOAL` in Claude Code returns a JSON draft of tickets. Paste it into **Ticket draft** on the Agents page (shown when Swarm is chosen), or send it as `tickets` with a swarm run, and the planner is skipped: the swarm works the draft's `build` tickets instead. Each ticket's description and acceptance criteria become its worker's task. Tickets run in waves by `depends_on`: a ticket starts once the build tickets it depends on are merged, from the swarm branch as it stands, so it sees their changes. A ticket whose dependency was left out (failed, empty or conflicting) is left out and named in the summary. Research, decision and `build_parent` tickets are not code to write and are skipped; dependencies on them are not waited for. At most 12 build tickets. Dependent waves need the local sandbox (not `RUNNER_SANDBOX=e2b`); a draft whose tickets are all independent works in both. Creating the GitHub issues from the draft is not built; the draft is the only state for now.
+**From a ticket draft.** `/wayfinder GOAL` in Claude Code returns a JSON draft of tickets. Paste it into **Ticket draft** on the Agents page (shown when Swarm is chosen), or send it as `tickets` with a swarm run, and the planner is skipped: the swarm works the draft's `build` tickets instead. Each ticket's description and acceptance criteria become its worker's task. Tickets run in waves by `depends_on`: a ticket starts once the build tickets it depends on are merged, from the swarm branch as it stands, so it sees their changes. A ticket whose dependency was left out (failed, empty or conflicting) is left out and named in the summary. Research, decision and `build_parent` tickets are not code to write and are skipped; dependencies on them are not waited for. At most 12 build tickets. Dependent waves need the local sandbox (not `RUNNER_SANDBOX=e2b`); a draft whose tickets are all independent works in both. **Save as markdown files…** under the draft writes it into the repo (see below).
 
 **Compatible with Matt Pocock's wayfinder** ([mattpocock/skills](https://github.com/mattpocock/skills)). His map is a `wayfinder:map` issue (Destination, Notes, Decisions so far, Not yet specified, Out of scope) with child issues labelled `wayfinder:research|prototype|grilling|task`, a `## Question` body and native blocking. Our draft maps onto it: `destinations` are the Destination, `fog_of_war` is Not yet specified, `depends_on` is blocking, and each ticket carries a `wayfinder_type`. In the other direction, paste issues from `gh issue list --json number,title,body,labels` (blocked by a `Blocked by: #n` line or a `blocked_by` list) into the Ticket draft box and they are read as tickets. His tickets are decisions, so they are not run; an issue that also has a `build` label is. `toWayfinderMap()` in `runner/tickets.js` turns a draft into his map body and labelled tickets, ready to file.
+
+**Tickets as markdown files.** **Save as markdown files…** (under Ticket draft on the Agents page; or `POST /ui/api/tickets/files` with `tickets`, `repo` and `confirm: true`) shows the files it will write and asks, then writes `wayfinder/<map>/map.md` and one file per ticket into the repo (a numbered folder if that map exists already). `map.md` holds his five sections, with the tickets listed as tasks in Notes. Each ticket file has front matter (`id`, `title`, `labels` such as `wayfinder:task` and `build`, `blocked_by`, `status`), a `## Question` body, and `Blocked by:` and `Part of` links to the other files. Blockers come first in the order. They are plain files: read them, edit them, tick them off, commit them. **Load from a folder…** (or `POST /ui/api/tickets/read` with `repo` and `folder`) reads such a folder, including hand-written ones with the same front matter, back into the Ticket draft box for a swarm; files without an `id` are skipped. Nothing is sent to GitHub. Checked against temporary repos only.
 
 Notes:
 
@@ -74,6 +85,8 @@ Notes:
 - Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed. The record is written to a temporary file and renamed into place; where Windows refuses the rename for a moment (a virus scanner or the indexer holding `run.json` open, `EPERM`) it retries, then writes in place, so a run is never lost to that.
 - It runs under Docker with `COMPOSE_PROFILES=runs` (see [Cloud sandboxes](#cloud-sandboxes-e2b) for the setup), which on a server is how to use it.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
+
+See also [ChatDev as an external tool](chatdev.md), a workflow that runs the ChatDev multi-agent tool in a cloud sandbox.
 
 ### Cloud sandboxes (E2B and Fly Sprites)
 
@@ -114,3 +127,34 @@ RUNNER_SANDBOX=e2b            # the compose default for this container
 ```
 
 The runner comes up beside the Interceptor (`http://runner:3100`, no ports published) and the Interceptor sends it the Agents page's requests with the same `RUNNER_TOKEN`, so nothing else on the network can drive it. Runs and their branches land in the `runs` and `repos` folders on the server, so **Continue**, **Retry** and `git diff` work as they do on your PC, and the branch is pushed from the server. Local mode is possible too but pointless there: the worktree is made from the copy of the repo in `repos`, and commands run inside the runner's image, which has only Node and git.
+
+## Apps (in-app agents, step 2)
+
+An app is a repo you can ask for changes: on the Agents page, **Register an app** with its repo, the paths an agent may edit (`ui/**`, one per line; `*` stays in one folder), an optional dev server command (`{port}` is filled in) and test command. **Ask for a change** starts a run on the `change-app` workflow (implement, then verify).
+
+- The write and edit tools refuse any file outside the editable paths. A command can still write anywhere, so after the run the changed files are checked too: anything outside is listed in the result and the run ends `incomplete` instead of `done`.
+- The run's test command runs at the end, and Preview uses the app's dev command when you give none.
+- What the person was looking at (`context` in `POST /apps/:id/changes`) is passed to the agent as untrusted data.
+- Registrations live in `runs/_apps/`. API: `GET/POST /apps`, `GET/PATCH/DELETE /apps/:id`, `POST /apps/:id/changes` (also under `/ui/api/apps`).
+
+### Ship and undo
+
+A finished change shows a **Ship this change** panel: files and lines changed, whether the tests pass, and notes (large change, sensitive files such as auth, payments, migrations, `.env`, workflows). **Approve and merge** stays off while the run did not finish, made no commit, changed files outside the editable paths or its tests fail. The notes are advice; the person decides.
+
+Approving pushes the run's branch, opens a pull request and merges it on GitHub (`GITHUB_TOKEN` in `.env` with Pull requests and Contents write; the repo comes from the app's *GitHub repo* or its `origin` remote, the target from *Base branch* or `origin/HEAD`). The app's own pipeline deploys after the merge; with deploy method `hook` the runner also POSTs the app's hook URL. **Undo** opens and merges a revert pull request for the merge commit. API: `GET/POST /runs/:id/ship`, `POST /runs/:id/undo`. Git history is the audit trail.
+
+### The "Change this page" widget
+
+`ui/agent-widget.js` is already on every harness UI page (`<script src="agent-widget.js" data-app-name="Harness UI" defer>`). It shows a **Change this page** button only when an app with that name (or `data-app="<id>"`) is registered on the Agents page, so register the repo as "Harness UI" with editable paths such as `ui/**` to turn it on. You write what should change, optionally click **Pick an element**, and it starts a change run with the page, the picked element, selected text and recent console errors as context (the agent is told this is untrusted data). Progress shows in the panel; preview, approve and undo are on the Agents page. For another app served from the same address, add the script with its own `data-app-name`.
+
+### Proposals
+
+The widget's **Propose a fix only** (or `POST /apps/:id/proposals` with `kind` `error` or `feedback`, a `note` and the page `context`) runs a change that can only end as an **open pull request**: never merged, never deployed, a draft when it touches sensitive files. A page that hit console errors sends them as the problem; without errors it is a "this is confusing" note. It needs `GITHUB_TOKEN` like shipping; without it the branch is left in the repo and the run log says so. Limits: 3 proposals an hour per app (`RUNNER_PROPOSALS_PER_HOUR`), and the same problem is not proposed again while its earlier proposal is open or running (HTTP 429).
+
+## Cost
+
+Every model call a run makes is priced like the Usage page (the runner reads `/ui/api/model-info`; a cost the provider reports wins). A run record has `cost` (dollars) and `unpricedCalls` (calls to models with no known price, shown as `$1.20+`). A swarm's cost includes its workers.
+
+**Cost limit.** `maxCost` (dollars, on a run, on an agent, or on a task) stops a run when it has spent that much. It ends as `incomplete` with `outOfBudget: true` and shows as "cost limit"; Continue carries it on with the whole limit again, like steps and minutes. A call that is already running finishes, so a run can go a little over. 0 or blank means no limit. On a swarm each worker gets the limit; the swarm's own planner and reviewer count against it too.
+
+The Dashboard shows run spend per day, stacked by the four agents that spent most (the rest are "Other"). A run counts on the day it started.

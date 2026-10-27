@@ -33,6 +33,36 @@
     <div id="agentInfo" class="agent-info" hidden></div>
   </div>
 
+  <h2 data-hint="An app is a repo you can ask for changes. The agent may edit only the paths you list, runs the app's tests, and the result is a branch with a live preview, like any run">Apps</h2>
+  <div class="card" id="appBar">
+    <div id="appList"></div>
+    <div class="actions"><button type="button" id="appAdd">Register an app</button></div>
+  </div>
+  <dialog id="appDialog" class="picker agentdlg" aria-label="App">
+    <form id="appForm" autocomplete="off">
+      <div class="picker-head"><strong id="appFormTitle">Register an app</strong><button type="button" id="appClose" aria-label="Close">×</button></div>
+      <label class="field"><span>Name</span><input type="text" name="name" required maxlength="60" placeholder="Harness UI"></label>
+      <label class="field"><span data-hint="A git repo inside the folders the runner may use">Repo path</span><input type="text" name="repo" required spellcheck="false" placeholder="/home/you/repos/my-app"></label>
+      <label class="field"><span data-hint="One per line. ui/** is everything under ui; * stays in one folder. Edits anywhere else are refused">Paths the agent may edit</span><textarea name="editablePaths" rows="3" required placeholder="ui/**"></textarea></label>
+      <div class="row">
+        <label class="field"><span data-hint="Starts the app for a preview. {port} is replaced by a free port">Dev server command</span><input type="text" name="devCommand" spellcheck="false" placeholder="npm start"></label>
+        <label class="field"><span data-hint="Run after each change; Approve is disabled while it fails">Test command</span><input type="text" name="testCommand" spellcheck="false" placeholder="npm test"></label>
+      </div>
+      <div class="row">
+        <label class="field"><span data-hint="owner/name. Blank: read from the repo's origin remote">GitHub repo</span><input type="text" name="githubRepo" spellcheck="false" placeholder="skyfly200/custom-ai-harness"></label>
+        <label class="field"><span data-hint="Branch changes merge into. Blank: the repo's default branch">Base branch</span><input type="text" name="baseBranch" spellcheck="false" placeholder="master"></label>
+      </div>
+      <div class="picker-foot"><span class="note" id="appMsg"></span><button type="submit" class="primary">Save app</button></div>
+    </form>
+  </dialog>
+  <dialog id="changeDialog" class="picker agentdlg" aria-label="Ask for a change">
+    <form id="changeForm" autocomplete="off">
+      <div class="picker-head"><strong id="changeTitle">Ask for a change</strong><button type="button" id="changeClose" aria-label="Close">×</button></div>
+      <label class="field wide"><span>What should change?</span><textarea name="request" rows="4" required placeholder="Make the Save button blue"></textarea></label>
+      <div class="picker-foot"><span class="note" id="changeMsg"></span><button type="submit" class="primary">Start the change</button></div>
+    </form>
+  </dialog>
+
   <h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2>
   <form class="card" id="newRun" autocomplete="off">
     <label class="field wide"><span>What should it do?</span>
@@ -43,7 +73,8 @@
       <span class="pick-note muted" id="pickNote"></span>
     </div>
     <label class="field wide oneoff" id="ticketsField" hidden><span data-hint="Optional. Paste the JSON that /wayfinder returned. The swarm then skips its planner and works the build tickets instead, a wave at a time: a ticket starts once the tickets it depends on are merged">Ticket draft (JSON from /wayfinder)</span>
-      <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea></label>
+      <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea>
+      <span class="fine muted"><button type="button" id="fileTickets" data-hint="Write this draft into the repo below as markdown files (wayfinder/<map>/map.md and one file per ticket) you can read, edit and commit. Shows what it will write and asks first">Save as markdown files…</button> <button type="button" id="loadTickets" data-hint="Read a folder of wayfinder markdown files in the repo below back into this box">Load from a folder…</button> <span id="ticketsMsg" role="status"></span></span></label>
     <div class="row oneoff">
       <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
         <div class="repo-input"><input type="text" name="repo" id="repo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
@@ -55,8 +86,14 @@
     </div>
     <div class="row">
       <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
+      <label class="field"><span data-hint="Most it may spend, in dollars, priced like the Usage page. It stops there and you can Continue it. Blank or 0: no limit. For a swarm, each worker gets this limit">Max cost ($)</span><input type="number" name="maxCost" min="0" max="1000" step="0.01" placeholder="no limit"></label>
       <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
     </div>
+    <div class="row">
+      <label class="field"><span data-hint="The highest routing tier this run may use, by name (for example Strong). Blank means no cap. Stronger-model retries stay under it">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
+    </div>
+    <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so the harness picks a stronger model. Up to two steps up, never above Highest tier">
+      <input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
     <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
       <input type="checkbox" name="autoDebug" value="1"><span>Auto debug a failed run</span></label>
     <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
@@ -82,8 +119,11 @@
       <div class="row">
         <label class="field"><span data-hint="Most model calls a task may use. Blank or 0: no limit besides the minutes">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
         <label class="field"><span>Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+        <label class="field"><span data-hint="Most one task may spend, in dollars. It stops there and you can Continue it. Blank or 0: no limit">Max cost ($)</span><input type="number" name="maxCost" min="0" max="1000" step="0.01" placeholder="no limit"></label>
+        <label class="field"><span data-hint="The highest routing tier its tasks may use, by name. Blank means no cap">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
         <label class="field"><span data-hint="A chat project this agent belongs to. Chats in that project can hand it work with /agent, and the project lists it">Chat project</span><select name="project" id="agentProject"><option value="">None</option></select></label>
       </div>
+      <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so a stronger model answers"><input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
       <div class="picker-foot"><span class="note" id="agentMsg"></span><button type="submit" class="primary" id="agentSave">Save agent</button></div>
     </form>
   </dialog>
@@ -105,13 +145,28 @@
     <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
     <div id="termHost" class="termhost"></div>
   </details>
+  <div class="card" id="shipPanel" hidden>
+    <strong data-hint="Merges the change into the app through a GitHub pull request, so its normal pipeline deploys it. Needs GITHUB_TOKEN in .env. Approve stays off while tests fail or files outside the editable paths changed">Ship this change</strong>
+    <div id="shipInfo"></div>
+    <div class="actions"><button type="button" class="primary" id="shipBtn" disabled>Approve and merge</button><button type="button" id="undoBtn" hidden>Undo (revert)</button><span class="note" id="shipMsg"></span></div>
+  </div>
+  <details class="card termpanel" id="previewPanel" hidden>
+    <summary data-hint="Start the app's dev server inside this run's workspace and open it, to look at what the agent changed before you merge anything. Local runs only">Preview</summary>
+    <form id="previewForm" class="row" autocomplete="off">
+      <label class="field wide"><span data-hint="The command that starts the app. {port} becomes a free port (also set as PORT)">Dev server command</span><input type="text" name="command" id="previewCmd" placeholder="npm run dev -- --port {port}" spellcheck="false" maxlength="500"></label>
+      <div class="actions"><button class="primary" type="submit" id="previewStart">Start preview</button><button type="button" id="previewStop" hidden>Stop preview</button><span class="note" id="previewMsg" role="status"></span></div>
+    </form>
+    <div id="previewInfo"></div>
+  </details>
 </main>
 <script src="hints.js"></script>
 <script src="bright.js"></script>
+<script src="agent-widget.js" data-app-name="Harness UI" defer></script>
 <script src="vendor/xterm/xterm.js"></script>
 <script src="vendor/xterm/addon-fit.js"></script>
 <script src="terminal.js"></script>
 <script src="costs.js"></script>
 <script src="agents.js"></script>
+<script src="apps.js"></script>
 </body>
 </html>

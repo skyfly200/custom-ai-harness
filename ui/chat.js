@@ -55,6 +55,100 @@ const store = {
   remove(key) { try { localStorage.removeItem(key); } catch {} },
 };
 
+// With a database on the server (DATABASE_URL), chats and the per-person lists are also kept there:
+// each save is pushed a moment later and, at start, what other devices saved is pulled. localStorage
+// stays the working copy, so the page is as quick as before and works unchanged with no database.
+const SYNC_DATA = ['harness-projects', 'harness-skills', 'harness-commands', 'harness-schedules', 'harness-chat-prefs'];
+const sync = {
+  on: false, timers: new Map(), failed: false,
+  api(path, opts = {}) {
+    return fetch(`api/sync${path}`, { ...opts, headers: { 'content-type': 'application/json' }, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
+  },
+  queue(key, fn) {
+    if (!this.on) return;
+    clearTimeout(this.timers.get(key));
+    this.timers.set(key, setTimeout(async () => {
+      this.timers.delete(key);
+      try { const r = await fn(); if (r && r.status >= 500) throw new Error(r.status); this.failed = false; } catch { this.failed = true; }
+    }, 1500));
+  },
+  pushChat(c) { this.queue(`c:${c.id}`, () => this.api(`/chats/${c.id}`, { method: 'PUT', body: c })); },
+  pushData(key, value) {
+    const updated = Date.now();
+    try { localStorage.setItem(`harness-sync-ts:${key}`, String(updated)); } catch {}
+    this.queue(`d:${key}`, () => this.api(`/data/${key}`, { method: 'PUT', body: { value, updated } }));
+  },
+  dropChat(id) { clearTimeout(this.timers.get(`c:${id}`)); this.timers.delete(`c:${id}`); if (this.on) this.api(`/chats/${id}`, { method: 'DELETE' }).catch(() => {}); },
+  // Pull what is newer on the server, push what is newer here (a first sign-in uploads this browser's chats)
+  async start() {
+    let remote;
+    try {
+      const r = await fetch('api/sync', { headers: { accept: 'application/json' } });
+      if (!r.ok) return;
+      remote = await r.json();
+    } catch { return; }
+    if (!remote || !remote.db) return;
+    this.on = true;
+    let changed = false;
+    const raw = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
+    const byId = new Map(remote.chats.map(e => [e.id, e]));
+    for (const e of remote.chats) {
+      const local = index.find(x => x.id === e.id);
+      if (e.deleted) {
+        if (local) { index = index.filter(x => x.id !== e.id); store.remove(CHAT_KEY(e.id)); cache.delete(e.id); changed = true; }
+        continue;
+      }
+      if (local && local.updated >= e.updated) continue;
+      try {
+        const r = await this.api(`/chats/${e.id}`);
+        if (!r.ok) continue;
+        const c = await r.json();
+        raw(CHAT_KEY(c.id), c);
+        cache.delete(c.id);
+        const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches };
+        const i = index.findIndex(x => x.id === c.id);
+        if (i >= 0) index[i] = entry; else index.push(entry);
+        changed = true;
+      } catch {}
+    }
+    index.sort((a, b) => b.updated - a.updated);
+    raw(INDEX_KEY, index);
+    for (const e of index) {
+      const theirs = byId.get(e.id);
+      if (theirs && !theirs.deleted && theirs.updated >= e.updated) continue;
+      const c = store.get(CHAT_KEY(e.id), null);
+      if (c) this.pushChat(c);
+    }
+    for (const key of SYNC_DATA) {
+      const theirs = remote.data[key];
+      let ours = 0;
+      try { ours = Number(localStorage.getItem(`harness-sync-ts:${key}`)) || 0; } catch {}
+      if (theirs && theirs.updated > ours) {
+        raw(key, theirs.value);
+        try { localStorage.setItem(`harness-sync-ts:${key}`, String(theirs.updated)); } catch {}
+        changed = true;
+      } else if (!theirs || ours > theirs.updated) {
+        const v = store.get(key, null);
+        if (v !== null) this.pushData(key, v);
+      }
+    }
+    const guarded = sessionStorage.getItem('harness-sync-reloaded');
+    if (changed && !guarded && !running.size) { sessionStorage.setItem('harness-sync-reloaded', '1'); location.reload(); }
+    else sessionStorage.removeItem('harness-sync-reloaded');
+  },
+};
+// store.set and remove tell sync what changed
+const rawSet = store.set.bind(store), rawRemove = store.remove.bind(store);
+store.set = (key, value) => {
+  const ok = rawSet(key, value);
+  if (ok && sync.on) {
+    if (key.startsWith('harness-chat:')) sync.pushChat(value);
+    else if (SYNC_DATA.includes(key)) sync.pushData(key, value);
+  }
+  return ok;
+};
+store.remove = (key) => { rawRemove(key); if (key.startsWith('harness-chat:')) sync.dropChat(key.slice('harness-chat:'.length)); };
+
 const PROJECTS_KEY = 'harness-projects';
 const SKILLS_KEY = 'harness-skills';
 const COMMANDS_KEY = 'harness-commands';
@@ -4063,6 +4157,7 @@ drawSide();
 setTimeout(checkSchedules, 1500);
 connectLive();
 loadRecent();
+sync.start();
 setActivity(!!prefs.activity);
 setSide(narrow() ? false : panelOpen);
 setInterval(() => { drawList(); drawSchedules(); }, 60000);

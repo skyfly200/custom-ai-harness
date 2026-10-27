@@ -18,6 +18,7 @@ const { createPricer } = require('../utils/runCost');
 const { PreviewManager } = require('./preview');
 const { AgentStore } = require('./agents');
 const { AppStore, editableMatcher } = require('./apps');
+const { Shipper, verdict: shipVerdict } = require('./ship');
 
 const MAX_EVENTS = 2000;
 const EVENT_TEXT = 3000;
@@ -115,7 +116,7 @@ class RunManager {
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoDebug = false, sandbox = 'local' }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoDebug = false, sandbox = 'local', shipper = null }) {
         this.pollMs = pollMs;
         this.batchPollMs = batchPollMs; // how often a waiting batch stage asks whether its batch is done
         this.dir = dir;
@@ -135,6 +136,7 @@ class RunManager {
         fs.mkdirSync(dir, { recursive: true });
         this.agents = new AgentStore(path.join(dir, '_agents'));
         this.apps = new AppStore(path.join(dir, '_apps'));
+        this.shipper = shipper || new Shipper();
         this.load();
     }
 
@@ -549,6 +551,51 @@ class RunManager {
         ].filter(Boolean).join('\n\n');
         const summary = this.create({ goal, repo: app.repo, workflow: 'change-app', app: app.id, editable: app.editablePaths, test: app.testCommand || undefined, maxMinutes: 30 });
         return summary;
+    }
+
+    /** The app and finished change a ship or undo call is about. */
+    changeOf(id) {
+        const run = this.get(id);
+        if (!run) throw new Error('no such run');
+        const app = run.app && this.apps.get(run.app);
+        if (!app) throw new Error('this run is not a change to a registered app');
+        return { run: this.active.get(id) || run, app };
+    }
+
+    async baseBranchOf(app) {
+        if (app.baseBranch) return app.baseBranch;
+        const head = await new Promise((r) => execFile('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd: app.repo }, (e, o) => r(e ? '' : o.trim())));
+        return head.replace(/^origin\//, '') || 'master';
+    }
+
+    shipStatus(id) {
+        const { run, app } = this.changeOf(id);
+        return shipVerdict(run, app.repo).then((v) => ({ ...v, shipped: run.ship || null, undone: run.undo || null }));
+    }
+
+    /** Merge the change into the app's base branch on GitHub. Only when the verdict allows it. */
+    async shipChange(id) {
+        const { run, app } = this.changeOf(id);
+        if (run.ship) throw new Error('this change was already shipped');
+        const v = await shipVerdict(run, app.repo);
+        if (!v.canShip) throw new Error(`not shipping: ${v.blocked.join('; ')}`);
+        const out = await this.shipper.ship({ run, app, repoDir: app.repo, base: await this.baseBranchOf(app) });
+        run.ship = { ...out, ...(await this.shipper.deploy(app)) };
+        this.event(run, { type: 'note', text: `Shipped: pull request ${out.pr} merged into ${out.base} (${out.url}).` });
+        this.save(run);
+        return run.ship;
+    }
+
+    /** Revert a shipped change with a revert pull request. */
+    async undoChange(id) {
+        const { run, app } = this.changeOf(id);
+        if (!run.ship) throw new Error('this change was not shipped');
+        if (run.undo) throw new Error('this change was already undone');
+        const out = await this.shipper.undo({ run, app, repoDir: app.repo });
+        run.undo = { ...out, ...(await this.shipper.deploy(app)) };
+        this.event(run, { type: 'note', text: `Undone: revert pull request ${out.pr} merged (${out.url}).` });
+        this.save(run);
+        return run.undo;
     }
 
     // --- agents: long-lived, with tasks that build on each other ---------------------

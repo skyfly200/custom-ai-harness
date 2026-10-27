@@ -48,6 +48,10 @@
         <label class="field"><span data-hint="Starts the app for a preview. {port} is replaced by a free port">Dev server command</span><input type="text" name="devCommand" spellcheck="false" placeholder="npm start"></label>
         <label class="field"><span data-hint="Run after each change; Approve is disabled while it fails">Test command</span><input type="text" name="testCommand" spellcheck="false" placeholder="npm test"></label>
       </div>
+      <div class="row">
+        <label class="field"><span data-hint="owner/name. Blank: read from the repo's origin remote">GitHub repo</span><input type="text" name="githubRepo" spellcheck="false" placeholder="skyfly200/custom-ai-harness"></label>
+        <label class="field"><span data-hint="Branch changes merge into. Blank: the repo's default branch">Base branch</span><input type="text" name="baseBranch" spellcheck="false" placeholder="master"></label>
+      </div>
       <div class="picker-foot"><span class="note" id="appMsg"></span><button type="submit" class="primary">Save app</button></div>
     </form>
   </dialog>
@@ -139,6 +143,11 @@
     <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
     <div id="termHost" class="termhost"></div>
   </details>
+  <div class="card" id="shipPanel" hidden>
+    <strong data-hint="Merges the change into the app through a GitHub pull request, so its normal pipeline deploys it. Needs GITHUB_TOKEN in .env. Approve stays off while tests fail or files outside the editable paths changed">Ship this change</strong>
+    <div id="shipInfo"></div>
+    <div class="actions"><button type="button" class="primary" id="shipBtn" disabled>Approve and merge</button><button type="button" id="undoBtn" hidden>Undo (revert)</button><span class="note" id="shipMsg"></span></div>
+  </div>
   <details class="card termpanel" id="previewPanel" hidden>
     <summary data-hint="Start the app's dev server inside this run's workspace and open it, to look at what the agent changed before you merge anything. Local runs only">Preview</summary>
     <form id="previewForm" class="row" autocomplete="off">

@@ -75,3 +75,6 @@
 .agentdlg { width: min(640px, calc(100vw - 32px)); overflow: auto; }
 #newRun .oneoff[hidden] { display: none; }
 .run-item .agent-tag { color: var(--accent); }
+.app-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.app-row:last-of-type { border-bottom: 0; }
+.app-row .actions { display: flex; gap: 8px; }

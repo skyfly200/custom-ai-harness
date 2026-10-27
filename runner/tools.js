@@ -36,7 +36,9 @@ const definitions = [
  * person allows it. Returns { definitions, call(name, args) } where call
  * resolves { text, finished? }.
  */
-function makeTools({ sandbox, check, approve, toolset = 'all' }) {
+function makeTools({ sandbox, check, approve, toolset = 'all', editable = null }) {
+    // an app's change run may only write inside its editable paths; the tool refuses, not the prompt
+    const outside = (p) => (editable && !editable(p) ? `${p} is outside the paths this app lets the agent edit. Choose a file inside them, or call finish and say what needs changing elsewhere.` : null);
     async function gate(kind, text) {
         let verdict;
         try {
@@ -64,12 +66,14 @@ function makeTools({ sandbox, check, approve, toolset = 'all' }) {
             return `${path} (${lines.length} lines)\n${text}`;
         },
         async write_file({ path, content }) {
+            if (outside(path)) return outside(path);
             const blocked = await gate('write', await sandbox.resolve(path));
             if (blocked) return blocked;
             await sandbox.writeFile(path, String(content));
             return `Wrote ${path} (${String(content).length} characters).`;
         },
         async edit_file({ path, old: oldText, new: newText }) {
+            if (outside(path)) return outside(path);
             const content = await sandbox.readFile(path);
             const at = content.indexOf(oldText);
             if (!oldText || at < 0) return `"old" was not found in ${path}. Read the file again and copy the text exactly.`;

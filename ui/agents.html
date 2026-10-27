@@ -33,6 +33,32 @@
     <div id="agentInfo" class="agent-info" hidden></div>
   </div>
 
+  <h2 data-hint="An app is a repo you can ask for changes. The agent may edit only the paths you list, runs the app's tests, and the result is a branch with a live preview, like any run">Apps</h2>
+  <div class="card" id="appBar">
+    <div id="appList"></div>
+    <div class="actions"><button type="button" id="appAdd">Register an app</button></div>
+  </div>
+  <dialog id="appDialog" class="picker agentdlg" aria-label="App">
+    <form id="appForm" autocomplete="off">
+      <div class="picker-head"><strong id="appFormTitle">Register an app</strong><button type="button" id="appClose" aria-label="Close">×</button></div>
+      <label class="field"><span>Name</span><input type="text" name="name" required maxlength="60" placeholder="Harness UI"></label>
+      <label class="field"><span data-hint="A git repo inside the folders the runner may use">Repo path</span><input type="text" name="repo" required spellcheck="false" placeholder="/home/you/repos/my-app"></label>
+      <label class="field"><span data-hint="One per line. ui/** is everything under ui; * stays in one folder. Edits anywhere else are refused">Paths the agent may edit</span><textarea name="editablePaths" rows="3" required placeholder="ui/**"></textarea></label>
+      <div class="row">
+        <label class="field"><span data-hint="Starts the app for a preview. {port} is replaced by a free port">Dev server command</span><input type="text" name="devCommand" spellcheck="false" placeholder="npm start"></label>
+        <label class="field"><span data-hint="Run after each change; Approve is disabled while it fails">Test command</span><input type="text" name="testCommand" spellcheck="false" placeholder="npm test"></label>
+      </div>
+      <div class="picker-foot"><span class="note" id="appMsg"></span><button type="submit" class="primary">Save app</button></div>
+    </form>
+  </dialog>
+  <dialog id="changeDialog" class="picker agentdlg" aria-label="Ask for a change">
+    <form id="changeForm" autocomplete="off">
+      <div class="picker-head"><strong id="changeTitle">Ask for a change</strong><button type="button" id="changeClose" aria-label="Close">×</button></div>
+      <label class="field wide"><span>What should change?</span><textarea name="request" rows="4" required placeholder="Make the Save button blue"></textarea></label>
+      <div class="picker-foot"><span class="note" id="changeMsg"></span><button type="submit" class="primary">Start the change</button></div>
+    </form>
+  </dialog>
+
   <h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2>
   <form class="card" id="newRun" autocomplete="off">
     <label class="field wide"><span>What should it do?</span>
@@ -121,5 +147,6 @@
 <script src="terminal.js"></script>
 <script src="costs.js"></script>
 <script src="agents.js"></script>
+<script src="apps.js"></script>
 </body>
 </html>

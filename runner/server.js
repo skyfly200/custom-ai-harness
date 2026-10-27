@@ -13,6 +13,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { RunManager } = require('./runs');
+const { listDrivers } = require('./sandbox');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -40,6 +41,8 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
 
     app.get('/runs', (req, res) => res.json({ runs: manager.list() }));
     app.get('/runs/repos', (req, res) => res.json({ repos: manager.repos(), roots: manager.roots }));
+    // the sandbox drivers a run can pick, and whether each one's key is set
+    app.get('/runs/sandboxes', (req, res) => res.json({ default: manager.sandboxKind, drivers: listDrivers() }));
     app.get('/runs/browse', (req, res) => {
         try { res.json(manager.browse(req.query.path)); } catch (err) { fail(res, err); }
     });
@@ -107,7 +110,8 @@ if (require.main === module) {
         password: process.env.HARNESS_PASSWORD || '',
         maxRuns: Number(process.env.RUNNER_MAX_RUNS) || 2,
         autoDebug: /^(1|true|yes|on)$/i.test(process.env.RUNNER_AUTO_DEBUG || ''),
-        // local: a git worktree on this machine. e2b: a cloud sandbox (E2B_API_KEY in .env)
+        // The default for runs that pick none. local: a git worktree on this machine. e2b: an E2B
+        // cloud sandbox (E2B_API_KEY). sprites: a Fly Sprite (SPRITES_TOKEN).
         sandbox: process.env.RUNNER_SANDBOX || 'local',
     });
     createApp(manager, { token: process.env.RUNNER_TOKEN || '', port }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {

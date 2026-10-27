@@ -51,6 +51,7 @@
       <label class="field"><span data-hint="Which routing picks the models for this run">Routing</span><select name="profile"><option value="">Default</option></select></label>
       <label class="field"><span data-hint="Nudges every request toward cheaper or stronger models">Effort</span>
         <select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
+      <label class="field"><span data-hint="Where the agent's commands run. This machine is a git worktree; E2B and Sprites are throwaway cloud machines (their key goes in .env)">Sandbox</span><select name="sandbox" class="sandbox-select"><option value="">Default</option></select></label>
     </div>
     <div class="row">
       <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
@@ -76,6 +77,7 @@
         <label class="field"><span data-hint="The steps every task follows">Workflow</span><select name="workflow" id="agentWorkflow"></select></label>
         <label class="field"><span data-hint="Which routing picks the models">Routing</span><select name="profile" id="agentProfile"><option value="">Default</option></select></label>
         <label class="field"><span>Effort</span><select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
+        <label class="field"><span data-hint="Where the agent's commands run. This machine is a git worktree; E2B and Sprites are throwaway cloud machines (their key goes in .env)">Sandbox</span><select name="sandbox" class="sandbox-select"><option value="">Default</option></select></label>
       </div>
       <div class="row">
         <label class="field"><span data-hint="Most model calls a task may use. Blank or 0: no limit besides the minutes">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>

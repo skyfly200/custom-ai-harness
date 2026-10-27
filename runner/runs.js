@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
-const { createSandbox, attachSandbox, E2BSandbox, LocalSandbox } = require('./sandbox');
+const { createSandbox, attachSandbox, destroySandboxById, driverFor, normalizeKind, isCloud, LocalSandbox } = require('./sandbox');
 const { makeTools } = require('./tools');
 const { runAgent, systemFor } = require('./agent');
 const workflows = require('../utils/workflows');
@@ -119,7 +119,7 @@ class RunManager {
         this.maxRuns = maxRuns;
         this.retryDelayMs = retryDelayMs;
         this.autoDebugDefault = Boolean(autoDebug); // for new runs (RUNNER_AUTO_DEBUG)
-        this.sandboxKind = sandbox === 'cloud' ? 'e2b' : sandbox; // local (a worktree here) or e2b (a cloud sandbox)
+        this.sandboxKind = normalizeKind(sandbox) || sandbox; // the default driver: local (a worktree here), e2b or sprites (cloud sandboxes); a run can pick its own
         this.runs = new Map();      // id -> record
         this.active = new Map();    // id -> the part a continued run is working as now
         this.live = new Map();      // id -> { sandbox, stop, resolve }
@@ -137,8 +137,8 @@ class RunManager {
             run.error = 'The runner was restarted while this was running.';
             run.pending = null;
             run.ended = new Date().toISOString();
-            // its cloud sandbox would otherwise go on billing until E2B's own timeout
-            if (run.sandboxId) E2BSandbox.destroyById(run.sandboxId).catch(() => {});
+            // its cloud sandbox would otherwise go on billing until the provider's own timeout
+            if (run.sandboxId) destroySandboxById(run.sandbox, run.sandboxId).catch(() => {});
             return true;
         };
         for (const id of fs.readdirSync(this.dir)) {
@@ -242,6 +242,10 @@ class RunManager {
             return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d;
         };
         if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
+        // which sandbox driver this run works in; blank is the runner's default
+        const sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : this.sandboxKind;
+        if (!sandbox) throw new Error(`unknown sandbox ${cfg.sandbox}`);
+        driverFor(sandbox); // an unknown driver, or one whose key is not set, fails now rather than when the run starts
         const isSwarm = cfg.workflow === 'swarm';
         const workflow = isSwarm ? { id: 'swarm', name: 'Swarm' } : workflows.get(cfg.workflow || workflows.FALLBACK);
         if (!workflow) throw new Error(`no workflow named ${cfg.workflow}`);
@@ -262,7 +266,7 @@ class RunManager {
             // time or is stopped. maxMinutes still bounds it, so it cannot run forever.
             maxSteps: num0(cfg.maxSteps, 0, 10000, 0), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
             autoDebug: num(cfg.autoDebug, 0, 1, this.autoDebugDefault ? 1 : 0) === 1,
-            sandbox: this.sandboxKind, sandboxId: null,
+            sandbox, sandboxId: null,
             debugOf: cfg.debugOf ? String(cfg.debugOf) : null, debugDepth: num(cfg.debugDepth, 0, 9, 0), debugRun: null,
             // a run carried on after it ran out of steps or time: the same run and branch,
             // not a new one. continues counts the carries-on, legs the parts done so far and
@@ -381,8 +385,8 @@ class RunManager {
         live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind: run.sandbox || this.sandboxKind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
         const sandbox = live.sandbox;
         run.base = sandbox.base;
-        if (sandbox.kind === 'e2b') { run.sandboxId = sandbox.id; this.save(run); }
-        this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}${sandbox.kind === 'e2b' ? ` in an E2B sandbox (${sandbox.id})` : ''}.` });
+        if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; this.save(run); }
+        this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}${isCloud(sandbox.kind) ? ` in ${sandbox.kind === 'sprites' ? 'a Fly Sprite' : 'an E2B sandbox'} (${sandbox.id})` : ''}.` });
         const files = (await sandbox.git(['ls-files'])).split('\n').filter(Boolean);
         const context = `The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
         const workflow = workflows.get(run.workflow) || workflows.get(workflows.FALLBACK);
@@ -428,7 +432,7 @@ class RunManager {
             if (run.carriesOn) this.foldLeg(run);
             // a cloud sandbox is billed by the minute, so it goes as soon as the run does; a local
             // worktree stays, so the run page keeps working and its branch can still be inspected
-            if (live.sandbox?.kind === 'e2b') live.sandbox.destroy().catch(() => {});
+            if (isCloud(live.sandbox?.kind)) live.sandbox.destroy().catch(() => {});
             else await live.sandbox?.close?.();
             this.noteAgent(run);
             this.startAutoDebug(run);
@@ -487,7 +491,7 @@ class RunManager {
         const source = cfg?.source && typeof cfg.source === 'object'
             ? { chat: cfg.source.chat ? { id: String(cfg.source.chat.id || '').slice(0, 80), title: String(cfg.source.chat.title || '').slice(0, 120) } : null } : null;
         return this.create({
-            goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort,
+            goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
         });
@@ -629,7 +633,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, sandbox: from.sandbox, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };
@@ -735,10 +739,10 @@ class RunManager {
         if (!run) throw new Error('no such run');
         if (this.live.has(id) || run.status === 'queued') throw new Error('stop the run first');
         const dir = path.join(this.dir, id, 'work');
-        if (run.sandbox === 'e2b') {
+        if (isCloud(run.sandbox)) {
             // the sandbox is gone, and with it the only copy of the tree it worked in; the branch it
             // handed back is what is left, so there is no worktree here to remove
-            if (run.sandboxId) await E2BSandbox.destroyById(run.sandboxId);
+            if (run.sandboxId) await destroySandboxById(run.sandbox, run.sandboxId);
         } else {
             await new LocalSandbox({ dir, repo: run.repo, branch: run.branch, base: run.base }).destroy();
         }

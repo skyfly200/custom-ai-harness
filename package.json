@@ -33,6 +33,9 @@
     "pg": "^8.23.1",
     "uv": "^1.4.0"
   },
+  "optionalDependencies": {
+    "@fly/sprites": "^0.2.4"
+  },
   "devDependencies": {
     "concurrently": "^10.0.6"
   }

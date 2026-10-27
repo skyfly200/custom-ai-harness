@@ -37,13 +37,13 @@ function parsePlan(text, goal) {
 }
 
 async function executeSwarm(manager, run, live) {
-    const { createSandbox } = require('./sandbox');
+    const { createSandbox, isCloud } = require('./sandbox');
     const path = require('path');
     const sandbox = await createSandbox({ kind: run.sandbox || manager.sandboxKind, repo: run.repo, dir: path.join(manager.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
     live.sandbox = sandbox;
     run.base = sandbox.base;
-    if (sandbox.kind === 'e2b') { run.sandboxId = sandbox.id; manager.save(run); }
-    manager.event(run, { type: 'note', text: `Swarm on branch ${run.branch} from ${sandbox.base.slice(0, 10)}${sandbox.kind === 'e2b' ? ` in an E2B sandbox (${sandbox.id})` : ''}.` });
+    if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; manager.save(run); }
+    manager.event(run, { type: 'note', text: `Swarm on branch ${run.branch} from ${sandbox.base.slice(0, 10)}${isCloud(sandbox.kind) ? ` in ${sandbox.kind === 'sprites' ? 'a Fly Sprite' : 'an E2B sandbox'} (${sandbox.id})` : ''}.` });
     const files = (await sandbox.git(['ls-files'])).split('\n').filter(Boolean);
     const context = `The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
     let n = 0;
@@ -85,15 +85,15 @@ async function executeSwarm(manager, run, live) {
         if (!ready.length) break;
         // later waves start from the branch the earlier ones were merged into
         const from = wave === 0 ? run.base : run.branch;
-        if (wave > 0 && sandbox.kind === 'e2b') {
-            for (const i of todo) if (!settled.has(i)) { skipped.push(`${plan.parts[i].title}: tickets that depend on others need the local sandbox (RUNNER_SANDBOX unset)`); settled.add(i); }
+        if (wave > 0 && isCloud(sandbox.kind)) {
+            for (const i of todo) if (!settled.has(i)) { skipped.push(`${plan.parts[i].title}: tickets that depend on others need the local sandbox`); settled.add(i); }
             break;
         }
         for (const i of ready) {
             const p = plan.parts[i];
             run.children[i] = manager.create({
                 goal: `${p.task}\n\nThis is one part of a larger task that several engineers do at once, each on their own branch: "${run.goal}". Do only your part and leave files that belong to other parts alone.`,
-                repo: run.repo, base: from, workflow: p.workflow, profile: run.profile, model: run.model, effort: run.effort,
+                repo: run.repo, base: from, workflow: p.workflow, profile: run.profile, model: run.model, effort: run.effort, sandbox: run.sandbox,
                 maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, parent: run.id, autoDebug: run.autoDebug,
             }).id;
         }

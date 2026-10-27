@@ -3,16 +3,20 @@
 // branch to inspect, test and push. Commands run here with a trimmed
 // environment (no API keys).
 //
-// Two sandboxes offer the same methods (create, attach, resolve, readFile,
+// Three sandboxes offer the same methods (create, attach, resolve, readFile,
 // writeFile, listDir, exec, stop, git, commit, diffStat, diff, destroy), so the
 // tools and the runs never know which one they got. create starts a run's branch
 // from a base commit; attach takes the branch as it stands, for carrying a run on
 // after it hit its step or time limit:
 //   LocalSandbox - a git worktree on this machine (the default).
-//   E2BSandbox   - a cloud sandbox from E2B (RUNNER_SANDBOX=e2b). It has no
-//                  copy of your repo to branch off, so the branch is made by
-//                  handing it a git bundle of the base commit, and the branch
-//                  it ends on is handed back the same way before the run ends.
+//   E2BSandbox   - a cloud sandbox from E2B (kind e2b, needs E2B_API_KEY).
+//   SpritesSandbox - a Fly Sprite (kind sprites, needs SPRITES_TOKEN).
+// The two cloud ones share CloudSandbox. They have no copy of your repo to branch
+// off, so the branch is made by handing them a git bundle of the base commit, and
+// the branch they end on is handed back the same way before the run ends. A
+// driver only says how to open one, how to tell a timeout from a failed command
+// and how to delete one by id. Pick one per run (the run's `sandbox`), or set
+// RUNNER_SANDBOX for the default; DRIVERS lists what exists.
 'use strict';
 
 const fs = require('fs');
@@ -216,11 +220,10 @@ class LocalSandbox {
 }
 
 // ---------------------------------------------------------------------------
-// E2B: the same workspace, in a sandbox in the cloud
+// Cloud: the same workspace, in a sandbox in the cloud
 // ---------------------------------------------------------------------------
 
-const WORK_DIR = process.env.E2B_WORKDIR || '/home/user/work';
-// E2B kills the sandbox after this. A run's own limit (240 minutes at most) plus an
+// The provider kills the sandbox after this. A run's own limit (240 minutes at most) plus an
 // hour, so a run that is carried on after it ran out of time still has a sandbox.
 const SANDBOX_LIFETIME_MS = 5 * 60 * 60 * 1000;
 const HOST_TMP = (name) => path.join(os.tmpdir(), `harness-${process.pid}-${Date.now()}-${name}`);
@@ -244,29 +247,39 @@ async function packRepo(repo, commit, until = null) {
     }
 }
 
-class E2BSandbox {
+class CloudSandbox {
+    // what a driver sets
+    static kind = 'cloud';
+    static get workDir() { return '/home/user/work'; }
+    /** Open an empty sandbox: resolves an object shaped like e2b's Sandbox (sandboxId, files, commands, kill). */
+    static async open() { throw new Error('not implemented'); }
+    /** { timedOut } or { exitCode, output } for an error a command run raised; null for any other error. */
+    static classify() { return null; }
+    static async destroyById() {}
+
     constructor({ sandbox, repo, branch, base }) {
         this.sandbox = sandbox;
-        this.dir = WORK_DIR;
+        this.dir = this.constructor.workDir;
         this.repo = repo;
         this.branch = branch;
         this.base = base;
         this.handle = null;
-        this.kind = 'e2b';
+        this.kind = this.constructor.kind;
         this.id = sandbox.sandboxId;
     }
 
     /**
-     * A fresh E2B sandbox with `branch` checked out.
+     * A fresh cloud sandbox with `branch` checked out.
      *
      * adapt is null for a new run's branch, which is made from `base` (a commit in
-     * `repo` on this machine) with its whole history. For a run carried on, adapt
-     * says which commits the branch already has from earlier: if it has any, the
-     * sandbox is given just the ones since `base` (so a part that ran out of time
-     * keeps the work it committed) and the branch is taken as it stands; if it has
-     * none, the branch starts at `base` as it did the first time.
+     * `repo` on this machine) with its whole history. For a run carried on, adapt is
+     * set and says
+     * whether the branch already has commits from earlier: if it has any, the
+     * sandbox is given the branch as it stands (so a part that ran out of time
+     * keeps the work it committed); if it has none, the branch starts at `base`
+     * as it did the first time.
      */
-    static async create({ repo, branch, base = 'HEAD', adapt = null, template = process.env.E2B_TEMPLATE || 'base', lifetimeMs = SANDBOX_LIFETIME_MS }) {
+    static async create({ repo, branch, base = 'HEAD', adapt = null, template = null, lifetimeMs = SANDBOX_LIFETIME_MS }) {
         let top, commit, start = null;
         try {
             top = (await git(repo, ['rev-parse', '--show-toplevel'])).trim();
@@ -282,15 +295,14 @@ class E2BSandbox {
         // a branch that is where it started has nothing of its own to send: send it all
         if (start === commit) start = null;
         const from = start || commit;
-        const { Sandbox } = require('e2b');
-        const sandbox = await Sandbox.create(template, { timeoutMs: lifetimeMs });
-        const box = new E2BSandbox({ sandbox, repo: top, branch, base: commit });
+        const sandbox = await this.open({ template, lifetimeMs });
+        const box = new this({ sandbox, repo: top, branch, base: commit });
         try {
             const remote = `/tmp/harness-base-${sandbox.sandboxId}.bundle`;
-            await sandbox.files.makeDir(WORK_DIR);
+            await sandbox.files.makeDir(box.dir);
             await box.exec('command -v git >/dev/null 2>&1 || (command -v apt-get >/dev/null 2>&1 && sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git)', { timeoutMs: 300000 });
-            // a carried-on branch only needs the commits the earlier part made, on top of the base
-            await sandbox.files.write(remote, await packRepo(top, from, start ? commit : null));
+            // a carried-on branch is sent whole: the new sandbox has nothing, not even the base, to build on
+            await sandbox.files.write(remote, await packRepo(top, from));
             await box.git(['init', '-q', '.']);
             await box.git(['fetch', '-q', remote, `${PACK_REF}:refs/heads/${branch}`]);
             await box.git(['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
@@ -324,20 +336,20 @@ class E2BSandbox {
 
     /** Run a shell command in the workspace. Resolves { code, output, timedOut, ms }; never rejects. */
     async exec(command, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-        const { TimeoutError, CommandExitError } = require('e2b');
         const started = Date.now();
         let output = '';
         const add = (d) => { if (output.length < MAX_OUTPUT * 4) output += d; };
         try {
-            const handle = await this.sandbox.commands.run(command, { cwd: this.dir, background: true, onStdout: add, onStderr: add });
+            const handle = await this.sandbox.commands.run(command, { cwd: this.dir, background: true, timeoutMs, onStdout: add, onStderr: add });
             this.handle = handle;
             const r = await handle.wait();
             this.handle = null;
             return { code: r.exitCode ?? 0, output: trimOutput(output || `${r.stdout || ''}${r.stderr || ''}`), timedOut: false, ms: Date.now() - started };
         } catch (err) {
             this.handle = null;
-            if (err instanceof TimeoutError) return { code: -1, output: trimOutput(`${output}\n${err.message}`), timedOut: true, ms: Date.now() - started };
-            if (err instanceof CommandExitError) return { code: err.exitCode, output: trimOutput(output || `${err.stdout || ''}${err.stderr || ''}`), timedOut: false, ms: Date.now() - started };
+            const known = this.constructor.classify(err);
+            if (known?.timedOut) return { code: -1, output: trimOutput(`${output}\n${err.message}`), timedOut: true, ms: Date.now() - started };
+            if (known) return { code: known.exitCode, output: trimOutput(output || known.output || ''), timedOut: false, ms: Date.now() - started };
             return { code: -1, output: trimOutput(`${output}\n${err.message}`), timedOut: false, ms: Date.now() - started };
         }
     }
@@ -418,6 +430,23 @@ class E2BSandbox {
         this.handle?.kill?.().catch(() => {});
         await this.sandbox.kill().catch(() => {});
     }
+}
+
+class E2BSandbox extends CloudSandbox {
+    static kind = 'e2b';
+    static get workDir() { return process.env.E2B_WORKDIR || '/home/user/work'; }
+
+    static async open({ template, lifetimeMs }) {
+        const { Sandbox } = require('e2b');
+        return Sandbox.create(template || process.env.E2B_TEMPLATE || 'base', { timeoutMs: lifetimeMs });
+    }
+
+    static classify(err) {
+        const { TimeoutError, CommandExitError } = require('e2b');
+        if (err instanceof TimeoutError) return { timedOut: true };
+        if (err instanceof CommandExitError) return { exitCode: err.exitCode, output: `${err.stdout || ''}${err.stderr || ''}` };
+        return null;
+    }
 
     /** Kill a sandbox by id, for a run whose sandbox outlived its process. */
     static async destroyById(id) {
@@ -426,18 +455,62 @@ class E2BSandbox {
     }
 }
 
+class SpritesSandbox extends CloudSandbox {
+    static kind = 'sprites';
+    static get workDir() { return process.env.SPRITES_WORKDIR || '/home/sprite/work'; }
+
+    static async open() { return require('./sprites').createSprite(); }
+
+    static classify(err) {
+        if (err?.name === 'TimeoutError') return { timedOut: true };
+        if (err?.name === 'CommandExitError') return { exitCode: err.exitCode, output: `${err.stdout || ''}${err.stderr || ''}` };
+        return null;
+    }
+
+    static async destroyById(id) { await require('./sprites').deleteSprite(id).catch(() => {}); }
+}
+
+// ---------------------------------------------------------------------------
+// The drivers a run can pick from
+// ---------------------------------------------------------------------------
+
+const DRIVERS = {
+    local: { id: 'local', name: 'This machine (git worktree)', cloud: false, class: LocalSandbox, configured: () => true, needs: null },
+    e2b: { id: 'e2b', name: 'E2B cloud sandbox', cloud: true, class: E2BSandbox, configured: () => !!process.env.E2B_API_KEY, needs: 'E2B_API_KEY' },
+    sprites: { id: 'sprites', name: 'Fly Sprite', cloud: true, class: SpritesSandbox, configured: () => !!process.env.SPRITES_TOKEN, needs: 'SPRITES_TOKEN' },
+};
+const ALIASES = { cloud: 'e2b', sprite: 'sprites', fly: 'sprites' };
+
+/** The driver id for what a person typed ('', 'cloud', 'Sprite' ...), or null when there is no such driver. */
+function normalizeKind(kind) {
+    const k = String(kind ?? '').trim().toLowerCase();
+    if (!k) return null;
+    const id = ALIASES[k] || k;
+    return DRIVERS[id] ? id : null;
+}
+
+const isCloud = (kind) => !!DRIVERS[normalizeKind(kind)]?.cloud;
+
+function driverFor(kind) {
+    const id = normalizeKind(kind);
+    if (!id) throw new Error(`unknown sandbox ${kind}; use ${Object.keys(DRIVERS).join(', ')}`);
+    const driver = DRIVERS[id];
+    if (!driver.configured()) throw new Error(`the ${id} sandbox needs ${driver.needs} in .env`);
+    return driver;
+}
+
+/** What the run form offers: every driver, and whether its key is set. */
+function listDrivers() {
+    return Object.values(DRIVERS).map(({ id, name, cloud, needs, configured }) => ({ id, name, cloud, needs, configured: configured() }));
+}
+
 /**
- * The sandbox a run gets. local (default) is a worktree on this machine; e2b is a
- * cloud sandbox from E2B (needs E2B_API_KEY, which the e2b package reads itself).
+ * The sandbox a run gets: `kind` is a driver id (local, e2b, sprites). local (default
+ * RUNNER_SANDBOX) is a worktree on this machine; the others are cloud sandboxes.
  */
 async function createSandbox({ kind = process.env.RUNNER_SANDBOX || 'local', ...opts } = {}) {
-    const cloud = String(kind).toLowerCase();
-    if (cloud === 'e2b' || cloud === 'cloud') {
-        if (!process.env.E2B_API_KEY) throw new Error('RUNNER_SANDBOX=e2b needs E2B_API_KEY in .env');
-        return E2BSandbox.create(opts);
-    }
-    if (cloud !== 'local') throw new Error(`unknown sandbox ${kind}; use local or e2b`);
-    return LocalSandbox.create(opts);
+    const driver = driverFor(kind);
+    return driver.cloud ? driver.class.create(opts) : LocalSandbox.create(opts);
 }
 
 /**
@@ -446,13 +519,14 @@ async function createSandbox({ kind = process.env.RUNNER_SANDBOX || 'local', ...
  * was killed when its part ended); the branch is handed to it as it stands.
  */
 async function attachSandbox({ kind = process.env.RUNNER_SANDBOX || 'local', ...opts } = {}) {
-    const cloud = String(kind).toLowerCase();
-    if (cloud === 'e2b' || cloud === 'cloud') {
-        if (!process.env.E2B_API_KEY) throw new Error('RUNNER_SANDBOX=e2b needs E2B_API_KEY in .env');
-        return E2BSandbox.create({ ...opts, adapt: true });
-    }
-    if (cloud !== 'local') throw new Error(`unknown sandbox ${kind}; use local or e2b`);
-    return LocalSandbox.attach(opts);
+    const driver = driverFor(kind);
+    return driver.cloud ? driver.class.create({ ...opts, adapt: true }) : LocalSandbox.attach(opts);
 }
 
-module.exports = { LocalSandbox, E2BSandbox, createSandbox, attachSandbox, MAX_OUTPUT, trimOutput };
+/** Delete a cloud sandbox by id, for a run whose sandbox outlived its process. */
+async function destroySandboxById(kind, id) {
+    const id2 = normalizeKind(kind);
+    if (id2 && DRIVERS[id2].cloud && id) await DRIVERS[id2].class.destroyById(id);
+}
+
+module.exports = { LocalSandbox, CloudSandbox, E2BSandbox, SpritesSandbox, DRIVERS, driverFor, normalizeKind, isCloud, listDrivers, destroySandboxById, createSandbox, attachSandbox, MAX_OUTPUT, trimOutput };

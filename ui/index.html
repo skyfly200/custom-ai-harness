@@ -29,6 +29,25 @@
   <h2 id="sinceHead" data-hint="Counts reset when the Interceptor (npm start) restarts">Since start</h2>
   <div class="grid" id="stats"></div>
 
+  <h2 data-hint="Your persistent agents and one-off runs: who is working, what needs your decision, what finished lately. The Agents page has the full detail"><a href="agents.html">Agents</a> <span class="muted" id="agentSummary"></span></h2>
+  <div id="agentDown" class="card notice" hidden></div>
+  <div class="card approvals" id="needs" hidden></div>
+  <div class="grid agent-grid" id="agentCards"><div class="card sub muted">Loading…</div></div>
+  <div class="two home agent-lower">
+    <section>
+      <h2 data-hint="Runs and tasks that are queued, running or waiting for you, and the latest ones that ended">Runs</h2>
+      <div class="card list" id="agentRuns"><div class="sub muted">Loading…</div></div>
+    </section>
+    <section>
+      <h2 data-hint="Hands a task to one of your agents. It starts from where that agent's last task left off">Give an agent a task</h2>
+      <form class="card" id="quickTask" autocomplete="off">
+        <label class="field"><span>Agent</span><select name="agent" id="quickAgent"></select></label>
+        <label class="field"><span>What should it do?</span><textarea name="goal" rows="3" required placeholder="Add a --version flag to the CLI"></textarea></label>
+        <div class="quick-foot"><button class="primary" type="submit">Start task</button><span class="sub" id="quickMsg"></span></div>
+      </form>
+    </section>
+  </div>
+
   <div class="two home">
     <section>
       <h2 data-hint="Your latest chats on this browser, newest first"><a href="chat.html">Recent chats</a></h2>
@@ -65,6 +84,7 @@
 
 <script src="hints.js"></script>
 <script src="costs.js"></script>
+<script src="agentBoard.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -248,6 +268,107 @@ function renderGuard(g) {
     <td><code>${esc((e.text || '').slice(0, 160))}</code>${e.tool ? ` <span class="sub">${esc(e.tool)}</span>` : ''}</td></tr>`).join('');
 }
 
+// ---- agents ------------------------------------------------------------------
+// Runs and agents come from the task runner through the Interceptor (/ui/api/runs, /ui/api/agents)
+
+const RUN_TAGS = { done: 'ok', waiting: 'warn', incomplete: 'warn', failed: 'bad', stopped: 'warn' };
+const RUN_WORD = { done: 'finished', waiting: 'needs you' };
+const STATE_DOT = { waiting: 'warn', working: 'ok', queued: 'ok', idle: 'off' };
+const STATE_WORD = { waiting: 'Needs you', working: 'Working', queued: 'Queued', idle: 'Idle' };
+const since = (iso) => ago(new Date(iso).getTime());
+const repoName = (r) => String(r || '').split(/[\\/]/).pop();
+const firstLine = (s, n) => String(s || '').split('\n')[0].slice(0, n);
+let agentsBusy = false;
+let quickAgentValue = '';
+
+function renderNeeds(needs) {
+  $('needs').hidden = !needs.length;
+  $('needs').innerHTML = needs.map(r => `<div class="need" data-run="${esc(r.id)}">
+      <div class="need-head"><span class="tag warn" style="margin-left:0">needs you</span> <b>${r.agentName ? esc(r.agentName) : 'Run'}</b> <a href="agents.html#${esc(r.parent || r.id)}" class="muted">${esc(firstLine(r.goal, 90))}</a></div>
+      <div class="sub">The agent wants to ${r.pending.kind === 'write' ? 'write this file' : 'run this command'} <span class="muted">(${esc(r.pending.reason)})</span></div>
+      <pre>${esc(String(r.pending.text).slice(0, 400))}</pre>
+      <div class="actions"><button class="primary" data-allow="1">Allow</button><button data-allow="0">Decline</button></div></div>`).join('');
+}
+
+function renderAgentCards(b) {
+  if (!b.agents.length) {
+    $('agentCards').innerHTML = '<div class="card sub muted">No agents yet. <a href="agents.html">Create one</a> and it keeps working on a repo of yours, one task after another.</div>';
+    return;
+  }
+  $('agentCards').innerHTML = b.agents.map(a => {
+    const last = a.lastTask;
+    return `<a class="card agent-card" href="agents.html#${esc(a.id)}">
+      <div class="name"><span class="dot ${STATE_DOT[a.state]}"></span>${esc(a.name)}<span class="tag ${a.state === 'waiting' ? 'warn' : a.state === 'idle' ? '' : 'ok'}">${STATE_WORD[a.state]}</span></div>
+      <div class="sub"><code>${esc(repoName(a.repo))}</code>${a.project?.name ? ` · ${esc(a.project.name)}` : ''}</div>
+      <div class="sub agent-last">${last ? `${esc(firstLine(last.goal, 80))}<br><span class="tag ${RUN_TAGS[last.status] || ''}" style="margin-left:0">${esc(RUN_WORD[last.status] || last.status)}</span> ${since(last.created)}` : 'No tasks yet'}</div>
+      <div class="sub">${a.taskCount || 0} task${a.taskCount === 1 ? '' : 's'}${a.done ? ` · ${a.done} done` : ''}${a.failed ? ` · ${a.failed} failed` : ''} · ${short(a.tokens)} tokens</div></a>`;
+  }).join('');
+}
+
+function runRow(r) {
+  return `<a class="row" href="agents.html#${esc(r.id)}"><span class="title">${esc(firstLine(r.goal, 200))}</span>
+    <span class="meta"><span class="tag ${RUN_TAGS[r.status] || ''}" style="margin-left:0">${esc(RUN_WORD[r.status] || r.status)}</span> ${since(r.created)}</span>
+    <span class="proj">${r.agentName ? `${esc(r.agentName)} · ` : ''}${r.kind === 'swarm' ? 'swarm · ' : ''}<code>${esc(repoName(r.repo))}</code>${r.plan ? ' · plan only' : r.branch && r.status !== 'queued' ? ` · <code>${esc(r.branch)}</code>` : ''} · ${short(AgentBoard.tokensOf(r))} tokens${r.steps ? ` · ${r.steps} steps` : ''}</span></a>`;
+}
+
+function renderAgentRuns(b) {
+  const rows = [...b.active, ...b.recent];
+  $('agentRuns').innerHTML = rows.length ? rows.map(runRow).join('') + '<a class="more" href="agents.html">All runs and agents →</a>'
+    : '<div class="sub muted">No runs yet.</div><a class="more" href="agents.html">Start one →</a>';
+}
+
+function renderQuick(agents) {
+  const sel = $('quickAgent');
+  if (document.activeElement === sel) return;
+  sel.innerHTML = agents.length ? agents.map(a => `<option value="${esc(a.id)}">${esc(a.name)}${a.active ? ` (${a.waiting ? 'needs you' : 'working'})` : ''}</option>`).join('') : '<option value="">No agents yet</option>';
+  if (quickAgentValue && agents.some(a => a.id === quickAgentValue)) sel.value = quickAgentValue;
+  $('quickTask').querySelector('button').disabled = !agents.length;
+}
+
+async function loadAgents() {
+  if (agentsBusy) return;
+  agentsBusy = true;
+  try {
+    const [r, a] = await Promise.all([getJSON('api/runs'), getJSON('api/agents')]);
+    $('agentDown').hidden = true;
+    const b = AgentBoard.board(r.runs, a.agents);
+    renderNeeds(b.needs);
+    renderAgentCards(b);
+    renderAgentRuns(b);
+    renderQuick(a.agents);
+    $('agentSummary').textContent = `${b.totals.active ? `${b.totals.active} running` : 'none running'}${b.needs.length ? ` · ${b.needs.length} need${b.needs.length === 1 ? 's' : ''} you` : ''}`;
+  } catch (err) {
+    $('agentDown').hidden = false;
+    $('agentDown').textContent = `Task runner unreachable: ${err.message}`;
+    $('agentCards').innerHTML = '';
+    $('agentRuns').innerHTML = '<div class="sub muted">Unavailable.</div>';
+  } finally { agentsBusy = false; }
+}
+
+$('needs').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-allow]');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    await getJSON(`api/runs/${b.closest('.need').dataset.run}/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ allow: b.dataset.allow === '1' }) });
+  } catch (err) { alert(err.message); }
+  loadAgents();
+});
+
+$('quickAgent').addEventListener('change', (e) => { quickAgentValue = e.target.value; });
+$('quickTask').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (!f.elements.agent.value) return;
+  $('quickMsg').textContent = 'Starting…';
+  try {
+    const run = await getJSON(`api/agents/${encodeURIComponent(f.elements.agent.value)}/tasks`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ goal: f.elements.goal.value }) });
+    f.elements.goal.value = '';
+    $('quickMsg').innerHTML = `Started. <a href="agents.html#${esc(run.id)}">Watch it →</a>`;
+    loadAgents();
+  } catch (err) { $('quickMsg').textContent = err.message; }
+});
+
 // ---- loop ------------------------------------------------------------------
 
 async function refresh() {
@@ -265,9 +386,11 @@ async function refresh() {
 
 renderChats();
 loadUsage();
+loadAgents();
 refresh();
 setInterval(refresh, 3000);
 setInterval(loadUsage, 30000);
+setInterval(loadAgents, 3000);
 // Chats saved in another tab show up here as they change
 addEventListener('storage', (e) => { if (e.key === 'harness-chats' || e.key === 'harness-projects') renderChats(); });
 </script>

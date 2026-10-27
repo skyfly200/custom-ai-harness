@@ -2,6 +2,16 @@
 
 Written 2026-10-27 for Skyler. Updated the same day with Skyler's answers: invite-only users, OpenRouter workload identity federation as the main credential path with $1 guest accounts as the fallback, attachments as a separate goal from text chats, a Fly region near Colorado and a `skylerfly.com` subdomain. A plan, not code. It covers running the harness on [Fly.io](https://fly.io), keeping chats and per-user data in [Neon](https://neon.com) Postgres, and adding accounts with OAuth sign-in. Back to the [README](../README.md). Related: [Run it on a server](server-docker.md), [Named logins](logins.md), [Task runner](task-runner.md), the [agentic roadmap](../ROADMAP.md).
 
+## Status (2026-10-27)
+
+PR 2 (database layer), PR 4 (chats in Neon) and PR 5 (sign-in) shipped in [PR #98](https://github.com/skyfly200/custom-ai-harness/pull/98); see [Chats and sign-in in Neon](neon.md). They differ from this plan in three ways, and where the two disagree below, `neon.md` and the code are right:
+
+- **Sign-in uses Neon Auth** (managed Better Auth) for the Google and GitHub buttons, invite-only, with `HARNESS_ADMIN_EMAILS` for admins. This plan recommended self-hosted OAuth; the managed option was chosen instead. Users, API keys and invites sit in `harness_store`, sessions in `sessions`.
+- **Chats are stored as the page keeps them**, one row per chat in `chats` (plus `user_data` for projects, skills, commands, schedules and prefs), not one row per message. The browser still works from localStorage and syncs about 1.5 s after each save. A message-per-row table and server-side message saving are not done.
+- **`DATABASE_DRIVER=http`** (Neon's HTTPS driver) exists for hosts that only allow port 443.
+
+**Next: PR 3, the Fly deploy to `agents.skylerfly.com`.** `fly.toml` and a Fly Dockerfile don't exist yet. Still not done: 3a (Stop button and idle stop), 6 to 11.
+
 ## The short version
 
 - **Fly:** one app, one Machine at first (shared-cpu, 1 GB, about $6.70 a month), running Gateway, Router and Interceptor from one image under the existing `npm run all` launcher. Fly gives https, so the Cloudflare tunnel is not needed. A 1 GB volume holds only the global `config.yaml` and settings. Split into one Machine per part only when memory or restarts make it worth it.
@@ -88,8 +98,8 @@ Non-secret settings (`HARNESS_MODE`, `STRONG_MODEL` and the other `.env` launch 
 
 - **Fly region.** Skyler is in Colorado. Fly lists a Denver region (`den`); confirm with `fly platform regions` before relying on it, and fall back to Dallas (`dfw`) if it is missing or doesn't offer shared-cpu Machines. Fly prices differ by region and the figures above are for `iad`/`ewr`, so check the Machine price for the chosen region.
 - **Neon region.** Neon has no Denver; the nearest AWS regions are `us-west-2` (Oregon) and `us-east-2` (Ohio). Pick one and keep the app in a region with a short round trip to it (every chat save is a database call). I'd choose Oregon, then measure a query from the Machine and switch if it is slow.
-- **Domain.** Use a subdomain such as `harness.skylerfly.com`. With DNS on Netlify: (1) `fly certs add harness.skylerfly.com` and read the DNS records it asks for; (2) in Netlify DNS add a `CNAME` for `harness` pointing at the app's `YOUR-APP.fly.dev` (Fly may also ask for an `_acme-challenge` CNAME, or an `A`/`AAAA` pair if you prefer); (3) wait for `fly certs check` to show the certificate issued. No Netlify hosting is involved, only its DNS.
-- This one address is used everywhere that needs a stable name: the OAuth callbacks (`https://harness.skylerfly.com/auth/github/callback`), the OIDC issuer URL for OpenRouter federation (OpenRouter requires the token's `iss` to equal it exactly, https only), and the PWA install.
+- **Domain.** Use a subdomain such as `agents.skylerfly.com`. With DNS on Netlify: (1) `fly certs add agents.skylerfly.com` and read the DNS records it asks for; (2) in Netlify DNS add a `CNAME` for `harness` pointing at the app's `YOUR-APP.fly.dev` (Fly may also ask for an `_acme-challenge` CNAME, or an `A`/`AAAA` pair if you prefer); (3) wait for `fly certs check` to show the certificate issued. No Netlify hosting is involved, only its DNS.
+- This one address is used everywhere that needs a stable name: the OAuth callbacks (`https://agents.skylerfly.com/auth/github/callback`), the OIDC issuer URL for OpenRouter federation (OpenRouter requires the token's `iss` to equal it exactly, https only), and the PWA install.
 - Pick the final subdomain before registering the OAuth apps and the OpenRouter issuer, since both store the address. Changing it later means redoing both.
 
 ### Start and stop to save cost
@@ -206,7 +216,7 @@ Request handling: the Interceptor already reads `x-harness-profile` and similar 
 - **How WIF would work for hosted users.** PR #90 already does the exchange for one install-wide policy (`utils/openrouterAuth.js`, Gateway and Router go through `/openrouter-proxy`). Per user it needs two additions: (a) the harness becomes a small **OIDC issuer** (publishes `/.well-known/openid-configuration` and a JWKS, signs ES256 or RS256 JWTs with `iss` = the app's https address, `sub` = the user id, `aud` = the policy's audience), and (b) the user (or you, for your own org) adds the harness as a trusted issuer in OpenRouter and creates a policy with `sub` = their user id, then pastes the **policy id** into Account settings. Nothing secret is stored; revoking is pausing the policy. The Interceptor mints the JWT, exchanges it (cached for about 14 minutes, as #90 does) and uses the resulting token for that user's requests.
 - **Wiring.** Today the Gateway and Router reach OpenRouter through `/openrouter-proxy` with one proxy key. Hosted mode makes that proxy per-request: the Interceptor tags each internal call with the signed-in user (an internal-only header the Gateway cannot be tricked into sending from outside, because the proxy is on the loopback or private network) and the proxy swaps in that user's key or exchanged token. If the user has no credential, the request is refused with a plain message, or falls back to the shared key when the admin allows it for that user.
 - **Guest accounts (decided 2026-10-27).** Someone with no credential of their own is not refused: an admin (only an admin, never self-service) can create a **guest** user. A guest uses your shared key but has a hard **$1 lifetime cap** (not monthly; the credit does not renew), and is limited to cheap models (an allowed-model list on the account; the Frontier tier is off). The Interceptor checks the cap before forwarding, as for other limits; once spent, requests get a plain 429 saying the guest credit is used up, and you can raise it on the Users page. Users who are not guests and have no credential are refused with a message to add one. **No overshoot (Skyler, 2026-10-27):** the guest cap is enforced by reserving money before the request goes out, not by counting afterwards. See [Hard caps](#hard-caps-no-overshoot).
-- **Constraint to decide on:** WIF needs the user to own an OpenRouter Business organisation, which most invited people won't. Skyler chose federation as the main path (2026-10-27), so WIF is PR 8; a pasted key (PR 8b) is optional for people without an org, and guests cover the rest. A middle option inside your own org is one policy per invited person, each acting as a workspace key you create with its own limit, which gives OpenRouter-side spend caps per person without anyone pasting a key.
+- **Decided (2026-10-27):** full users bring their own credential, so a full user needs their own OpenRouter Business org for federation, or (PR 8b, optional) a pasted key. Guests use Skyler's key. One policy per person in Skyler's org was considered and dropped.
 - **Verify before building:** the exact JWT and issuer rules above come from OpenRouter's docs as read today; nothing has been tried against a real org. Test with one issuer, one policy and one key before designing the UI.
 - **Programs.** Each user makes `hk_` keys on the Users page (exists). The key identifies the user, so Claude Code traffic counts against the same limits as chat. Keys can be named, revoked, and show last-used time (adding columns to what `login.js` has).
 - **Metering and limits still apply.** Even with their own key, the harness records spend per user so people (and you) can see it, and an optional admin-set cap per person still stops requests with a 429. A person's own OpenRouter key limits are theirs to set on OpenRouter.
@@ -245,11 +255,11 @@ Runs are the one part that doesn't move to Fly in v1.
 Each is a separate PR that works on its own and keeps the local, no-database setup working.
 
 1. **Plan** (this document).
-2. **Database layer.** `utils/db.js`, `migrations/`, `npm run migrate`, `DATABASE_URL` optional. A `PgStore` for users, API keys and sessions behind the existing `Store` interface, with sessions in the database. Tests against a throwaway Postgres (Docker, or Neon branch in CI; the repo has no CI today, so local first). Hosted mode off by default.
+2. **Database layer.** *(Done, #98.)* `utils/db.js`, `migrations/`, `npm run migrate`, `DATABASE_URL` optional. A `PgStore` for users, API keys and sessions behind the existing `Store` interface, with sessions in the database. Tests against a throwaway Postgres (Docker, or Neon branch in CI; the repo has no CI today, so local first). Hosted mode off by default.
 3. **Fly deploy.** (With `auto_start_machines`/`auto_stop_machines` set, so it sleeps when idle from day one.) `Dockerfile.fly`, `fly.toml`, secrets list, volume, `trust proxy`, health check, `docs/fly.md` with step by step commands for Windows. Usable immediately with the current named logins. This is the first point where Skyler can reach it from a phone without Tailscale or a tunnel.
 3a. **Stop button and idle stop.** Admin-only Stop on the Dashboard (Fly Machines API with a scoped token), `HARNESS_IDLE_STOP_MIN`, an idle check that sees streams, Runs and pending approvals. Optional later: the always-on Start page.
-4. **Chats in the database (text only).** Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import". Attachments are not part of it.
-5. **OAuth sign-in.** GitHub and Google, `identities`, invite-only users page, `HARNESS_ADMIN_EMAILS`, account page (link or unlink providers, make API keys), sign-in page buttons.
+4. **Chats in the database (text only).** *(Done in #98 as whole-chat rows, not message rows.)* Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import". Attachments are not part of it.
+5. **OAuth sign-in.** *(Done in #98 through Neon Auth; Google by default, GitHub with its own OAuth app.)* GitHub and Google, `identities`, invite-only users page, `HARNESS_ADMIN_EMAILS`, account page (link or unlink providers, make API keys), sign-in page buttons.
 6. **Per-user settings, routings and MCP.** Global versus user split, encrypted MCP secrets, hosted lockdown for stdio MCP and shells.
 7. **Usage, limits and guest accounts.** `usage_events`, per-user spend, optional caps and a Users page column, 429 handling in chat, and the guest account (below): only an admin can make one, it uses your shared key with a hard $1 lifetime cap.
 8. **OpenRouter workload identity federation per user (the main credential path).** The harness as an OIDC issuer (discovery and JWKS), per-user JWTs, a policy id in Account settings, per-request credential in `/openrouter-proxy`. Needs an OpenRouter Business org, so it starts with a one-issuer, one-policy trial in your org.
@@ -270,6 +280,9 @@ Steps 3 and 4 can swap if you would rather have chats in the database before the
 
 ## Decisions so far
 
+- **Subdomain: `agents.skylerfly.com`** (Skyler, 2026-10-27).
+- **Two kinds of user:** guests use Skyler's key (hard $1 cap); full users bring their own OpenRouter credential. No per-person policies or workspace keys in Skyler's org. A full user without a credential is refused until they add one (Skyler, 2026-10-27).
+- **Sleeps after 30 idle minutes** (`HARNESS_IDLE_STOP_MIN=30` in hosted mode).
 - **Federation** is the main OpenRouter credential path. No-credential users get a **guest account** only Skyler can make, with a $1 lifetime cap on the shared key (Skyler, 2026-10-27).
 - **Region and domain:** a Fly region near Colorado, and a subdomain of `skylerfly.com` (DNS is on Netlify). See [Region and domain](#region-and-domain).
 - Users are **invited**, not open sign-up (Skyler, 2026-10-27).
@@ -280,11 +293,9 @@ Steps 3 and 4 can swap if you would rather have chats in the database before the
 ## Open questions for Skyler
 
 1. **OAuth providers:** GitHub and Google first. Any others (Apple, Microsoft, email-and-password only)?
-2. **Auth:** happy with self-hosted OAuth now and AuthKit only if needs grow? With invite-only users the case for AuthKit is weaker still.
-3. **Federation:** the invited people each need an OpenRouter Business org to use it, or you give them a policy in your org (a workspace key per person, with a cap). Which is the plan? Guests cover everyone else.
-4. **Subdomain name:** `harness.skylerfly.com`, or another name?
-5. **MCP and shell for other users:** remote MCP servers only for non-admins, with stdio and shell for you alone. OK?
-6. **Runs:** hidden until PR 11, or earlier than attachments and WIF?
-7. **Start and stop:** is "open the address to wake it, plus a Stop button and idle stop" enough, or do you also want a Start button on a separate always-on page? How many idle minutes before it sleeps (I'd say 30)?
-8. **Neon plan:** Free to start (sleeps after 5 idle minutes), or Launch from day one?
-9. **Existing chats:** import from the browser you use now, and keep localStorage working offline when no database is set (the plan says yes)?
+2. **Auth:** happy with self-hosted OAuth now and AuthKit only if needs grow?
+3. **MCP and shell for other users:** remote MCP servers only for non-admins, with stdio and shell for you alone. OK?
+4. **Runs:** hidden until PR 11, or earlier than attachments and WIF?
+5. **Start button:** is waking by opening the address, plus Stop and idle stop, enough, or do you also want a separate always-on Start page?
+6. **Neon plan:** Free to start (sleeps after 5 idle minutes), or Launch from day one?
+7. **Existing chats:** import from the browser you use now, and keep localStorage working offline when no database is set (the plan says yes)?

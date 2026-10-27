@@ -96,6 +96,15 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
         if (!manager.get(req.params.id)) return fail(res, new Error('no such run'), 404);
         res.type('text/plain').send(await manager.diff(req.params.id));
     });
+    // Preview: the run's dev server, so its work can be looked at (local runs)
+    app.post('/runs/:id/preview', async (req, res) => {
+        try { res.status(201).json(await manager.startPreview(req.params.id, req.body)); } catch (err) {
+            if (err.needsApproval) return res.status(409).json({ error: err.message, needsApproval: true });
+            fail(res, err, /no such run/.test(err.message) ? 404 : 400);
+        }
+    });
+    app.get('/runs/:id/preview', (req, res) => (manager.get(req.params.id) ? res.json(manager.previewStatus(req.params.id)) : fail(res, new Error('no such run'), 404)));
+    app.delete('/runs/:id/preview', (req, res) => { manager.stopPreview(req.params.id); res.json({ ok: true }); });
     app.post('/runs/:id/approve', (req, res) => {
         try { manager.approve(req.params.id, req.body?.allow === true); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }
     });
@@ -135,6 +144,7 @@ if (require.main === module) {
         // cloud sandbox (E2B_API_KEY). sprites: a Fly Sprite (SPRITES_TOKEN).
         sandbox: process.env.RUNNER_SANDBOX || 'local',
     });
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { manager.previews.stopAll(); process.exit(0); });
     createApp(manager, { token: process.env.RUNNER_TOKEN || '', port }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {
         console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}; sandbox: ${manager.sandboxKind}`);
     });

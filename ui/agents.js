@@ -144,6 +144,53 @@ function drawTerminal(run) {
 }
 $('termPanel').addEventListener('toggle', () => { if ($('termPanel').open) setTimeout(() => runTerminal?.refit(), 0); });
 
+// Preview: the run's dev server. Drawn outside the detail pane so the form keeps what you typed.
+let previewFor = null;
+const PREVIEW_KEY = 'harness-preview-command';
+async function drawPreview(run) {
+  const panel = $('previewPanel');
+  const ok = run && run.kind === 'run' && !run.plan && (!run.sandbox || run.sandbox === 'local') && run.status !== 'queued';
+  panel.hidden = !ok;
+  if (!ok) { previewFor = null; return; }
+  if (previewFor !== run.id) {
+    previewFor = run.id;
+    try { $('previewCmd').value = localStorage.getItem(PREVIEW_KEY) || ''; } catch { $('previewCmd').value = ''; }
+    $('previewMsg').textContent = '';
+  }
+  const st = await api(`/${run.id}/preview`).catch(() => ({ running: false }));
+  $('previewStop').hidden = !st.running;
+  $('previewStart').disabled = Boolean(st.running);
+  $('previewInfo').innerHTML = st.url ? `<p>${st.running ? (st.ready ? '<span class="tag ok">running</span>' : '<span class="tag">starting</span>') : `<span class="tag bad">exited (${esc(st.exited)})</span>`} <a href="${esc(st.url)}" target="_blank" rel="noopener">${esc(st.url)}</a> <code>${esc(st.command)}</code></p><pre>${esc((st.log || []).join('\n'))}</pre>` : '';
+}
+$('previewForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const command = $('previewCmd').value.trim();
+  if (!command || !selected) return;
+  try { localStorage.setItem(PREVIEW_KEY, command); } catch { /* fine */ }
+  const start = (approved) => fetch(`api/runs/${selected}/preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command, approved }) });
+  try {
+    $('previewMsg').textContent = 'Starting…';
+    let res = await start(false);
+    let body = await res.json().catch(() => ({}));
+    if (res.status === 409 && body.needsApproval) {
+      if (!confirm(`${body.error}\n\nRun this command in the workspace?\n${command}`)) { $('previewMsg').textContent = ''; return; }
+      res = await start(true);
+      body = await res.json().catch(() => ({}));
+    }
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    $('previewMsg').textContent = body.ready ? '' : 'It has not answered yet; see the log below.';
+    previewFor = null;
+    await drawPreview(await api(`/${selected}`));
+  } catch (err) { $('previewMsg').textContent = err.message; }
+});
+$('previewStop').addEventListener('click', async () => {
+  try {
+    await fetch(`api/runs/${selected}/preview`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+    previewFor = null;
+    await drawPreview(await api(`/${selected}`));
+  } catch (err) { $('previewMsg').textContent = err.message; }
+});
+
 async function refresh() {
   if (busy) return;
   busy = true;
@@ -159,7 +206,8 @@ async function refresh() {
       const run = await api(`/${selected}`).catch(() => null);
       renderDetail(run);
       drawTerminal(run);
-    } else drawTerminal(null);
+      drawPreview(run);
+    } else { drawTerminal(null); drawPreview(null); }
     $('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('down').hidden = false;

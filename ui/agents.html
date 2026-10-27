@@ -113,6 +113,14 @@
     <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
     <div id="termHost" class="termhost"></div>
   </details>
+  <details class="card termpanel" id="previewPanel" hidden>
+    <summary data-hint="Start the app's dev server inside this run's workspace and open it, to look at what the agent changed before you merge anything. Local runs only">Preview</summary>
+    <form id="previewForm" class="row" autocomplete="off">
+      <label class="field wide"><span data-hint="The command that starts the app. {port} becomes a free port (also set as PORT)">Dev server command</span><input type="text" name="command" id="previewCmd" placeholder="npm run dev -- --port {port}" spellcheck="false" maxlength="500"></label>
+      <div class="actions"><button class="primary" type="submit" id="previewStart">Start preview</button><button type="button" id="previewStop" hidden>Stop preview</button><span class="note" id="previewMsg" role="status"></span></div>
+    </form>
+    <div id="previewInfo"></div>
+  </details>
 </main>
 <script src="hints.js"></script>
 <script src="bright.js"></script>

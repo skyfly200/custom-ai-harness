@@ -127,3 +127,14 @@ RUNNER_SANDBOX=e2b            # the compose default for this container
 ```
 
 The runner comes up beside the Interceptor (`http://runner:3100`, no ports published) and the Interceptor sends it the Agents page's requests with the same `RUNNER_TOKEN`, so nothing else on the network can drive it. Runs and their branches land in the `runs` and `repos` folders on the server, so **Continue**, **Retry** and `git diff` work as they do on your PC, and the branch is pushed from the server. Local mode is possible too but pointless there: the worktree is made from the copy of the repo in `repos`, and commands run inside the runner's image, which has only Node and git.
+
+## Apps (in-app agents, step 2)
+
+An app is a repo you can ask for changes: on the Agents page, **Register an app** with its repo, the paths an agent may edit (`ui/**`, one per line; `*` stays in one folder), an optional dev server command (`{port}` is filled in) and test command. **Ask for a change** starts a run on the `change-app` workflow (implement, then verify).
+
+- The write and edit tools refuse any file outside the editable paths. A command can still write anywhere, so after the run the changed files are checked too: anything outside is listed in the result and the run ends `incomplete` instead of `done`.
+- The run's test command runs at the end, and Preview uses the app's dev command when you give none.
+- What the person was looking at (`context` in `POST /apps/:id/changes`) is passed to the agent as untrusted data.
+- Registrations live in `runs/_apps/`. API: `GET/POST /apps`, `GET/PATCH/DELETE /apps/:id`, `POST /apps/:id/changes` (also under `/ui/api/apps`).
+
+Ship, undo and the in-page widget come in later steps; for now the result is a branch to review.

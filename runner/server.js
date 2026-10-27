@@ -88,6 +88,24 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
     app.post('/agents/:id/tasks', (req, res) => {
         try { res.status(201).json(manager.assign(req.params.id, req.body)); } catch (err) { fail(res, err, /no such agent/.test(err.message) ? 404 : 400); }
     });
+    // Apps: registered apps whose own agent changes them, limited to editable paths
+    app.get('/apps', (req, res) => res.json({ apps: manager.listApps() }));
+    app.post('/apps', (req, res) => {
+        try { res.status(201).json(manager.createApp(req.body)); } catch (err) { fail(res, err); }
+    });
+    app.get('/apps/:id', (req, res) => {
+        const a = manager.getApp(req.params.id);
+        return a ? res.json(a) : fail(res, new Error('no such app'), 404);
+    });
+    app.patch('/apps/:id', (req, res) => {
+        try { res.json(manager.updateApp(req.params.id, req.body)); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 400); }
+    });
+    app.delete('/apps/:id', (req, res) => {
+        try { manager.removeApp(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 409); }
+    });
+    app.post('/apps/:id/changes', (req, res) => {
+        try { res.status(201).json(manager.askChange(req.params.id, req.body)); } catch (err) { fail(res, err, /no such app/.test(err.message) ? 404 : 400); }
+    });
     app.get('/runs/:id', (req, res) => {
         const run = manager.get(req.params.id);
         return run ? res.json(run) : fail(res, new Error('no such run'), 404);

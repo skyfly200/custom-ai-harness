@@ -1,0 +1,11 @@
+{
+  "id": "change-app",
+  "name": "Change an app",
+  "when": "a request to change a registered app from inside it: a button, a layout, a filter, a wording",
+  "stages": [
+    { "id": "implement", "role": "Implementer", "tools": "all", "maxSteps": 30,
+      "prompt": "Make the requested change to the app, and only that. You may edit only the paths named in the task; edits elsewhere are refused. Keep the change small and in the style of the surrounding code. If the app has a test command, run it. If the request needs a change outside the editable paths, do what you can inside them and say in finish what is left. Call finish with what you changed." },
+    { "id": "verify", "role": "Verifier", "tools": "check", "maxSteps": 10, "effort": "low", "verdict": true, "retryTo": "implement", "maxRetries": 1,
+      "prompt": "Check the change. Read the diff with `git diff HEAD` (it is not committed yet) and run the test command from the task if there is one. Start your finish summary with PASS if the change does what was asked and nothing else broke, or FAIL followed by exactly what is wrong." }
+  ]
+}

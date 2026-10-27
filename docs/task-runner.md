@@ -143,4 +143,8 @@ A finished change shows a **Ship this change** panel: files and lines changed, w
 
 Approving pushes the run's branch, opens a pull request and merges it on GitHub (`GITHUB_TOKEN` in `.env` with Pull requests and Contents write; the repo comes from the app's *GitHub repo* or its `origin` remote, the target from *Base branch* or `origin/HEAD`). The app's own pipeline deploys after the merge; with deploy method `hook` the runner also POSTs the app's hook URL. **Undo** opens and merges a revert pull request for the merge commit. API: `GET/POST /runs/:id/ship`, `POST /runs/:id/undo`. Git history is the audit trail.
 
-The widget inside the app and self-improvement proposals come in later steps.
+### The "Change this page" widget
+
+`ui/agent-widget.js` is already on every harness UI page (`<script src="agent-widget.js" data-app-name="Harness UI" defer>`). It shows a **Change this page** button only when an app with that name (or `data-app="<id>"`) is registered on the Agents page, so register the repo as "Harness UI" with editable paths such as `ui/**` to turn it on. You write what should change, optionally click **Pick an element**, and it starts a change run with the page, the picked element, selected text and recent console errors as context (the agent is told this is untrusted data). Progress shows in the panel; preview, approve and undo are on the Agents page. For another app served from the same address, add the script with its own `data-app-name`.
+
+Self-improvement proposals come in a later step.

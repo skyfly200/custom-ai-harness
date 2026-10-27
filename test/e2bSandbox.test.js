@@ -76,7 +76,7 @@ class FakeSandbox {
             pid: 1,
             async wait() {
                 try {
-                    const r = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', out], { cwd: realCwd, encoding: 'utf8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] });
+                    const r = execFileSync(...(process.platform === 'win32' ? ['powershell', ['-NoProfile', '-NonInteractive', '-Command', out]] : ['sh', ['-c', out]]), { cwd: realCwd, encoding: 'utf8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] });
                     onStdout?.(String(r));
                     return { exitCode: 0, stdout: String(r), stderr: '' };
                 } catch (err) {
@@ -161,7 +161,7 @@ test('a run that changes nothing makes no commit and leaves no branch', async ()
 
 test('a command reports its exit code, its output and a timeout like a local one', async () => {
     const box = await E2BSandbox.create({ repo, branch: 'harness/e2b4', base });
-    const ok = await box.exec('Write-Output hello');
+    const ok = await box.exec(process.platform === 'win32' ? 'Write-Output hello' : 'echo hello');
     assert.equal(ok.code, 0);
     assert.match(ok.output, /hello/);
     assert.equal(ok.timedOut, false);

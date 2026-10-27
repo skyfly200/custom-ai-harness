@@ -380,7 +380,7 @@ test('a leg of a continued run keeps its own record, and a restart carries it on
     const { id } = start({ maxSteps: 1 });
     const root = await settle(id);
     manager.continueRun(id);
-    await sleep(50);
+    // look at once: a leg with nothing left to say folds itself back within milliseconds
     const leg = manager.get(id);
     assert.notEqual(leg, manager.runs.get(id), 'the leg and the run are separate records');
     assert.equal(manager.runs.get(id).goal, root.goal, 'the run keeps its own record while it is carried on');

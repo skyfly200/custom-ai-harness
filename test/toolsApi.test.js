@@ -12,7 +12,7 @@ let harness, base, app;
 
 test.before(async () => {
     fs.mkdirSync(repo);
-    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+    execFileSync('git', ['init', '-q'], { cwd: repo }); // no -b: git before 2.28 has none
     fs.writeFileSync(path.join(repo, 'a.txt'), 'alpha\n');
     process.env.MCP_CONFIG = path.join(dir, 'mcp.json');
     fs.writeFileSync(process.env.MCP_CONFIG, JSON.stringify({ mcpServers: { echo: { command: process.execPath, args: [path.join(__dirname, 'fixtures', 'echo-mcp-server.js')] } } }));

@@ -1,11 +1,15 @@
 // Which OpenRouter models take its Batch API (about half price, results within
-// 24 h). The catalog has no field for it, so data/batch-models.json lists them
-// by hand: exact ids, or 'vendor/*'.
+// 24 h). The catalog has no field for it, so a JSON list says which they are:
+// exact ids, or 'vendor/*'. data/batch-models.json (gitignored, yours to edit)
+// wins when it exists; batch-models.json next to server.js is the list that ships,
+// so a fresh checkout knows the same models.
 
 const fs = require('fs');
 const path = require('path');
 
-const FILE = process.env.HARNESS_BATCH_MODELS_FILE || path.join(__dirname, '..', 'data', 'batch-models.json');
+const SHIPPED = path.join(__dirname, '..', 'batch-models.json');
+const LOCAL = path.join(__dirname, '..', 'data', 'batch-models.json');
+const FILE = process.env.HARNESS_BATCH_MODELS_FILE || (fs.existsSync(LOCAL) ? LOCAL : SHIPPED);
 
 function load(file = FILE) {
     try {

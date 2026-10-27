@@ -67,6 +67,9 @@ class FileStore {
         const tmp = `${this.file}.tmp`;
         fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600 });
         fs.renameSync(tmp, this.file);
+        // Windows keeps the mode of a file that is replaced, and a rename there does
+        // not carry the temporary file's 0600 over: set it again on what is now on disk
+        try { fs.chmodSync(this.file, 0o600); } catch { /* a filesystem without modes */ }
     }
 }
 

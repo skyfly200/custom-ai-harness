@@ -8,7 +8,7 @@ strong_model: or-deepseek-v4.1-flash-1017
 # model; unset sends them to strong_model. fallback-openrouter-tools is free
 # (NVIDIA Nemotron 3.5 Super VL) and calls tools.
 # strong_model_tools: fallback-openrouter-tools
-weak_model: or-gemma-4-31b-it-free
+weak_model: or-deepseek-v4.1-flash-1017
 
 # Groq's free tier allows 8K tokens per minute, counting requested output.
 # Weak requests estimated above this go to the overflow model instead

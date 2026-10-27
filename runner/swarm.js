@@ -37,12 +37,13 @@ function parsePlan(text, goal) {
 }
 
 async function executeSwarm(manager, run, live) {
-    const { LocalSandbox } = require('./sandbox');
+    const { createSandbox } = require('./sandbox');
     const path = require('path');
-    const sandbox = await LocalSandbox.create({ repo: run.repo, dir: path.join(manager.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
+    const sandbox = await createSandbox({ kind: run.sandbox || manager.sandboxKind, repo: run.repo, dir: path.join(manager.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
     live.sandbox = sandbox;
     run.base = sandbox.base;
-    manager.event(run, { type: 'note', text: `Swarm on branch ${run.branch} from ${sandbox.base.slice(0, 10)}.` });
+    if (sandbox.kind === 'e2b') { run.sandboxId = sandbox.id; manager.save(run); }
+    manager.event(run, { type: 'note', text: `Swarm on branch ${run.branch} from ${sandbox.base.slice(0, 10)}${sandbox.kind === 'e2b' ? ` in an E2B sandbox (${sandbox.id})` : ''}.` });
     const files = (await sandbox.git(['ls-files'])).split('\n').filter(Boolean);
     const context = `The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
     let n = 0;
@@ -59,7 +60,7 @@ async function executeSwarm(manager, run, live) {
     run.children = plan.parts.map((p) => manager.create({
         goal: `${p.task}\n\nThis is one part of a larger task that several engineers do at once, each on their own branch: "${run.goal}". Do only your part and leave files that belong to other parts alone.`,
         repo: run.repo, base: run.base, workflow: p.workflow, profile: run.profile, model: run.model, effort: run.effort,
-        maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, parent: run.id,
+        maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, parent: run.id, autoDebug: run.autoDebug,
     }).id);
     manager.event(run, { type: 'note', text: `Started ${run.children.length} worker${run.children.length === 1 ? '' : 's'}.` });
     manager.save(run);
@@ -74,6 +75,10 @@ async function executeSwarm(manager, run, live) {
 
     const merged = [];
     const skipped = [];
+    // a cloud sandbox has no copy of the workers' branches (they are in the repo here), so they
+    // are handed over as bundles first; on this machine a worktree already sees them
+    const toMerge = run.children.filter((id) => { const c = manager.get(id); return c.status === 'done' && c.result?.commit; });
+    if (sandbox.importBranches) await sandbox.importBranches(toMerge.map((id) => manager.get(id).branch));
     for (const [i, id] of run.children.entries()) {
         const child = manager.get(id);
         const title = plan.parts[i].title;

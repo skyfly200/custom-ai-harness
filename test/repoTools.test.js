@@ -12,7 +12,8 @@ const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-outside-'));
 const git = (...args) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' }).toString();
 
 test.before(() => {
-    git('init', '-q', '-b', 'main');
+    git('init', '-q');
+    git('checkout', '-q', '-b', 'main'); // -b on init needs git 2.28; this works on older ones too
     git('config', 'user.email', 't@example.com');
     git('config', 'user.name', 'Tester');
     fs.mkdirSync(path.join(repo, 'src'));

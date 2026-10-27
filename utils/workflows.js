@@ -30,7 +30,8 @@ function clean(raw, file) {
         if (s.effort && !EFFORTS.has(s.effort)) throw new Error(`${file}: stage ${sid} effort is not valid`);
         return {
             id: sid, role: String(s.role || sid), prompt: String(s.prompt), tools: s.tools || 'all',
-            maxSteps: Math.min(200, Math.max(1, Math.floor(Number(s.maxSteps)) || 30)), effort: s.effort || null,
+            // 0 means the stage sets no step limit of its own (the run's still applies)
+            maxSteps: Math.min(10000, Math.max(0, Number.isFinite(Math.floor(Number(s.maxSteps))) ? Math.floor(Number(s.maxSteps)) : 30)), effort: s.effort || null,
             verdict: Boolean(s.verdict), retryTo: s.retryTo || null, maxRetries: Math.min(3, Math.max(0, Math.floor(Number(s.maxRetries)) || 0)),
         };
     });

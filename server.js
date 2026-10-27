@@ -1,7 +1,9 @@
-require('dotenv').config();
+// A test run must not pick up the developer's .env: the tests set the variables
+// they need themselves, and a value left over from .env (a master key, say) would
+// silently reach a fake Gateway and make a test pass or fail for the wrong reason.
+if (!process.env.NODE_TEST_CONTEXT) require('dotenv').config();
 const express = require('express');
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
-const { countTokens, isEnabled, recordObservation } = require('./utils/tokenCounter');
 const {
     latestUserText,
     latestUserHasImage,
@@ -16,6 +18,7 @@ const {
 const monitor = require('./utils/monitor');
 const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
+const langfuse = require('./utils/langfuse');
 const autoStrategy = require('./utils/autoStrategy');
 const workflows = require('./utils/workflows');
 const tiers = require('./utils/tiers');
@@ -33,10 +36,14 @@ const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager } = require('./utils/mcp');
 const repoTools = require('./utils/repoTools');
+const chatShell = require('./utils/chatShell');
+const chatWorktrees = require('./utils/chatWorktrees');
 const { requirePassword, viaProxy } = require('./utils/access');
 const { createLogin } = require('./utils/login');
 const { parseAdmins, Users, FileStore } = require('./utils/users');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const path = require('path');
 
 const app = express();
@@ -163,26 +170,6 @@ function logRoute(path, { model, threshold, winRate, reason, tier, effort }) {
     }
 }
 
-/**
- * Token counting (opt‑in). When enabled we log estimated in/out tokens and
- * feed the actual output count back into the correction factor so the estimate
- * learns from real data.
- */
-function logTokens(req, label) {
-    if (!isEnabled) return;
-    const inText = JSON.stringify(req.body);
-    const inTok = countTokens(inText);
-    console.info(`[tokens] ${label} in=${inTok}`);
-    const oldSend = res.send;
-    res.send = function (body) {
-        try {
-            const outText = typeof body === 'string' ? body : JSON.stringify(body);
-            const outTok = countTokens(outText);
-        } catch {}
-        return oldSend.call(this, body);
-    };
-}
-
 // Token counts from a routed request's reply, for the Usage page. Failed
 // calls carry no usage and aren't counted.
 function recordUsage(req, proxyRes) {
@@ -196,6 +183,7 @@ function recordUsage(req, proxyRes) {
             servedBy: event.servedBy,
             upstream,
             usage: counts,
+            // no counts in the reply: the request's own size and the text that came back
             estimate: { input: req.harnessInputEstimate, outputChars },
             saved: req.harnessSaved,
         });
@@ -222,15 +210,29 @@ function recordFailure(req, proxyRes) {
     });
 }
 
+// Sockets to the Gateway. The proxy's own agent keeps free sockets forever,
+// and LiteLLM (uvicorn) closes an idle one after a few seconds: reusing one in
+// that gap is a read ECONNRESET on a request that never reached a model. A
+// short timeout drops them first, and per-request reset retry covers the rest.
+const gatewayAgent = new (GATEWAY_URL.startsWith('https:') ? https : http).Agent({
+    keepAlive: true,
+    keepAliveMsecs: 1000,
+    timeout: 4000, // close an idle socket before the Gateway does
+    maxSockets: 256,
+    maxFreeSockets: 8,
+});
+
 // Everything goes to the Gateway (LiteLLM), which speaks both the OpenAI and
 // the Anthropic Messages formats and applies the fallback chain. The guard
 // fails a request the Gateway leaves hanging, so clients get an error instead.
 const toGateway = createProxyMiddleware({
     target: GATEWAY_URL,
     changeOrigin: true,
+    agent: gatewayAgent,
     on: {
         proxyReq: (proxyReq, req, res) => {
             for (const [name, value] of Object.entries(gatewayAuth)) proxyReq.setHeader(name, value);
+            for (const [name, value] of Object.entries(req.harnessLangfuse || {})) proxyReq.setHeader(name, value);
             fixRequestBody(proxyReq, req, res);
             if (!req.harnessEvent) return; // token counting, model listing
             const { gatewayTimeoutMs, streamIdleTimeoutMs } = settings.get();
@@ -243,9 +245,13 @@ const toGateway = createProxyMiddleware({
                     monitor.recordError(req.harnessEvent, new Error(message), kind);
                 },
             });
-            res.on('close', () => {
-                if (!res.writableFinished && !req.harnessFailed) monitor.recordCancel(req.harnessEvent);
-            });
+            // once per request: the retry below runs this hook again
+            if (!req.harnessCancelHook) {
+                req.harnessCancelHook = true;
+                res.on('close', () => {
+                    if (!res.writableFinished && !req.harnessFailed) monitor.recordCancel(req.harnessEvent);
+                });
+            }
         },
         proxyRes: (proxyRes, req) => {
             req.harnessGuard?.response(proxyRes);
@@ -256,9 +262,23 @@ const toGateway = createProxyMiddleware({
         },
         // Replaces http-proxy-middleware's own error answer, so it must answer
         // the client itself: without that a down Gateway left clients waiting forever.
+        // It also does the reset retry: with an on.error handler, http-proxy-middleware
+        // resolves its promise instead of calling next(err), so the error middleware
+        // further down never sees the failure.
         error: (err, req, res) => {
             req.harnessGuard?.clear();
             if (req.harnessFailed) return; // the guard already answered
+            // A reset before the Gateway said anything is usually a socket it had
+            // already closed: send the same request again, on a fresh one.
+            if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) {
+                req.harnessRetried = true;
+                console.warn(`${req.path}: the Gateway reset the connection (${err.code}); retrying once`);
+                // the body was read once already: the proxy writes req.body again from
+                // what the body parser kept, which is still here
+                req.harnessGuard?.clear();
+                toGateway(req, res, () => {});
+                return;
+            }
             req.harnessFailed = true;
             const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
             console.warn(`${req.path}: ${message}`);
@@ -269,6 +289,9 @@ const toGateway = createProxyMiddleware({
 
 // Control UI: monitor the stack and switch the Router's classifier.
 app.use('/ui', express.static(path.join(__dirname, 'ui')));
+
+// Langfuse logging (utils/langfuse.js): are keys set, can we reach it, are prompts logged
+app.get('/ui/api/langfuse', async (req, res) => res.json(await langfuse.status(settings.get())));
 
 app.get('/ui/api/status', async (req, res) => {
     res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats(), openrouter: orAuth.status() });
@@ -736,6 +759,64 @@ app.post('/ui/api/tts', async (req, res) => {
     }
 });
 
+// Dictation for the chat page through an OpenAI-compatible transcription
+// endpoint (POST {STT_URL}/audio/transcriptions). The browser's own speech
+// service needs no server, but Brave and some Chromium builds ship without one
+// and always fail with "network". STT_URL points this at OpenRouter, Groq,
+// OpenAI, a local Whisper or the Gateway. STT_MODEL is the model to ask for and
+// STT_LANGUAGE the default language; the page can override both per request.
+const STT_URL = (process.env.STT_URL || (process.env.OPENROUTER_API_KEY ? OPENROUTER_URL : '')).replace(/\/+$/, '');
+const STT_OPENROUTER = /openrouter\.ai/.test(STT_URL);
+const STT_MODEL = process.env.STT_MODEL || (STT_OPENROUTER ? 'mistralai/voxtral-mini-transcribe-3-0' : 'whisper-1');
+const STT_LANGUAGE = process.env.STT_LANGUAGE || '';
+const STT_KEY = process.env.STT_API_KEY
+    || (STT_URL.startsWith(GATEWAY_URL) ? GATEWAY_KEY : '')
+    || (STT_OPENROUTER ? process.env.OPENROUTER_API_KEY || '' : '');
+
+app.get('/ui/api/stt', (req, res) => {
+    if (!STT_URL) return res.json({ configured: false });
+    res.json({ configured: true, model: STT_MODEL, language: STT_LANGUAGE, host: new URL(STT_URL).host });
+});
+
+// The page records with MediaRecorder and sends base64 JSON. Upstream it goes
+// as a multipart upload, which is what OpenAI, Groq, local Whisper servers and
+// OpenRouter all accept; 24 MB is OpenAI's cap and OpenRouter's too.
+const STT_FORMATS = { 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' };
+const STT_MAX_BYTES = 24 * 1024 * 1024;
+
+app.post('/ui/api/stt', async (req, res) => {
+    if (!STT_URL) return res.status(404).json({ error: 'No speech server: add OPENROUTER_API_KEY or STT_URL to .env' });
+    if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+    const { audio, format, language, model } = req.body || {};
+    if (typeof audio !== 'string' || !audio) return res.status(400).json({ error: 'audio is required' });
+    const bytes = Buffer.from(audio, 'base64');
+    if (!bytes.length) return res.status(400).json({ error: 'audio is empty' });
+    if (bytes.length > STT_MAX_BYTES) return res.status(413).json({ error: 'audio is longer than 24 MB' });
+    const type = String(format || 'audio/webm').split(';')[0].trim();
+    const ext = STT_FORMATS[type] || 'webm';
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type }), `dictation.${ext}`);
+    form.append('model', typeof model === 'string' && model ? model : STT_MODEL);
+    // transcription servers want an ISO-639-1 code: the page holds "en-US"
+    const lang = ((typeof language === 'string' && language.trim()) || STT_LANGUAGE).split(/[-_]/)[0];
+    if (lang) form.append('language', lang);
+    try {
+        const upstream = await fetch(`${STT_URL}/audio/transcriptions`, {
+            method: 'POST',
+            headers: STT_KEY ? { authorization: `Bearer ${STT_KEY}` } : {},
+            body: form,
+            signal: AbortSignal.timeout(120000),
+        });
+        const body = await upstream.text();
+        if (!upstream.ok) return res.status(502).json({ error: `Speech server answered HTTP ${upstream.status}: ${body.slice(0, 300)}` });
+        let text = body;
+        try { text = JSON.parse(body).text ?? ''; } catch {}
+        res.json({ text: String(text).trim() });
+    } catch (err) {
+        res.status(502).json({ error: `Speech server unreachable: ${err.cause?.code || err.message}` });
+    }
+});
+
 // Tools for the chat page: MCP servers from mcp-servers.json, and read-only
 // tools over a git repo a chat is linked to. The page runs the tool loop: it
 // sends the definitions with each request and calls back here to run a call.
@@ -746,7 +827,7 @@ app.get('/ui/api/tools', async (req, res) => {
     const status = mcp.status();
     const definitions = {};
     for (const s of status.servers) definitions[s.name] = mcp.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
-    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions() });
+    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions(), shellDefinitions: settings.get().shellInRepo ? chatShell.definitions() : [] });
 });
 
 app.post('/ui/api/tools/reload', localJsonOnly, async (req, res) => {
@@ -756,22 +837,60 @@ app.post('/ui/api/tools/reload', localJsonOnly, async (req, res) => {
 
 app.post('/ui/api/repo', localJsonOnly, async (req, res) => {
     try {
-        res.json(await repoTools.inspect(req.body?.path));
+        const repo = await repoTools.inspect(req.body?.path);
+        const workspace = req.body?.chatId ? await chatWorktrees.create(repo.path, req.body.chatId) : null;
+        res.json({ ...repo, ...(workspace ? { workspacePath: workspace.path, workspaceBranch: workspace.branch } : {}) });
     } catch (err) {
         res.status(400).json({ error: err.message });
     }
 });
 
+// Run one command for a chat linked to a repo, once the guard has been asked.
+// "allow" runs it and "deny" never does; "ask" runs only when the page says you
+// allowed it there, so a page that skips the question gets a refusal, not a run.
+async function shellCall(repo, args, confirmed) {
+    const { guardJev, guardAskAt, guardDenyAt, shellInRepo } = settings.get();
+    if (!shellInRepo) throw new Error('the shell is off: turn it on in the chat options or in the settings');
+    const command = String(args.command || '');
+    if (!command.trim()) throw new Error('command is required');
+    const root = chatShell.repoRoot(repo);
+    const verdict = await guard.check({ tool: 'bash', command }, { ask: askRouter, jev: guardJev, askAt: guardAskAt, denyAt: guardDenyAt });
+    monitor.live.emit('update', { type: 'guard', event: { ...verdict, from: 'chat' } });
+    if (verdict.decision === 'deny') throw new Error(`refused: ${verdict.reason}`);
+    if (verdict.decision === 'ask' && !confirmed) throw new Error(`needs your approval (${verdict.reason}) but the page sent no confirmation`);
+    const r = await chatShell.exec(root, command, { timeoutMs: (Number(args.timeout_seconds) || 120) * 1000 });
+    const status = r.timedOut ? `timed out after ${Math.round(r.ms / 1000)} s` : `exit code ${r.code}`;
+    return `${status}\n${r.output}`.trimEnd();
+}
+
+// A command the chat's shell wants to run, checked but not run: the page shows
+// the guard's verdict, asks you when it says "ask", then posts the command back
+// to /ui/api/tools/call with `confirmed`.
+app.post('/ui/api/tools/shell/check', localJsonOnly, async (req, res) => {
+    const { command } = req.body || {};
+    if (typeof command !== 'string' || !command.trim()) return res.status(400).json({ error: 'command is required' });
+    const { guardJev, guardAskAt, guardDenyAt, shellInRepo } = settings.get();
+    if (!shellInRepo) return res.json({ decision: 'deny', reason: 'the shell is off in the settings' });
+    const result = await guard.check({ tool: 'bash', command }, { ask: askRouter, jev: guardJev, askAt: guardAskAt, denyAt: guardDenyAt });
+    monitor.live.emit('update', { type: 'guard', event: { ...result, from: 'chat' } });
+    res.json(result);
+});
+
 // Run one tool call. A failing tool is an answer for the model, not an HTTP error.
 app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
-    const { name, arguments: args, repo } = req.body || {};
+    const { name, arguments: args, repo, chatId, confirmed } = req.body || {};
     if (typeof name !== 'string' || !name) return res.status(400).json({ error: 'name is required' });
     const started = Date.now();
     try {
+        const needsRepo = chatShell.isShellTool(name) || repoTools.isRepoTool(name);
+        const workspace = needsRepo && repo && chatId ? await chatWorktrees.create(repo, chatId) : null;
+        const toolRepo = workspace?.path || repo;
         let result;
-        if (repoTools.isRepoTool(name)) {
-            if (!repo) throw new Error('this chat is not linked to a git repo');
-            result = { text: await repoTools.call(repo, name, args || {}), isError: false };
+        if (chatShell.isShellTool(name)) {
+            result = { text: await shellCall(toolRepo, args || {}, confirmed === true), isError: false };
+        } else if (repoTools.isRepoTool(name)) {
+            if (!toolRepo) throw new Error('this chat is not linked to a git repo');
+            result = { text: await repoTools.call(toolRepo, name, args || {}), isError: false };
         } else {
             await mcp.start();
             result = await mcp.call(name, args || {});
@@ -864,6 +983,7 @@ async function routeAndRecord(req, res) {
     if (route.tier) res.set('x-harness-tier', encodeURIComponent(route.tier));
     if (route.profile) res.set('x-harness-profile', encodeURIComponent(route.profile));
     if (req.harnessAuto) res.set('x-harness-auto', encodeURIComponent(`${req.harnessAuto.how}: ${req.harnessAuto.why}`));
+    req.harnessLangfuse = langfuse.headersFor(req, route, { content: settings.get().langfuseContent });
 }
 
 // OpenAI-compatible agents (Cursor, Aider, Continue, ...) and the chat page
@@ -894,12 +1014,32 @@ app.post('/v1/messages', async (req, res, next) => {
 // Anything else (token counting, model listing) passes through untouched
 app.use(toGateway);
 
+// Errors the proxy hands on. It emits 'error' and then calls next with the same
+// error, so this runs after on.error, which leaves a reset unanswered: a
+// connection the Gateway dropped before saying anything is retried once, on a
+// fresh socket, and anything else is answered here.
+app.use((err, req, res, next) => {
+    if (gatewayGuard.isReset(err) && !res.headersSent && !req.harnessRetried) {
+        req.harnessGuard?.clear(); // its watchdog would answer the retry
+        req.harnessRetried = true;
+        console.warn(`${req.path}: the Gateway reset the connection (${err.code}); retrying once`);
+        return toGateway(req, res, next);
+    }
+    if (res.headersSent || res.writableEnded) return;
+    req.harnessFailed = true;
+    const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
+    console.warn(`${req.path}: ${message}`);
+    monitor.recordError(req.harnessEvent, new Error(message), kind);
+});
+
 if (require.main === module) {
     app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
     mcp.start().then(() => {
         for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);
     });
-    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => mcp.close().finally(() => process.exit(0)));
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
+        Promise.all([chatShell.closePowerShellSessions(), mcp.close()]).finally(() => process.exit(0));
+    });
 }
 
 module.exports = { app, mcp, applyHeadroom, headroomCompressText, applyContextAnchor, deriveThreshold, withCavemanAnthropic, dropUnsignedThinking };

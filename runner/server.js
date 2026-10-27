@@ -60,6 +60,19 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
     app.post('/runs/:id/stop', (req, res) => {
         try { manager.stop(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }
     });
+    // The same task again on a fresh branch; debug: told what went wrong last time
+    app.post('/runs/:id/retry', (req, res) => {
+        try { res.status(201).json(manager.retry(req.params.id, { debug: req.body?.debug === true })); } catch (err) {
+            fail(res, err, /no such run/.test(err.message) ? 404 : 409);
+        }
+    });
+    // The same run carried on after it ran out of steps or time: same id, same branch,
+    // not a new run (Retry is for a run that failed)
+    app.post('/runs/:id/continue', (req, res) => {
+        try { res.status(201).json(manager.continueRun(req.params.id)); } catch (err) {
+            fail(res, err, /no such run/.test(err.message) ? 404 : 409);
+        }
+    });
     app.delete('/runs/:id', async (req, res) => {
         try { await manager.remove(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }
     });
@@ -75,9 +88,12 @@ if (require.main === module) {
         harnessUrl: process.env.HARNESS_URL || 'http://localhost:3000',
         password: process.env.HARNESS_PASSWORD || '',
         maxRuns: Number(process.env.RUNNER_MAX_RUNS) || 2,
+        autoDebug: /^(1|true|yes|on)$/i.test(process.env.RUNNER_AUTO_DEBUG || ''),
+        // local: a git worktree on this machine. e2b: a cloud sandbox (E2B_API_KEY in .env)
+        sandbox: process.env.RUNNER_SANDBOX || 'local',
     });
     createApp(manager, { token: process.env.RUNNER_TOKEN || '', port }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {
-        console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}`);
+        console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}; sandbox: ${manager.sandboxKind}`);
     });
 }
 

@@ -8,10 +8,14 @@ const os = require('node:os');
 const path = require('node:path');
 
 let mode = 'ok';
+let calls = 0;         // Gateway calls since a test reset the counter
 let upstreamClosed = false;
 const gateway = http.createServer((req, res) => {
     upstreamClosed = false;
     res.on('close', () => { upstreamClosed = true; });
+    calls++;
+    // A Gateway that goes away mid-call: the socket dies before any headers
+    if (mode === 'reset' || (mode === 'reset-once' && calls === 1)) return req.socket.destroy();
     if (mode === 'hang') return;
     if (mode === 'stall') {
         res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -64,7 +68,9 @@ test('a working Gateway answers normally', async () => {
 
 test('tokens Headroom takes out of tool results are counted for the Usage page', async () => {
     mode = 'ok';
-    const big = 'line of tool output\n'.repeat(2000); // 40,000 characters; Headroom keeps 4,000
+    // far bigger than the cap, so Headroom cuts it down to the cap whatever that is
+    const cap = require('../utils/messageTransforms').HEADROOM_MAX_TOOL_CHARS;
+    const big = 'line of tool output\n'.repeat(Math.ceil((cap * 4) / 20));
     const res = await send('/v1/chat/completions', { messages: [
         { role: 'user', content: 'run it' },
         { role: 'assistant', content: null, tool_calls: [{ id: 't1', type: 'function', function: { name: 'run', arguments: '{}' } }] },
@@ -75,7 +81,9 @@ test('tokens Headroom takes out of tool results are counted for the Usage page',
     await new Promise((r) => setTimeout(r, 50));
     const { rows } = await (await fetch(`${base}/ui/api/usage?days=1`)).json();
     const saved = rows.reduce((sum, r) => sum + (r.savedHeadroom || 0), 0);
-    assert.ok(saved > 8000 && saved < 10000, `about 36,000 characters / 4, got ${saved}`);
+    // about what was cut, over 4 characters a token
+    const cut = big.length - cap;
+    assert.ok(saved > cut / 8 && saved < cut / 2, `about ${Math.round(cut / 4)} tokens cut, got ${saved}`);
 });
 
 test('a down Gateway gets an error, not a hang', async () => {
@@ -89,8 +97,28 @@ test('a down Gateway gets an error, not a hang', async () => {
     await new Promise((r) => gateway.listen(Number(new URL(saved).port), '127.0.0.1', r));
 });
 
+test('a connection the Gateway resets is retried once, and the retry answers', async () => {
+    mode = 'reset-once';
+    calls = 0;
+    const res = await send('/v1/chat/completions', chat);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).choices[0].message.content, 'hi');
+    assert.equal(calls, 2, 'the first call was dropped, the retry answered');
+});
+
+test('a Gateway that keeps resetting says so instead of "read ECONNRESET"', async () => {
+    mode = 'reset';
+    calls = 0;
+    const res = await send('/v1/chat/completions', chat);
+    assert.equal(res.status, 502);
+    assert.match((await res.json()).error.message, /dropped the connection \(ECONNRESET\)/);
+    assert.equal(latest().errorKind, 'gateway down');
+    assert.equal(calls, 2, 'one attempt, one retry, then the error');
+});
+
 test('a Gateway that never answers times out with an Anthropic-shaped error', async () => {
     mode = 'hang';
+    calls = 0;
     const res = await send('/v1/messages', messages);
     assert.equal(res.status, 504);
     const body = await res.json();

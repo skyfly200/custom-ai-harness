@@ -45,6 +45,20 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 ## Ideas for Later
 * ✅ **Free VPS Hosting (Docker):** `docker compose up -d --build` runs the Interceptor, Router and Gateway as containers on a server; README "Run it on a server" walks through Oracle Cloud Always Free with Tailscale. About 450 MB of memory with the `systemone` Router, so 1 GB free tiers fit too; the RouteLLM BERT Router is a build option (`ROUTER_BACKENDS=routellm`, ~2 GB more). The local engine and Ollama don't run there, so strong requests use OpenRouter fallbacks.
   * ✅ **Access control:** `HARNESS_PASSWORD` locks every page and API (browser login box, or the agent's API key), and the Docker setup won't start without it.
+  * ✅ **Task runner as a container (`COMPOSE_PROFILES=runs`):** `docker/runner.Dockerfile` runs the runner beside the Interceptor, reached as `http://runner:3100` with a shared `RUNNER_TOKEN`; run records and branches stay in `./runs` and `./repos`. Agents work in an E2B cloud sandbox (`RUNNER_SANDBOX=e2b`), so the image needs no language toolchains and agent commands never run in a container that has the host's folders mounted.
+
+---
+
+# Runner: Cloud Sandboxes (E2B) ✅
+
+Agent runs can work in a Linux VM from [E2B](https://e2b.dev) instead of a worktree on this machine, so `run_command` and the file tools never touch the host. Set `RUNNER_SANDBOX=e2b` and `E2B_API_KEY` in `.env`; nothing else changes for workflows, tools, the command guard, approvals or the Runs page.
+
+* ✅ **`E2BSandbox` behind the `LocalSandbox` interface:** `runner/sandbox.js` exports both with the same methods (`resolve`, `readFile`, `writeFile`, `listDir`, `exec`, `git`, `commit`, `diffStat`, `diff`, `sync`, `destroy`), and `createSandbox`/`attachSandbox` pick one, so `runs.js`, `tools.js` and `swarm.js` never know which they got. The e2b module is required lazily, so a local setup needs no key and no network.
+* ✅ **Branch in and out as a git bundle:** the base commit is packed here and written into a fresh sandbox (`E2B_TEMPLATE`, default `base`), which checks it out on its own `harness/<id>` branch in `E2B_WORKDIR`; at the end everything is committed, packed back and fetched into the local repo, so `git diff`, **Continue**, **Retry** and pushing all work as with a local run. A base that is not a branch tip packs with its full history; a carried-on branch sends only the commits made since the base.
+* ✅ **Swarm support:** each worker's branch is handed *to* the swarm's sandbox before the merge, and the swarm's merged branch is handed back after.
+* ✅ **Billing stops with the run:** the sandbox is killed when the run ends and when a restart finds a run that was in progress; `destroyById` covers one whose process died. `E2B_API_KEY` is never passed into the commands the agent runs (the trimmed env allowlist applies here too).
+* ✅ **Tests:** `test/e2bSandbox.test.js` covers the start point, the handed-back branch, an unchanged run, exit codes and timeouts, workspace bounds, a swarm merge, `createSandbox`'s choice and error, and a non-tip base, with a stand-in for `e2b` so it needs neither network nor key.
+* **Not done:** no real-key smoke test yet (mocked only), and `E2B_WORKDIR`/template choice is per-runner, not per-run.
 
 ---
 
@@ -52,7 +66,7 @@ The work splits into two parts (see [ADR 0002](docs/adr/0002-orchestrator-is-an-
 
 Optional, higher-level operation built on top of the Model Layer. State lives on GitHub issues ([ADR 0001](docs/adr/0001-tracker-is-the-orchestrators-only-state.md)).
 
-* **Multi-Session Orchestration (`/wayfinder` via Claude Sonnet 4.6):** Invoke Sonnet 4.6 to map project destinations, track "fog of war" domain questions, and break goals down into a JSON/DAG ticket matrix.
+* **Multi-Session Orchestration (`/wayfinder` via Claude Sonnet 4.6):** ✅ Claude Code command maps project destinations, records "fog of war" domain questions, and drafts a topologically ordered JSON ticket matrix. The draft is review-only; GitHub issue creation and dispatch remain future work.
 * **Interactive State Interrogation (`/grill-me` & `/grill-with-docs` via Claude Opus 5):** Run multi-round interview sessions on architectural decision tickets to update domain models, `CONTEXT.md`, and Architectural Decision Records (ADRs) prior to writing code. Grilling is HITL and happens in the human's own session.
   * **Voice Grilling (STT/TTS):** Voice lives client-side in Claude Code, not in the Orchestrator or Model Layer.
     * ✅ **MVP TTS:** `.claude/hooks/speak.js` Stop hook reads each reply aloud via Windows `System.Speech` when `GRILL_VOICE=1` is set; strips code blocks and markdown, and cuts off stale speech when a new reply arrives.
@@ -61,7 +75,34 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
     * **Voice-Mode Prompting:** When `GRILL_VOICE` is set, instruct the grilling skill to ask one short question per turn, state its recommended answer in one sentence, and avoid tables and option menus.
     * **Glossary-Primed Transcription:** Run Whisper (local or Groq free tier) with `CONTEXT.md` glossary terms in its `prompt` parameter so domain words (Orchestrator, Build Ticket, ADR) transcribe correctly.
     * **Gateway Audio Routes (optional):** Add `/v1/audio/transcriptions` and `/v1/audio/speech` pass-through to the Interceptor so audio calls use LiteLLM fallbacks like chat does. Only if dictation accuracy becomes a real problem.
-* **Pre-triage (Qwen 3 Coder):** Before an Escalation, have local Qwen 3 Coder (`http://localhost:8080` / `11434`) attempt a concrete failure (broken build, failing test, error log).
-* **Parallel Worker Fan-Out:** Dispatch Ready Build Tickets to parallel Workers (local Qwen 3 Coder or Groq), each in its own branch and worktree.
+
+* **Parallel Worker Fan-Out:** Dispatch Ready Build Tickets to parallel Workers, each in its own branch and worktree.
+
+* **Agentic Teams (ChatDev vs. build in-house):** Evaluate ChatDev against extending the existing Runner/Orchestrator with collaborating specialist agents. Compare integration effort, fit with isolated worktrees and ticket state, model flexibility, and operational overhead; choose an approach and define a small MVP before committing to a framework.
+
 * **Adversarial Audit & Closed-Loop Refactoring:** Run a short Opus 5 Audit over each Worker's pull request. If rejected, route a concise JSON critique back to the Worker for refactoring without burning high-cost frontier output tokens.
 * **Cross-Session Context Handoff:** When work moves between Workers or models, pass hash pointers (`Ref ID`) and Git diffs instead of re-sending full workspace files, backed by a local cache.
+
+# Bugs
+* **Allow Tool Call messages should surface and show a clear indicator of user input being needed
+
+# Additional
+
+* ✅ **Advisor as a real command (`/advisor MODEL`):** Set a model as an advisor and give the chat's model an `ask_advisor` tool for second opinions. Short names match a served Gateway model; `/advisor` reports the current setting and `/advisor off` removes it. The advisor answers in one plain request with no tools of its own, and its cost is counted with the calling reply.
+* **Subagent spawning (`/subagent`):** Spawn a subagent for an individual task, with its own model — default a cheaper, lower tier than the chat's — and its own tool budget. The parent chat gets the subagent's summary back as a tool result, so research and grunt work run on the cheap model while the parent keeps the thread.
+* **Plan mode:** A mode in which the agent reads, searches and reasons but makes no changes. Every write and every mutating command is refused with "plan mode", the agent finishes with a plan instead of a diff, and a button turns the plan into a normal run. Fits the existing tool sets: plan mode is the `read`/`check` toolset plus a refusal in `makeTools`, not a new sandbox.
+* **One working tree per chat:** Chats linked to the same repo currently share the user's working copy, so a chat's `run_command` (and its uncommitted edits) interfere with other chats and with runs. Give each chat its own worktree on its own branch, created on link and reused across turns, so concurrent chats and runs never see each other's changes.
+* **Queue a message into a thinking chat:** Sending into a chat that is still replying is refused ("Stop the current reply first"). Instead queue the message; when the reply finishes, the queued one is sent in order, with the queued messages shown in the composer.
+* **Thinking pane keeps its place:** While a reply streams, an open thinking pane jumps to the newest text on every redraw, so scrolling up is impossible. Follow only while you are at the bottom; once you scroll up, stay where you are and show a **scroll to bottom** button in the pane to jump back (and re-arm following).
+* **Fix the thinking animation that outlives the thinking:** `.spark i { animation-delay: inherit }` in `ui/chat.css` inherits the `.thinking` frame delay, so the dots keep hopping after the reply stops streaming. Give them their own delays, and stop the animation when the message is no longer streaming.
+
+## Failing tests to fix
+
+From `testout.txt` (264/282 passing):
+
+* **`access.test.js` (2):** the harness password and API keys sent as `x-api-key`/`Bearer` reach the Gateway instead of being stripped (`seen.authorization`, `seen['x-api-key']`).
+* **`login.test.js` (2):** same credential leak through the login gate, and `users.json` is created world-readable (`mode & 0o077` is `54`, not `0`).
+* **`gateway.test.js` (2):** a Gateway that resets the connection is not retried — the error never reaches the retry middleware, so the request hangs until the client times out.
+* **`gatewayConfig.test.js` (3):** resolved for the shipped `config.yaml` (its fallback chains had been deleted and are restored); the remaining fixture assertions depend on LF line endings — see `.gitattributes`.
+* **`calm.test.js` (1):** the test's `@media (hover: hover)` stripping regex misses the blocks in `ui/calm.css`, so hiding rules look like they sit outside the media query.
+* **`mcp.test.js` (1):** a stdio server that times out once is not retried — the second connect never lists tools (`test/fixtures/flaky-mcp-server.js`).

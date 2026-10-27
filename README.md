@@ -81,7 +81,15 @@ If you'd rather have one window per part (easier to read when something goes wro
 
 ### Connect Claude Code
 
-In a fourth PowerShell window:
+Leave the harness running, open a fourth PowerShell window in the same folder and run:
+
+```powershell
+npm run claude
+```
+
+That sets the variables below for you and starts Claude Code in this folder. Add `--` to pass Claude Code its own options (`npm run claude -- -p "explain router.py"`). Set `HARNESS_URL` in `.env` to use a harness on another machine, and `HARNESS_API_KEY` to an API key from the Users page when the harness runs with `HARNESS_REQUIRE_LOGIN=1`. Set `CLAUDE_CODE_BIN` if `claude` is not the command on your PATH.
+
+The script only sets those variables; it does not install Claude Code. Install Claude Code and make sure its command is on your PATH first. On Windows, the launcher resolves either `claude.exe` or `claude.cmd`; if it is installed somewhere else, set `CLAUDE_CODE_BIN` to its full path. If the harness isn't answering it says so instead of starting Claude Code, so start `npm run all` first.
 
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://localhost:3000"
@@ -91,6 +99,10 @@ claude
 ```
 
 These settings only last for that window. Other tools such as Cursor, Aider, Continue or Cline connect to `http://localhost:3000/v1` as an "OpenAI-compatible" endpoint.
+
+### Draft an orchestration plan
+
+In Claude Code, run `/wayfinder <goal>` to map a goal into project destinations, unresolved domain questions, and a dependency-ordered JSON ticket draft. Wayfinder is planning-only: it does not edit the repository or create GitHub issues, and every drafted ticket remains not Ready until a person reviews and enters it in the tracker.
 
 ### Install Bright Chat as an app
 
@@ -271,16 +283,7 @@ Cloudflare doesn't promise quick tunnels stay up, so use a named tunnel for anyt
 
 ### Phone test checklist
 
-Run through this once on a real phone (on mobile data, not your home Wi-Fi, so you know it really goes through the tunnel) and tell me what breaks.
-
-1. Open the tunnel address at `/ui/chat.html`. **Expect** a password prompt, then Bright Chat. A wrong password must be refused.
-2. Send a short message. **Expect** a streamed reply, and the routing note under it naming the model.
-3. Install it: Android Chrome menu → **Install app**; iPhone Safari Share → **Add to Home Screen**. **Expect** an icon with the orb, and it opens full screen with no browser bar. On an iPhone, the message box should clear the home bar.
-4. Turn on airplane mode and open the installed app. **Expect** the page to load and show an error when you send a message, not a blank screen. Turn airplane mode off again.
-5. Open Dashboard, Usage and Routing from the top bar. **Expect** them to fit the screen and scroll sideways only inside tables.
-6. Try voice: allow the microphone, dictate a message, and use read-aloud on a reply. Safari and Chrome differ here, so note which one you used.
-7. Hold a long chat request, lock the phone for a minute and unlock. **Expect** the chat to resume or show a clear error, not hang.
-8. From a computer, open `https://YOUR-ADDRESS/ui/api/status` with no password. **Expect** a 401, never data.
+For the full manual validation checklist, see [docs/hand-testing.md](./docs/hand-testing.md). It covers the real phone checks for password flow, installability, offline behavior, dashboard fit, voice, resume-after-lock, and unauthenticated status access.
 
 ## Technical reference
 
@@ -340,7 +343,7 @@ The [technical roadmap](ROADMAP.md) has four phases, all implemented:
 | `launch-laya.sh` | CPU launcher for the self-hosted Laya server the Router classifies with |
 | `caveman-compress.js` | Standing context trimmer for `CLAUDE.md`, `.qwen/settings.json` |
 | `validate-config.js` | UTF-8 / non-breaking space validator for config directories |
-| `docker-compose.yml`, `Dockerfile`, `docker/` | The three parts as containers, for a server (see [Run it on a server](#run-it-on-a-server-docker)) |
+| `docker-compose.yml`, `Dockerfile`, `docker/` | The three parts as containers, for a server, plus the task runner as a fourth (`COMPOSE_PROFILES=runs`) (see [Run it on a server](#run-it-on-a-server-docker)) |
 | `utils/access.js` | The optional `HARNESS_PASSWORD` login |
 | `utils/login.js`, `utils/users.js`, `ui/users.html`, `scripts/hash-password.js` | Named logins with admins (see [Named logins](#named-logins-with-admins-harness_require_login)) |
 | `guard-rules.json`, `utils/guard.js`, `.claude/hooks/guard.js` | The command guard (see [Command guard](#command-guard-jev-checks-commands-before-they-run)) |
@@ -671,6 +674,8 @@ Point an OpenAI-compatible assistant (Cursor, Aider, Continue, Cline) at `http:/
 
 ### Using Claude Code through the harness
 
+`npm run claude` from the repo folder sets this up and starts Claude Code in one step; this is what it sets:
+
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://localhost:3000"
 $env:ANTHROPIC_AUTH_TOKEN = "local-harness"   # dummy; keeps your real Anthropic credentials off the local stack
@@ -743,11 +748,15 @@ The **Runs** page gives an agent a goal, such as "fix the failing test in `utils
 
 How it keeps your work safe:
 
-- **Its own branch.** Each run is a `git worktree` of your repo on a new branch named `harness/<id>`. Your checked-out files are never touched. Review the branch with `git diff <start>..harness/<id>` (the page shows the exact command) and push it yourself if you like. Nothing is ever pushed or published for you.
+- **Its own branch.** Each run is a `git worktree` of your repo on a new branch named `harness/<id>`, or (with `RUNNER_SANDBOX=e2b`) a [cloud sandbox](#cloud-sandboxes-e2b) that gets the same branch. Your checked-out files are never touched. Review the branch with `git diff <start>..harness/<id>` (the page shows the exact command) and push it yourself if you like. Nothing is ever pushed or published for you.
 - **Every command and file write goes past the [command guard](#command-guard-jev-checks-commands-before-they-run).** Dangerous ones are refused, risky ones wait on the Runs page for you to **Allow** or **Decline** (no answer for 15 minutes counts as decline), and an unreachable guard counts as "ask".
 - **Only chosen folders.** Repos must be inside `RUNNER_ROOTS` (default the `repos` folder next to the harness; set it in `.env`, separating folders with `;` on Windows). Files the agent reads and writes must stay inside its workspace, and `.git` is off limits.
+- **One working tree per chat.** Linking a repo to a chat gives it a persistent `git worktree` on its own `harness/chat-…` branch. Chats linked to the same repo therefore do not share uncommitted edits or shell commands, and the original checkout is left alone. A chat's worktree starts at the linked repo's current `HEAD`; it does not copy uncommitted files from the original checkout. Worktrees are kept under `data/chat-worktrees` (or `CHAT_WORKTREES_DIR` if set) so the chat can resume in the same workspace later.
 - **No keys.** Commands the agent runs get a trimmed environment, so they can't print the harness's API keys.
-- **Limits.** Each run stops after its max steps (40) or max minutes (30), and at most `RUNNER_MAX_RUNS` (2) run at once. **Stop** ends a run, even in the middle of a command.
+- **Faster local tool rounds.** Independent file and directory reads requested together run concurrently; writes and shell commands stay ordered. On Windows, local runs and the linked-repo shell reuse a PowerShell process, while starting each command back in the repository root. A run's shell closes when that run ends.
+- **Plan mode.** Tick **Plan only, change nothing** on the form, or start one from a chat with `/plan TASK`. The agent reads and searches the repository but is offered no shell, write or edit tool, so it cannot change files or run commands. Its rules tell it to answer with the plan itself, and the run makes no commit. What comes back is the plan — what it would change file by file, the order, what to check after each step, and the risks or open questions. Read it, then start the same task without plan mode (or with an agent that has a different model) when you are happy. The Runs page marks such a run **Plan only** and hides the branch and diff, since there is nothing to review.
+- **Limits.** Each run stops after its max minutes (30), and at most `RUNNER_MAX_RUNS` (2) run at once. **Max steps** is off by default (0), so a run goes on until the agent calls finish or its minutes run out; set a number to cap the model calls it may make (a workflow stage may also cap its own). **Stop** ends a run, even in the middle of a command.
+- **Continue, retry and auto debug.** A run that only ran out of steps or time has **Continue**: the same run, the same `harness/<id>` branch, starting from the commits and the files the earlier part left (what it was saying when it ran out goes into the prompt), with a fresh set of minutes (and steps, if it was capped) rather than whatever was left of the old ones. Nothing went wrong, so it is not a new run and nothing is thrown away; continue it as often as it needs, and the page shows how many parts it took. With no step limit a run only ends this way on its minutes, which is what the default of 30 makes likely on a long task. A run that **failed** has **Retry run** (the same task again from the same commit, on a fresh `harness/<id>` branch) and **Auto debug**: the new agent is told what the earlier attempt got wrong (the error, the failing test output, the last tools it ran and what they returned) and is asked to work out the real cause instead of repeating it. Tick **Auto debug a failed run** on the form (or set `RUNNER_AUTO_DEBUG=1`) and the runner does that by itself, at most 2 generations deep, so a failure it cannot fix stops and waits for you. An earlier run's branch is not deleted, so you can compare the two.
 
 To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Runs** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Type or paste the repo's path, pick a recent one, or press **Browse…** to walk through the allowed folders (repos are marked ◆). The agent runs the project's tests itself when the task calls for it.
 
@@ -783,9 +792,74 @@ The swarm's page lists its workers; click one to watch it or answer its approval
 Notes:
 
 - The runner is its own process (`node runner/server.js`, port 3100, only reachable from this machine). The Interceptor passes the Runs page's requests to it after its own login check, and `npm run all` sets a shared `RUNNER_TOKEN` so nothing else on the machine can drive it. If you start the parts yourself, set the same `RUNNER_TOKEN` in `.env` for both.
-- Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed.
-- It isn't in the Docker setup yet. Cloud sandboxes can replace the local worktree later.
+- Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed. The record is written to a temporary file and renamed into place; where Windows refuses the rename for a moment (a virus scanner or the indexer holding `run.json` open, `EPERM`) it retries, then writes in place, so a run is never lost to that.
+- It runs under Docker with `COMPOSE_PROFILES=runs` (see [Cloud sandboxes](#cloud-sandboxes-e2b) for the setup), which on a server is how to use it.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
+
+#### Cloud sandboxes (E2B)
+
+A run can work in a sandbox in the cloud instead of a worktree on this machine: the agent's commands then run in a Linux VM from [E2B](https://e2b.dev), never on your PC. Set `RUNNER_SANDBOX=e2b` and `E2B_API_KEY` in `.env` (the key is on your E2B dashboard; get one from the free tier), keep the repo in `RUNNER_ROOTS` as usual, and start the runner as always. Nothing else changes: the same workflows, tools, guard and approvals apply, and the run page looks the same.
+
+How the branch gets there and back:
+
+1. The base commit of your repo is packed into a git bundle and written into a fresh sandbox (template `E2B_TEMPLATE`, default `base`), which checks it out on a branch `harness/<id>` of its own in `/home/user/work` (set `E2B_WORKDIR`).
+2. The agent works there; every file call and command goes to the sandbox.
+3. When the run ends, everything is committed and the branch is packed back into a bundle and fetched into your repo here, so `git diff`, **Continue**, **Retry** and pushing work exactly as with a local run. A swarm's own branch is handed back after its merges, and each worker's branch is handed *to* it before they are merged. A continued run gets a new sandbox holding its branch as it stands.
+4. The sandbox is killed as soon as the run ends (and if the runner is restarted mid-run), so nothing keeps billing. Its record keeps the sandbox id.
+5. On a Docker server, the runner is a container (`COMPOSE_PROFILES=runs`) whose commands all go to the sandbox; see below.
+
+Notes:
+
+- The cloud sandbox has no copy of your other branches, and `E2B_API_KEY` is never given to the commands the agent runs.
+- The run's own record and the branch stay here, in `runs/<id>/run.json` and your repo; delete the run to remove the record.
+- `apt-get install git` runs once in a new sandbox if the template has no git.
+- Reading files, listing folders and running commands are network calls now, so a cloud run is slower per step than a local one; `MAX_OUTPUT` trimming and the run's step and minute limits work as before.
+
+**On a Docker server.** The runner has its own container. Set these in `.env` on the server, then `docker compose up -d --build`:
+
+```
+COMPOSE_PROFILES=runs
+RUNNER_TOKEN=any-long-random-text
+E2B_API_KEY=e2b_...
+RUNNER_SANDBOX=e2b            # the compose default for this container
+```
+
+The runner comes up beside the Interceptor (`http://runner:3100`, no ports published) and the Interceptor sends it the Runs page's requests with the same `RUNNER_TOKEN`, so nothing else on the network can drive it. Runs and their branches land in the `runs` and `repos` folders on the server, so **Continue**, **Retry** and `git diff` work as they do on your PC, and the branch is pushed from the server. Local mode is possible too but pointless there: the worktree is made from the copy of the repo in `repos`, and commands run inside the runner's image, which has only Node and git.
+
+### Langfuse (see every call, grouped by chat or run)
+
+[Langfuse](https://langfuse.com) records each model call the Gateway makes: which model, tokens, cost, how long it took, and (if you choose) the prompt and reply. The harness groups calls by chat (Bright Chat) or by run (Runs page), and tags each with the client, the model, the strategy, whether Auto picked it, and the user who was logged in. Claude Code calls are grouped by its own session id. **Nothing is sent unless you set both keys.**
+
+1. Get keys: sign up at [cloud.langfuse.com](https://cloud.langfuse.com) (free tier), make a project, then Settings, API Keys. Or run your own, below.
+2. Add them to `.env`:
+
+   ```
+   LANGFUSE_PUBLIC_KEY=pk-lf-...
+   LANGFUSE_SECRET_KEY=sk-lf-...
+   LANGFUSE_HOST=https://us.cloud.langfuse.com   # only if your project is on the US cloud
+   ```
+3. Install the logger once into the `.venv` (Docker does this for you): `pip install langfuse`.
+4. Restart. With `npm run all` the Gateway then starts through `docker/gateway-start.py`, which writes `.gateway-config.yaml` (your `config.yaml` plus the Langfuse callbacks; `config.yaml` itself is not touched). With Docker, `docker compose up -d --build`.
+
+The Settings page shows a Langfuse box: off, connected (with a link to open it), or what is wrong (keys refused, unreachable).
+
+**What is logged.** By default only metadata: model, tokens, cost, timing, tags. The text of your prompts and replies (which can include your code and files) stays out. To log it as well, tick "Langfuse: also log prompts and replies" on the Settings page; it applies from the next request, no restart. Or set `LANGFUSE_LOG_CONTENT=1` in `.env` as the starting value. The Gateway redacts text by default, so programs that call the Gateway directly (port 4000) are never logged with content.
+
+**Your own Langfuse in Docker.** Needs about 3 GB of RAM (too much for a 1 GB server; use the cloud there). In `.env`:
+
+```
+COMPOSE_PROFILES=langfuse
+LANGFUSE_HOST=http://langfuse-web:3000
+LANGFUSE_URL=http://localhost:3001
+LANGFUSE_SALT=any-long-random-text
+LANGFUSE_ENCRYPTION_KEY=...            # openssl rand -hex 32
+LANGFUSE_PUBLIC_KEY=pk-lf-harness      # you choose these; they are created on first start
+LANGFUSE_SECRET_KEY=sk-lf-harness-change-me
+LANGFUSE_INIT_USER_EMAIL=you@example.com
+LANGFUSE_INIT_USER_PASSWORD=choose-a-password
+```
+
+Then `docker compose up -d --build` and open http://localhost:3001. The first start takes a minute or two. Combine with other profiles with commas (`COMPOSE_PROFILES=local,langfuse`).
 
 ### Control UI
 
@@ -814,7 +888,9 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 - **Chats.** Every chat is saved in the browser and listed on the left under **Recent**, newest first, with search. Alt+↑/↓ moves between chats, Ctrl+Shift+O starts a new one, Ctrl+K searches. A chat that is replying shows what it is doing in the list (routing, thinking, writing with a token count, or the tool it is using), and one that finished while you were elsewhere gets a dot. After the first reply, the model is asked for a short name for the chat (turn this off under Options → Model **Name new chats automatically**; type a title to rename it yourself). Hover a chat to show its × delete button, or use the trash button in the top bar, or **Delete all chats** under the list.
 - **Projects.** The **+** next to *Projects* in the sidebar makes one: a name, a colour, instructions sent with every chat in it, skills that are on for every chat in it, and optionally a git repo its chats can read. Click a project to see only its chats; **New chat** then starts one inside it. Move a chat into or out of a project under Options → Context. The project's settings (the gear on hover, or its badge in the top bar) also show its total tokens and cost. Deleting a project keeps its chats.
 - **Scheduled messages.** The **+** next to *Scheduled* sends a message at a set time, once or every hour, day, weekday or week, into a new chat each time (optionally in a project) or into an existing chat. They run while Bright Chat is open in a browser tab; a run missed while it was closed happens as soon as the page opens. **Run now** in a schedule sends it straight away.
-- **Skills.** A skill is named instructions: a review checklist, a writing style, the steps for a task. The sparkle button in the message box (or typing `/` in an empty box) lists them: tick one to turn it on for this chat. **Manage skills** adds and edits them (three examples are added the first time). **Let the model load other skills when it needs them** gives the model a `use_skill` tool and a list of your skills, so it can read one when a question matches; like any tool, this sends requests to tool-capable models. The same panel lists the MCP tools (see below).
+- **Skills.** A skill is named instructions: a review checklist, a writing style, the steps for a task. The sparkle button in the message box lists them: tick one to turn it on for this chat. **Manage skills** adds and edits them (three examples are added the first time). **Let the model load other skills when it needs them** gives the model a `use_skill` tool and a list of your skills, so it can read one when a question matches; like any tool, this sends requests to tool-capable models.
+- **Commands.** Typing `/` in the message box lists three commands the page handles itself, then your own, each with the model it sends to, and under them the tools this chat can use. **`/advisor MODEL`** sets a better model this chat's model may call for a second opinion: give it a short name (`/advisor opus` finds the newest Opus) or a full one, and from then on the chat's model has an `ask_advisor` tool it can hand a hard part to. The advisor answers in words, with no tools of its own, so the expensive model's part stays small; each call's cost is counted with the reply that made it. `/advisor` alone says what is set and `/advisor off` removes it; the composer says which advisor a chat has. A short name is matched to the newest model the Gateway serves, so "opus" means `claude-opus-5.5` and "opus-4.5" the one it names. **`/subagent TASK`** hands one task to an agent on its own branch while the chat carries on: it is an ordinary run, so it has its own page entry, approvals and diff, and follows the chat's repo, routing and effort. `/subagent MODEL TASK` gives it a model of its own; use this when a cheaper model can handle searching, fetching or a mechanical edit. **`/plan TASK`** starts a plan-only run: the agent reads the repo and writes down what it would change, in order, without changing files or committing. Your own commands are one message sent with a model, strategy or effort for that turn only, so the next message goes back to the chat's own routing. The panel's **Commands** button adds and edits them: a name, one line on what it does, the model or strategy, the effort, and the message, where `{args}` becomes what you type after the command (a command with no `{args}` gets it after its message). A command's turn carries no tools, since a model named there may not call them.
+- **Queued messages and following a reply.** Type while a reply is still arriving and the message waits its turn instead of being dropped: the composer says how many are waiting, and **Clear** removes them. Scrolling up during a reply stops the conversation following the new text, so you can read what came before; a button at the bottom takes you back, and the chat follows again once you are at the end. Scrolling up inside a thinking pane holds that pane still in the same way. A reply that was still arriving when the page closed is marked as cut off, instead of its animation playing forever.
 - **Stop, resend and frozen replies.** A reply in progress has a **Stop** button (or press Esc), and every message you sent has a resend button. The Interceptor already fails a request that gets no answer within 5 minutes or goes quiet for 2 (see `gatewayTimeoutMs` and `streamIdleTimeoutMs`); as a backstop, for example when the Interceptor itself stops answering, the page gives up after 310 and 130 seconds and offers Retry. Change both under Options → Model (0 waits forever). Free models often stall or return HTTP 429 once their daily or per-minute quota is used up, and the error says so.
 - **Costs and context.** Each reply shows what it cost (`free` for free and local models), and the top bar shows the chat's tokens, total cost and how full the model's context window is for the next message. Click those numbers for a breakdown: a bar per reply (sent and written tokens), tokens and cost by model, the size of the next message against the model's context window, and the project's totals. Prices and context sizes come from the Gateway's `/v1/model/info` through `/ui/api/model-info`; a provider's own figure (OpenRouter's `usage.cost`, LiteLLM's `x-litellm-response-cost` header) wins when there is one.
 - **Formatting and copying.** Replies render Markdown (headings, lists, tables, quotes, highlighted code). Every message has a copy button, and so does every code block. Messages can be edited and resent, and the last reply regenerated.
@@ -822,7 +898,9 @@ Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml`
 - **Context.** Attach text files and images with the paperclip, by dropping them on the page, or by pasting. Under Options, each chat has a system prompt and notes the model sees with every message. The composer shows a rough token count for the request.
 - **Strategy per chat.** Options → Model → **Strategy for this chat** picks where the chat's messages go: the default strategy, one of your named strategies from the Routing page, or **One model directly** to skip routing and send every message to the model you type. A project has the same choice in its settings, and its chats follow it unless they pick their own. Each reply says which strategy it used.
 - **Tools.** A chat can use MCP servers and read a git repo on your computer. See [Chat tools: MCP servers and git repos](#chat-tools-mcp-servers-and-git-repos).
-- **Voice.** The mic button (Ctrl+M) dictates into the message box, optionally sending when you stop talking. Replies can be read aloud on demand or automatically as they stream, with a choice of voice, speed, pitch and volume, and a Test button to hear a voice. Hands-free mode does both in a loop: turn it on with the headset button next to the mic (or under Options → Voice). It starts listening at once, sends when you pause, reads the reply aloud, then listens again; click it again to stop listening and reading. **Read clearly** (on by default) says symbols, shorthand and code names as words: `->` becomes "to", `e.g.` "for example", `10k` "10 thousand", `max_tokens` "max tokens", and a link becomes "a link to github.com". Dictation uses the browser's speech recognition: it needs Chrome or Edge, they send the audio to their speech service, and the microphone only works on `http://localhost` or https.
+- **Voice.** The mic button (Ctrl+M) dictates into the message box, optionally sending when you stop talking. Replies can be read aloud on demand or automatically as they stream, with a choice of voice, speed, pitch and volume, and a Test button to hear a voice. Hands-free mode does both in a loop: turn it on with the headset button next to the mic (or under Options → Voice). It starts listening at once, sends when you pause, reads the reply aloud, then listens again; click it again to stop listening and reading. **Read clearly** (on by default) says symbols, shorthand and code names as words: `->` becomes "to", `e.g.` "for example", `10k` "10 thousand", `max_tokens` "max tokens", and a link becomes "a link to github.com". Dictation uses the browser's speech recognition (Chrome and Edge have one; they send the audio to their speech service), or the harness's own speech model when the browser has none. **Options → Voice → Dictation** picks one: **Auto** (the browser, else the server), **This browser**, or **Speech model**. Brave and some Chromium builds have no speech service and answer every attempt with `network`; with `OPENROUTER_API_KEY` in `.env` they fall back to it on their own. The microphone only works on `http://localhost` or https.
+
+**Dictation through the harness.** With `OPENROUTER_API_KEY` set, `/ui/api/stt` sends the recording to OpenRouter's [speech-to-text models](https://openrouter.ai/collections/speech-to-text-models); it starts on the cheap Mistral Voxtral Mini Transcribe. `STT_URL` points it at another OpenAI-style server instead (Groq's free Whisper, OpenAI, a local Whisper, or a model in LiteLLM at `http://localhost:4000/v1`). The page records in short stretches, ends one when you pause, and adds each transcript to the message box.
 
 #### Chat tools: MCP servers and git repos
 
@@ -849,7 +927,7 @@ The chat page can give the model tools. While it answers, the model can call the
 - You don't need an MCP entry for Artificial Analysis: model ratings come from `ARTIFICIAL_ANALYSIS_API_KEY` in `.env`.
 - The Interceptor connects when it starts and prints each server's state. Options → Tools lists them with their tool counts and any start-up error. Untick a server to leave its tools out of your chats. Press **Reload** after editing the file.
 
-Requests carry tools only when a chat is linked to a repo or an MCP server is ticked. Requests with tools go to a model that can call them (the Router's `strong_model_tools` or `weak_model_tools`, falling back to the strong model), not to the free chat model. Each round of tool calls is its own request through the Interceptor, so it is routed, logged and counted like any other. The reply's cost and token counts add up all of the rounds. **Most tool rounds per reply** (12 by default) stops a model that keeps calling tools. Tool results pass through Headroom like Claude Code's, so long results are trimmed to about 4,000 characters when Headroom is on.
+Requests carry tools only when a chat is linked to a repo or an MCP server is ticked. Requests with tools go to a model that can call them (the Router's `strong_model_tools` or `weak_model_tools`, falling back to the strong model), not to the free chat model. Each round of tool calls is its own request through the Interceptor, so it is routed, logged and counted like any other. The reply's cost and token counts add up all of the rounds. A round that comes back with nothing at all — no text and no tool call, which is what a model that spends its whole answer thinking does — is tried once more, with twice the output room when the cap cut it off. If the second try is empty too, the reply says why (the output cap, the content filter, a tool call that arrived with no name, or that no tool list could be loaded) instead of leaving an empty bubble. **Max tool rounds** in the chat options sets how many rounds of tool calls a reply may use, and **0 means no limit** (the default): the reply goes on until the model stops calling tools or you press Stop, with the stall and no-reply timeouts still applying. Only rounds that really ran tools count towards it, not the empty-round retry. Tool results pass through Headroom like Claude Code's, so long results are trimmed to about 12,000 characters when Headroom is on.
 
 Tools run only for requests from this computer (`/ui/api/tools/call` refuses others), and only the chat page uses them. Claude Code connects to its own MCP servers (`claude mcp add ...`), and its tool calls pass through the harness unchanged.
 
@@ -863,7 +941,7 @@ Tools run only for requests from this computer (`/ui/api/tools/call` refuses oth
 - **Over time**: a bar per day, split by the service that answered.
 - **Bars and a table** of input, cached input and output tokens, requests and cost by model and by service. A switch sizes every chart by all tokens, input, output, request counts or cost.
 
-The counts are the ones each reply reports (`usage` in OpenAI replies, `input_tokens`/`output_tokens` in Anthropic ones, streamed or not). Replies without them, such as OpenAI streams that don't ask for `stream_options.include_usage`, are estimated at about 4 characters a token and marked ~. The service for each model comes from its `litellm_params` in `config.yaml`. Totals are kept per day in `harness-usage.json` (gitignored) so they survive a restart; **Clear totals** on the page empties it. The page updates live as requests finish, and the dashboard's routing log shows the same in/out counts per request.
+The counts are the ones each reply reports (`usage` in OpenAI replies, `input_tokens`/`output_tokens` in Anthropic ones, streamed or not), read one way everywhere by `ui/tokens.js`, so the chat page, this page and the dashboard always agree. A stream reports usage in pieces, so the largest of each count is kept. Replies without any, such as OpenAI streams that don't ask for `stream_options.include_usage`, are estimated from the request that was sent and the text that came back (about 4 characters a token) and marked ~. The chat page counts a reply as it arrives, not only when it ends. The service for each model comes from its `litellm_params` in `config.yaml`. Totals are kept per day in `harness-usage.json` (gitignored) so they survive a restart; **Clear totals** on the page empties it. The page updates live as requests finish, and the dashboard's routing log shows the same in/out counts per request.
 
 #### Routing editor
 
@@ -899,6 +977,9 @@ Optional `.env` settings:
 | `TTS_API_KEY` | Key for `TTS_URL`. Not needed for OpenRouter or the Gateway. |
 | `TTS_VOICES` | Comma-separated voices for the default model, when the server doesn't list them. |
 | `TTS_INSTRUCTIONS` | Tone and pacing for models that take it (OpenAI, Gemini, Fish Audio), e.g. `Calm, friendly, a little brisk`. |
+| `STT_URL` | Use another OpenAI-style server for dictation instead of OpenRouter: Groq's Whisper (`https://api.groq.com/openai/v1`), OpenAI (`https://api.openai.com/v1` with `STT_API_KEY`), a local Whisper server, or a model in LiteLLM (`http://localhost:4000/v1`). |
+| `STT_MODEL`, `STT_LANGUAGE` | The transcription model and its default language. |
+| `STT_API_KEY` | Key for `STT_URL`. Not needed for OpenRouter or the Gateway. |
 
 Any client can skip the Router for one request the same way: send the model name in an `x-harness-model` header, or use a named strategy with `x-harness-profile`. Every routed response carries `x-harness-model` and `x-harness-route` headers saying where it went, `x-harness-tier` with the tier it landed in, plus `x-harness-profile` when a named strategy was used.
 

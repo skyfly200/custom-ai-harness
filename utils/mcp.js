@@ -258,11 +258,13 @@ class McpManager {
         if (type === 'stdio') {
             if (!spec.command) throw new Error('needs a "command" (or a "url" for an HTTP server)');
             const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+            const env = { ...process.env, ...(spec.env || {}) };
+            delete env.NODE_TEST_CONTEXT;
             const transport = new StdioClientTransport({
                 command: spec.command,
                 args: spec.args || [],
                 // the whole environment, as Claude Code does: npx needs the proxy, npm and Windows folder variables
-                env: { ...process.env, ...(spec.env || {}) },
+                env,
                 cwd: spec.cwd || ROOT, // so "scripts/jev-files-mcp.js" works wherever the Interceptor was started
                 stderr: 'pipe',
             });

@@ -1,17 +1,31 @@
 // A place for an agent to work: a git worktree on a new branch of the user's
 // repo, so the agent never touches the working copy and the result is a
 // branch to inspect, test and push. Commands run here with a trimmed
-// environment (no API keys). This is the "local" Sandbox; a cloud one (E2B,
-// Daytona) would offer the same methods: create, resolve, readFile,
-// writeFile, listDir, exec, stop, git, destroy.
+// environment (no API keys).
+//
+// Two sandboxes offer the same methods (create, attach, resolve, readFile,
+// writeFile, listDir, exec, stop, git, commit, diffStat, diff, destroy), so the
+// tools and the runs never know which one they got. create starts a run's branch
+// from a base commit; attach takes the branch as it stands, for carrying a run on
+// after it hit its step or time limit:
+//   LocalSandbox - a git worktree on this machine (the default).
+//   E2BSandbox   - a cloud sandbox from E2B (RUNNER_SANDBOX=e2b). It has no
+//                  copy of your repo to branch off, so the branch is made by
+//                  handing it a git bundle of the base commit, and the branch
+//                  it ends on is handed back the same way before the run ends.
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const posix = path.posix;
 const { spawn, execFile } = require('child_process');
+const { PowerShellSession } = require('../utils/powershellSession');
 
 const MAX_OUTPUT = 20000;
 const DEFAULT_TIMEOUT_MS = 120000;
+// The ref a throwaway bundle is packed from, so a base that is not a branch tip can be sent whole
+const PACK_REF = 'refs/harness-pack/base';
 // Only these reach a command the agent runs: it must not be able to print the harness's API keys
 const ENV_ALLOW = ['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL', 'APPDATA', 'LOCALAPPDATA', 'ProgramFiles', 'SHELL', 'TERM', 'CI'];
 
@@ -43,6 +57,12 @@ class LocalSandbox {
         this.branch = branch;
         this.base = base;
         this.child = null;
+        this.kind = 'local';
+        this.id = null;
+        this.powershell = null;
+        // set by stop(): a worktree that is stopped starts no more commands, so a stop that
+        // lands between two steps of a run can't be undone by the next command it asks for
+        this.stopped = false;
     }
 
     /** A worktree of `repo` at `dir` on new branch `branch`, starting from `base` (default: the repo's current commit). */
@@ -57,6 +77,36 @@ class LocalSandbox {
         fs.mkdirSync(path.dirname(dir), { recursive: true });
         await git(top, ['worktree', 'add', '-q', '-b', branch, dir, commit]);
         return new LocalSandbox({ dir: fs.realpathSync(dir), repo: top, branch, base: commit });
+    }
+
+    /**
+     * The worktree a run already has, for carrying it on: the same folder when it
+     * is still a worktree on the branch, or one made again from the branch (so the
+     * commits the earlier part made are there). `base` is where the run started,
+     * which the diff is measured from.
+     */
+    static async attach({ repo, dir, branch, base = 'HEAD' }) {
+        let top;
+        try {
+            top = (await git(repo, ['rev-parse', '--show-toplevel'])).trim();
+        } catch {
+            throw new Error(`${repo} is not a git repository`);
+        }
+        const start = (await git(top, ['rev-parse', '--verify', `${base}^{commit}`]).catch(() => { throw new Error(`${base} is not a commit in ${top}`); })).trim();
+        // a part that ended before it committed anything has no branch yet: start it again
+        if (!(await git(top, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]).then((s) => s.trim()).catch(() => ''))) {
+            await git(top, ['worktree', 'prune']).catch(() => {});
+            return LocalSandbox.create({ repo: top, dir, branch, base: start });
+        }
+        const here = fs.existsSync(dir) ? fs.realpathSync(dir) : null;
+        const on = here ? (await git(here, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim() : '';
+        if (on === branch) return new LocalSandbox({ dir: here, repo: top, branch, base: start });
+        // the folder is gone, or is a worktree of something else: make it again on the branch
+        if (here) await git(top, ['worktree', 'remove', '--force', dir]).catch(() => fs.rmSync(dir, { recursive: true, force: true }));
+        await git(top, ['worktree', 'prune']).catch(() => {});
+        fs.mkdirSync(path.dirname(dir), { recursive: true });
+        await git(top, ['worktree', 'add', '-q', dir, branch]);
+        return new LocalSandbox({ dir: fs.realpathSync(dir), repo: top, branch, base: start });
     }
 
     /** The absolute path of `rel` inside the workspace, or an Error if it leads outside (links included). */
@@ -86,16 +136,23 @@ class LocalSandbox {
 
     /** Run a shell command in the workspace. Resolves { code, output, timedOut, ms }; never rejects. */
     exec(command, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+        if (this.stopped) return Promise.resolve({ code: -1, output: 'the workspace was stopped, so the command did not run', timedOut: false, ms: 0 });
+        if (process.platform === 'win32') {
+            if (!this.powershell) {
+                const env = Object.fromEntries(ENV_ALLOW.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
+                this.powershell = new PowerShellSession(this.dir, env);
+            }
+            return this.powershell.run(command, timeoutMs).then((result) => ({ ...result, output: trimOutput(result.output) }));
+        }
         return new Promise((resolve) => {
             const started = Date.now();
-            const win = process.platform === 'win32';
             const env = Object.fromEntries(ENV_ALLOW.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
-            const [bin, args] = win ? ['powershell', ['-NoProfile', '-NonInteractive', '-Command', command]] : ['bash', ['-c', command]];
+            const [bin, args] = ['bash', ['-c', command]];
             let output = '';
             let timedOut = false;
             let child;
             try {
-                child = spawn(bin, args, { cwd: this.dir, env, detached: !win, stdio: ['ignore', 'pipe', 'pipe'] });
+                child = spawn(bin, args, { cwd: this.dir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
             } catch (err) {
                 return resolve({ code: -1, output: `could not start ${bin}: ${err.message}`, timedOut: false, ms: 0 });
             }
@@ -115,14 +172,21 @@ class LocalSandbox {
     }
 
     kill(child = this.child) {
+        this.stopped = true;
+        this.close();
         if (!child?.pid) return;
         try {
-            if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
-            else process.kill(-child.pid, 'SIGKILL');
+            process.kill(-child.pid, 'SIGKILL');
         } catch { /* already gone */ }
     }
 
-    stop() { this.kill(); }
+    close() {
+        const session = this.powershell;
+        this.powershell = null;
+        return session?.close() || Promise.resolve();
+    }
+
+    stop() { this.stopped = true; this.kill(); }
 
     git(args) { return git(this.dir, args); }
 
@@ -143,10 +207,252 @@ class LocalSandbox {
 
     /** Remove the worktree; the branch stays in the repo. */
     async destroy() {
-        this.kill();
+        this.stopped = true;
+        await this.close();
+        if (this.child?.pid) this.kill(this.child);
         await git(this.repo, ['worktree', 'remove', '--force', this.dir]).catch(() => fs.rmSync(this.dir, { recursive: true, force: true }));
         await git(this.repo, ['worktree', 'prune']).catch(() => {});
     }
 }
 
-module.exports = { LocalSandbox, MAX_OUTPUT, trimOutput };
+// ---------------------------------------------------------------------------
+// E2B: the same workspace, in a sandbox in the cloud
+// ---------------------------------------------------------------------------
+
+const WORK_DIR = process.env.E2B_WORKDIR || '/home/user/work';
+// E2B kills the sandbox after this. A run's own limit (240 minutes at most) plus an
+// hour, so a run that is carried on after it ran out of time still has a sandbox.
+const SANDBOX_LIFETIME_MS = 5 * 60 * 60 * 1000;
+const HOST_TMP = (name) => path.join(os.tmpdir(), `harness-${process.pid}-${Date.now()}-${name}`);
+
+/**
+ * Pack `commit` and everything it needs into a bundle, for a sandbox that has no
+ * repo yet. `until` is the commit the sandbox already has, if any: what is packed
+ * then is only what came after it.
+ */
+async function packRepo(repo, commit, until = null) {
+    const file = HOST_TMP('base.bundle');
+    try {
+        // a ref of its own, so a commit that is not a branch tip still packs with its full history
+        await git(repo, ['update-ref', PACK_REF, commit]);
+        await git(repo, ['bundle', 'create', '-q', file, PACK_REF, ...(until ? ['--not', until] : [])]);
+        const bytes = fs.readFileSync(file);
+        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    } finally {
+        await git(repo, ['update-ref', '-d', PACK_REF]).catch(() => {});
+        fs.rmSync(file, { force: true });
+    }
+}
+
+class E2BSandbox {
+    constructor({ sandbox, repo, branch, base }) {
+        this.sandbox = sandbox;
+        this.dir = WORK_DIR;
+        this.repo = repo;
+        this.branch = branch;
+        this.base = base;
+        this.handle = null;
+        this.kind = 'e2b';
+        this.id = sandbox.sandboxId;
+    }
+
+    /**
+     * A fresh E2B sandbox with `branch` checked out.
+     *
+     * adapt is null for a new run's branch, which is made from `base` (a commit in
+     * `repo` on this machine) with its whole history. For a run carried on, adapt
+     * says which commits the branch already has from earlier: if it has any, the
+     * sandbox is given just the ones since `base` (so a part that ran out of time
+     * keeps the work it committed) and the branch is taken as it stands; if it has
+     * none, the branch starts at `base` as it did the first time.
+     */
+    static async create({ repo, branch, base = 'HEAD', adapt = null, template = process.env.E2B_TEMPLATE || 'base', lifetimeMs = SANDBOX_LIFETIME_MS }) {
+        let top, commit, start = null;
+        try {
+            top = (await git(repo, ['rev-parse', '--show-toplevel'])).trim();
+        } catch {
+            throw new Error(`${repo} is not a git repository`);
+        }
+        try {
+            commit = (await git(top, ['rev-parse', '--verify', `${base}^{commit}`])).trim();
+        } catch {
+            throw new Error(`${base} is not a commit in ${top}`);
+        }
+        if (adapt) start = (await git(top, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]).then((s) => s.trim()).catch(() => '')) || null;
+        // a branch that is where it started has nothing of its own to send: send it all
+        if (start === commit) start = null;
+        const from = start || commit;
+        const { Sandbox } = require('e2b');
+        const sandbox = await Sandbox.create(template, { timeoutMs: lifetimeMs });
+        const box = new E2BSandbox({ sandbox, repo: top, branch, base: commit });
+        try {
+            const remote = `/tmp/harness-base-${sandbox.sandboxId}.bundle`;
+            await sandbox.files.makeDir(WORK_DIR);
+            await box.exec('command -v git >/dev/null 2>&1 || (command -v apt-get >/dev/null 2>&1 && sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git)', { timeoutMs: 300000 });
+            // a carried-on branch only needs the commits the earlier part made, on top of the base
+            await sandbox.files.write(remote, await packRepo(top, from, start ? commit : null));
+            await box.git(['init', '-q', '.']);
+            await box.git(['fetch', '-q', remote, `${PACK_REF}:refs/heads/${branch}`]);
+            await box.git(['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
+            await box.git(['reset', '-q', '--hard', 'HEAD']);
+            await sandbox.files.remove(remote).catch(() => {});
+            return box;
+        } catch (err) {
+            await sandbox.kill().catch(() => {});
+            throw err;
+        }
+    }
+
+    /** The absolute path of `rel` inside the workspace, or an Error if it leads outside. */
+    resolve(rel) {
+        const target = posix.resolve(this.dir, String(rel ?? '.'));
+        const back = posix.relative(this.dir, target);
+        if (back.startsWith('..') || posix.isAbsolute(back)) throw new Error(`${rel} is outside the workspace`);
+        if (target.split('/').includes('.git')) throw new Error('the .git folder is off limits');
+        return target;
+    }
+
+    async readFile(rel) { return this.sandbox.files.read(this.resolve(rel)); }
+
+    async writeFile(rel, content) { await this.sandbox.files.write(this.resolve(rel), String(content)); }
+
+    async listDir(rel) {
+        const entries = await this.sandbox.files.list(this.resolve(rel));
+        return entries.filter((e) => e.name !== '.git')
+            .map((e) => (e.type === 'dir' ? `${e.name}/` : e.name)).sort();
+    }
+
+    /** Run a shell command in the workspace. Resolves { code, output, timedOut, ms }; never rejects. */
+    async exec(command, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+        const { TimeoutError, CommandExitError } = require('e2b');
+        const started = Date.now();
+        let output = '';
+        const add = (d) => { if (output.length < MAX_OUTPUT * 4) output += d; };
+        try {
+            const handle = await this.sandbox.commands.run(command, { cwd: this.dir, background: true, onStdout: add, onStderr: add });
+            this.handle = handle;
+            const r = await handle.wait();
+            this.handle = null;
+            return { code: r.exitCode ?? 0, output: trimOutput(output || `${r.stdout || ''}${r.stderr || ''}`), timedOut: false, ms: Date.now() - started };
+        } catch (err) {
+            this.handle = null;
+            if (err instanceof TimeoutError) return { code: -1, output: trimOutput(`${output}\n${err.message}`), timedOut: true, ms: Date.now() - started };
+            if (err instanceof CommandExitError) return { code: err.exitCode, output: trimOutput(output || `${err.stdout || ''}${err.stderr || ''}`), timedOut: false, ms: Date.now() - started };
+            return { code: -1, output: trimOutput(`${output}\n${err.message}`), timedOut: false, ms: Date.now() - started };
+        }
+    }
+
+    /** Stop the command that is running, if one is. The sandbox itself stays. */
+    stop() { this.handle?.kill?.().catch(() => {}); }
+
+    async git(args) {
+        const r = await this.exec(['git', ...args].map((a) => (/^[\w@%+=:,./^-]+$/.test(a) ? a : `'${String(a).replace(/'/g, `'\\''`)}'`)).join(' '));
+        if (r.code !== 0) throw new Error(r.output.trim() || `git ${args[0]} failed`);
+        return r.output;
+    }
+
+    /**
+     * Fetch the branches named from the repo on this machine, so they can be checked
+     * out or merged here. The sandbox's own repo has no copy of them, so each one
+     * arrives as a bundle in a file. A branch that cannot be packed is skipped: its
+     * merge then fails and is reported, which is what a swarm does with a part that
+     * conflicts.
+     */
+    async importBranches(branches) {
+        for (const [i, branch] of branches.entries()) {
+            const file = HOST_TMP('in.bundle');
+            const remote = `/tmp/harness-in-${this.sandbox.sandboxId}-${i}.bundle`;
+            try {
+                await git(this.repo, ['bundle', 'create', '-q', file, `refs/heads/${branch}`, '--not', this.base]);
+                const bytes = fs.readFileSync(file);
+                await this.sandbox.files.write(remote, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+                await this.git(['fetch', '-q', remote, `+refs/heads/${branch}:refs/heads/${branch}`]);
+            } catch { /* the merge reports it */ } finally {
+                await this.sandbox.files.remove(remote).catch(() => {});
+                fs.rmSync(file, { force: true });
+            }
+        }
+    }
+
+    /**
+     * Hand the branch to the repo on this machine, so the run page can diff it and
+     * you can inspect, test and push it like a local run's branch.
+     */
+    async sync() {
+        const head = (await this.git(['rev-parse', 'HEAD'])).trim();
+        if (head === this.base) return;
+        const remote = `/tmp/harness-out-${this.sandbox.sandboxId}.bundle`;
+        const file = HOST_TMP('out.bundle');
+        try {
+            await this.git(['bundle', 'create', '-q', remote, `refs/heads/${this.branch}`, '--not', this.base]);
+            fs.writeFileSync(file, await this.sandbox.files.read(remote, { format: 'bytes' }));
+            await git(this.repo, ['fetch', '-q', '--no-tags', file, `+refs/heads/${this.branch}:refs/heads/${this.branch}`]);
+        } finally {
+            await this.sandbox.files.remove(remote).catch(() => {});
+            fs.rmSync(file, { force: true });
+        }
+    }
+
+    /** Commit everything the agent changed (and hand the branch back). Returns the new commit, or null if nothing changed. */
+    async commit(message) {
+        await this.git(['add', '-A']);
+        let commit = null;
+        if ((await this.git(['status', '--porcelain'])).trim()) {
+            await this.git(['-c', 'user.name=Bright Chat runner', '-c', 'user.email=runner@localhost', 'commit', '-q', '-m', message]);
+            commit = (await this.git(['rev-parse', 'HEAD'])).trim();
+        }
+        // a swarm's work arrives as merges, so hand the branch back even when this made no commit
+        await this.sync();
+        return commit;
+    }
+
+    async diffStat() { return (await this.git(['diff', '--stat', `${this.base}..HEAD`])).trim(); }
+
+    async diff(limit = 200000) {
+        const text = await this.git(['diff', `${this.base}..HEAD`]);
+        return text.length > limit ? `${text.slice(0, limit)}\n[... diff cut at ${limit} characters ...]` : text;
+    }
+
+    /** Kill the sandbox; the branch stays in the repo on this machine. */
+    async destroy() {
+        this.handle?.kill?.().catch(() => {});
+        await this.sandbox.kill().catch(() => {});
+    }
+
+    /** Kill a sandbox by id, for a run whose sandbox outlived its process. */
+    static async destroyById(id) {
+        const { Sandbox } = require('e2b');
+        await Sandbox.kill(id).catch(() => {});
+    }
+}
+
+/**
+ * The sandbox a run gets. local (default) is a worktree on this machine; e2b is a
+ * cloud sandbox from E2B (needs E2B_API_KEY, which the e2b package reads itself).
+ */
+async function createSandbox({ kind = process.env.RUNNER_SANDBOX || 'local', ...opts } = {}) {
+    const cloud = String(kind).toLowerCase();
+    if (cloud === 'e2b' || cloud === 'cloud') {
+        if (!process.env.E2B_API_KEY) throw new Error('RUNNER_SANDBOX=e2b needs E2B_API_KEY in .env');
+        return E2BSandbox.create(opts);
+    }
+    if (cloud !== 'local') throw new Error(`unknown sandbox ${kind}; use local or e2b`);
+    return LocalSandbox.create(opts);
+}
+
+/**
+ * The workspace a run carried on from an earlier part gets: the same branch, with
+ * the commits that part made. A cloud sandbox is always a new one (the earlier one
+ * was killed when its part ended); the branch is handed to it as it stands.
+ */
+async function attachSandbox({ kind = process.env.RUNNER_SANDBOX || 'local', ...opts } = {}) {
+    const cloud = String(kind).toLowerCase();
+    if (cloud === 'e2b' || cloud === 'cloud') {
+        if (!process.env.E2B_API_KEY) throw new Error('RUNNER_SANDBOX=e2b needs E2B_API_KEY in .env');
+        return E2BSandbox.create({ ...opts, adapt: true });
+    }
+    if (cloud !== 'local') throw new Error(`unknown sandbox ${kind}; use local or e2b`);
+    return LocalSandbox.attach(opts);
+}
+
+module.exports = { LocalSandbox, E2BSandbox, createSandbox, attachSandbox, MAX_OUTPUT, trimOutput };

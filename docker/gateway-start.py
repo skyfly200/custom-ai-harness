@@ -5,6 +5,9 @@ edits it. This writes /tmp/config.yaml from it on every start:
   - localhost addresses point at the containers or the host machine
     (OLLAMA_URL, LOCAL_ENGINE_URL)
   - each model in LOCAL_MODELS gets a "local-<name>" entry on Ollama
+  - LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY set: Langfuse success and failure
+    callbacks on, with prompts and replies left out of the log unless the
+    Interceptor asks for them per request (utils/langfuse.js)
   - HARNESS_MODE=passthrough keeps only one model, "passthrough", which the
     Interceptor sends every request to: PASSTHROUGH_MODEL is a model name
     from config.yaml or a LiteLLM provider/model id (openrouter/..., openai/...)
@@ -14,7 +17,9 @@ import sys
 
 import yaml
 
-SOURCE, TARGET = "/app/config.yaml", "/tmp/config.yaml"
+# scripts/start-all.js runs this outside Docker with these set
+SOURCE = os.environ.get("GATEWAY_SOURCE", "/app/config.yaml")
+TARGET = os.environ.get("GATEWAY_TARGET", "/tmp/config.yaml")
 LOCAL_URLS = {
     "http://localhost:11434": "OLLAMA_URL",  # also the base for LOCAL_MODELS
     "http://localhost:8000": "LOCAL_ENGINE_URL",
@@ -70,10 +75,27 @@ def passthrough(config: dict) -> dict:
     }
 
 
+def add_langfuse(config: dict) -> None:
+    """Nothing is added, so nothing is sent, unless both keys are set."""
+    if not (env("LANGFUSE_PUBLIC_KEY") and env("LANGFUSE_SECRET_KEY")):
+        return
+    settings = config.setdefault("litellm_settings", {})
+    for key in ("success_callback", "failure_callback"):
+        callbacks = list(settings.get(key) or [])
+        if "langfuse" not in callbacks:
+            callbacks.append("langfuse")
+        settings[key] = callbacks
+    # Prompts and replies stay out of Langfuse; the Interceptor sends a header on
+    # requests when the Settings page says to log them.
+    settings["turn_off_message_logging"] = True
+
+
 def build(config: dict) -> dict:
     point_local_urls(config)
     add_local_models(config)
-    return passthrough(config) if env("HARNESS_MODE").lower() == "passthrough" else config
+    out = passthrough(config) if env("HARNESS_MODE").lower() == "passthrough" else config
+    add_langfuse(out)
+    return out
 
 
 def use_federation() -> None:
@@ -95,4 +117,6 @@ if __name__ == "__main__":
     with open(TARGET, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False)
     print("Gateway models:", ", ".join(e["model_name"] for e in config["model_list"]), flush=True)
-    os.execvp("litellm", ["litellm", "--config", TARGET, "--host", "0.0.0.0", "--port", "4000"])
+    litellm = os.environ.get("GATEWAY_LITELLM", "litellm")
+    host, port = os.environ.get("GATEWAY_HOST", "0.0.0.0"), os.environ.get("GATEWAY_PORT", "4000")
+    os.execvp(litellm, [litellm, "--config", TARGET, "--host", host, "--port", port])

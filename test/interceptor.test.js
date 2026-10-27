@@ -65,8 +65,8 @@ test('anchor never touches text the user typed', () => {
 });
 
 test('Headroom still compresses tool results after the refactor', () => {
-    const out = applyHeadroom([{ role: 'tool', tool_call_id: 'a', content: 'x'.repeat(10000) }]);
-    assert.ok(out[0].content.length <= 4000);
+    const out = applyHeadroom([{ role: 'tool', tool_call_id: 'a', content: 'x'.repeat(40000) }]);
+    assert.ok(out[0].content.length <= 12000);
     assert.match(out[0].content, /chars truncated by harness/);
 });
 

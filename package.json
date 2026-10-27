@@ -13,7 +13,8 @@
     "hash": "node scripts/hash-password.js",
     "all": "node scripts/start-all.js",
     "all:ollama": "node scripts/start-all.js --ollama",
-    "full": "npm run validate && npm test && node scripts/start-all.js"
+    "full": "npm run validate && npm test && node scripts/start-all.js",
+    "claude": "node scripts/claude.js"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +23,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "dotenv": "^18.0.3",
+    "e2b": "^2.59.0",
     "express": "^5.2.1",
     "http-proxy-middleware": "^4.2.0",
     "uv": "^1.4.0"

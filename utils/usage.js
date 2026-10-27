@@ -7,6 +7,9 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { StringDecoder } = require('string_decoder');
+// The same reading of a provider's usage the chat page does (ui/tokens.js), so
+// a number shown in a chat and one counted here never disagree
+const Tokens = require('../ui/tokens');
 
 const FILE = process.env.HARNESS_USAGE_FILE || path.join(__dirname, '..', 'harness-usage.json');
 const CONFIG_FILE = process.env.HARNESS_GATEWAY_CONFIG || path.join(__dirname, '..', 'config.yaml');
@@ -88,13 +91,9 @@ function providerOf(model) {
 // OpenAI and Anthropic usage objects to one shape. Anthropic counts cached
 // input separately from input_tokens; input here is all of it.
 function normalize(u) {
-    if (!u || typeof u !== 'object') return null;
-    const cacheRead = u.cache_read_input_tokens ?? u.prompt_tokens_details?.cached_tokens ?? 0;
-    const cacheWrite = u.cache_creation_input_tokens ?? 0;
-    const input = u.prompt_tokens ?? ((u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + cacheWrite);
-    const output = u.completion_tokens ?? u.output_tokens ?? 0;
-    if (!input && !output) return null;
-    return { input, output, cacheRead, cacheWrite };
+    const k = Tokens.usage(u);
+    if (!k) return null;
+    return { input: k.input, output: k.output, cacheRead: k.cacheRead, cacheWrite: k.cacheWrite };
 }
 
 // Streams report usage in pieces (Anthropic: input at message_start, output
@@ -113,19 +112,7 @@ function merge(a, b) {
 // Characters of generated text and tool arguments, for an estimate when the
 // reply carries no usage (an OpenAI stream without include_usage)
 function outputChars(obj) {
-    let n = 0;
-    for (const choice of obj.choices || []) {
-        const m = choice.delta || choice.message || {};
-        if (typeof m.content === 'string') n += m.content.length;
-        if (typeof m.reasoning_content === 'string') n += m.reasoning_content.length;
-        for (const call of m.tool_calls || []) n += (call.function?.arguments || '').length;
-    }
-    const d = obj.delta; // Anthropic content_block_delta
-    if (d) n += (d.text || d.partial_json || d.thinking || '').length;
-    for (const block of Array.isArray(obj.content) ? obj.content : []) {
-        n += (block.text || '').length + (block.input ? JSON.stringify(block.input).length : 0);
-    }
-    return n;
+    return Tokens.charsOf(obj);
 }
 
 function inspect(obj, state) {

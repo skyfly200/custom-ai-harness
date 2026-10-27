@@ -18,12 +18,16 @@
 <link rel="stylesheet" href="calm.css">
 </head>
 <body class="chat-page" data-bg="off">
-<div class="app" id="app">
+<div class="app side-open" id="app">
 
-  <!-- Top bar, across the chats column and the conversation -->
+  <!-- Top bar: the brand, the pages, and the button that folds the chats panel away -->
   <header class="top">
-    <button class="icon only-narrow" id="toggleSide" title="Chats" aria-label="Chats"></button>
+    <button class="icon" id="toggleSide" title="Hide chats" aria-label="Chats" aria-expanded="true"></button>
     <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span></h1><a href="./">Dashboard</a><a href="chat.html" class="here" aria-current="page">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a><a href="runs.html">Runs</a><a href="settings.html">Settings</a></nav>
+  </header>
+
+  <!-- Chat bar, over the conversation: this chat's name, context and controls -->
+  <div class="chatbar">
     <button type="button" class="proj-badge" id="projectBadge" hidden></button>
     <input type="text" id="title" class="title" aria-label="Chat title" placeholder="New chat">
     <button type="button" class="stats" id="chatStats" title=""></button>
@@ -35,7 +39,7 @@
       <button class="icon" id="toggleOptions" title="Model, voice and context options" aria-label="Options"></button>
       <button class="icon" id="toggleActivity" title="Live activity" aria-label="Activity"></button>
     </div>
-  </header>
+  </div>
 
   <!-- Projects, schedules and recent chats -->
   <aside class="side" id="side">
@@ -104,12 +108,21 @@
             </span>
           </label>
           <div class="muted small" id="repoInfo">Read-only for the model.</div>
+          <label class="check" title="Let the model run commands in the linked repo with run_command. Every command goes past the command guard first, and a risky one waits in the chat for you to Allow or Decline. Commands run in your own working copy, so uncommitted work is not protected."><input type="checkbox" id="shellInRepo" checked> Shell in the linked repo</label>
           <div class="tools-head"><span>MCP servers</span><button type="button" id="mcpReload" class="mini" title="Read mcp-servers.json again and reconnect">Reload</button></div>
           <ul class="mcp-list" id="mcpList"><li class="muted small">Loading…</li></ul>
-          <label title="Stop a reply after this many rounds of tool calls">Max tool rounds <input type="number" id="maxToolRounds" min="1" max="50" value="12"></label>
+          <label title="Stop a reply after this many rounds of tool calls. 0 means no limit: the reply keeps going until the model stops calling tools or you press Stop (the stall and no-reply timeouts still apply).">Max tool rounds <input type="number" id="maxToolRounds" min="0" max="500" value="0" placeholder="0 = no limit"></label>
+          <div class="muted small">0 or empty: no limit.</div>
         </fieldset>
         <fieldset>
           <legend>Voice</legend>
+          <label title="Auto uses this browser's speech service and falls back to the harness's speech model if the browser has none (Brave does not)">Dictation
+            <select id="sttEngine">
+              <option value="auto">Auto (browser, else server)</option>
+              <option value="browser">This browser</option>
+              <option value="server">Speech model</option>
+            </select>
+          </label>
           <label>Dictation language <input type="text" id="sttLang" placeholder="en-US"></label>
           <label class="check"><input type="checkbox" id="autoSend"> Send on pause</label>
           <label>Read aloud
@@ -137,13 +150,14 @@
     </section>
 
     <div class="log" id="log"></div>
+    <button type="button" class="jump-down" id="jumpDown" hidden title="Scroll to the newest message" aria-label="Scroll to bottom"></button>
 
     <form class="compose" id="compose">
       <div class="chips" id="chips"></div>
       <div class="compose-row glow-edge" id="composeRow">
         <button type="button" class="icon" id="attach" title="Attach files or images (or drop / paste them)" aria-label="Attach"></button>
         <input type="file" id="fileInput" multiple hidden>
-        <button type="button" class="icon" id="kitBtn" title="Skills and tools (or type / in an empty box)" aria-label="Skills and tools"></button>
+        <button type="button" class="icon" id="kitBtn" title="Skills (type / for commands and tools)" aria-label="Skills"></button>
         <textarea id="input" rows="1" placeholder="Message" title="Enter to send, Shift+Enter for a new line"></textarea>
         <button type="button" class="icon" id="mic" title="Dictate (Ctrl+M)" aria-label="Dictate"></button>
         <button type="button" class="icon" id="handsFreeBtn" title="Hands-free: talk, it sends when you pause, reads the reply, then listens again" aria-label="Hands-free mode" aria-pressed="false"></button>
@@ -157,18 +171,20 @@
         </div>
         <div class="kit" id="kit" hidden>
           <div class="kit-sec">
-            <div class="kit-head"><b>Skills</b><button type="button" class="mini" id="manageSkills">Manage skills</button></div>
-            
+            <div class="kit-head"><b>Skills</b><span class="kit-btns"><button type="button" class="mini" id="manageSkills">Manage skills</button><button type="button" class="mini" id="manageCommands" title="Commands you type with /">Commands</button></span></div>
             <ul class="kit-list" id="kitSkills"></ul>
             <label class="check small" title="Lists your other skills to the model with a use_skill tool, so it can load one when a question needs it. Requests with tools go to models that can call them."><input type="checkbox" id="skillTool"> Let the model load skills</label>
           </div>
           <div class="kit-sec">
-            <div class="kit-head"><b>Tools</b><button type="button" class="mini" id="kitReload" title="Read mcp-servers.json again and reconnect">Reload</button></div>
-            <ul class="mcp-list" id="kitTools"></ul>
+            <div class="kit-head"><b>Tools</b><span class="muted small">type / to list them</span></div>
             <div class="muted small" id="kitRepo"></div>
+            <label class="check" title="Run commands in the linked repo (run_command); the command guard checks each one"><input type="checkbox" id="kitShell"> Shell in the repo</label>
           </div>
         </div>
+        <div class="slash" id="slash" hidden></div>
       </div>
+      <div class="queue-note muted small" id="queueNote" hidden></div>
+      <div class="advisor-note muted small" id="advisorNote" hidden></div>
       <div class="compose-hint muted small" id="hint"></div>
     </form>
   </main>
@@ -237,6 +253,34 @@
   </form>
 </dialog>
 
+<dialog class="dlg wide" id="commandsDialog">
+  <form method="dialog" id="commandsForm">
+    <h3>Commands</h3>
+    <p class="muted small">Type <kbd>/</kbd> in the message box to list commands. A command sends its message with a model, strategy or effort for that turn only: like Claude Code's advisor, but with any model. The tools the chat can use are listed under them.</p>
+    <div class="skills-grid">
+      <div><ul class="skill-index" id="commandIndex"></ul><button type="button" class="mini" id="commandAdd">+ New command</button></div>
+      <div class="skill-edit" id="commandEdit">
+        <label>Name <input type="text" id="cName" maxlength="40" placeholder="e.g. advisor"></label>
+        <label>What it does <input type="text" id="cDesc" maxlength="200" placeholder="One line, shown in the list"></label>
+        <label>Model or strategy <input type="text" id="cModel" maxlength="120" list="models" placeholder="Any model name, or the name of a strategy"></label>
+        <label>Effort
+          <select id="cEffort">
+            <option value="">Leave it</option>
+            <option value="min">Cheapest</option>
+            <option value="low">Lower</option>
+            <option value="auto">Auto</option>
+            <option value="high">Higher</option>
+            <option value="max">Best</option>
+          </select>
+        </label>
+        <label title="{args} in the message becomes what you type after the command">Message <textarea id="cBody" rows="8" placeholder="e.g. Give a second opinion on this before I send it: {args}"></textarea></label>
+        <div class="dlg-actions"><button type="button" class="link danger" id="commandDelete">Delete command</button></div>
+      </div>
+    </div>
+    <div class="dlg-actions"><span class="spacer"></span><button class="primary" value="close">Done</button></div>
+  </form>
+</dialog>
+
 <dialog class="dlg wide" id="skillsDialog">
   <form method="dialog" id="skillsForm">
     <h3>Skills</h3>
@@ -260,7 +304,9 @@
 
 <script src="markdown.js"></script>
 <script src="cachetimer.js"></script>
+<script src="tokens.js"></script>
 <script src="costs.js"></script>
+<script src="modelAlias.js"></script>
 <script src="chat.js"></script>
 <script src="bright.js"></script>
 </body>

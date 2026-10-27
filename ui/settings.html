@@ -15,109 +15,170 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="settings.css">
 </head>
 <body>
-<main>
+<main class="settings">
   <header>
     <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Settings</span></h1><a href="./" data-hint="Health of each part, recent chats, usage and requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a><a href="runs.html" data-hint="Give an agent a task and watch it work on its own branch">Runs</a><a href="settings.html" data-hint="Interceptor and Router settings" class="here" aria-current="page">Settings</a></nav>
-    <span class="muted" id="updated">Loading…</span>
+    <div class="tools">
+      <input id="setFilter" type="search" placeholder="Find a setting…" aria-label="Find a setting" data-hint="Show only the settings whose name or help text matches">
+      <span class="muted" id="updated">Loading…</span>
+    </div>
   </header>
 
-  <p class="muted" id="usersLink" hidden><a href="users.html">Users and API keys</a>: who can sign in, and keys for programs.</p>
-  <h2 style="margin-top:16px" data-hint="How the Interceptor treats each request before routing it">Interceptor settings</h2>
-  <div class="card">
-    <form id="isettings" class="form" autocomplete="off">
-      <label class="field"><span data-hint="Send every request to this model and skip the Router">Pin every request to a model</span>
-        <input type="text" name="pinModel" list="models" placeholder="Off: the Router decides">
-        <small>Skips the Router entirely. Leave empty for normal routing.</small></label>
-      <label class="field"><span data-hint="The score a request needs to go to the strong model">Fixed threshold</span>
-        <input type="number" name="fixedThreshold" min="0" max="1" step="0.05" placeholder="Off: from keywords">
-        <small>0 always strong, 1 almost always weak. Empty uses the keyword rule (0.2 / 0.5 / 0.8).</small></label>
-      <label class="field"><span data-hint="The most output any client may ask for">Max output tokens</span>
-        <input type="number" name="maxOutputTokens" min="1" step="1">
-        <small>Caps what clients ask for. Groq rejects more than 65,536.</small></label>
-      <label class="field"><span data-hint="How long to wait for the Router's answer">Router timeout (ms)</span>
-        <input type="number" name="routerTimeoutMs" min="100" step="100">
-        <small>After this the request goes to the fallback model below.</small></label>
-      <label class="field"><span data-hint="How long a reply may take to start before it fails">Gateway timeout (ms)</span>
-        <input type="number" name="gatewayTimeoutMs" min="1000" step="1000">
-        <small>How long the Gateway may take to start answering, all fallbacks included, before the request fails instead of hanging.</small></label>
-      <label class="field"><span data-hint="How long a streaming reply may pause before it is ended">Stalled reply timeout (ms)</span>
-        <input type="number" name="streamIdleTimeoutMs" min="1000" step="1000">
-        <small>A reply that goes quiet this long mid-stream is ended with an error.</small></label>
-      <label class="field"><span data-hint="Used when the Router doesn't answer in time">Model when the Router is down</span>
-        <input type="text" name="routerDownModel" list="models"></label>
-      <label class="field"><span data-hint="Used when the Router is down and the request carries tools (Claude Code)">…for requests with tools</span>
-        <input type="text" name="routerDownToolsModel" list="models"></label>
-      <label class="field check"><input type="checkbox" name="caveman">
-        <span>Caveman prompt<br><small>Tell the model to be terse, to cut output tokens.</small></span></label>
-      <label class="field check"><input type="checkbox" name="headroom">
-        <span>Headroom<br><small>Compress tool results over 4,000 characters.</small></span></label>
-      <label class="field check"><input type="checkbox" name="contextAnchor">
-        <span>Context anchor<br><small>Replace repeated identical tool results with a pointer.</small></span></label>
-      <label class="field check"><input type="checkbox" name="autoJev">
-        <span>Auto strategy asks Jev<br><small>When no strategy's rules fit a request, Jev rates each strategy's description. Off: only the rules apply.</small></span></label>
-      <label class="field"><span data-hint="Which Auto tries first. Jev first: it rates every strategy's description right away and the rules only apply if it finds no fit. Rules first: Jev is asked only when no rule holds">Auto tries first</span>
-        <select name="autoFirst"><option value="jev">Jev</option><option value="rules">Rules</option></select></label>
-      <label class="field"><span data-hint="How sure Jev must be that a strategy's description fits before Auto picks it">Auto: pick a strategy from</span>
-        <input type="number" name="autoAskAt" min="0" max="1" step="0.05">
-        <small>0.5: the best-fitting strategy is used if Jev rates it 50% likely.</small></label>
-      <label class="field check"><input type="checkbox" name="guardJev">
-        <span>Command guard asks Jev<br><small>Commands the guard rules don't cover are rated by Jev. Off: only the rules apply.</small></span></label>
-      <label class="field"><span data-hint="How sure Jev must be that a command is risky before the agent has to ask you">Guard: ask you from</span>
-        <input type="number" name="guardAskAt" min="0" max="1" step="0.05">
-        <small>0.5: a command Jev rates 50% likely risky needs your OK.</small></label>
-      <label class="field"><span data-hint="How sure Jev must be before a command is blocked outright. Empty: Jev alone never blocks">Guard: block from</span>
-        <input type="number" name="guardDenyAt" min="0" max="1" step="0.05" placeholder="Off: Jev never blocks">
-        <small>Rules in guard-rules.json still block. Try 0.95.</small></label>
-    </form>
-    <div class="actions">
-      <button class="primary" id="isave" data-hint="Use these settings from the next request on, and keep them across restarts">Save</button>
-      <button id="ireset" data-hint="Put every Interceptor setting back to its default">Reset to defaults</button>
-      <span class="note" id="imsg"></span>
-    </div>
-    <div class="sub muted fine" style="margin-top:8px">Applies from the next request; kept in <code>harness-settings.json</code>.</div>
+  <p class="notice muted" id="usersLink" hidden><a href="users.html">Users and API keys</a>: who can sign in, and keys for programs.</p>
+
+  <div class="card" id="langfuse" hidden>
+    <div class="sub"><b>Langfuse</b> <span id="lfState"></span></div>
+    <div class="sub muted fine" id="lfNote"></div>
   </div>
 
-  <h2 data-hint="Which models the Router picks between, and how it scores requests. The Routing page shows the same as a map">Router settings</h2>
-  <div class="card">
-    <div id="rdown" class="sub"></div>
-    <form id="rsettings" class="form" autocomplete="off">
-      <div class="subhead" style="grid-column:1/-1;margin:0">Models it picks between</div>
-      <label class="field"><span data-hint="For requests the classifier rates hard">Strong model</span><input type="text" name="strong_model" list="models">
-        <small>When the strong model's win rate reaches the threshold.</small></label>
-      <label class="field"><span data-hint="For easy requests without tools">Weak model</span><input type="text" name="weak_model" list="models"></label>
-      <label class="field"><span data-hint="For easy requests that carry tools">Weak model for tool requests</span><input type="text" name="weak_model_tools" list="models">
-        <small>Claude Code requests always carry tools. Empty uses the weak model.</small></label>
-      <label class="field"><span data-hint="Easy requests bigger than this go to the overflow model">Weak model size limit (tokens)</span><input type="number" name="weak_model_max_tokens" min="1">
-        <small>Bigger weak requests go to the overflow model. Empty for no limit.</small></label>
-      <label class="field"><span data-hint="For easy requests over the size limit">Overflow model</span><input type="text" name="weak_model_overflow" list="models"></label>
+  <section class="card panel" id="iPanel">
+    <div class="panel-head">
+      <h2 data-hint="How the Interceptor treats each request before routing it">Interceptor settings</h2>
+      <span class="chip warn" id="idirty" hidden>Unsaved changes</span>
+      <span class="panel-note muted fine">Applies from the next request; kept in <code>harness-settings.json</code>.</span>
+    </div>
+    <form id="isettings" class="form grouped" autocomplete="off">
+      <div class="group" role="group" aria-labelledby="gRoute">
+        <h3 class="group-title" id="gRoute">Routing</h3>
+        <div class="group-grid">
+          <label class="field"><span data-hint="Send every request to this model and skip the Router">Pin every request to a model</span>
+            <input type="text" name="pinModel" list="models" placeholder="Off: the Router decides">
+            <small>Skips the Router entirely. Leave empty for normal routing.</small></label>
+          <label class="field"><span data-hint="The score a request needs to go to the strong model">Fixed threshold</span>
+            <input type="number" name="fixedThreshold" min="0" max="1" step="0.05" placeholder="Off: from keywords">
+            <small>0 always strong, 1 almost always weak. Empty uses the keyword rule (0.2 / 0.5 / 0.8).</small></label>
+          <label class="field"><span data-hint="Used when the Router doesn't answer in time">Model when the Router is down</span>
+            <input type="text" name="routerDownModel" list="models"></label>
+          <label class="field"><span data-hint="Used when the Router is down and the request carries tools (Claude Code)">…for requests with tools</span>
+            <input type="text" name="routerDownToolsModel" list="models"></label>
+          <label class="field"><span data-hint="How long to wait for the Router's answer">Router timeout (ms)</span>
+            <input type="number" name="routerTimeoutMs" min="100" step="100">
+            <small>After this the request goes to the fallback model above.</small></label>
+        </div>
+      </div>
 
-      <div class="subhead" style="grid-column:1/-1;margin:8px 0 0">Classifier</div>
-      <label class="field"><span data-hint="The classifier that scores each request">Backend</span><select name="backend"></select>
-        <small id="backendHelp"></small></label>
-      <label class="field" data-for="systemone llm"><span>Base URL</span><input type="text" name="base_url"
-        placeholder="https://openrouter.ai/api"><small>Jev via OpenRouter, or http://127.0.0.1:8001 for local Laya.</small></label>
-      <label class="field" data-for="systemone llm"><span>Model</span><input type="text" name="model" placeholder="jev-latest"></label>
-      <label class="field" data-for="systemone llm"><span>API key variable</span><input type="text" name="api_key_env"
-        placeholder="OPENROUTER_API_KEY"><small>Name of the variable in .env, not the key itself.</small></label>
-      <label class="field" data-for="systemone llm"><span>Timeout (s)</span><input type="number" name="timeout" min="0.1" step="0.5"></label>
-      <label class="field" data-for="systemone llm"><span>Prompt characters sent</span><input type="number" name="max_chars" min="1"></label>
-      <label class="field" data-for="routellm"><span>Checkpoint</span><input type="text" name="checkpoint"></label>
-      <label class="field" data-for="laya"><span>Prompt characters sent</span><input type="number" name="laya_max_chars" min="1"></label>
-      <label class="field" data-for="custom"><span>Scorer</span><input type="text" name="scorer" placeholder="package.module:factory"></label>
+      <div class="group" role="group" aria-labelledby="gLimits">
+        <h3 class="group-title" id="gLimits">Limits and timeouts</h3>
+        <div class="group-grid">
+          <label class="field"><span data-hint="The most output any client may ask for">Max output tokens</span>
+            <input type="number" name="maxOutputTokens" min="1" step="1">
+            <small>Caps what clients ask for. Groq rejects more than 65,536.</small></label>
+          <label class="field"><span data-hint="How long a reply may take to start before it fails">Gateway timeout (ms)</span>
+            <input type="number" name="gatewayTimeoutMs" min="1000" step="1000">
+            <small>How long the Gateway may take to start answering, all fallbacks included, before the request fails instead of hanging.</small></label>
+          <label class="field"><span data-hint="How long a streaming reply may pause before it is ended">Stalled reply timeout (ms)</span>
+            <input type="number" name="streamIdleTimeoutMs" min="1000" step="1000">
+            <small>A reply that goes quiet this long mid-stream is ended with an error.</small></label>
+        </div>
+      </div>
+
+      <div class="group" role="group" aria-labelledby="gTransforms">
+        <h3 class="group-title" id="gTransforms">Prompt transforms</h3>
+        <div class="group-grid switches">
+          <label class="field check"><input type="checkbox" name="caveman">
+            <span>Caveman prompt<br><small>Tell the model to be terse, to cut output tokens.</small></span></label>
+          <label class="field check"><input type="checkbox" name="headroom">
+            <span>Headroom<br><small>Compress tool results over 4,000 characters.</small></span></label>
+          <label class="field check"><input type="checkbox" name="contextAnchor">
+            <span>Context anchor<br><small>Replace repeated identical tool results with a pointer.</small></span></label>
+        </div>
+      </div>
+
+      <div class="group" role="group" aria-labelledby="gAuto">
+        <h3 class="group-title" id="gAuto">Auto strategy</h3>
+        <div class="group-grid switches">
+          <label class="field check"><input type="checkbox" name="autoJev">
+            <span>Auto strategy asks Jev<br><small>When no strategy's rules fit a request, Jev rates each strategy's description. Off: only the rules apply.</small></span></label>
+          <label class="field"><span data-hint="Which Auto tries first. Jev first: it rates every strategy's description right away and the rules only apply if it finds no fit. Rules first: Jev is asked only when no rule holds">Auto tries first</span>
+            <select name="autoFirst"><option value="jev">Jev</option><option value="rules">Rules</option></select></label>
+          <label class="field"><span data-hint="How sure Jev must be that a strategy's description fits before Auto picks it">Auto: pick a strategy from</span>
+            <input type="number" name="autoAskAt" min="0" max="1" step="0.05">
+            <small>0.5: the best-fitting strategy is used if Jev rates it 50% likely.</small></label>
+        </div>
+      </div>
+
+      <div class="group" role="group" aria-labelledby="gGuard">
+        <h3 class="group-title" id="gGuard">Command guard</h3>
+        <div class="group-grid switches">
+          <label class="field check"><input type="checkbox" name="guardJev">
+            <span>Command guard asks Jev<br><small>Commands the guard rules don't cover are rated by Jev. Off: only the rules apply.</small></span></label>
+          <label class="field check"><input type="checkbox" name="shellInRepo">
+            <span>Shell in a chat's linked repo<br><small>Lets a chat linked to a git repo run commands there. Each command goes past the guard, and a risky one waits in the chat for Allow. Off: chats only read the repo.</small></span></label>
+          <label class="field"><span data-hint="How sure Jev must be that a command is risky before the agent has to ask you">Guard: ask you from</span>
+            <input type="number" name="guardAskAt" min="0" max="1" step="0.05">
+            <small>0.5: a command Jev rates 50% likely risky needs your OK.</small></label>
+          <label class="field"><span data-hint="How sure Jev must be before a command is blocked outright. Empty: Jev alone never blocks">Guard: block from</span>
+            <input type="number" name="guardDenyAt" min="0" max="1" step="0.05" placeholder="Off: Jev never blocks">
+            <small>Rules in guard-rules.json still block. Try 0.95.</small></label>
+        </div>
+      </div>
+
+      <div class="group" role="group" aria-labelledby="gLangfuse">
+        <h3 class="group-title" id="gLangfuse">Langfuse</h3>
+        <div class="group-grid switches">
+          <label class="field check"><input type="checkbox" name="langfuseContent">
+            <span>Also log prompts and replies<br><small>Off: Langfuse gets the model, tokens, cost, timing and tags only. On: it also keeps the text of every prompt and reply (code, file contents). Only matters once Langfuse is set up (see above).</small></span></label>
+        </div>
+      </div>
     </form>
-    <div class="actions">
+    <div class="actions bar">
+      <button class="primary" id="isave" data-hint="Use these settings from the next request on, and keep them across restarts">Save</button>
+      <button id="ireset" data-hint="Put every Interceptor setting back to its default">Reset to defaults</button>
+      <span class="note" id="imsg" role="status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section class="card panel" id="rPanel">
+    <div class="panel-head">
+      <h2 data-hint="Which models the Router picks between, and how it scores requests. The Routing page shows the same as a map">Router settings</h2>
+      <span class="chip warn" id="rdirty" hidden>Unsaved changes</span>
+      <span class="panel-note muted fine">Apply lasts until the Router restarts. Save also writes <span id="rpath">the config file</span>.</span>
+    </div>
+    <p class="down" id="rdown"></p>
+    <form id="rsettings" class="form grouped" autocomplete="off">
+      <div class="group" role="group" aria-labelledby="gModels">
+        <h3 class="group-title" id="gModels">Models it picks between</h3>
+        <div class="group-grid">
+          <label class="field"><span data-hint="For requests the classifier rates hard">Strong model</span><input type="text" name="strong_model" list="models">
+            <small>When the strong model's win rate reaches the threshold.</small></label>
+          <label class="field"><span data-hint="For easy requests without tools">Weak model</span><input type="text" name="weak_model" list="models"></label>
+          <label class="field"><span data-hint="For easy requests that carry tools">Weak model for tool requests</span><input type="text" name="weak_model_tools" list="models">
+            <small>Claude Code requests always carry tools. Empty uses the weak model.</small></label>
+          <label class="field"><span data-hint="Easy requests bigger than this go to the overflow model">Weak model size limit (tokens)</span><input type="number" name="weak_model_max_tokens" min="1">
+            <small>Bigger weak requests go to the overflow model. Empty for no limit.</small></label>
+          <label class="field"><span data-hint="For easy requests over the size limit">Overflow model</span><input type="text" name="weak_model_overflow" list="models"></label>
+        </div>
+      </div>
+
+      <div class="group" role="group" aria-labelledby="gClassifier">
+        <h3 class="group-title" id="gClassifier">Classifier</h3>
+        <div class="group-grid">
+          <label class="field"><span data-hint="The classifier that scores each request">Backend</span><select name="backend"></select>
+            <small id="backendHelp"></small></label>
+          <label class="field" data-for="systemone llm"><span>Base URL</span><input type="text" name="base_url"
+            placeholder="https://openrouter.ai/api"><small>Jev via OpenRouter, or http://127.0.0.1:8001 for local Laya.</small></label>
+          <label class="field" data-for="systemone llm"><span>Model</span><input type="text" name="model" placeholder="jev-latest"></label>
+          <label class="field" data-for="systemone llm"><span>API key variable</span><input type="text" name="api_key_env"
+            placeholder="OPENROUTER_API_KEY"><small>Name of the variable in .env, not the key itself.</small></label>
+          <label class="field" data-for="systemone llm"><span>Timeout (s)</span><input type="number" name="timeout" min="0.1" step="0.5"></label>
+          <label class="field" data-for="systemone llm"><span>Prompt characters sent</span><input type="number" name="max_chars" min="1"></label>
+          <label class="field" data-for="routellm"><span>Checkpoint</span><input type="text" name="checkpoint"></label>
+          <label class="field" data-for="laya"><span>Prompt characters sent</span><input type="number" name="laya_max_chars" min="1"></label>
+          <label class="field" data-for="custom"><span>Scorer</span><input type="text" name="scorer" placeholder="package.module:factory"></label>
+        </div>
+      </div>
+    </form>
+    <div class="actions bar">
       <button class="primary" id="rapply" data-hint="Use these Router settings now, until the Router restarts">Apply</button>
       <button id="rsave" data-hint="Use them now and write them to the Router's config file">Apply and save to file</button>
       <button id="rreload" data-hint="Throw away unsaved Router changes and read its config file again">Reload from file</button>
-      <span class="note" id="rmsg"></span>
-    </div>
-    <div class="sub muted fine" style="margin-top:8px">
-      Apply lasts until the Router restarts. Save also writes <span id="rpath">the config file</span>.
+      <span class="note" id="rmsg" role="status" aria-live="polite"></span>
     </div>
     <div class="sub" id="routerError"></div>
-  </div>
+  </section>
   <datalist id="models"></datalist>
 </main>
 
@@ -134,7 +195,7 @@ const BACKEND_HELP = {
   llm: 'An OpenAI-compatible model rates difficulty 0 to 1.',
   custom: 'Your own scorer factory.',
 };
-let routerFormDirty = false, interceptorFormDirty = false;
+let routerFormDirty = false, interceptorFormDirty = false, lfShown = false;
 
 async function getJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -146,6 +207,46 @@ const postJSON = (url, body) => getJSON(url, { method: 'POST', headers: { 'conte
 
 function note(id, text, cls) { $(id).textContent = text; $(id).className = 'note ' + (cls || ''); }
 
+// A panel with edits not yet saved shows a warning chip and a warmer edge, so
+// it is clear that leaving the page would lose them.
+function showDirty(chip, panel, dirty) {
+  $(chip).hidden = !dirty;
+  $(panel).classList.toggle('dirty', dirty);
+}
+const markInterceptor = () => showDirty('idirty', 'iPanel', interceptorFormDirty);
+const markRouter = () => showDirty('rdirty', 'rPanel', routerFormDirty);
+
+// ---- find a setting ---------------------------------------------------------
+
+// The box in the header keeps only the fields whose name or help text matches;
+// a group or panel left with nothing shown goes away too. A field the backend
+// choice hides stays hidden while a search is on (.filtered-out wins over the
+// inline display), and comes back with its group when the search is cleared.
+// The Save bars stay: a search is a way to find a setting, not to lose the
+// buttons that keep it.
+function filterSettings() {
+  const q = $('setFilter').value.trim().toLowerCase();
+  for (const form of [$('isettings'), $('rsettings')]) {
+    for (const field of form.querySelectorAll('.field')) {
+      const text = field.textContent.toLowerCase() + ' ' + (field.dataset.hint || '').toLowerCase();
+      field.classList.toggle('filtered-out', !!q && !text.includes(q));
+    }
+    for (const group of form.querySelectorAll('.group')) {
+      const fields = [...group.querySelectorAll('.field')];
+      group.hidden = !!q && fields.every(f => f.classList.contains('filtered-out'));
+    }
+  }
+  for (const panel of [$('iPanel'), $('rPanel')]) {
+    const shown = [...panel.querySelectorAll('.group')].some(g => !g.hidden);
+    panel.hidden = !!q && !shown;
+  }
+  // The Langfuse status card is not a setting: it steps aside while searching
+  // and comes back with the state it had.
+  $('langfuse').hidden = !!q || !lfShown;
+}
+$('setFilter').addEventListener('input', filterSettings);
+$('setFilter').addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('setFilter').value = ''; filterSettings(); } });
+
 // ---- Interceptor settings --------------------------------------------------
 
 function fillInterceptorForm(s) {
@@ -156,6 +257,7 @@ function fillInterceptorForm(s) {
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? '';
   }
   interceptorFormDirty = false;
+  markInterceptor();
 }
 
 function readInterceptorForm() {
@@ -171,7 +273,7 @@ async function loadInterceptorSettings() {
   try { fillInterceptorForm((await getJSON('api/settings')).settings); } catch (err) { note('imsg', err.message, 'err'); }
 }
 
-$('isettings').addEventListener('input', () => { interceptorFormDirty = true; });
+$('isettings').addEventListener('input', () => { interceptorFormDirty = true; markInterceptor(); });
 $('isave').addEventListener('click', async () => {
   try { fillInterceptorForm((await postJSON('api/settings', readInterceptorForm())).settings); note('imsg', 'Saved.', 'ok'); }
   catch (err) { note('imsg', err.message, 'err'); }
@@ -225,7 +327,7 @@ function routerChanges() {
 async function routerAction(fn, busy, done) {
   note('rmsg', busy);
   for (const b of ['rapply', 'rsave', 'rreload']) $(b).disabled = true;
-  try { await fn(); routerFormDirty = false; note('rmsg', done, 'ok'); }
+  try { await fn(); routerFormDirty = false; markRouter(); note('rmsg', done, 'ok'); }
   catch (err) { note('rmsg', err.message, 'err'); }
   for (const b of ['rapply', 'rsave', 'rreload']) $(b).disabled = false;
   refresh();
@@ -236,7 +338,7 @@ async function applyRouter() {
   if (Object.keys(changes).length) await postJSON('api/router/config', { changes });
 }
 
-$('rsettings').addEventListener('input', () => { routerFormDirty = true; });
+$('rsettings').addEventListener('input', () => { routerFormDirty = true; markRouter(); });
 $('rsettings').elements.backend.addEventListener('change', showBackendFields);
 $('rapply').addEventListener('click', () => routerAction(applyRouter, 'Applying… (a classifier change can load a model)', 'Applied.'));
 $('rsave').addEventListener('click', () => routerAction(async () => { await applyRouter(); await postJSON('api/router/save', {}); }, 'Saving…', 'Applied and saved.'));
@@ -267,6 +369,28 @@ loadModels();
 loadInterceptorSettings();
 refresh();
 setInterval(refresh, 5000);
+
+// ---- Langfuse ----------------------------------------------------------------
+
+async function loadLangfuse() {
+  try {
+    const lf = await getJSON('api/langfuse');
+    lfShown = true;
+    $('langfuse').hidden = !!$('setFilter').value.trim();
+    if (!lf.configured) {
+      $('lfState').textContent = 'is off';
+      $('lfNote').innerHTML = 'Add <code>LANGFUSE_PUBLIC_KEY</code> and <code>LANGFUSE_SECRET_KEY</code> to <code>.env</code> and restart the Gateway to log every call. See the README, “Langfuse”.';
+      return;
+    }
+    $('lfState').innerHTML = (lf.ok ? '<span class="note ok">connected</span>' : `<span class="note err">${esc(lf.problem)}</span>`)
+      + ` · <a href="${esc(lf.url)}" target="_blank" rel="noopener">open ${esc(new URL(lf.url).host)}</a>`;
+    $('lfNote').textContent = lf.content
+      ? 'Prompts and replies are logged too (the setting below).'
+      : 'Logging metadata only: model, tokens, cost, timing and tags. Prompt and reply text is left out (the setting below).';
+  } catch { $('langfuse').hidden = true; lfShown = false; }
+}
+loadLangfuse();
+$('isave').addEventListener('click', () => setTimeout(loadLangfuse, 500));
 </script>
 <script>fetch('/ui/api/me').then((r) => r.ok && (document.getElementById('usersLink').hidden = false)).catch(() => {});</script>
 <script src="bright.js"></script>

@@ -108,7 +108,11 @@ function withCavemanAnthropic(system) {
 // visible marker, keeping the tail where build/test errors usually land.
 // ---------------------------------------------------------------------------
 
-const HEADROOM_MAX_TOOL_CHARS = 4000; // cap per tool result, marker included
+// Cap per tool result, marker included. A middle truncation is what makes a model
+// read a file again, or grep for what it only half saw, so this is generous: a
+// whole source file usually fits, and a long build log keeps its tail where the
+// errors are. Context anchor below still drops exact repeats.
+const HEADROOM_MAX_TOOL_CHARS = 12000;
 const HEADROOM_HEAD_SHARE = 0.4;      // share of the cap kept from the start; the rest comes from the end
 
 // Patterns that add no signal: blank lines, trailing whitespace
@@ -209,4 +213,5 @@ module.exports = {
     applyHeadroom,
     headroomCompressText,
     applyContextAnchor,
+    HEADROOM_MAX_TOOL_CHARS,
 };

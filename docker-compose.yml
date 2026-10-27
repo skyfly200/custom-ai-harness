@@ -10,6 +10,7 @@
 #   STRONG_MODEL, WEAK_MODEL, ...   the models the Router picks between
 #   COMPOSE_PROFILES=local and LOCAL_MODELS   run Ollama with these models
 #   COMPOSE_PROFILES=tunnel (+ TUNNEL_TOKEN) or tunnel-quick   reach it from a phone over https
+#   LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY   log every call to Langfuse (cloud, or COMPOSE_PROFILES=langfuse for your own)
 # Change them, then run docker compose up -d --build.
 x-local-urls: &local-urls
   OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
@@ -31,6 +32,9 @@ services:
       ROUTER_URL: http://router:6060
       # with OPENROUTER_FEDERATION_POLICY_ID set, the Gateway and Router call OpenRouter through here
       GATEWAY_URL: http://gateway:4000
+      # The task runner (COMPOSE_PROFILES=runs), reached over the compose network
+      RUNNER_URL: http://runner:3100
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
       HARNESS_SETTINGS_FILE: /app/data/harness-settings.json
       HARNESS_PROFILES_FILE: /app/data/routing-profiles.json
       HARNESS_USAGE_FILE: /app/data/harness-usage.json
@@ -74,6 +78,41 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
 
+  # The task runner (the Runs page), only with COMPOSE_PROFILES=runs in .env.
+  # Each run's commands go to an E2B cloud sandbox (RUNNER_SANDBOX=e2b,
+  # E2B_API_KEY), so the agent works in a Linux VM rather than in this
+  # container; the runner here only packs the branch in and back out. Runs and
+  # branches land in ./runs and ./repos, as on your PC, so the Runs page's diff,
+  # Continue and Retry work the same. (RUNNER_SANDBOX=local also works here —
+  # the worktree is made from the copy of the repo in ./repos — but commands
+  # then run in this image, which has only Node and git.)
+  # Set RUNNER_TOKEN in .env (any long random text): the Interceptor sends it,
+  # and nothing else on the network can drive the runner without it.
+  runner:
+    build:
+      context: .
+      dockerfile: docker/runner.Dockerfile
+    profiles: [runs]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      RUNNER_HOST: 0.0.0.0
+      RUNNER_PORT: "3100"
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?set RUNNER_TOKEN in .env (any long random text)}
+      # Runner host check: it only answers a Host it was told about
+      RUNNER_ALLOWED_HOSTS: runner:3100,harness:3100
+      RUNNER_ROOTS: /repos
+      RUNNER_DIR: /app/runs
+      RUNNER_SANDBOX: ${RUNNER_SANDBOX:-e2b}
+      HARNESS_URL: http://harness:3000
+      HARNESS_PASSWORD: ${HARNESS_PASSWORD:-}
+      E2B_API_KEY: ${E2B_API_KEY:-}
+      E2B_TEMPLATE: ${E2B_TEMPLATE:-base}
+    volumes:
+      - ./runs:/app/runs       # run records and each run's worktree
+      - ./repos:/repos         # the repos a run may start in (RUNNER_ROOTS)
+    depends_on: [harness]
+
   # Local models with Ollama, only with COMPOSE_PROFILES=local in .env.
   # Downloads LOCAL_MODELS on start; the Gateway lists each as local-<name>.
   ollama:
@@ -113,5 +152,97 @@ services:
     command: tunnel --no-autoupdate --url http://harness:3000
     depends_on: [harness]
 
+  # Your own Langfuse (LLM logging), only with COMPOSE_PROFILES=langfuse. Needs
+  # about 3 GB of RAM, so not for a 1 GB server: use cloud.langfuse.com there.
+  # Open http://localhost:3001 (LANGFUSE_PORT). Set LANGFUSE_INIT_* in .env and the
+  # login and the API keys are created on the first start (README: "Langfuse").
+  # The harness reaches it as http://langfuse-web:3000 (LANGFUSE_HOST).
+  langfuse-web:
+    image: langfuse/langfuse:3
+    profiles: [langfuse]
+    restart: unless-stopped
+    depends_on: [langfuse-db, langfuse-clickhouse, langfuse-redis, langfuse-minio]
+    ports:
+      - "${LANGFUSE_PORT:-3001}:3000"
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://postgres:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-db:5432/postgres
+      SALT: "${LANGFUSE_SALT:?set LANGFUSE_SALT in .env (any long random text)}"
+      ENCRYPTION_KEY: "${LANGFUSE_ENCRYPTION_KEY:?set LANGFUSE_ENCRYPTION_KEY in .env (64 hex characters, from openssl rand -hex 32)}"
+      NEXTAUTH_SECRET: ${LANGFUSE_SALT}
+      NEXTAUTH_URL: ${LANGFUSE_URL:-http://localhost:3001}
+      TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-redis
+      REDIS_AUTH: ${LANGFUSE_DB_PASSWORD:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_DB_PASSWORD:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      # optional first-start setup: an organisation, project, API keys and a login
+      LANGFUSE_INIT_ORG_ID: harness
+      LANGFUSE_INIT_ORG_NAME: Harness
+      LANGFUSE_INIT_PROJECT_ID: harness
+      LANGFUSE_INIT_PROJECT_NAME: Harness
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-admin}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    profiles: [langfuse]
+    restart: unless-stopped
+    depends_on: [langfuse-db, langfuse-clickhouse, langfuse-redis, langfuse-minio]
+    environment: *langfuse-env
+
+  langfuse-db:
+    image: postgres:17
+    profiles: [langfuse]
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
+    volumes:
+      - langfuse-db:/var/lib/postgresql/data
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server
+    profiles: [langfuse]
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
+    volumes:
+      - langfuse-clickhouse:/var/lib/clickhouse
+
+  langfuse-redis:
+    image: redis:7
+    profiles: [langfuse]
+    restart: unless-stopped
+    command: --requirepass ${LANGFUSE_DB_PASSWORD:-langfuse} --maxmemory-policy noeviction
+
+  langfuse-minio:
+    image: minio/minio
+    profiles: [langfuse]
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
+    volumes:
+      - langfuse-minio:/data
+
 volumes:
   ollama:
+  langfuse-db:
+  langfuse-clickhouse:
+  langfuse-minio:

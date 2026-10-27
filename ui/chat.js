@@ -5,6 +5,8 @@
 
 const $ = (id) => document.getElementById(id);
 const { render, toSpeech, escape: esc } = window.Markdown;
+const modelAlias = window.ModelAlias;
+const Tokens = window.Tokens;   // usage readings and estimates, shared with the Interceptor
 const speechText = (markdown) => toSpeech(markdown, { clear: $('speakClear').checked });
 
 const ICONS = {
@@ -55,11 +57,13 @@ const store = {
 
 const PROJECTS_KEY = 'harness-projects';
 const SKILLS_KEY = 'harness-skills';
+const COMMANDS_KEY = 'harness-commands';
 const SCHEDULES_KEY = 'harness-schedules';
 
 let index = store.get(INDEX_KEY, []);   // [{id, title, updated, count, project}]
 let projects = store.get(PROJECTS_KEY, []);   // [{id, name, color, instructions, repo, skills, created}]
 let skills = store.get(SKILLS_KEY, []);       // [{id, name, description, body}]
+let commands = store.get(COMMANDS_KEY, []);   // [{id, name, description, body, model, effort}]
 let schedules = store.get(SCHEDULES_KEY, []); // [{id, name, prompt, repeat, next, target, project, last}]
 const unseen = new Set();                // chats that finished a reply while not open
 const cache = new Map();                 // id -> chat
@@ -74,8 +78,29 @@ function newChatObject() {
 function loadChat(id) {
   if (cache.has(id)) return cache.get(id);
   const c = store.get(CHAT_KEY(id), null);
-  if (c) cache.set(id, c);
+  if (c) { clearStaleStreams(c); cache.set(id, c); }
   return c;
+}
+
+// A reply saved while it was still arriving belongs to a page that has gone (it was
+// closed, reloaded or crashed): nothing is streaming it any more. Left as it is, its
+// thinking animation would play forever and its Stop button would do nothing. What
+// arrived is kept and the reply is marked as cut off.
+function clearStaleStreams(c) {
+  let changed = false;
+  for (const m of c.messages || []) {
+    if (m.role !== 'assistant' || !m.streaming) continue;
+    changed = true;
+    m.streaming = false;
+    for (const r of m.rounds || []) for (const call of r.calls || []) if (call.result == null) { call.result = 'Cut off before this tool finished.'; call.isError = true; }
+    delete m.joinText; delete m.reasoningRound; delete m.reasoningCut;
+    if (m.trace) { delete m.trace.toolsRunning; m.trace.done = m.trace.done ?? Date.now() - (m.trace.start || Date.now()); }
+    const note = m.trace?.error ? `cut off: ${m.trace.error}` : 'cut off when the page closed';
+    m.content = m.content ? `${m.content}\n\n*(${note})*` : `*(${note})*`;
+    m.cost = computeCost(m);
+  }
+  if (changed) { try { saveChat(c, { touch: false }); } catch {} }
+  return changed;
 }
 
 function saveChat(c, { touch = true } = {}) {
@@ -141,7 +166,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll'];
+const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttEngine', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll', 'shellInRepo'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['maxTokens', 'temperature']) {
@@ -171,7 +196,10 @@ for (const id of PREF_FIELDS) {
     if (id === 'handsFree') drawHandsFree();
     if (id === 'autoSpeak' && !el.checked) speech.stop();
     if (id === 'ttsEngine') { speech.stop(); drawEngine(); }
+    if (id === 'sttEngine') { drawEngine(); if (dictation.want) { dictation.stop(); dictation.start(); } }
     if (id === 'serverModel') { speech.stop(); drawServerVoices(); prefs.serverVoice = $('serverVoice').value; store.set(PREF_KEY, prefs); drawEngine(); }
+    // the shell changes the tool list, so the panels and the repo note follow it
+    if (id === 'shellInRepo') { drawRepo(); drawKit(); drawTools(); }
     drawHint();
   });
 }
@@ -208,7 +236,8 @@ function flashCopied(btn) {
 }
 
 const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
-const approxTokens = (chars) => Math.round(chars / 4);
+// About 4 characters a token, the Interceptor's own rule (ui/tokens.js)
+const approxTokens = (chars) => Math.max(0, Math.round(chars / 4));
 function ago(t) {
   const s = (Date.now() - t) / 1000;
   if (s < 60) return 'just now';
@@ -231,6 +260,20 @@ const COLORS = ['#8b6cff', '#ff5fa2', '#ffb547', '#3fd0ff', '#34d399', '#f87171'
 let scope = store.get('harness-chat-scope', '');   // '' = every chat, else a project id
 if (scope && !projects.some(p => p.id === scope)) scope = '';
 const sideOpen = store.get('harness-side-sections', { projects: true, scheduled: true, recent: true });
+
+// The chats panel folds away to a button in the top bar; the choice is kept
+const narrow = () => matchMedia('(max-width: 760px)').matches;
+let panelOpen = store.get('harness-side-open', true);
+function setSide(open) {
+  panelOpen = !!open;
+  $('app').classList.toggle('side-open', panelOpen);
+  $('toggleSide').classList.toggle('on', panelOpen);
+  $('toggleSide').setAttribute('aria-expanded', String(panelOpen));
+  $('toggleSide').title = panelOpen ? 'Hide chats' : 'Show chats';
+  // a folded panel is still in the page, so keep it out of the tab order
+  $('side').inert = !panelOpen;
+  store.set('harness-side-open', panelOpen);
+}
 
 const projectOf = (c) => (c?.project ? projects.find(p => p.id === c.project) : null);
 const saveProjects = () => store.set(PROJECTS_KEY, projects);
@@ -261,7 +304,11 @@ function liveStatus(id) {
     const call = (m.rounds || []).flatMap(x => x.calls).find(x => x.result == null);
     return call ? `tool · ${toolLabel(call.name)[1]}` : 'using tools';
   }
-  if (tr.firstToken != null) return `writing · ${fmtTok(tr.usage?.completion_tokens ?? tr.chunks ?? 0)}`;
+  if (tr.firstToken != null) {
+    // tokens the provider has counted so far, else the text that has arrived
+    const out = Tokens.usage(tr.usage)?.output ?? approxTokens(tr.textChars || 0);
+    return `writing · ${fmtTok(out)}${Tokens.usage(tr.usage) ? '' : '~'}`;
+  }
   if (tr.answered) return 'thinking';
   if (tr.routed) return 'waiting';
   return 'routing';
@@ -332,7 +379,7 @@ $('chatList').addEventListener('click', (e) => {
     return;
   }
   const li = e.target.closest('li[data-id]');
-  if (li) { openChat(li.dataset.id); $('app').classList.remove('side-open'); }
+  if (li) { openChat(li.dataset.id); if (narrow()) setSide(false); }
 });
 $('projectList').addEventListener('click', (e) => {
   const edit = e.target.closest('[data-edit]');
@@ -367,12 +414,15 @@ function openChat(id) {
   $('system').value = chat.system || '';
   $('notes').value = chat.notes || '';
   $('input').value = chat.draft || '';
+  if (typeof hideSlash === 'function') hideSlash();
   pending = chat.pendingAttachments || [];
   drawChips(); autoGrow(); drawContextSize(); drawRepo(); drawRoute(); drawTools(); drawEffort();
   drawList();
   drawProjectBits();
   drawLog();
   busy(running.has(chat.id));
+  drawQueue();
+  drawAdvisor();
   try { localStorage.setItem('harness-chat-open', chat.id); } catch {}
   $('input').focus();
 }
@@ -392,7 +442,7 @@ function stepChat(dir) {
   if (next) openChat(next.id);
 }
 
-$('newChat').addEventListener('click', () => { openChat(null); $('app').classList.remove('side-open'); });
+$('newChat').addEventListener('click', () => { openChat(null); if (narrow()) setSide(false); });
 $('deleteChat').addEventListener('click', () => {
   if (!index.some(e => e.id === chat.id)) {
     // nothing saved yet: just clear what's typed
@@ -406,7 +456,7 @@ $('deleteAll').addEventListener('click', () => {
   if (!index.length) return toast('No saved chats to delete.');
   if (confirm(`Delete all ${index.length} saved chat${index.length === 1 ? '' : 's'} in this browser? This can't be undone. (Export all chats first to keep a copy.)`)) deleteAllChats();
 });
-$('toggleSide').addEventListener('click', () => $('app').classList.toggle('side-open'));
+$('toggleSide').addEventListener('click', () => setSide(!$('app').classList.contains('side-open')));
 $('title').addEventListener('change', () => { chat.title = $('title').value.trim(); saveChat(chat, { touch: false }); drawList(); });
 $('system').addEventListener('change', () => { chat.system = $('system').value; saveChat(chat); drawList(); drawContextSize(); });
 $('notes').addEventListener('change', () => { chat.notes = $('notes').value; saveChat(chat); drawList(); drawContextSize(); });
@@ -515,7 +565,7 @@ function traceHtml(m) {
   const steps = [];
   const now = Date.now();
   const live = m.streaming;
-  const step = (cls, text, t) => steps.push(`<li class="${cls}"><span class="st">${cls === 'ok' ? '✓' : cls === 'bad' ? '✕' : ''}</span><span>${text}</span><span class="t">${t ?? ''}</span></li>`);
+  const step = (cls, text, t) => steps.push({ cls, text, t });
 
   step('ok', 'Sent to the Interceptor', '');
   if (tr.routed) {
@@ -535,15 +585,32 @@ function traceHtml(m) {
   }
   if (tr.firstToken != null) {
     const done = tr.done != null;
-    const tok = tr.usage?.completion_tokens ?? tr.chunks;
+    // what the provider counted, else the text that has arrived (marked ~)
+    const u = Tokens.usage(tr.usage);
+    const tok = u?.output ?? approxTokens(tr.textChars || 0);
     const secs = ((done ? tr.done : now - tr.start) - tr.firstToken) / 1000;
     const rate = secs > 0.2 && tok ? ` · ${(tok / secs).toFixed(0)} tok/s` : '';
-    step(done ? 'ok' : 'now', `${done ? 'Reply finished' : 'Writing'} · ${tok ?? 0} ${tr.usage ? 'tokens' : 'chunks'}${rate}`, `first token ${fmtMs(tr.firstToken)}`);
+    const why = tr.finish ? ` · stopped because ${tr.finish === 'length' ? 'it hit the output cap' : tr.finish === 'tool_calls' ? 'it asked for a tool' : tr.finish === 'stop' ? 'it was done' : tr.finish === 'content_filter' ? 'of the content filter' : tr.finish}` : '';
+    step(done ? 'ok' : 'now', `${done ? 'Reply finished' : 'Writing'} · ${u ? '' : '~'}${tok ?? 0} tokens${rate}${done ? why : ''}`, `first token ${fmtMs(tr.firstToken)}`);
   } else if (live && tr.answered) {
     step('now', 'Waiting for the first token…', fmtMs(now - tr.start));
   }
+  if (tr.droppedCalls) step('bad', `${tr.droppedCalls} tool call${tr.droppedCalls > 1 ? 's' : ''} arrived with no name and could not run`, '');
   if (tr.error) step('bad', esc(tr.error), '');
-  return `<ul class="trace">${steps.join('')}</ul>`;
+  const row = ({ cls, text, t }) => `<li class="${cls}"><span class="st">${cls === 'ok' ? '✓' : cls === 'bad' ? '✕' : ''}</span><span>${text}</span><span class="t">${t ?? ''}</span></li>`;
+  const current = steps[steps.length - 1];
+  const history = steps.slice(0, -1);
+  return `<div class="trace-progress">${current ? `<div class="trace-current ${current.cls}"><span class="st">${current.cls === 'ok' ? '✓' : current.cls === 'bad' ? '✕' : ''}</span><span class="label">${current.text}</span><span class="t">${current.t ?? ''}</span></div>` : ''}
+    ${history.length ? `<details class="trace-history" data-k="trace-history"><summary>Earlier steps (${history.length})</summary><ul class="trace">${history.map(row).join('')}</ul></details>` : ''}</div>`;
+}
+
+// "1,234 in · 567 out", with a ~ when the provider sent no counts and the
+// numbers were worked out from the prompt and the reply
+function replyUsageHtml(m) {
+  const k = usageOf(m);
+  if (!k) return '';
+  const tilde = k.exact ? '' : '~';
+  return `<span title="${k.exact ? 'Counted by the provider' : 'Estimated: the provider sent no counts, so this is about 4 characters a token'}">${tilde}${k.input.toLocaleString()} in · ${tilde}${k.output.toLocaleString()} out</span>`;
 }
 
 function metaHtml(m) {
@@ -552,9 +619,10 @@ function metaHtml(m) {
   const bits = [
     model && `<code>${esc(model)}</code>`,
     (routeWhy(tr?.routed) || meta.route) && esc(routeWhy(tr?.routed) || meta.route),
+    m.turn?.command && `<span class="tag" title="Sent by the command /${esc(m.turn.command)}${turnNote(m.turn) ? `: ${esc(turnNote(m.turn))}` : ''}">/${esc(m.turn.command)}</span>`,
     tr?.answered?.fallbacks > 0 && `<span class="warn">${tr.answered.fallbacks} fallback${tr.answered.fallbacks > 1 ? 's' : ''}</span>`,
     (tr?.done ?? meta.ms) != null && fmtMs(tr?.done ?? meta.ms),
-    tr?.usage && `${tr.usage.prompt_tokens ?? '?'} in · ${tr.usage.completion_tokens ?? '?'} out`,
+    replyUsageHtml(m),
     costHtml(m),
   ].filter(Boolean);
   if (!bits.length) return '';
@@ -569,23 +637,35 @@ const replyModel = (m) => m?.trace?.answered?.servedBy || m?.trace?.routed?.mode
 const fmtTok = (n) => n < 1000 ? String(n) : n < 1e6 ? `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k` : `${(n / 1e6).toFixed(1)}M`;
 const fmtUsd = (n) => n === 0 ? '$0' : n < 0.0001 ? '<$0.0001' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`;
 
+// Tokens of anything one request or one reply reported, in one shape whatever
+// the provider called its fields (ui/tokens.js): { input, output, cacheRead,
+// cacheWrite, cost, exact }. A reply whose rounds reported counts is the sum of
+// its rounds (runReply keeps that in tr.usageParts); anything the provider left
+// out is filled from what did arrive, and marked inexact.
+function usageOf(x) {
+  const tr = x?.trace || {};
+  const k = tr.usageParts ? { ...tr.usageParts } : Tokens.usage(tr.usage);
+  if (!k) return null;
+  // Some providers stream the text without ever counting it (an OpenAI stream
+  // without include_usage). Then the prompt we sent and the text that arrived
+  // are the best numbers there are, at about 4 characters a token.
+  if (!k.input) { k.input = approxTokens(tr.sentChars ?? 0); k.exact = false; }
+  if (!k.output && tr.textChars) { k.output = approxTokens(tr.textChars); k.exact = false; }
+  return k;
+}
+
 // { usd, free, estimated } or null when the price isn't known. The provider's
 // own figure wins (OpenRouter's usage.cost, LiteLLM's cost header); else the
 // tokens times the Gateway's price list.
 function computeCost(m) {
   const tr = m.trace || {};
-  const u = tr.usage;
-  if (typeof u?.cost === 'number') return { usd: u.cost, free: u.cost === 0 };
+  const k = usageOf(m);
+  if (typeof k?.cost === 'number') return { usd: k.cost, free: k.cost === 0 };
   if (tr.headerCost > 0) return { usd: tr.headerCost, free: false };
   const info = modelInfo[replyModel(m)];
   if (info?.free) return { usd: 0, free: true };
-  if (!info || info.inputCost == null || !u) return null;
-  return { usd: tokensCost(u, info), free: false, estimated: true };
-}
-// Tokens times the price list, cached input at the provider's cache price (ui/costs.js)
-function tokensCost(u, info) {
-  const k = CacheTimer.cacheUsage(u);
-  return Costs.rowCost({ input: k.prompt, output: u.completion_tokens ?? u.output_tokens ?? 0, cacheRead: k.read, cacheWrite: k.write }, info).cost;
+  if (!info || info.inputCost == null || !k) return null;
+  return { usd: Costs.rowCost(k, info).cost, free: false, estimated: !k.exact };
 }
 const replyCost = (m) => (m.cost !== undefined && !m.streaming ? m.cost : computeCost(m));
 
@@ -596,38 +676,73 @@ function costHtml(m) {
   return `<span class="cost" title="${c.estimated ? 'Worked out from the Gateway’s price list' : 'Reported by the provider'}">${c.estimated ? '≈ ' : ''}${fmtUsd(c.usd)}</span>`;
 }
 
-// Tokens the next request will send: context, history, attachments and the box
+// Tokens the next request will send, counted where it is put together: every
+// context block, the history with its attachments and tool calls, the tool
+// schemas (however small) and the box. Images are noted separately: their size
+// in tokens depends on the model.
+function requestPrompt() {
+  if (!chat) return { chars: 0, images: 0 };
+  let images = 0;
+  // a text attachment goes in as a <file> block
+  const fileChars = (list) => (list || []).reduce((n, a) => (
+    a.kind === 'image' ? n : n + `<file name="${a.name}">\n${a.text || ''}\n</file>`.length), 0);
+  // a user message as it will be sent: a command's own message, then its file blocks
+  const userChars = (m) => {
+    const text = [m.turn?.command ? commandPrompt(m) : m.content,
+      ...(m.attachments || []).filter(a => a.kind === 'text').map(f => `<file name="${f.name}">\n${f.text}\n</file>`)].filter(Boolean);
+    return JSON.stringify(text).length;
+  };
+  // images are counted, not measured: their size in tokens depends on the model
+  const countImages = (list) => { images += (list || []).filter(a => a.kind === 'image').length; };
+  // what will be sent, not what is stored: a command's message, the attachments
+  // written out as file blocks, and the tool calls and results of each round
+  let chars = contextText(chat).length;
+  for (const m of chat.messages) {
+    if (m.role === 'user') { chars += userChars(m); countImages(m.attachments); }
+    else if (m.role === 'assistant' && !m.streaming) {
+      chars += assistantMessages(m, true).reduce((k, a) => k + JSON.stringify(a).length, 0);
+    }
+  }
+  // the tool schemas go with every request, small ones included
+  const tools = JSON.stringify(activeTools(chat));
+  if (tools && tools !== '[]') chars += tools.length;
+  return { chars: chars + fileChars(pending) + $('input').value.length, images };
+}
 function requestTokens() {
-  if (!chat) return 0;
-  const files = (list) => (list || []).reduce((n, a) => n + (a.text?.length || 0), 0);
-  const ctx = contextText(chat).length + files(pending);
-  const hist = chat.messages.filter(m => m.role === 'user' || m.role === 'assistant')
-    .reduce((n, m) => n + String(m.content).length + files(m.attachments)
-      + (m.rounds || []).reduce((k, r) => k + r.calls.reduce((x, t) => x + (t.arguments?.length || 0) + (t.result?.length || 0), 0), 0), 0);
-  const tools = JSON.stringify(activeTools(chat)).length;
-  return approxTokens(ctx + hist + (tools > 2 ? tools : 0) + $('input').value.length);
+  return approxTokens(requestPrompt().chars);
 }
 
-// Header: tokens and cost so far in this chat, and how full the context is
-function drawStats() {
+// Header: tokens and cost so far in this chat, and how full the context is.
+// Counts come from what each provider reported; a reply still arriving counts
+// what it has reported so far, so the numbers move as it writes.
+// countNext false keeps the last "next request" size: while a reply streams it
+// can't change, and recounting the whole history 4 times a second is wasted work.
+let nextTokens = null;
+function drawStats(countNext = true) {
   const el = $('chatStats');
   if (!chat) return;
-  const replies = chat.messages.filter(m => m.role === 'assistant' && !m.streaming);
-  let input = 0, output = 0, usd = 0, paid = 0, free = 0, unknown = 0;
+  const replies = chat.messages.filter(m => m.role === 'assistant');
+  const sent = chat.messages.filter(m => m.role === 'user');
+  let input = 0, output = 0, usd = 0, paid = 0, free = 0, unknown = 0, estimated = 0, requests = 0;
   for (const m of replies) {
-    const u = m.trace?.usage;
-    if (u) { input += u.prompt_tokens || 0; output += u.completion_tokens || 0; }
+    const k = usageOf(m);
+    if (k) {
+      requests++;
+      input += k.input; output += k.output;
+      if (!k.exact) estimated++;
+    }
     const c = replyCost(m);
     if (!c) unknown++; else if (c.free) free++; else { paid++; usd += c.usd; }
   }
-  const next = requestTokens();
+  const next = (countNext || nextTokens == null) ? (nextTokens = requestTokens()) : nextTokens;
   const model = routeOf(chat).model || replyModel(replies[replies.length - 1]);
   const max = modelInfo[model]?.maxInput;
-  const lastSent = [...replies].reverse().find(m => m.trace?.usage?.prompt_tokens)?.trace.usage.prompt_tokens;
+  const lastSent = [...replies].reverse().map(usageOf).find(k => k?.input)?.input;
   if (!replies.length && !next) { el.innerHTML = ''; return; }
   const pct = max ? Math.min(100, Math.round(next / max * 100)) : null;
+  const tilde = estimated ? '~' : '';
   const bits = [];
-  if (input + output) bits.push(`<span>${fmtTok(input + output)} tokens</span>`);
+  if (input + output) bits.push(`<span title="${estimated ? `${estimated} of ${requests} request${requests === 1 ? '' : 's'} had no counts from the provider, so those are estimated` : 'Counted by the providers'}">${tilde}${fmtTok(input + output)} tokens</span>`);
   if (paid) bits.push(`<span>${fmtUsd(usd)}${unknown ? '+' : ''}</span>`);
   else if (free && !unknown) bits.push('<span class="ok">free</span>');
   bits.push(max
@@ -635,7 +750,8 @@ function drawStats() {
     : `<span class="ctx-text">context ≈ ${fmtTok(next)}</span>`);
   el.innerHTML = bits.join('');
   el.title = [
-    `This chat: ${input.toLocaleString()} tokens in, ${output.toLocaleString()} out over ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}.`,
+    `This chat: ${tilde}${input.toLocaleString()} tokens in, ${tilde}${output.toLocaleString()} out over ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}${estimated ? ` (${estimated} estimated: the provider sent no counts)` : ''}.`,
+    `You sent ${sent.length} message${sent.length === 1 ? '' : 's'}; each reply re-sends the whole history, so input tokens grow faster than the chat does.`,
     `Cost: ${fmtUsd(usd)} for ${paid} paid repl${paid === 1 ? 'y' : 'ies'}${free ? `, ${free} free` : ''}${unknown ? `, ${unknown} with no known price` : ''}.`,
     `Next request: about ${next.toLocaleString()} tokens${max ? ` of ${model}'s ${max.toLocaleString()} (${pct}%)` : model ? ` (no context size known for ${model})` : ''}.`,
     lastSent ? `The last reply was sent ${lastSent.toLocaleString()} tokens.` : '',
@@ -658,7 +774,7 @@ function messageHtml(m, i, list) {
         <button data-act="copy" title="Copy">${ICONS.copy}</button>
         <button data-act="edit" title="Edit and resend">${ICONS.edit}</button>
         <button data-act="resend" title="Send this again (replies after it are replaced)">${ICONS.retry}</button></span></div>
-      ${attachmentsHtml(m.attachments)}${m.content ? `<div class="bubble">${esc(m.content)}</div>` : ''}</div>`;
+      ${attachmentsHtml(m.attachments)}${m.content || m.turn?.command ? `<div class="bubble">${m.turn?.command ? `<code>/${esc(m.turn.command)}</code>${m.content ? ` ${esc(m.content)}` : ''}` : esc(m.content)}</div>` : ''}</div>`;
   }
   if (m.role === 'error') {
     return `<div class="msg error" data-id="${m.id}"><div class="who">Error<span class="actions">
@@ -672,21 +788,38 @@ function messageHtml(m, i, list) {
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>
       ${lastAssistant && !m.streaming ? `<button data-act="retry" title="Regenerate">${ICONS.retry}</button>` : ''}</span></div>
     <div class="bubble${m.streaming ? ' working' : ''}"${m.streaming ? ` style="--spin-delay:-${(Date.now() - m.time) % 4000}ms"` : ''}><div class="live-trace">${m.streaming ? traceHtml(m) : ''}</div>
-      ${m.streaming && !m.content && !(m.rounds || []).length ? thinkingHtml(m) : ''}
+      ${m.streaming && !m.content && !(m.rounds || []).length && !m.reasoning ? thinkingHtml(m) : ''}
       ${replyBodyHtml(m)}
       <div class="meta-wrap">${m.streaming ? '' : metaHtml(m)}</div></div></div>`;
 }
 
-// Reply text with each round of tool calls where it happened
+// What the model thought first, when the provider sends it back. It stays in
+// the chat and goes above the tool calls it led to, but is never sent back to
+// the model as part of the conversation.
+const REASONING_SHOWN = 20000;
+function reasoningHtml(m) {
+  const text = m.reasoning || '';
+  if (!text) return '';
+  const shown = text.length > REASONING_SHOWN ? `${text.slice(0, REASONING_SHOWN)}\n… (${(text.length - REASONING_SHOWN).toLocaleString()} more characters)` : text;
+  return `<details class="reasoning" data-k="reasoning"><summary>
+      <span class="spark"><i></i><i></i><i></i></span><span>${m.streaming ? 'Thinking' : 'Thought'}</span>
+      <span class="t">${text.length.toLocaleString()} characters</span></summary><pre>${esc(shown)}</pre></details>`;
+}
+
+// Reply text with all tool calls grouped where the first round happened
 function replyBodyHtml(m) {
   const rounds = m.rounds || [];
   const last = rounds.length ? rounds[rounds.length - 1].end : 0;
   const rest = m.content.slice(last);
-  let html = '', from = 0;
-  rounds.forEach((r, k) => {
+  let html = reasoningHtml(m), from = 0;
+  let toolsAdded = false;
+  rounds.forEach((r) => {
     const text = m.content.slice(from, r.end);
     if (text.trim()) html += `<div class="md">${render(text)}</div>`;
-    html += toolCallsHtml(r, k);
+    if (!toolsAdded) {
+      html += toolCallsHtml(rounds);
+      toolsAdded = true;
+    }
     from = r.end;
   });
   const empty = !m.content && !rounds.length && !m.streaming;
@@ -698,6 +831,7 @@ function toolLabel(name) {
   const m = /^mcp__(.+?)__(.+)$/.exec(name);
   if (m) return [m[1], m[2]];
   if (name.startsWith('repo_')) return ['repo', name.slice(5)];
+  if (name === 'run_command') return ['shell', name];
   return ['', name];
 }
 
@@ -715,29 +849,65 @@ function prettyArgs(args) {
 }
 
 const SHOW_RESULT = 6000;
-function toolCallsHtml(r, k) {
-  return `<div class="tool-calls">${r.calls.map((c, j) => {
+function toolCallsHtml(rounds) {
+  const calls = rounds.flatMap((r, k) => r.calls.map((call, j) => ({ call, key: `tool-${k}-${j}` })));
+  if (!calls.length) return '';
+  const state = calls.some(({ call }) => call.result == null) ? 'now' : calls.some(({ call }) => call.isError) ? 'bad' : 'ok';
+  return `<details class="tool-calls ${state}" data-k="tools"><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
+      <span>Tool calls (${calls.length})</span></summary><div class="tool-list">${calls.map(({ call: c, key }) => {
     const [src, name] = toolLabel(c.name);
     const state = c.result == null ? 'now' : c.isError ? 'bad' : 'ok';
     const result = c.result == null ? '' : c.result.length > SHOW_RESULT ? `${c.result.slice(0, SHOW_RESULT)}\n… (${(c.result.length - SHOW_RESULT).toLocaleString()} more characters sent to the model)` : c.result;
-    return `<details class="tool-call ${state}" data-k="tool-${k}-${j}"><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
+    const ap = c.approval;
+    const asked = ap?.state === 'ask';
+    const approve = asked ? `<div class="approve"><span>${esc(ap.reason || 'The command guard is unsure about this command.')}</span>
+        <button type="button" data-approve="allow" data-call="${esc(c.id)}">Allow</button><button type="button" data-approve="decline" data-call="${esc(c.id)}">Decline</button></div>`
+      : ap ? `<div class="verdict ${ap.state === 'allowed' ? 'ok' : 'bad'}">${ap.state === 'allowed' ? 'You allowed it' : 'You declined it'}${ap.reason ? ` · ${esc(ap.reason)}` : ''}</div>` : '';
+    return `<details class="tool-call ${state}" data-k="${key}"${asked ? ' open' : ''}><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
         ${src ? `<span class="src">${esc(src)}</span>` : ''}<code>${esc(name)}</code><span class="args">${esc(argsSummary(c.arguments))}</span>
-        <span class="t">${c.ms != null ? fmtMs(c.ms) : state === 'now' ? 'running…' : ''}</span></summary>
-      <div class="io"><b>Input</b><pre>${esc(prettyArgs(c.arguments))}</pre>${c.result != null ? `<b>Result</b><pre class="out">${esc(result)}</pre>` : ''}</div></details>`;
-  }).join('')}</div>`;
+        <span class="t">${c.ms != null ? fmtMs(c.ms) : asked ? 'waiting for you' : state === 'now' ? 'running…' : ''}</span></summary>
+      <div class="io"><b>Input</b><pre>${esc(prettyArgs(c.arguments))}</pre>${approve}${c.result != null ? `<b>Result</b><pre class="out">${esc(result)}</pre>` : ''}</div></details>`;
+  }).join('')}</div></details>`;
 }
 
+// Whether the conversation follows the newest text. Scrolling up leaves it where
+// you put it, even mid-reply; scrolling back to the end (or pressing the button
+// that appears while you are up there) follows again.
+const NEAR_BOTTOM = 60;   // how close to the end counts as being at the end
 let stickToBottom = true;
-$('log').addEventListener('scroll', () => {
+let jumpedAway = false;   // you scrolled up during a reply and haven't come back
+const atBottom = () => {
   const log = $('log');
-  stickToBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  return log.scrollHeight - log.scrollTop - log.clientHeight < NEAR_BOTTOM;
+};
+function drawJumpDown() {
+  const b = $('jumpDown');
+  const away = !atBottom();
+  b.hidden = !away;
+  b.classList.toggle('new', away && jumpedAway);
+}
+$('log').addEventListener('scroll', () => {
+  stickToBottom = atBottom();
+  if (stickToBottom) jumpedAway = false;
+  drawJumpDown();
+});
+$('jumpDown').addEventListener('click', () => {
+  stickToBottom = true;
+  jumpedAway = false;
+  $('log').scrollTop = $('log').scrollHeight;
+  drawJumpDown();
+  $('input').focus();
 });
 
 function drawLog() {
   const log = $('log');
+  // a chat that is redrawn from scratch (a new message arrived) follows the end again
+  const follow = stickToBottom || !jumpedAway;
   log.innerHTML = chat.messages.length ? chat.messages.map(messageHtml).join('') : emptyState();
-  stickToBottom = true;
-  log.scrollTop = log.scrollHeight;
+  stickToBottom = follow;
+  jumpedAway = false;
+  if (follow) log.scrollTop = log.scrollHeight;
+  drawJumpDown();
   drawHint();
 }
 
@@ -753,15 +923,42 @@ function redraw(m) {
       const el = $('log').querySelector(`.msg[data-id="${msg.id}"]`);
       const i = chat.messages.indexOf(msg);
       const html = messageHtml(msg, i, chat.messages);
-      if (el) patch(el, html); else drawLog();
+      if (el) patch(el, html);
+      else { drawLog(); followThinking(); }
     }
     dirty.clear();
     if (stickToBottom && $('autoScroll').checked) $('log').scrollTop = $('log').scrollHeight;
+    else if (!atBottom()) jumpedAway = true;
+    drawJumpDown();
   });
 }
+// A thinking pane that is open keeps its newest text in view while the reply
+// streams in, whatever the chat is doing. A pane you scrolled up in stays where
+// you put it, so reading an earlier thought isn't undone by the next one.
+function followThinking(root) {
+  const scope = root || $('log');
+  for (const pre of scope.querySelectorAll('.reasoning[open] > pre')) {
+    if (pre.dataset.hold === '1') continue;
+    pre.scrollTop = pre.scrollHeight;
+  }
+}
+// Where a pane was scrolled to, so a redraw doesn't send you back to the top
+function reasoningPos(el) {
+  const pre = el.querySelector('.reasoning[open] > pre');
+  if (!pre) return null;
+  const bottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+  return { bottom, top: pre.scrollTop, hold: bottom ? '0' : '1' };
+}
+// Reopening a thinking pane mid-reply jumps to the latest thought
+$('log').addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (!d.classList?.contains('reasoning') || !d.open || !d.closest('.msg.streaming')) return;
+  followThinking(d.closest('.msg'));
+}, true);
 // Replace a message's content but keep its button row when that hasn't
 // changed, so a click on Stop isn't lost to a redraw mid-click
 function patch(el, html) {
+  const pos = reasoningPos(el);
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   const fresh = tmp.firstElementChild;
@@ -777,11 +974,19 @@ function patch(el, html) {
     el.append(...fresh.childNodes);
   }
   for (const k of open) { const d = el.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; }
+  const pre = el.querySelector('.reasoning[open] > pre');
+  if (pos && pre) {
+    pre.scrollTop = pos.bottom ? pre.scrollHeight : pos.top;
+    // remember a pane the person scrolled up in, so streaming text leaves it alone
+    if (pos.hold === '1') pre.dataset.hold = '1'; else delete pre.dataset.hold;
+  }
 }
 // keep elapsed times ticking while a reply is pending
 setInterval(() => {
   for (const { reply } of running.values()) if (chat.messages.includes(reply)) redraw(reply);
   if (running.size) drawLiveStatus();
+  // the header's counts move while a reply writes, not just when it ends
+  if (running.has(chat?.id)) drawStats(false);
 }, 250);
 
 $('log').addEventListener('change', (e) => {
@@ -795,6 +1000,12 @@ $('log').addEventListener('change', (e) => {
 });
 
 $('log').addEventListener('click', async (e) => {
+  const appr = e.target.closest('[data-approve]');
+  if (appr) {
+    pendingApprovals.get(appr.dataset.call)?.(appr.dataset.approve === 'allow');
+    appr.closest('.approve')?.remove();
+    return;
+  }
   const sug = e.target.closest('[data-suggest]');
   if (sug) { $('input').value = sug.dataset.suggest; autoGrow(); $('input').focus(); return; }
   const codeBtn = e.target.closest('.copy-code');
@@ -818,7 +1029,8 @@ $('log').addEventListener('click', async (e) => {
     case 'edit':
       if (running.has(chat.id)) return toast('Stop the current reply first.');
       if (i < chat.messages.length - 1 && !confirm('Edit this message? The replies after it will be removed.')) return;
-      $('input').value = m.content;
+      // editing a command's message puts the command back in the box
+      $('input').value = m.turn?.command ? `/${m.turn.command}${m.content ? ` ${m.content}` : ' '}` : m.content;
       pending = m.attachments || [];
       chat.messages.splice(i);
       saveChat(chat); drawLog(); drawChips(); autoGrow(); drawList();
@@ -854,8 +1066,10 @@ function contextText(c) {
   }
   const repo = repoOf(c);
   if (repo) {
-    parts.push(`This chat is linked to the git repository "${repo.name}" at ${repo.path}${repo.branch ? ` (branch ${repo.branch})` : ''}. `
-      + 'Use the repo_ tools to list, read and search its files and to look at its git history before answering questions about it. Paths are relative to the repository root.');
+    const shell = $('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length;
+    parts.push(`This chat is linked to the git repository "${repo.name}" at ${repo.path}${repo.branch ? ` (branch ${repo.branch})` : ''}. Its tools use this chat's own persistent Git worktree, so edits and commands do not affect the original working copy or other chats. `
+      + 'Use the repo_ tools to list, read and search its files and to look at its git history before answering questions about it. Paths are relative to the repository root.'
+      + (shell ? ' The run_command tool runs a shell command in this chat\'s worktree: every command goes past the command guard, and one it finds risky waits for the user to allow it. Prefer the repo_ tools for reading, and run_command for tests and build steps.' : ''));
   }
   return parts.join('\n\n');
 }
@@ -863,7 +1077,7 @@ function contextText(c) {
 function userContent(m) {
   const files = (m.attachments || []).filter(a => a.kind === 'text');
   const images = (m.attachments || []).filter(a => a.kind === 'image');
-  const text = [m.content, ...files.map(f => `<file name="${f.name}">\n${f.text}\n</file>`)].filter(Boolean).join('\n\n');
+  const text = [m.turn?.command ? commandPrompt(m) : m.content, ...files.map(f => `<file name="${f.name}">\n${f.text}\n</file>`)].filter(Boolean).join('\n\n');
   if (!images.length) return text;
   return [{ type: 'text', text: text || '(see image)' }, ...images.map(a => ({ type: 'image_url', image_url: { url: a.dataUrl } }))];
 }
@@ -902,12 +1116,18 @@ function busy(on) {
   $('send').classList.toggle('primary', !on);
 }
 
-async function send(text, attachments) {
+async function send(text, attachments, turn) {
   const c = chat;
   const r = $('send').getBoundingClientRect();
   window.Bright?.pulse(r.left + r.width / 2, r.top + r.height / 2, 1);
-  if (text || attachments.length) c.messages.push({ id: uid(), role: 'user', content: text, attachments: attachments.length ? attachments : undefined, time: Date.now() });
-  await runReply(c);
+  if (text || attachments.length) c.messages.push({ id: uid(), role: 'user', content: text, attachments: attachments.length ? attachments : undefined, time: Date.now(), ...(turn ? { turn } : {}) });
+  await runReply(c, turn);
+}
+
+// What a / command did to its turn, for the reply's footer
+function turnNote(turn) {
+  if (!turn) return '';
+  return [turn.model && `${turn.profile ? 'strategy' : 'model'} ${turn.model}`, turn.effort && `effort ${turn.effort}`, turn.tools === false && 'no tools'].filter(Boolean).join(' · ');
 }
 
 function regenerate() {
@@ -915,7 +1135,10 @@ function regenerate() {
   if (running.has(c.id)) return;
   while (c.messages.length && c.messages[c.messages.length - 1].role !== 'user') c.messages.pop();
   if (!c.messages.length) return;
-  runReply(c);
+  // a command's answer is regenerated with the same command's model
+  const last = c.messages[c.messages.length - 1];
+  const command = last.turn?.command && commands.find(x => x.name === last.turn.command);
+  runReply(c, command ? commandTurn(command) : null);
 }
 
 // Send a user message again: stop any reply in progress, drop what came after it
@@ -929,7 +1152,8 @@ async function resendFrom(c, m) {
   c.messages.splice(i + 1);
   saveChat(c);
   if (chat === c) drawLog();
-  runReply(c);
+  // a command's message goes again with the same command's model
+  runReply(c, m.turn?.command ? commandTurn(commands.find(x => x.name === m.turn.command) || { name: m.turn.command }) : null);
 }
 
 // Free models often stall or refuse once their daily or per-minute quota is used
@@ -937,18 +1161,31 @@ const QUOTA_HINT = 'Free models often stall or refuse once their daily or per-mi
 const looksLikeQuota = (text) => /\b429\b|rate.?limit|quota|too many requests|exhausted|exceeded|capacity/i.test(text);
 const seconds = (id) => Math.max(0, Number($(id).value) || 0);
 
-async function runReply(c) {
-  const reply = { id: uid(), role: 'assistant', content: '', streaming: true, time: Date.now(), trace: { start: Date.now(), chunks: 0 } };
+async function runReply(c, turn) {
+  const reply = { id: uid(), role: 'assistant', content: '', streaming: true, time: Date.now(), trace: { start: Date.now(), chunks: 0 }, ...(turn ? { turn } : {}) };
   c.messages.push(reply);
   saveChat(c);
   if (chat === c) { drawLog(); $('title').placeholder = chatTitle(c); }
 
   const stream = $('stream').checked;
-  const tools = activeTools(c);
-  const maxRounds = Math.max(1, parseInt($('maxToolRounds').value, 10) || 12);
+  // a command's turn carries no tools: a model named there may not call them
+  let tools = turn?.tools === false ? [] : activeTools(c);
+  // The tool list comes from the harness at page load. A page that failed to get
+  // it (or got an empty one) sends a prompt saying "use the repo_ tools" with no
+  // tools at all, and the model then promises to read the file and stops with
+  // nothing it can call. Load the list again before sending.
+  if (!tools.length && turn?.tools !== false) {
+    await loadTools();
+    tools = activeTools(c);
+  }
+  reply.toolsMissing = turn?.tools !== false && !tools.length && !!repoOf(c);
+  // 0 (or empty, or junk) means no limit: the round loop runs until the model
+  // stops asking for tools. The stall and no-reply timeouts still bound it.
+  const rawRounds = parseInt($('maxToolRounds').value, 10);
+  const maxRounds = Number.isFinite(rawRounds) && rawRounds > 0 ? rawRounds : 0;
   const history = apiMessages(c, c.messages.length - 1);
   const headers = { 'content-type': 'application/json' };
-  Object.assign(headers, routeHeaders(c));
+  Object.assign(headers, routeHeaders(c), turnHeaders(turn));
 
   const controller = new AbortController();
   let finish;
@@ -973,19 +1210,35 @@ async function runReply(c) {
   }, 1000);
   const giveUp = (why) => { reply.timedOut = why; controller.abort(); };
   const clientIds = [];
-  const total = { prompt_tokens: 0, completion_tokens: 0, cost: 0, costKnown: true, any: false };
-  const addUsage = (u, headerCost) => {
-    if (!u) { total.costKnown = false; return; }
-    total.any = true;
-    total.prompt_tokens += u.prompt_tokens || 0;
-    total.completion_tokens += u.completion_tokens || 0;
-    if (typeof u.cost === 'number') total.cost += u.cost;
+  // What every request of this reply reported, added up (ui/tokens.js reads a
+  // provider's usage whatever shape it comes in). A request that reported nothing
+  // is filled in from the prompt it sent and the text it wrote, at about 4
+  // characters a token, and the total is then marked inexact.
+  const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, exact: true };
+  const addUsage = (k, headerCost, tr) => {
+    if (!k) {
+      k = {
+        input: approxTokens(tr.sentChars || 0),
+        output: approxTokens(tr.textChars || 0),
+        cacheRead: 0, cacheWrite: 0, cost: null, exact: false,
+      };
+      if (!k.input && !k.output) return;
+    }
+    total.input += k.input;
+    total.output += k.output;
+    total.cacheRead += k.cacheRead;
+    total.cacheWrite += k.cacheWrite;
+    if (!k.exact) total.exact = false;
+    if (typeof k.cost === 'number') total.cost += k.cost;
     else if (headerCost > 0) total.cost += headerCost;
-    else total.costKnown = false;
+    else total.exactCost = false;
   };
   try {
+    let toolRounds = 0;  // rounds that really ran tools, for Max tool rounds
+    let moreRoom = 0;    // output cap for a second try after a "length" stop
     for (let round = 0; ; round++) {
       // each round of tool calls is a request of its own, routed and logged like any other
+      const before = reply.content.length;
       if (round > 0) {
         reply.trace = tr = { start: Date.now(), chunks: 0, lastData: Date.now(), round };
         reply.joinText = true; // a blank line between the text before and after the tools
@@ -997,7 +1250,8 @@ async function runReply(c) {
       if (stream) body.stream_options = { include_usage: true };
       if (tools.length) body.tools = tools;
       const maxTokens = parseInt($('maxTokens').value, 10);
-      if (maxTokens > 0) body.max_tokens = maxTokens;
+      if (moreRoom) { body.max_tokens = moreRoom; moreRoom = 0; }
+      else if (maxTokens > 0) body.max_tokens = maxTokens;
       if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
 
       const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
@@ -1011,6 +1265,8 @@ async function runReply(c) {
         fallbacks: parseInt(res.headers.get('x-litellm-attempted-fallbacks'), 10) || tr.answered?.fallbacks || 0,
       };
       tr.headerCost = parseFloat(res.headers.get('x-litellm-response-cost')) || 0;
+      // how big the prompt this request sends is, for a provider that reports no counts
+      tr.sentChars = JSON.stringify(body).length;
       reply.meta = { model: tr.routed.model, route: routeWhy(tr.routed) };
       redraw(reply);
       if (!res.ok) {
@@ -1025,16 +1281,33 @@ async function runReply(c) {
       } else {
         const j = await res.json();
         const msg = j.choices?.[0]?.message || {};
+        appendReasoning(reply, msg.reasoning_content ?? msg.reasoning ?? '');
         appendText(reply, msg.content ?? '');
         calls = (msg.tool_calls || []).map(t => ({ id: t.id, name: t.function?.name || '', arguments: t.function?.arguments || '' }));
+        tr.finish = j.choices?.[0]?.finish_reason;
         tr.firstToken = Date.now() - tr.start;
         tr.usage = j.usage || null;
+        // the text and tool arguments this request generated, for an estimate
+        tr.textChars = Tokens.charsOf(j);
         speech.feed(reply);
       }
       tr.done = Date.now() - tr.start;
-      addUsage(tr.usage, tr.headerCost);
+      addUsage(Tokens.usage(tr.usage), tr.headerCost, tr);
       noteCache(c, tr);
+      // a call whose name never arrived (a provider cut it off mid-stream) cannot be run
+      if (calls.some(t => !t.name)) tr.droppedCalls = calls.filter(t => !t.name).length;
       calls = calls.filter(t => t.name);
+      // A round that gave back nothing at all: no text, no tool call. Some models
+      // spend the whole answer thinking and stop, or plan a tool call and never
+      // send it. Try once more, with more room when the output cap was the cause.
+      if (!calls.length && !reply.content.slice(before).trim() && !reply.emptyRetried) {
+        reply.emptyRetried = true;
+        // keep the second try's thinking apart from the first's in the pane
+        if (reply.reasoning) reply.reasoning += '\n\n';
+        if (tr.finish === 'length') moreRoom = Math.min(Math.max(maxTokens, 1024) * 2, 32768);
+        continue;
+      }
+      if (calls.length) toolRounds++;
       if (!calls.length) break;
 
       // run the tools, then send their results back for the next round
@@ -1042,22 +1315,43 @@ async function runReply(c) {
       (reply.rounds ||= []).push(r);
       redraw(reply);
       tr.toolsRunning = true;
-      for (const call of r.calls) await runTool(call, c, controller.signal, () => redraw(reply));
+      for (const call of r.calls) {
+        await runTool(call, c, controller.signal, () => redraw(reply));
+        // what the advisor's own model cost is part of this reply's cost
+        if (typeof call.advisorCost === 'number') total.cost += call.advisorCost;
+      }
       tr.toolsRunning = false;
       tr.lastData = Date.now();
       saveChat(c, { touch: false });
-      if (round + 1 >= maxRounds) {
-        reply.content += `${reply.content ? '\n\n' : ''}*(stopped after ${maxRounds} rounds of tool calls; raise the limit under Options to let it go on)*`;
+      if (maxRounds && toolRounds >= maxRounds) {
+        reply.content += `${reply.content ? '\n\n' : ''}*(stopped after ${maxRounds} rounds of tool calls; set Max tool rounds to 0 under Options for no limit)*`;
         break;
       }
     }
-    // one total for the whole reply, whatever number of requests it took
-    if (reply.rounds?.length && total.any) {
-      tr.usage = { prompt_tokens: total.prompt_tokens, completion_tokens: total.completion_tokens, ...(total.costKnown ? { cost: total.cost } : {}) };
+    // One total for the whole reply, whatever number of requests and rounds it
+    // took, kept on the reply itself (tr.usageParts). Left out only when no
+    // request of it reported anything and nothing arrived to estimate from.
+    if (total.input || total.output) {
+      tr.usageParts = {
+        input: total.input, output: total.output, cacheRead: total.cacheRead, cacheWrite: total.cacheWrite,
+        exact: total.exact, ...(total.exactCost === false ? {} : { cost: total.cost }),
+      };
       tr.headerCost = 0;
     }
+    drawStats();
+    // Nothing came back even on the second try: say why, rather than leaving
+    // "(empty reply)" with no way to tell what went wrong.
+    if (!reply.content.trim() && !reply.rounds?.length && !reply.timedOut) reply.content = emptyNote(reply, tr);
   } catch (err) {
     tr.done = Date.now() - tr.start;
+    // a stopped or failed reply still used what it used, so the counts are kept
+    if (total.input || total.output) {
+      tr.usageParts = {
+        input: total.input, output: total.output, cacheRead: total.cacheRead, cacheWrite: total.cacheWrite,
+        exact: total.exact, ...(total.exactCost === false ? {} : { cost: total.cost }),
+      };
+      tr.headerCost = 0;
+    }
     for (const r of reply.rounds || []) for (const call of r.calls) if (call.result == null) { call.result = 'Stopped before this tool finished.'; call.isError = true; }
     const message = err.name === 'AbortError' && reply.timedOut ? `${reply.timedOut}, so the page stopped waiting.` : err.message;
     if (err.name === 'AbortError' && !reply.timedOut) {
@@ -1074,6 +1368,10 @@ async function runReply(c) {
     clearInterval(watchdog);
     reply.streaming = false;
     delete reply.joinText;
+    delete reply.reasoningRound;
+    delete reply.reasoningCut;
+    delete reply.emptyRetried;
+    delete reply.toolsMissing;
     delete tr.toolsRunning;
     if (c.messages.includes(reply)) reply.cost = computeCost(reply);
     running.delete(c.id);
@@ -1084,7 +1382,38 @@ async function runReply(c) {
     if (reply.content && !reply.timedOut) nameChat(c);
     speech.endReply(reply);
     finish();
+    // a message typed while this reply was arriving goes next, as if you had just sent it
+    if (queues.get(c.id)?.length) setTimeout(() => drainQueue(c.id), 0);
   }
+}
+
+// The model's thinking, when the provider streams or returns it. A new round
+// of tool calls starts a new paragraph of it. Kept in the chat (browser
+// storage), so it is capped: a runaway model can think for a long time.
+const REASONING_KEEP = 60000;
+function appendReasoning(reply, text) {
+  if (!text || reply.reasoningCut) return;
+  const round = reply.trace?.round || 0;
+  if (reply.reasoning && reply.reasoningRound !== round) reply.reasoning += '\n\n';
+  reply.reasoningRound = round;
+  reply.reasoning = (reply.reasoning || '') + text;
+  if (reply.reasoning.length > REASONING_KEEP) {
+    reply.reasoning = `${reply.reasoning.slice(0, REASONING_KEEP)}\n\n… (the rest of the thinking was dropped to keep the chat small)`;
+    reply.reasoningCut = true;
+  }
+}
+
+// Why a reply that gave back nothing at all did: a model that spends its whole
+// answer thinking and stops, plans a tool call and never sends it (or sends it
+// nameless), or is cut off by the output cap. Shown in place of "(empty reply)".
+function emptyNote(reply, tr) {
+  const thought = (reply.reasoning || '').length;
+  const why = tr.finish === 'length' ? 'the output cap cut it off before it said anything, so raise Max tokens'
+    : tr.finish === 'content_filter' ? 'the provider’s content filter stopped it'
+    : tr.droppedCalls ? `it asked for a tool, but ${tr.droppedCalls > 1 ? `${tr.droppedCalls} calls` : 'the call'} arrived with no name, so nothing could run`
+    : reply.toolsMissing ? 'this chat is linked to a repo, but its tool list could not be loaded, so it had no tool to call: reload the page'
+    : `it stopped without answering (${tr.finish ? `finish reason: ${tr.finish}` : 'no finish reason'})`;
+  return `*(no answer: ${why}${thought ? ` · it thought for ${thought.toLocaleString()} characters first` : ''}. It was tried twice; Regenerate to try again.)*`;
 }
 
 // Text from the model; the first text after a round of tool calls starts a new paragraph
@@ -1095,6 +1424,70 @@ function appendText(reply, text) {
     reply.joinText = false;
   }
   reply.content += text;
+}
+
+// A risky shell command waits here until you press Allow or Decline (a Stop also
+// ends it). Resolves true only for Allow.
+const pendingApprovals = new Map(); // call key -> resolve
+let approvalCount = 0;
+function askApproval(call, reason, onChange, signal) {
+  // the buttons in the chat find this by the call's id
+  const key = call.id || (call.id = `call_${++approvalCount}`);
+  call.approval = { state: 'ask', reason: reason || '' };
+  onChange();
+  return new Promise((resolve) => {
+    const settle = (allow) => {
+      pendingApprovals.delete(key);
+      signal?.removeEventListener('abort', onAbort);
+      call.approval = { state: allow ? 'allowed' : 'declined', reason: reason || '' };
+      onChange();
+      resolve(allow);
+    };
+    const onAbort = () => settle(false);
+    // Stop (or a timeout) ends the wait too, so the reply can't hang here
+    signal?.addEventListener('abort', onAbort, { once: true });
+    pendingApprovals.set(key, settle);
+  });
+}
+
+// Ask the advisor. One request, no tools and no streaming: the answer is text the
+// model reads. It goes through the Interceptor with the advisor's model named in
+// the headers, so its cost lands in this chat's totals like any other request.
+const ADVISOR_CTX = 12000;
+const ADVISOR_REPLY = 8000;
+// What the advisor is told: answer as a reviewer, briefly. A note the person saved
+// with the advisor (the command's message) is part of how it answers.
+function ADVISOR_SYSTEM(advisor) {
+  const note = String(advisor?.note || '').trim();
+  return `You are an advisor to another AI agent that is doing the actual work in a code repository. It asks you about the part it is unsure of. Answer as a careful senior engineer: say what is wrong, missing or risky first, then what you would do instead. Be brief and concrete, name the exact change or the next check to run, and say plainly when it looks fine. You cannot read the repo or run anything: work from what the agent sends you, and say what you would need to know if that is not enough.${note ? `\n\nHow this person wants advice: ${note}` : ''}`;
+}
+async function askAdvisor(advisor, args, signal, c) {
+  const question = String(args?.question || '').trim();
+  if (!question) throw new Error('the question was empty');
+  const context = String(args?.context || '').trim();
+  const cut = context.length > ADVISOR_CTX ? `${context.slice(0, ADVISOR_CTX)}\n… (cut at ${ADVISOR_CTX} characters)` : context;
+  const res = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-harness-model': advisor.model, ...(advisor.effort ? { 'x-harness-effort': advisor.effort } : {}) },
+    body: JSON.stringify({
+      model: advisor.model,
+      stream: false,
+      messages: [
+        { role: 'system', content: ADVISOR_SYSTEM(advisor) },
+        { role: 'user', content: context ? `${question}\n\nContext the agent sent:\n${cut}` : question },
+      ],
+    }),
+    signal,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error?.message || body.error || `HTTP ${res.status}`);
+  }
+  const body = await res.json().catch(() => ({}));
+  const said = String(body.choices?.[0]?.message?.content || '').trim();
+  const cost = body.usage?.cost ?? body.cost;
+  if (!said) return { text: 'The advisor answered with nothing. Work it out yourself, or ask again with the question in one sentence.', isError: true, cost: typeof cost === 'number' ? cost : null };
+  return { text: said.length > ADVISOR_REPLY ? `${said.slice(0, ADVISOR_REPLY)}\n… (cut at ${ADVISOR_REPLY} characters)` : said, isError: false, cost: typeof cost === 'number' ? cost : null };
 }
 
 // Run one tool call through the harness (MCP server or repo tool)
@@ -1118,11 +1511,65 @@ async function runTool(call, c, signal, onChange) {
     call.ms = Date.now() - started;
     return onChange();
   }
+  // The advisor is called from the page: one plain request to its own model
+  if (call.name === 'ask_advisor') {
+    const a = advisorOf(c);
+    if (!a) {
+      call.result = 'Error: no advisor is set for this chat. The person can set one with /advisor MODEL.';
+      call.isError = true;
+      call.ms = Date.now() - started;
+      return onChange();
+    }
+    try {
+      const r = await askAdvisor(a, args, signal, c);
+      call.result = r.text;
+      call.isError = r.isError;
+      call.ms = Date.now() - started;
+      if (r.cost != null) call.advisorCost = r.cost;
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      call.result = `Error: the advisor could not answer (${err.message})`;
+      call.isError = true;
+      call.ms = Date.now() - started;
+    }
+    return onChange();
+  }
+  let confirmed = false;
+  call.approval = null;
   try {
+    if (call.name === 'run_command') {
+      // Ask the command guard first: a risky command waits here for Allow or Decline
+      const check = await fetch('api/tools/shell/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ command: String(args.command || ''), chatId: c.id, repo: repoOf(c)?.path }),
+        signal,
+      });
+      const v = await check.json().catch(() => ({}));
+      if (!check.ok) throw new Error(v.error || `HTTP ${check.status}`);
+      if (v.decision === 'deny') {
+        call.result = `Error: the harness refused this command (${v.reason || 'blocked by a guard rule'}). Do not run it; find another way or ask the user.`;
+        call.isError = true;
+        call.ms = Date.now() - started;
+        onChange();
+        return;
+      }
+      if (v.decision === 'ask') {
+        const allow = await askApproval(call, v.reason, onChange, signal);
+        if (!allow) {
+          call.result = `Error: the user declined to run this command (${v.reason || 'the guard asked'}). Do not run it again; ask what they want instead.`;
+          call.isError = true;
+          call.ms = Date.now() - started;
+          onChange();
+          return;
+        }
+        confirmed = true;
+      }
+    }
     const res = await fetch('api/tools/call', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: call.name, arguments: args, repo: repoOf(c)?.path }),
+      body: JSON.stringify({ name: call.name, arguments: args, repo: repoOf(c)?.path, chatId: c.id, confirmed }),
       signal,
     });
     const j = await res.json().catch(() => ({ text: `Error: HTTP ${res.status}`, isError: true }));
@@ -1147,6 +1594,10 @@ async function readStream(stream, reply, c) {
   const calls = [];
   const byIndex = new Map(); // stream index -> call (some providers reuse index 0 for every call)
   let buffer = '', lastSave = Date.now();
+  // Streams report usage in pieces and counts only grow, so the largest of each
+  // is kept (ui/tokens.js); counting the pieces too gives an estimate for a
+  // provider that sends no usage at all
+  tr.textChars = tr.textChars || 0;
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -1160,8 +1611,16 @@ async function readStream(stream, reply, c) {
       let j;
       try { j = JSON.parse(data); } catch { continue; }
       if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
-      if (j.usage) tr.usage = j.usage;
-      const d = j.choices?.[0]?.delta || {};
+      if (j.usage) tr.usage = Tokens.merge(Tokens.usage(tr.usage), Tokens.usage(j.usage));
+      tr.textChars += Tokens.charsOf(j);
+      const choice = j.choices?.[0];
+      // why it stopped: "length" means the output cap cut the answer off
+      if (choice?.finish_reason) tr.finish = choice.finish_reason;
+      const d = choice?.delta || {};
+      // Providers name the model's thinking differently: OpenRouter and most
+      // OpenAI-compatible servers say reasoning, others reasoning_content
+      const thought = d.reasoning_content ?? d.reasoning ?? '';
+      if (thought) { appendReasoning(reply, thought); redraw(reply); }
       const delta = d.content ?? '';
       if (delta) {
         if (tr.firstToken == null) tr.firstToken = Date.now() - tr.start;
@@ -1197,18 +1656,191 @@ $('compose').addEventListener('submit', (e) => {
 });
 function submit() {
   const text = $('input').value.trim();
-  if ((!text && !pending.length) || running.has(chat.id)) return;
-  dictation.stop();
+  if (!text && !pending.length) return;
+  // /advisor MODEL sets this chat's advisor and sends nothing
+  const asAdvice = advisorCommand(text);
+  if (asAdvice) return asAdvice;
+  // /subagent and /plan start a run of their own and send nothing to this chat
+  const asRun = subagentCommand(text);
+  if (asRun) return asRun;
+  // a command sends this one message to the command's model
+  const slash = slashCommand(text);
   const attachments = pending;
+  // A reply is already arriving: keep this message and send it when that one ends,
+  // so typing while the model thinks doesn't throw the message away.
+  if (running.has(chat.id)) return queue(chat.id, slash ? slash.text : text, attachments, slash ? commandTurn(slash.command) : null);
+  dictation.stop();
   $('input').value = '';
   pending = [];
   chat.draft = ''; chat.pendingAttachments = [];
+  hideSlash();
   drawChips(); autoGrow();
-  send(text, attachments);
+  send(slash ? slash.text : text, attachments, slash ? commandTurn(slash.command) : null);
+}
+
+// "/advisor MODEL" sets a better model this chat's own model may call for a second
+// opinion (it gets an ask_advisor tool), or "/advisor off" takes it away. A short
+// name finds the newest model the Gateway serves: "opus" -> claude-opus-5.5. The
+// setting is saved with the chat, so it lasts until you change it. Returns a
+// promise when the message was the advisor command, null when it was anything else.
+function advisorCommand(text) {
+  const m = /^\/advisor(?:\s+([\s\S]*))?$/i.exec(String(text || '').trim());
+  if (!m) return null;
+  const typed = (m[1] || '').trim();
+  const c = chat;
+  return (async () => {
+    if (!typed) {
+      const a = advisorOf(c);
+      toast(a ? `Advisor: ${a.model}. Type /advisor MODEL to change it, or /advisor off to remove it.` : 'Type /advisor MODEL, e.g. /advisor opus');
+      return;
+    }
+    if (/^(off|none|no)$/i.test(typed)) {
+      delete c.advisor;
+      saveChat(c, { touch: false });
+      drawAdvisor(); drawHint();
+      toast('Advisor removed');
+      return;
+    }
+    const pick = resolveModelName(typed);
+    if (!pick.model) {
+      const near = modelAlias.candidates(typed, gatewayModels || []).slice(0, 6);
+      const list = (gatewayModels || []).slice(0, 40).join(', ');
+      toast(near.length ? `No model matches "${typed}". Did you mean: ${near.join(', ')}?` : `No model matches "${typed}". Models: ${list}${(gatewayModels || []).length > 40 ? ', …' : ''}`);
+      return;
+    }
+    // the command's message becomes how the advisor is told to answer; its effort
+    // carries over too, so /advisor's saved settings still apply
+    const cmd = commands.find(x => x.name.toLowerCase() === 'advisor');
+    c.advisor = { model: pick.model, typed: pick.from !== pick.model ? pick.from : undefined, note: cmd?.body ? expandCommand(cmd, '').slice(0, 2000) : '', effort: cmd?.effort || null };
+    saveChat(c, { touch: false });
+    drawAdvisor(); drawHint();
+    toast(`Advisor set to ${pick.model}${pick.from !== pick.model ? ` (from "${pick.from}")` : ''}. This chat's model can ask it for a second opinion.`);
+  })();
+}
+
+// ---------------------------------------------------------------------------
+// Subagents: hand one task to an agent of its own, on its own branch, while this
+// chat carries on. It is an ordinary run of the Runs page (so it has its own page
+// entry, approvals and diff), started from here with the chat's repo, routing and
+// effort, and a model of its own if one is named: "subagent [model] task". A
+// cheaper model is the point: the chat does the thinking, the subagent does the
+// fetching, the searching, the mechanical edit.
+// ---------------------------------------------------------------------------
+
+// "/subagent [model] task" or "/subagent plan task". Returns a promise when the
+// message was this command, null otherwise.
+function subagentCommand(text) {
+  const m = /^\/(subagent|plan)(?:\s+([\s\S]*))?$/i.exec(String(text || '').trim());
+  if (!m) return null;
+  const plan = m[1].toLowerCase() === 'plan';
+  const typed = (m[2] || '').trim();
+  const c = chat;
+  return (async () => {
+    const repo = repoOf(c);
+    if (!repo) {
+      toast(`Link a git repo first (Options → Context): a ${plan ? 'plan' : 'subagent'} works in a copy of it.`);
+      return;
+    }
+    if (!typed) {
+      toast(plan
+        ? 'Type /plan TASK: an agent reads the repo and writes down what it would change, touching nothing.'
+        : 'Type /subagent TASK, or /subagent MODEL TASK to give it a cheaper model, e.g. /subagent haiku find the config loader');
+      return;
+    }
+    // a first word that names a model is the subagent's model; otherwise it is the task
+    let model = null, goal = typed;
+    if (!plan) {
+      const [first, ...rest] = typed.split(/\s+/);
+      const pick = rest.length ? resolveModelName(first) : { model: null };
+      if (pick.model) { model = pick.model; goal = rest.join(' '); }
+    }
+    const r = routeOf(c);
+    const body = {
+      goal, repo: repo.path, plan: plan ? '1' : '0',
+      // the chat's own routing, so the subagent follows the same rules
+      ...(r.model ? { model: r.model } : r.profile ? { profile: r.profile.id } : {}),
+      ...(c.effort && c.effort !== 'auto' ? { effort: c.effort } : {}),
+      ...(model ? { model } : {}),
+    };
+    try {
+      const res = await fetch('api/runs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const run = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(run.error || `HTTP ${res.status}`);
+      $('input').value = '';
+      chat.draft = '';
+      autoGrow();
+      const what = plan ? 'Plan' : 'Subagent';
+      toast(`${what} started: ${run.id}${model ? ` on ${model}` : ''}. It runs on its own branch; open Runs to watch it.`);
+      // the chat itself says what it started, so the conversation keeps the thread
+      const note = { id: uid(), role: 'assistant', content: `*${what} started: \`${run.id}\`${model ? ` on \`${model}\`` : ''}${plan ? ', changing nothing' : `, on branch \`${run.branch}\``}. Watch it on the [Runs page](runs.html#${run.id}).*`, time: Date.now(), meta: { note: true } };
+      c.messages.push(note);
+      saveChat(c);
+      if (chat === c) drawLog();
+    } catch (err) {
+      toast(err.message.includes('not running') ? 'The task runner is not running: start it with npm run all.' : `Could not start it: ${err.message}`);
+    }
+  })();
+}
+
+// Messages typed while a reply is still arriving. They belong to the chat's own id,
+// so leaving the chat and coming back doesn't lose them, and each is sent in turn.
+const queues = new Map();   // chat id -> [{ text, attachments, turn }]
+let draining = false;
+function queue(id, text, attachments, turn) {
+  if (!queues.has(id)) queues.set(id, []);
+  queues.get(id).push({ text, attachments, turn });
+  dictation.stop();
+  $('input').value = '';
+  if (chat?.id === id) { pending = []; chat.draft = ''; chat.pendingAttachments = []; hideSlash(); drawChips(); autoGrow(); }
+  drawQueue();
+  toast(queues.get(id).length === 1 ? 'Queued: it sends when this reply ends' : `Queued (${queues.get(id).length} waiting)`);
+}
+// The next message waits for the reply before it: the end of runReply calls this
+async function drainQueue(id) {
+  if (draining) return;
+  const q = queues.get(id);
+  if (!q?.length || running.has(id)) return;
+  const c = cache.get(id) || loadChat(id);
+  if (!c || c.deleted) { queues.delete(id); drawQueue(); return; }
+  const next = q.shift();
+  if (!q.length) queues.delete(id);
+  drawQueue();
+  if (chat?.id === id) { drawLog(); }
+  draining = true;
+  try {
+    c.messages.push({ id: uid(), role: 'user', content: next.text, attachments: next.attachments?.length ? next.attachments : undefined, time: Date.now(), ...(next.turn ? { turn: next.turn } : {}) });
+    saveChat(c);
+    await runReply(c, next.turn);
+  } finally {
+    draining = false;
+  }
+  if (queues.has(id)) drainQueue(id);
+}
+// How many of this chat's messages are waiting, shown under the composer
+function drawQueue() {
+  const n = queues.get(chat?.id)?.length || 0;
+  const el = $('queueNote');
+  if (!el) return;
+  el.hidden = !n;
+  el.innerHTML = n ? `<span>${n} message${n === 1 ? '' : 's'} waiting to send</span><button type="button" id="queueClear" title="Remove the waiting messages">Clear</button>` : '';
 }
 $('send').addEventListener('click', (e) => {
   const r = running.get(chat.id);
   if (r) { e.preventDefault(); r.controller.abort(); }
+});
+// Clear removes the messages waiting behind the current reply, without stopping it
+$('queueNote').addEventListener('click', (e) => {
+  if (!e.target.closest('#queueClear')) return;
+  queues.delete(chat.id);
+  drawQueue();
+  toast('Cleared the waiting messages');
+});
+$('advisorNote').addEventListener('click', (e) => {
+  if (!e.target.closest('#advisorOff')) return;
+  delete chat.advisor;
+  saveChat(chat, { touch: false });
+  drawAdvisor();
+  toast('Advisor removed');
 });
 
 function autoGrow() {
@@ -1217,9 +1849,178 @@ function autoGrow() {
   ta.style.height = Math.min(ta.scrollHeight + 2, 240) + 'px';
   drawHint();
 }
-$('input').addEventListener('input', autoGrow);
+
+// ---------------------------------------------------------------------------
+// Commands. Typing / lists them with the model each one sends to, and under
+// them the tools this chat can use. A command is one message sent with a
+// model, strategy or effort for that turn only, so /advisor can ask another
+// model and the next message goes back to the chat's own routing.
+// ---------------------------------------------------------------------------
+let slashItems = [];   // command names the menu shows, in order
+let slashPick = 0;     // the highlighted one
+
+// The half-typed query after a / (null when the box isn't a command)
+function slashQuery(value) {
+  const m = /^\/([^\n]*)$/.exec(value);
+  return m ? m[1].trim() : null;
+}
+
+// A command typed in full: { command, args }. The message keeps the command's
+// name and what was typed after it; the instructions it stands for are filled
+// in when the request is built, so editing a command changes what it says.
+function slashCommand(text) {
+  const m = /^\/([\w-]+)(?:\s+([\s\S]*))?$/.exec(text);
+  if (!m) return null;
+  const command = commands.find(c => c.name.toLowerCase() === m[1].toLowerCase());
+  return command ? { command, args: (m[2] || '').trim() } : null;
+}
+
+// The message a command stands for, as it is sent: the instructions replace the
+// typed command, with {args} filled in from what followed it
+function commandPrompt(m) {
+  const c = commands.find(x => x.name.toLowerCase() === String(m.turn?.command || '').toLowerCase());
+  return c ? expandCommand(c, m.content || '') : m.content || '';
+}
+
+// {args} becomes what was typed after the name; a command with no {args} gets
+// it after its message
+function expandCommand(command, args) {
+  let body = command.body;
+  if (body.includes('{args}')) body = body.replace(/\{args\}/g, args || '(what the person is doing now)');
+  else if (args) body += `\n\n${args}`;
+  return body;
+}
+
+// A command's model box takes any model name, or the name of a strategy
+function commandModel(command) {
+  const w = (command.model || '').trim();
+  if (!w) return {};
+  const strategy = strategies.profiles.find(x => x.id === w || x.name.toLowerCase() === w.toLowerCase());
+  return strategy ? { profile: strategy.id, model: strategy.name } : { model: w };
+}
+
+// What a command does to its turn. A model named there may not call tools,
+// so the turn carries none and the reply comes back in words.
+function commandTurn(command) {
+  const pick = commandModel(command);
+  return { command: command.name, model: pick.model, profile: pick.profile, effort: command.effort || null, tools: false };
+}
+
+// A turn's own route, laid over the chat's for its one request
+function turnHeaders(turn) {
+  if (!turn) return {};
+  const out = {};
+  if (turn.profile) out['x-harness-profile'] = turn.profile; else if (turn.model) out['x-harness-model'] = turn.model;
+  if (turn.effort && turn.effort !== 'auto') out['x-harness-effort'] = turn.effort;
+  return out;
+}
+
+function commandItem(c) {
+  const where = commandModel(c);
+  const bits = [where.profile ? `strategy ${where.model}` : where.model, c.effort && `effort ${c.effort}`].filter(Boolean);
+  return `<div class="slash-item" role="option" data-kind="command" data-name="${esc(c.name)}" title="${esc(c.body.slice(0, 300))}">`
+    + `<b>/${esc(c.name)} <i>${esc(c.description || '')}</i></b><span class="tag">${esc(bits.join(' · '))}</span>`
+    + `<span>${esc(c.body.replace(/\s+/g, ' ').slice(0, 120))}</span></div>`;
+}
+
+// Commands the page itself handles (they do something rather than send a message):
+// setting the advisor, and starting a subagent or a plan.
+const BUILTIN_COMMANDS = [
+  { name: 'advisor', what: 'A better model this chat can ask for a second opinion', tag: 'set once', example: '/advisor opus' },
+  { name: 'subagent', what: 'Hand one task to an agent on its own branch, on a model of its own', tag: 'runs page', example: '/subagent haiku find the config loader' },
+  { name: 'plan', what: 'An agent writes down what it would change, touching nothing', tag: 'no changes', example: '/plan how would you add a --version flag?' },
+];
+function builtinItem(b) {
+  return `<div class="slash-item" role="option" data-kind="builtin" data-name="${esc(b.name)}" title="${esc(b.example)}">`
+    + `<b>/${esc(b.name)} <i>${esc(b.what)}</i></b><span class="tag">${esc(b.tag)}</span>`
+    + `<span>${esc(b.example)}</span></div>`;
+}
+
+function drawSlash() {
+  // the first / fills in the examples, so there is something to try
+  if (!commands.length) { commands = STARTER_COMMANDS.map(c => ({ id: uid(), ...c })); saveCommands(); }
+  const q = slashQuery($('input').value);
+  if (q === null || q.includes(' ')) return hideSlash(); // past the name: the message itself
+  const needle = q.toLowerCase();
+  // the page's own commands come first; they do something instead of sending a message
+  const builtins = BUILTIN_COMMANDS.filter(b => !needle || b.name.includes(needle));
+  const found = commands.filter(c => (!needle || c.name.toLowerCase().includes(needle)) && !BUILTIN_COMMANDS.some(b => b.name === c.name.toLowerCase()));
+  if (!found.length && !builtins.length && needle) return hideSlash();
+  const rows = ['<div class="slash-sec">Commands</div>'];
+  if (builtins.length) rows.push(builtins.map(builtinItem).join(''));
+  if (found.length) rows.push(found.map(commandItem).join(''));
+  else if (!builtins.length) rows.push('<div class="slash-none">No commands yet. <button type="button" class="link" id="slashMake">Make one</button></div>');
+  // the tools this chat can use, so / shows what the next message may call
+  const live = chat ? activeTools(chat) : [];
+  if (live.length) {
+    rows.push('<div class="slash-sec">Tools this chat can use</div>');
+    rows.push(live.map(t => `<div class="slash-item" role="option" aria-disabled="true" data-kind="tool">`
+      + `<b>${esc(t.function.name)}</b><span>${esc(String(t.function.description || '').replace(/\s+/g, ' ').slice(0, 140))}</span></div>`).join(''));
+  }
+  $('slash').innerHTML = rows.join('');
+  slashItems = [...$('slash').querySelectorAll('[data-kind="command"], [data-kind="builtin"]')].map(el => el.dataset.name);
+  slashPick = Math.min(slashPick, Math.max(0, slashItems.length - 1));
+  markSlash();
+  $('slash').hidden = false;
+}
+
+function markSlash() {
+  const els = $('slash').querySelectorAll('[data-kind="command"], [data-kind="builtin"]');
+  els.forEach((el, i) => el.classList.toggle('on', i === slashPick));
+  els[slashPick]?.scrollIntoView({ block: 'nearest' });
+}
+
+function hideSlash() {
+  $('slash').hidden = true;
+  slashItems = [];
+  slashPick = 0;
+}
+
+// Put a command in the box, ready for what follows it
+function useSlash(name) {
+  const args = $('input').value.replace(/^\/[^\s]*\s?/, '');
+  const value = `/${name}${args ? ` ${args}` : ' '}`;
+  $('input').value = value;
+  hideSlash(); autoGrow();
+  $('input').focus();
+  $('input').setSelectionRange(value.length, value.length);
+}
+
+$('slash').addEventListener('mousedown', (e) => {
+  // mousedown, so the box keeps its focus
+  const item = e.target.closest('[data-kind="command"], [data-kind="builtin"]');
+  if (item) { e.preventDefault(); useSlash(item.dataset.name); return; }
+  if (e.target.closest('#slashMake')) {
+    e.preventDefault();
+    const name = (slashQuery($('input').value) || '').trim();
+    $('input').value = '';
+    hideSlash(); autoGrow();
+    newCommand(name);
+  }
+});
+
+// The menu follows the box: / lists, a name filters, a space means the message
+$('input').addEventListener('input', () => {
+  if (slashQuery($('input').value) !== null) slashPick = 0;
+  autoGrow();
+  drawSlash();
+});
 $('input').addEventListener('keydown', (e) => {
+  if (!$('slash').hidden && slashItems.length) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); slashPick = (slashPick + 1) % slashItems.length; markSlash(); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); slashPick = (slashPick - 1 + slashItems.length) % slashItems.length; markSlash(); return; }
+    if (e.key === 'Tab' || e.key === 'Enter') {
+      e.preventDefault();
+      // Enter on a command typed in full sends it; either key completes a half-typed one
+      if (e.key === 'Enter' && slashCommand($('input').value.trim())) { submit(); return; }
+      useSlash(slashItems[slashPick]); return;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); hideSlash(); return; }
+  }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
+});
+document.addEventListener('click', (e) => {
+  if (!$('slash').hidden && !e.target.closest('#slash, #composeRow')) hideSlash();
 });
 
 function drawContextSize() {
@@ -1230,15 +2031,23 @@ function drawContextSize() {
 
 function drawHint() {
   const bits = [];
-  const total = requestTokens();
-  if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${pending.some(a => a.kind === 'image') ? ' plus images' : ''}`);
+  const { chars, images } = requestPrompt();
+  const total = approxTokens(chars);
+  if (total) bits.push(`≈ ${total.toLocaleString()} tokens in this request${images ? ` plus ${images} image${images === 1 ? '' : 's'}` : ''}`);
   const route = chat ? routeOf(chat) : null;
   if (route?.model) bits.push(`straight to ${esc(route.model)}`);
   else if (route?.auto) bits.push('strategy: Auto');
   else if (route?.profile) bits.push(`strategy: ${esc(route.profile.name)}`);
   if (repoOf(chat)) bits.push(`linked to ${esc(repoOf(chat).name)}`);
+  if (repoOf(chat) && $('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length) bits.push('shell in the repo');
   const on = chat ? skillsOf(chat) : [];
   if (on.length) bits.push(`skill${on.length === 1 ? '' : 's'}: ${on.map(k => esc(k.name)).join(', ')}`);
+  // a command in the box sends this message with a model of its own
+  const typed = slashCommand($('input').value.trim());
+  const note = typed && turnNote(commandTurn(typed.command));
+  if (note) bits.push(`/${esc(typed.command.name)}: ${esc(note)}`);
+  const advisor = advisorOf(chat);
+  if (advisor) bits.push(`advisor ${esc(advisor.model)}`);
   const toolCount = chat ? activeTools(chat).length : 0;
   if (toolCount) bits.push(`${toolCount} tool${toolCount === 1 ? '' : 's'} on`);
   if ($('handsFree').checked) bits.push('hands-free on');
@@ -1323,6 +2132,45 @@ window.addEventListener('drop', (e) => {
 // tools for a repo the chat is linked to. Requests carry tools only when one
 // is on, since requests with tools go to models that can call them.
 // ---------------------------------------------------------------------------
+
+// The advisor: a better model this chat's model can call for a second opinion
+// (see utils/advisor.js). Set with "/advisor MODEL"; the setting lives with the
+// chat, and each call is one plain request to the advisor's model.
+const ADVISOR_TOOL = {
+  type: 'function',
+  function: {
+    name: 'ask_advisor',
+    description: 'Ask a stronger model for a second opinion on a hard part of this task: a design choice, a bug you cannot find, a piece of code you are unsure about. Send the question and the code or error text it needs. The advisor answers in words and cannot run tools or change files. Ask once or twice, not for every step.',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'What you want the advisor to weigh in on, as a clear question' },
+        context: { type: 'string', description: 'The code, error message or notes the advisor needs to answer. Paste it rather than naming a file: the advisor cannot read the repo.' },
+      },
+      required: ['question'],
+    },
+  },
+};
+const advisorOf = (c) => c?.advisor?.model ? c.advisor : null;
+// Shows in the composer's hint line and the kit, so a chat with an advisor says so
+function drawAdvisor() {
+  const a = advisorOf(chat);
+  const el = $('advisorNote');
+  if (el) {
+    el.hidden = !a;
+    el.innerHTML = a ? `<span>Advisor: <b>${esc(a.model)}</b>${a.typed ? ` (from "${esc(a.typed)}")` : ''} · its model can ask it for a second opinion</span><button type="button" id="advisorOff" title="Remove the advisor">Remove</button>` : '';
+  }
+  drawHint();
+}
+
+// A short name finds the newest model the Gateway serves (utils/modelAlias.js);
+// a full name or a Gateway name is used as typed.
+function resolveModelName(name) {
+  const models = gatewayModels || [];
+  if (!models.length) return { model: String(name || '').trim() };
+  const found = modelAlias.resolve(name, models);
+  return found ? { model: found, from: String(name || '').trim() } : { model: null, from: String(name || '').trim() };
+}
 function serverTools(c) {
   if (!toolInfo) return [];
   const off = new Set([...(prefs.mcpOff || []), ...routingMcpOff(c)]);
@@ -1331,10 +2179,14 @@ function serverTools(c) {
     if (s.status === 'connected' && !off.has(s.name)) list.push(...(toolInfo.definitions?.[s.name] || []));
   }
   if (repoOf(c)) list.push(...(toolInfo.repoDefinitions || []));
+  // a shell in the linked repo, unless it is off in the options or the settings
+  if (repoOf(c) && $('shellInRepo').checked && (toolInfo.shellDefinitions || []).length) list.push(...toolInfo.shellDefinitions);
   return list;
 }
 function activeTools(c) {
   const list = serverTools(c);
+  // a chat with an advisor set may call it for a second opinion
+  if (advisorOf(c)) list.push({ ...ADVISOR_TOOL });
   const more = loadableSkills(c);
   if (more.length) {
     list.push({ type: 'function', function: {
@@ -1354,6 +2206,7 @@ async function loadTools() {
     toolInfo = null;
   }
   drawTools();
+  drawRepo();
   drawHint();
 }
 
@@ -1372,7 +2225,7 @@ function drawTools() {
         ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}</li>`;
   });
   if (toolInfo?.error) rows.unshift(`<li class="err">${esc(toolInfo.error)}</li>`);
-  $('mcpList').innerHTML = $('kitTools').innerHTML = rows.join('') || (toolInfo
+  $('mcpList').innerHTML = rows.join('') || (toolInfo
     ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. Add them to <code>${esc(toolInfo.file?.split(/[\\/]/).pop() || 'mcp-servers.json')}</code>.</li>`
     : '<li class="err">Could not reach the harness.</li>');
 }
@@ -1388,7 +2241,6 @@ function onToolToggle(e) {
   drawHint();
 }
 $('mcpList').addEventListener('change', onToolToggle);
-$('kitTools').addEventListener('change', onToolToggle);
 
 $('mcpReload').addEventListener('click', async () => {
   $('mcpReload').disabled = true;
@@ -1409,7 +2261,7 @@ function drawRepo() {
   $('repoPath').readOnly = !!r;
   $('repoLink').textContent = r ? 'Unlink' : 'Link';
   $('repoInfo').innerHTML = r
-    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model can read its files and history (read-only).`
+    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model uses this chat's private worktree to read its files and history${$('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length ? ', and run guarded commands' : ''}.`
     : projectOf(chat)?.repo
       ? `Using the project's repo <b>${esc(projectOf(chat).repo.name)}</b>. Link another folder here to use that instead.`
       : 'Read-only for the model.';
@@ -1429,10 +2281,10 @@ $('repoLink').addEventListener('click', async () => {
   if (!path) return toast('Type the path of a folder inside a git repo.');
   $('repoLink').disabled = true;
   try {
-    const res = await fetch('api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) });
+    const res = await fetch('api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path, chatId: c.id }) });
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-    c.repo = { path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote };
+    c.repo = { path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote, ...(j.workspacePath ? { workspacePath: j.workspacePath, workspaceBranch: j.workspaceBranch } : {}) };
     $('repoPath').dataset.typed = '';
     saveChat(c, { touch: false });
     if (chat === c) toast(`Linked to ${j.name}.`);
@@ -1459,6 +2311,7 @@ function chatMarkdown(c) {
   for (const m of c.messages) {
     if (m.role === 'user') {
       out.push('## You', '');
+      if (m.turn?.command) out.push(`**/${m.turn.command}**${turnNote(m.turn) ? ` _(${turnNote(m.turn)})_` : ''}`, '');
       if (m.content) out.push(m.content, '');
       for (const a of m.attachments || []) {
         if (a.kind === 'image') out.push(`_Attached image: ${a.name}_`, '');
@@ -1782,9 +2635,10 @@ function drawEngine() {
   document.querySelector('[data-engine=browser]').hidden = server;
   const model = server && serverTTS.info.models.find(m => m.id === $('serverModel').value);
   $('voiceNote').textContent = [
-    !SR && 'Dictation needs Chrome or Edge.',
-    SR && !window.isSecureContext && 'The microphone works only on http://localhost or https.',
-    SR && 'Chrome and Edge send dictated audio to their speech service.',
+    !SR && !serverSTT.ok && 'Dictation needs Chrome or Edge, or a speech model (add OPENROUTER_API_KEY or STT_URL to .env).',
+    !window.isSecureContext && 'The microphone works only on http://localhost or https.',
+    serverSTT.ok ? 'Dictation goes to the speech model on the harness, not to the browser’s speech service.'
+      : SR && 'The browser answers dictation with its own speech service; Brave has none.',
     server ? `Replies are spoken by ${model?.name || $('serverModel').value} via ${serverTTS.info.host}${model?.free ? ' (free)' : ' (paid)'}.`
       : !browserTTS.ok ? 'This browser cannot read aloud.'
       : 'For browser voices, Edge’s ★ Natural voices sound best.',
@@ -1797,23 +2651,80 @@ $('testVoice').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Dictation (SpeechRecognition). Chrome and Edge have it; Firefox doesn't.
+// Dictation. Two engines: the browser's SpeechRecognition (Chrome and Edge
+// have it, and it is free and instant) or the harness's speech model
+// (/ui/api/stt), which Brave and other Chromium builds need because they ship
+// without a speech service and answer every attempt with "network".
 // ---------------------------------------------------------------------------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const MR = window.MediaRecorder;
+// set when this browser's own recognition fails for want of a speech service
+let browserBroken = false;
+
+// Harness STT server: GET /ui/api/stt says whether one is configured
+const serverSTT = {
+  info: null,
+  get ok() { return !!this.info?.configured; },
+};
+
+async function loadServerSTT() {
+  try {
+    serverSTT.info = await (await fetch('api/stt')).json();
+  } catch {
+    serverSTT.info = null;
+  }
+  drawEngine();
+  dictation.draw();
+}
+
 const dictation = {
-  rec: null,
+  rec: null,         // the browser's recogniser
   want: false,       // the user turned the mic on
   paused: false,     // paused while a reply is read aloud
   base: '',          // text in the box before this stretch of speech
   silence: null,
+  media: null,       // the recorder, for the server engine
+  starting: false,   // waiting on the microphone permission
+  stream: null,
+  chunks: [],
+  ctx: null,
+  analyser: null,
+  meter: null,
+  spoke: false,      // the segment has something in it worth sending
+  quietSince: 0,
+  discard: false,    // the next stop is a pause or a cancel: drop the audio
+  segmentStart: 0,
+
+  // Which engine to use now: the browser's own unless it has none, or the
+  // user picked the server
+  get engine() {
+    const choice = $('sttEngine').value;
+    if (choice === 'browser') return SR ? 'browser' : 'none';
+    if (choice === 'server') return serverSTT.ok ? 'server' : 'none';
+    const browser = SR && !browserBroken;
+    if (browser) return 'browser';
+    return serverSTT.ok ? 'server' : 'none';
+  },
+  get ok() { return this.engine !== 'none'; },
 
   start() {
-    if (!SR) return toast('Dictation needs Chrome or Edge.');
+    if (!this.ok) {
+      return toast(serverSTT.info === null || serverSTT.info?.configured === false
+        ? 'Dictation needs Chrome or Edge, or a speech model (OPENROUTER_API_KEY or STT_URL in .env).'
+        : 'Dictation needs a microphone.');
+    }
     speech.stop();
     this.want = true; this.paused = false;
-    this.listen();
+    this.begin();
   },
 
+  // Pick up after a pause, a cut segment or a broken browser recogniser
+  begin() {
+    if (!this.want || this.paused) return;
+    if (this.engine === 'server') this.listenServer(); else this.listen();
+  },
+
+  // --- the browser's own recognition -------------------------------------
   listen() {
     if (this.rec) return;
     const rec = new SR();
@@ -1845,25 +2756,172 @@ const dictation = {
     };
     rec.onerror = (e) => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
+      // No speech service in this browser (Brave, some Chromium builds): the
+      // harness's speech model does the same job, so carry on with that
+      if ((e.error === 'network' || e.error === 'service-not-allowed') && !browserBroken && serverSTT.ok) {
+        browserBroken = true;
+        this.rec = null;
+        toast('This browser has no speech service. Dictating through the harness instead.');
+        this.draw();
+        this.begin();
+        return;
+      }
       this.want = false;
+      this.rec = null;
       toast(e.error === 'not-allowed' || e.error === 'service-not-allowed'
         ? 'The microphone is blocked. Allow it for this page (it needs http://localhost or https).'
-        : `Dictation stopped: ${e.error}`);
+        : e.error === 'network'
+          ? 'This browser has no speech service. Pick “Speech model” under Options → Voice, or set OPENROUTER_API_KEY or STT_URL in .env.'
+          : `Dictation stopped: ${e.error}`);
+      this.draw();
     };
     rec.onend = () => {
       this.rec = null;
       // browsers end recognition after a pause; keep going while the mic is on
-      if (this.want && !this.paused) setTimeout(() => this.want && !this.paused && this.listen(), 150);
+      if (this.want && !this.paused) setTimeout(() => this.begin(), 150);
       this.draw();
     };
     try { rec.start(); this.rec = rec; } catch (err) { toast(`Dictation: ${err.message}`); this.want = false; }
     this.draw();
   },
 
+  // --- the harness's speech model ----------------------------------------
+  async listenServer() {
+    if (this.media || this.starting) return;
+    if (!MR || !navigator.mediaDevices?.getUserMedia) { this.want = false; this.draw(); return toast('This browser cannot record audio.'); }
+    this.starting = true;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (err) {
+      this.starting = false; this.want = false; this.draw();
+      return toast(err.name === 'NotAllowedError'
+        ? 'The microphone is blocked. Allow it for this page (it needs http://localhost or https).'
+        : `Microphone: ${err.message}`);
+    }
+    this.starting = false;
+    // the mic was turned off or paused while the permission prompt was up
+    if (!this.want || this.paused) { for (const t of stream.getTracks()) t.stop(); return; }
+    this.stream = stream;
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
+      .find((t) => !MR.isTypeSupported || MR.isTypeSupported(t)) || '';
+    const rec = new MR(stream, type ? { mimeType: type } : undefined);
+    this.media = rec; this.chunks = []; this.spoke = false; this.segmentStart = Date.now();
+    rec.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data); };
+    rec.onstop = () => this.finishSegment(rec, type);
+    try { rec.start(1000); } catch (err) { this.media = null; for (const t of stream.getTracks()) t.stop(); toast(`Dictation: ${err.message}`); this.want = false; }
+    this.meterStart();
+    this.draw();
+  },
+
+  // Loudness of the microphone, so a pause can end a segment and be sent
+  meterStart() {
+    this.meterStop();
+    this.quietSince = 0;
+    let analyser = null;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new Ctx();
+      const source = this.ctx.createMediaStreamSource(this.stream);
+      analyser = this.ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+    } catch { this.meterStop(); }
+    // Without a loudness reading (no AudioContext), send every few seconds so
+    // dictation still works; there is just no pause detection to end a segment
+    if (!analyser) {
+      this.meter = setInterval(() => {
+        if (!this.media) return;
+        this.spoke = true;
+        if (Date.now() - this.segmentStart > 15000) this.cut();
+      }, 500);
+      return;
+    }
+    this.analyser = analyser;
+    const buf = new Float32Array(analyser.fftSize);
+    this.meter = setInterval(() => {
+      if (!this.analyser || !this.media) return;
+      this.analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += v * v;
+      const rms = Math.sqrt(sum / buf.length);
+      if (rms > 0.02) { this.spoke = true; this.quietSince = 0; return; }
+      if (!this.spoke) return;
+      if (!this.quietSince) this.quietSince = Date.now();
+      // a pause after speech ends the segment; so does 25 seconds of it
+      if (Date.now() - this.quietSince > 1200 || Date.now() - this.segmentStart > 25000) this.cut();
+    }, 100);
+  },
+
+  meterStop() {
+    clearInterval(this.meter);
+    this.meter = null;
+    this.analyser = null;
+    try { this.ctx?.close(); } catch {}
+    this.ctx = null;
+  },
+
+  // End this stretch of recording; the rest arrives in onstop
+  cut() {
+    if (!this.media) return;
+    if (!this.spoke) { this.segmentStart = Date.now(); return; }
+    this.meterStop();
+    try { this.media.stop(); } catch {}
+  },
+
+  async finishSegment(rec, type) {
+    const chunks = this.chunks;
+    const spoke = this.spoke;
+    const discard = this.discard;
+    this.chunks = []; this.spoke = false; this.discard = false;
+    this.media = null;
+    this.meterStop();
+    const stream = this.stream;
+    this.stream = null;
+    for (const t of stream?.getTracks() || []) t.stop();
+    this.draw();
+    const blob = new Blob(chunks, { type: rec.mimeType || type || 'audio/webm' });
+    if (spoke && !discard && blob.size) await this.transcribe(blob);
+    if (this.want && !this.paused) setTimeout(() => this.begin(), 100);
+  },
+
+  async transcribe(blob) {
+    let text = '';
+    try {
+      const audio = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
+        reader.onerror = () => reject(reader.error || new Error('could not read the recording'));
+        reader.readAsDataURL(blob);
+      });
+      const res = await fetch('api/stt', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ audio, format: blob.type, language: $('sttLang').value.trim() }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+      text = String(out.text || '').trim();
+    } catch (err) {
+      toast(`Dictation: ${err.message}`);
+    }
+    if (!text) return;
+    const box = $('input');
+    box.value = (box.value ? box.value.replace(/\s*$/, ' ') : '') + text;
+    autoGrow();
+    if ($('autoSend').checked && !running.has(chat.id)) {
+      const handsFree = $('handsFree').checked;
+      box.value = '';
+      submit();
+      if (handsFree) { this.want = true; this.paused = true; this.draw(); }
+    }
+  },
+
   stop() {
     this.want = false; this.paused = false;
     clearTimeout(this.silence);
     this.rec?.stop();
+    this.media?.stop(); // what was said so far is still transcribed
     this.draw();
   },
 
@@ -1873,24 +2931,29 @@ const dictation = {
     this.paused = true;
     clearTimeout(this.silence);
     this.rec?.abort();
+    if (this.media) { this.discard = true; this.media.stop(); }
     this.draw();
   },
 
   resume() {
-    if (!SR || !$('handsFree').checked) return;
+    if (!this.ok || !$('handsFree').checked) return;
     this.want = true; this.paused = false;
-    this.listen();
+    this.begin();
   },
 
   draw() {
+    const engine = this.engine;
     const on = this.want && !this.paused;
     $('mic').classList.toggle('listening', on);
-    $('mic').title = !SR ? 'Dictation needs Chrome or Edge' : on ? 'Stop dictating (Ctrl+M)' : 'Dictate (Ctrl+M)';
+    $('mic').disabled = engine === 'none';
+    $('mic').title = engine === 'none' ? 'Dictation needs Chrome, Edge, or a speech model'
+      : on ? 'Stop dictating (Ctrl+M)'
+      : engine === 'server' ? 'Dictate through the harness’s speech model (Ctrl+M)'
+      : 'Dictate (Ctrl+M)';
     drawHandsFree();
   },
 };
 $('mic').addEventListener('click', () => (dictation.want && !dictation.paused ? dictation.stop() : dictation.start()));
-if (!SR) $('mic').disabled = true;
 
 // The composer's hands-free button is the Options checkbox plus the mic:
 // turning it on starts listening now, turning it off stops listening and reading
@@ -1907,16 +2970,17 @@ function drawHandsFree() {
   btn.classList.toggle('on', on);
   btn.classList.toggle('live', on && dictation.want);
   btn.setAttribute('aria-pressed', String(on));
-  btn.title = !SR ? 'Hands-free needs Chrome or Edge'
+  btn.disabled = !dictation.ok;
+  btn.title = !dictation.ok ? 'Hands-free needs Chrome, Edge, or a speech model'
     : on && !dictation.want ? 'Hands-free is on but not listening. Click to start listening'
     : on ? 'Hands-free is on. Click to stop listening and reading'
     : 'Hands-free: talk, it sends when you pause, reads the reply, then listens again';
 }
 // on but idle (after a reload, or the mic was stopped): a click starts listening
 $('handsFreeBtn').addEventListener('click', () => setHandsFree(!$('handsFree').checked || !dictation.want));
-if (!SR) $('handsFreeBtn').disabled = true;
 drawHandsFree();
 loadServerTTS();
+loadServerSTT();
 
 // ---------------------------------------------------------------------------
 // Live activity: the Interceptor's feed of every request
@@ -2111,6 +3175,10 @@ function routeOf(c) {
 }
 
 function routeHeaders(c) {
+  return { ...(c?.id ? { 'x-harness-session': `chat-${c.id}` } : {}), ...routeHeadersOf(c) };
+}
+
+function routeHeadersOf(c) {
   const r = routeOf(c);
   if (r.model) return { 'x-harness-model': r.model };
   const effort = c?.effort && c.effort !== 'auto' ? { 'x-harness-effort': c.effort } : {};
@@ -2219,10 +3287,10 @@ function projectUsage(id) {
     chats++;
     for (const m of c.messages) {
       if (m.role !== 'assistant') continue;
-      const u = m.trace?.usage;
-      if (u) { input += u.prompt_tokens || 0; output += u.completion_tokens || 0; }
+      const k = usageOf(m);
+      if (k) { input += k.input; output += k.output; }
       const cost = replyCost(m);
-      if (cost) usd += cost.usd; else if (u) priced = false;
+      if (cost) usd += cost.usd; else if (k) priced = false;
     }
   }
   return { chats, input, output, usd, priced };
@@ -2332,7 +3400,12 @@ function drawKit() {
       <span><b>${esc(k.name)}</b>${fromProject.has(k.id) ? ' <span class="tag">project</span>' : ''}<br><span class="muted small">${esc(k.description || '')}</span></span></label></li>`).join('')
     || '<li class="muted small">No skills yet. Manage skills to add some.</li>';
   const repo = repoOf(chat);
-  $('kitRepo').innerHTML = repo ? `Git repo <b>${esc(repo.name)}</b> is linked${chat.repo ? '' : ' through the project'}: the model can read it.` : 'Link a git repo under Options to let the model read it.';
+  const shellOn = $('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length > 0;
+  $('kitShell').checked = shellOn;
+  $('kitShell').disabled = !repo || !(toolInfo?.shellDefinitions || []).length;
+  $('kitRepo').innerHTML = repo
+    ? `Git repo <b>${esc(repo.name)}</b> is linked${chat.repo ? '' : ' through the project'}: the model can ${shellOn ? 'read it and run commands in it' : 'read it'}.`
+    : 'Link a git repo under Options to let the model read it.';
   $('kitBtn').classList.toggle('on', skillsOf(chat).length > 0);
 }
 $('kitBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleKit(); });
@@ -2355,10 +3428,15 @@ $('kitSkills').addEventListener('change', (e) => {
 });
 $('skillTool').checked = !!prefs.skillTool;
 $('skillTool').addEventListener('change', () => { prefs.skillTool = $('skillTool').checked; store.set(PREF_KEY, prefs); drawHint(); });
-$('kitReload').addEventListener('click', () => $('mcpReload').click());
-$('input').addEventListener('input', () => {
-  if ($('input').value === '/') { $('input').value = ''; toggleKit(true); }
+// the panel's shell box is the same preference as the options' one
+$('kitShell').addEventListener('change', () => {
+  $('shellInRepo').checked = $('kitShell').checked;
+  prefs.shellInRepo = $('kitShell').checked;
+  store.set(PREF_KEY, prefs);
+  drawRepo(); drawKit(); drawHint();
 });
+// the panel keeps to skills and commands; servers stay under Options
+// a / in an empty box lists the commands (drawSlash, above)
 
 function drawSkillIndex() {
   $('skillIndex').innerHTML = skills.map(k => `<li data-kid="${k.id}" class="${k === editingSkill ? 'on' : ''}">${esc(k.name || '(no name)')}</li>`).join('')
@@ -2403,6 +3481,84 @@ $('skillDelete').addEventListener('click', () => {
   drawSkillIndex();
 });
 $('skillsDialog').addEventListener('close', () => { skills = skills.filter(k => k.name || k.body); saveSkills(); drawKit(); drawHint(); });
+
+// ---------------------------------------------------------------------------
+// Commands: a name, what it does, the model or strategy its turn goes to, its
+// effort, and the message it sends ({args} becomes what you type after it)
+// ---------------------------------------------------------------------------
+const STARTER_COMMANDS = [{
+  name: 'advisor',
+  description: 'A second opinion from another model',
+  model: '',
+  effort: 'max',
+  body: 'Give a second opinion, as a careful reviewer: what is wrong, missing or risky first, then what you would do instead. Be brief and concrete, and say plainly when it looks fine.\n\nWhat the person is asking now:\n{args}',
+}];
+let editingCommand = null;
+const saveCommands = () => store.set(COMMANDS_KEY, commands);
+
+function drawCommandIndex() {
+  $('commandIndex').innerHTML = commands.map(c => `<li data-cid="${c.id}" class="${c === editingCommand ? 'on' : ''}">/${esc(c.name || '(no name)')}</li>`).join('')
+    || '<li class="muted small">No commands yet.</li>';
+  $('commandEdit').hidden = !editingCommand;
+  if (editingCommand) {
+    $('cName').value = editingCommand.name || '';
+    $('cDesc').value = editingCommand.description || '';
+    $('cModel').value = editingCommand.model || '';
+    $('cEffort').value = editingCommand.effort || '';
+    $('cBody').value = editingCommand.body || '';
+  }
+}
+
+function openCommands() {
+  if (!commands.length) { commands = STARTER_COMMANDS.map(c => ({ id: uid(), ...c })); saveCommands(); }
+  editingCommand = commands[0] || null;
+  drawCommandIndex();
+  $('kit').hidden = true;
+  $('commandsDialog').showModal();
+}
+
+// a / with no command by that name offers to make it
+function newCommand(name) {
+  if (!commands.length) commands = STARTER_COMMANDS.map(c => ({ id: uid(), ...c }));
+  editingCommand = { id: uid(), name: name || `command-${commands.length + 1}`, description: '', model: '', effort: '', body: '' };
+  commands.push(editingCommand);
+  saveCommands();
+  drawCommandIndex();
+  $('kit').hidden = true;
+  $('commandsDialog').showModal();
+  $('cName').select();
+}
+
+$('manageCommands').addEventListener('click', openCommands);
+$('commandIndex').addEventListener('click', (e) => {
+  const li = e.target.closest('[data-cid]');
+  if (li) { editingCommand = commands.find(c => c.id === li.dataset.cid); drawCommandIndex(); }
+});
+$('commandAdd').addEventListener('click', () => {
+  editingCommand = { id: uid(), name: `command-${commands.length + 1}`, description: '', model: '', effort: '', body: '' };
+  commands.push(editingCommand);
+  saveCommands(); drawCommandIndex(); $('cName').select();
+});
+for (const [id, key] of [['cName', 'name'], ['cDesc', 'description'], ['cModel', 'model'], ['cEffort', 'effort'], ['cBody', 'body']]) {
+  $(id).addEventListener('input', () => {
+    if (!editingCommand) return;
+    editingCommand[key] = key === 'name' ? $(id).value.trim().replace(/[\s/]+/g, '-') : $(id).value;
+    saveCommands();
+    if (key === 'name') drawCommandIndex();
+  });
+}
+$('commandDelete').addEventListener('click', () => {
+  if (!editingCommand || !confirm(`Delete the command “/${editingCommand.name}”?`)) return;
+  commands = commands.filter(c => c !== editingCommand);
+  saveCommands();
+  editingCommand = commands[0] || null;
+  drawCommandIndex();
+});
+$('commandsDialog').addEventListener('close', () => {
+  commands = commands.filter(c => c.name || c.body);
+  saveCommands();
+  drawHint();
+});
 
 // ---------------------------------------------------------------------------
 // Scheduled messages: sent while this page is open in a tab; a run missed
@@ -2499,8 +3655,13 @@ setInterval(checkSchedules, 15000);
 // This chat's tokens and cost, opened from the numbers in the top bar
 // ---------------------------------------------------------------------------
 function drawUsagePop() {
-  const replies = chat.messages.filter(m => m.role === 'assistant' && !m.streaming);
-  const rows = replies.map((m, i) => ({ i: i + 1, model: replyModel(m) || '?', input: m.trace?.usage?.prompt_tokens || 0, output: m.trace?.usage?.completion_tokens || 0, cost: replyCost(m) }));
+  // a reply still arriving counts what it has reported so far
+  const replies = chat.messages.filter(m => m.role === 'assistant');
+  const rows = replies.map((m, i) => {
+    const k = usageOf(m) || { input: 0, output: 0, exact: true };
+    return { i: i + 1, model: replyModel(m) || '?', input: k.input, output: k.output, exact: k.exact, cost: replyCost(m) };
+  });
+  const approx = rows.some(r => !r.exact) ? '~' : '';
   const byModel = new Map();
   for (const r of rows) {
     const t = byModel.get(r.model) || { n: 0, input: 0, output: 0, usd: 0, free: true, unknown: false };
@@ -2517,18 +3678,19 @@ function drawUsagePop() {
   const pu = p ? projectUsage(p.id) : null;
   $('usagePop').innerHTML = `
     <div class="up-tiles">
-      <div><b>${fmtTok(tot.input + tot.output)}</b><span>tokens</span></div>
+      <div><b>${approx}${fmtTok(tot.input + tot.output)}</b><span>tokens</span></div>
       <div><b>${fmtTok(tot.input)}</b><span>sent</span></div>
       <div><b>${fmtTok(tot.output)}</b><span>written</span></div>
       <div><b>${tot.usd ? fmtUsd(tot.usd) : 'free'}</b><span>cost</span></div>
     </div>
+    <div class="small muted">Sent counts every request this chat made: each reply re-sends the whole history, so it grows faster than the chat.${approx ? ' Values marked ~ are estimated: the provider sent no counts.' : ''}</div>
     ${rows.length ? `<div class="up-head">Each reply <span class="muted">sent · written</span></div>
-    <div class="up-bars">${rows.map(r => `<div class="up-bar" title="Reply ${r.i} · ${esc(r.model)}\n${r.input.toLocaleString()} in · ${r.output.toLocaleString()} out${r.cost ? ` · ${r.cost.free ? 'free' : fmtUsd(r.cost.usd)}` : ''}">
+    <div class="up-bars">${rows.map(r => `<div class="up-bar" title="Reply ${r.i} · ${esc(r.model)}\n${r.exact ? '' : '~'}${r.input.toLocaleString()} in · ${r.exact ? '' : '~'}${r.output.toLocaleString()} out${r.cost ? ` · ${r.cost.free ? 'free' : fmtUsd(r.cost.usd)}` : ''}">
       <i class="in" style="height:${100 * r.input / max}%"></i><i class="out" style="height:${100 * r.output / max}%"></i></div>`).join('')}</div>
     <div class="up-head">By model</div>
     <table class="up-table"><tbody>${[...byModel].map(([k, t]) => `<tr><td><code>${esc(k)}</code></td><td>${t.n}×</td><td>${fmtTok(t.input)} / ${fmtTok(t.output)}</td><td>${t.free && !t.unknown ? '<span class="ok">free</span>' : `${fmtUsd(t.usd)}${t.unknown ? '+' : ''}`}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">No replies yet.</p>'}
     <div class="up-head">Next message</div>
-    <div class="small">About ${next.toLocaleString()} tokens${ctxMax ? ` of ${esc(model)}'s ${ctxMax.toLocaleString()}` : ''}.</div>
+    <div class="small">About ${next.toLocaleString()} tokens${ctxMax ? ` of ${esc(model)}'s ${ctxMax.toLocaleString()}` : ''}${requestPrompt().images ? `, plus ${requestPrompt().images} image${requestPrompt().images === 1 ? '' : 's'}` : ''}.</div>
     ${ctxMax ? `<div class="up-meter"><i style="width:${Math.min(100, 100 * next / ctxMax)}%"></i></div>` : ''}
     ${pu ? `<div class="up-head">Project “${esc(p.name)}”</div><div class="small">${pu.chats} chats · ${fmtTok(pu.input + pu.output)} tokens · ${pu.usd ? fmtUsd(pu.usd) : 'free'}${pu.priced ? '' : '+'}</div>` : ''}
     <a class="small" href="usage.html">Every client's usage and costs →</a>`;
@@ -2547,9 +3709,9 @@ $('chatStats').addEventListener('click', (e) => {
 // to each model is kept on the chat: c.caches[model] = { at, read, write, long, prompt }
 function noteCache(c, tr) {
   const model = tr.answered?.servedBy || tr.routed?.model;
-  const u = CacheTimer.cacheUsage(tr.usage);
+  const u = Tokens.usage(tr.usage);
   if (!model || !u) return;
-  (c.caches ||= {})[model] = { at: tr.start, ...u };
+  (c.caches ||= {})[model] = { at: tr.start, read: u.cacheRead, write: u.cacheWrite, long: 0, prompt: u.input };
   if (c === chat) drawCacheTimer();
 }
 
@@ -2712,7 +3874,7 @@ async function keepAlive(c, model) {
     const headerCost = parseFloat(res.headers.get('x-litellm-response-cost')) || 0;
     const st = (c.keepAliveStats ||= { count: 0, usd: 0 });
     st.count++;
-    const cost = pingCost(tr.usage, headerCost, model);
+    const cost = pingCost(Tokens.usage(tr.usage), headerCost, model);
     if (cost) { st.usd += cost.usd; st.estimated ||= cost.estimated; }
     noteCache(c, tr);
     saveChat(c, { touch: false });
@@ -2724,13 +3886,14 @@ async function keepAlive(c, model) {
   }
 }
 
-// What a keep-alive cost: the provider's figure, else tokens at the price list's cache prices
-function pingCost(u, headerCost, model) {
-  if (typeof u?.cost === 'number') return { usd: u.cost };
+// What a keep-alive cost: the provider's figure, else its tokens at the price
+// list's cache prices (ui/costs.js)
+function pingCost(k, headerCost, model) {
+  if (typeof k?.cost === 'number') return { usd: k.cost };
   if (headerCost > 0) return { usd: headerCost };
   const info = modelInfo[model];
-  if (!u || info?.inputCost == null) return null;
-  return { usd: tokensCost(u, info), estimated: true };
+  if (!k || info?.inputCost == null) return null;
+  return { usd: Costs.rowCost(k, info).cost, estimated: !k.exact };
 }
 
 function checkKeepAlive() {
@@ -2752,14 +3915,14 @@ setInterval(() => { drawCacheTimer(); drawCacheDots(); checkKeepAlive(); }, 1000
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); openChat(null); }
-  else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); $('app').classList.add('side-open'); $('search').focus(); $('search').select(); }
+  else if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); setSide(true); $('search').focus(); $('search').select(); }
   else if (mod && e.key.toLowerCase() === 'm') { e.preventDefault(); $('mic').click(); }
   else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) { e.preventDefault(); stepChat(e.key === 'ArrowUp' ? -1 : 1); }
   else if (e.key === 'Escape') {
     if (!$('kit').hidden || !$('usagePop').hidden) { $('kit').hidden = $('usagePop').hidden = true; }
     else if (speech.current) speech.stop();
     else if (running.has(chat.id)) running.get(chat.id).controller.abort();
-    else $('app').classList.remove('side-open');
+    else if (narrow() && panelOpen) setSide(false);
   }
 });
 window.addEventListener('beforeunload', saveDraft);
@@ -2789,4 +3952,5 @@ setTimeout(checkSchedules, 1500);
 connectLive();
 loadRecent();
 setActivity(!!prefs.activity);
+setSide(narrow() ? false : panelOpen);
 setInterval(() => { drawList(); drawSchedules(); }, 60000);

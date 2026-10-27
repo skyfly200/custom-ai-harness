@@ -66,6 +66,14 @@ class AgentStore {
             if (!Number.isFinite(n)) throw new Error(`${k} must be a number`);
             out[k] = Math.min(hi, Math.max(lo, n));
         }
+        if (has('maxCost')) {
+            if (cfg.maxCost === null || cfg.maxCost === '') out.maxCost = null;
+            else {
+                const n = Number(cfg.maxCost);
+                if (!Number.isFinite(n) || n < 0) throw new Error('maxCost must be a number of dollars');
+                out.maxCost = Math.min(1000, Math.round(n * 100) / 100) || null;
+            }
+        }
         // the chat project (they live in the browser) this agent belongs to: its id and name
         if (has('project')) {
             const p = cfg.project;
@@ -80,7 +88,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, project: null,
+            instructions: '', profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

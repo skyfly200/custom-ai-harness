@@ -51,10 +51,10 @@ async function runTool(call, args, tools, emit) {
 }
 
 /**
- * run: { goal, maxSteps, deadline (ms epoch), stopped() }.
+ * run: { goal, maxSteps, deadline (ms epoch), stopped(), overBudget() (optional: true once the cost limit is spent) }.
  * `chat(messages, tools)` resolves the model's reply { message, usage }.
  * `tools` from makeTools. `emit(event)` records what happens.
- * Resolves { status: 'finished' | 'out_of_steps' | 'out_of_time' | 'stopped', summary, partial },
+ * Resolves { status: 'finished' | 'out_of_steps' | 'out_of_time' | 'out_of_budget' | 'stopped', summary, partial },
  * where partial (running out of steps only) is what the model was saying at the time.
  * That is what a run carried on from this one is given, since nothing went wrong.
  */
@@ -66,6 +66,7 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
     for (let step = 1; step <= last; step++) {
         if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
         if (Date.now() > run.deadline) return { status: 'out_of_time', summary: 'Ran out of time.', partial: partialNote(messages) };
+        if (run.overBudget?.()) return { status: 'out_of_budget', summary: 'Stopped at its cost limit.', partial: partialNote(messages) };
         emit({ type: 'step', step });
         const reply = await chat(shrinkHistory(messages), tools.definitions);
         const msg = reply.message;

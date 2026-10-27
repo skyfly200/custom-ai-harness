@@ -73,6 +73,7 @@ const fakeHarness = http.createServer((req, res) => {
     req.on('end', async () => {
         const body = JSON.parse(data || '{}');
         res.setHeader('content-type', 'application/json');
+        if (req.url === '/ui/api/model-info') return res.end(JSON.stringify({ models: {} }));
         if (req.url === '/v1/guard') return res.end(JSON.stringify(await guard.check(body, { jev: false })));
         modelCalls.push({ body, headers: req.headers });
         const next = script.shift();

@@ -12,6 +12,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY utils ./utils
+# utils/runCost.js prices a run with the page's own cost and token code
+COPY ui/costs.js ui/tokens.js ./ui/
 COPY workflows ./workflows
 COPY runner ./runner
 EXPOSE 3100

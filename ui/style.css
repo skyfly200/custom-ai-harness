@@ -93,3 +93,29 @@ button[data-hint], a[data-hint], label[data-hint], input[data-hint], select[data
 .bar-row .bar { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 18%, transparent); overflow: hidden; }
 .bar-row .bar i { display: block; height: 100%; border-radius: 3px; background: var(--brand); }
 @media (max-width: 520px) { .tiles { grid-template-columns: 1fr 1fr 1fr; gap: 6px; } .tiles.four { grid-template-columns: 1fr 1fr; } .tiles .stat { padding: 8px; } .tiles .stat .num { font-size: 16px; } }
+
+/* Dashboard: agents */
+.notice { color: var(--warn); border-color: var(--warn); }
+h2 a { color: inherit; text-decoration: none; }
+h2 a:hover { color: var(--accent); }
+h2 #agentSummary { text-transform: none; letter-spacing: 0; font-weight: 500; margin-left: 6px; }
+.approvals { border-color: var(--warn); padding: 6px 12px; margin-bottom: 10px; }
+.approvals .need { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.approvals .need:last-child { border-bottom: 0; }
+.approvals .need-head a { text-decoration: none; }
+.approvals pre { margin: 6px 0; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow: auto; }
+.approvals .actions { display: flex; gap: 8px; }
+.agent-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+a.agent-card { color: inherit; text-decoration: none; display: block; }
+a.agent-card:hover { border-color: var(--accent); }
+.agent-card .name .tag { margin-left: auto; }
+.agent-card .agent-last { min-height: 2.9em; }
+.agent-lower { margin-top: 10px; }
+.agent-lower h2 { margin-top: 14px; }
+#agentRuns { max-height: 420px; overflow-y: auto; }
+#agentRuns .row .title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#quickTask { display: grid; gap: 10px; }
+#quickTask textarea { width: 100%; resize: vertical; font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+#quickTask .quick-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dot.warn { background: var(--warn); }
+#agentRuns .row .proj { display: block; }

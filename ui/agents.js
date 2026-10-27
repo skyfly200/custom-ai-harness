@@ -162,11 +162,47 @@ async function drawPreview(run) {
   $('previewStart').disabled = Boolean(st.running);
   $('previewInfo').innerHTML = st.url ? `<p>${st.running ? (st.ready ? '<span class="tag ok">running</span>' : '<span class="tag">starting</span>') : `<span class="tag bad">exited (${esc(st.exited)})</span>`} <a href="${esc(st.url)}" target="_blank" rel="noopener">${esc(st.url)}</a> <code>${esc(st.command)}</code></p><pre>${esc((st.log || []).join('\n'))}</pre>` : '';
 }
+// Ship and undo: only for a change to a registered app. Shows what the checks found, and the
+// buttons stay off while something blocks it.
+let shipFor = null;
+async function drawShip(run) {
+  const panel = $('shipPanel');
+  const ok = run && run.app && ['done', 'incomplete'].includes(run.status);
+  panel.hidden = !ok;
+  if (!ok) { shipFor = null; return; }
+  if (shipFor !== run.id) { shipFor = run.id; $('shipMsg').textContent = ''; }
+  let v;
+  try { v = await api(`/${run.id}/ship`); } catch (err) { $('shipInfo').textContent = err.message; return; }
+  const lines = [];
+  lines.push(`<p>${v.files.length} file${v.files.length === 1 ? '' : 's'}, ${v.lines} lines changed · tests ${v.tests === null ? 'not run' : v.tests ? '<span class="tag ok">pass</span>' : '<span class="tag bad">fail</span>'}</p>`);
+  for (const b of v.blocked) lines.push(`<p class="tag bad">${esc(b)}</p>`);
+  for (const n of v.notes) lines.push(`<p class="muted">${esc(n)}</p>`);
+  if (v.shipped) lines.push(`<p><span class="tag ok">shipped</span> <a href="${esc(v.shipped.url)}" target="_blank" rel="noopener">pull request ${esc(v.shipped.pr)}</a> merged into ${esc(v.shipped.base)}</p>`);
+  if (v.undone) lines.push(`<p><span class="tag">undone</span> <a href="${esc(v.undone.url)}" target="_blank" rel="noopener">revert pull request ${esc(v.undone.pr)}</a></p>`);
+  $('shipInfo').innerHTML = lines.join('');
+  $('shipBtn').disabled = !v.canShip || Boolean(v.shipped);
+  $('undoBtn').hidden = !v.shipped || Boolean(v.undone);
+}
+async function shipAction(path, ask) {
+  if (!selected || !confirm(ask)) return;
+  $('shipMsg').textContent = 'Working…';
+  try {
+    const res = await fetch(`api/runs/${selected}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    $('shipMsg').textContent = 'Done.';
+    shipFor = null;
+    await drawShip(await api(`/${selected}`));
+  } catch (err) { $('shipMsg').textContent = err.message; }
+}
+$('shipBtn').addEventListener('click', () => shipAction('ship', 'Merge this change into the app on GitHub? Its normal pipeline then deploys it.'));
+$('undoBtn').addEventListener('click', () => shipAction('undo', 'Open and merge a revert pull request for this change?'));
+
 $('previewForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const command = $('previewCmd').value.trim();
-  if (!command || !selected) return;
-  try { localStorage.setItem(PREVIEW_KEY, command); } catch { /* fine */ }
+  if (!selected) return;
+  try { if (command) localStorage.setItem(PREVIEW_KEY, command); } catch { /* fine */ }
   const start = (approved) => fetch(`api/runs/${selected}/preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command, approved }) });
   try {
     $('previewMsg').textContent = 'Starting…';
@@ -207,7 +243,8 @@ async function refresh() {
       renderDetail(run);
       drawTerminal(run);
       drawPreview(run);
-    } else { drawTerminal(null); drawPreview(null); }
+      drawShip(run);
+    } else { drawTerminal(null); drawPreview(null); drawShip(null); }
     $('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('down').hidden = false;

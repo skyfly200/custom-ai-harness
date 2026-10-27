@@ -137,4 +137,16 @@ An app is a repo you can ask for changes: on the Agents page, **Register an app*
 - What the person was looking at (`context` in `POST /apps/:id/changes`) is passed to the agent as untrusted data.
 - Registrations live in `runs/_apps/`. API: `GET/POST /apps`, `GET/PATCH/DELETE /apps/:id`, `POST /apps/:id/changes` (also under `/ui/api/apps`).
 
-Ship, undo and the in-page widget come in later steps; for now the result is a branch to review.
+### Ship and undo
+
+A finished change shows a **Ship this change** panel: files and lines changed, whether the tests pass, and notes (large change, sensitive files such as auth, payments, migrations, `.env`, workflows). **Approve and merge** stays off while the run did not finish, made no commit, changed files outside the editable paths or its tests fail. The notes are advice; the person decides.
+
+Approving pushes the run's branch, opens a pull request and merges it on GitHub (`GITHUB_TOKEN` in `.env` with Pull requests and Contents write; the repo comes from the app's *GitHub repo* or its `origin` remote, the target from *Base branch* or `origin/HEAD`). The app's own pipeline deploys after the merge; with deploy method `hook` the runner also POSTs the app's hook URL. **Undo** opens and merges a revert pull request for the merge commit. API: `GET/POST /runs/:id/ship`, `POST /runs/:id/undo`. Git history is the audit trail.
+
+### The "Change this page" widget
+
+`ui/agent-widget.js` is already on every harness UI page (`<script src="agent-widget.js" data-app-name="Harness UI" defer>`). It shows a **Change this page** button only when an app with that name (or `data-app="<id>"`) is registered on the Agents page, so register the repo as "Harness UI" with editable paths such as `ui/**` to turn it on. You write what should change, optionally click **Pick an element**, and it starts a change run with the page, the picked element, selected text and recent console errors as context (the agent is told this is untrusted data). Progress shows in the panel; preview, approve and undo are on the Agents page. For another app served from the same address, add the script with its own `data-app-name`.
+
+### Proposals
+
+The widget's **Propose a fix only** (or `POST /apps/:id/proposals` with `kind` `error` or `feedback`, a `note` and the page `context`) runs a change that can only end as an **open pull request**: never merged, never deployed, a draft when it touches sensitive files. A page that hit console errors sends them as the problem; without errors it is a "this is confusing" note. It needs `GITHUB_TOKEN` like shipping; without it the branch is left in the repo and the run log says so. Limits: 3 proposals an hour per app (`RUNNER_PROPOSALS_PER_HOUR`), and the same problem is not proposed again while its earlier proposal is open or running (HTTP 429).

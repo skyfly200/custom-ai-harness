@@ -192,6 +192,8 @@ Notes:
 
 ## Moving chats to message rows
 
+**Update (2026-10-27): stages 1, 3 and 4 are built** (migration `003`, delta sync with join-on-conflict, no whole-chat blob), with almost nothing to migrate so the stages went out as one PR. **Stage 2 (the server saving replies itself) is not built yet** and is the next piece; schedules, Agents and Runs depend on it. The user id (stage 1's last part) is also still to do. The rest of this section is the original plan.
+
 Skyler asked (2026-10-27) for a plan to move the storage to the message-rows model above, or to update this plan to the shipped one. The doc now does both: the shipped model is described as current, and this section is the staged path to rows. **Recommendation: keep whole-chat rows for now and move in stages, starting only when something needs the server to write messages** (stage 2). Nothing here changes the page for anyone until stage 3.
 
 **What whole-chat rows cost today (all real, none urgent):**

@@ -14,10 +14,11 @@ Optional. With no `DATABASE_URL` the harness works as before: users and keys in 
 |---|---|
 | `harness_store` | the Users store: users, API keys, invites |
 | `sessions` | browser sessions (hash only) |
-| `chats` | each chat as the page keeps it, per user; delete leaves a marker so other devices drop it too |
+| `chats` | each chat's title, settings and the order of its messages, per user, with a version; delete leaves a marker so other devices drop it too |
+| `chat_messages` | one row per message (the page's own message object), per chat |
 | `user_data` | projects, skills, commands, schedules and chat preferences, per user |
 
-The chat page still works from the browser's storage and pushes each save about 1.5 s later. At start it pulls what another device saved (the newer copy wins) and uploads chats this browser has that the server lacks. Attachments travel inside chats for now; moving them to object storage is a later step in [the hosted plan](hosted-app-plan.md).
+The chat page still works from the browser's storage and saves to Postgres about 1.5 s after each change, sending only the messages that changed and the version it last saw. If another device (or, later, the server) saved in between, the save is refused with a 409; the page pulls the chat, joins the two sets of messages by id (`ui/chatmerge.js`) and saves again, so neither side's messages are lost. At start it pulls what another device saved (the newer copy wins) and uploads chats this browser has that the server lacks. Migration `003` split the earlier whole-chat rows into messages and left a safety copy in `chats_before_rows` (drop it once you are happy: `DROP TABLE chats_before_rows`).
 
 ## Continue with Google / GitHub
 

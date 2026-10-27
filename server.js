@@ -29,11 +29,14 @@ const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
 const cacheMarkers = require('./utils/cacheMarkers');
 const openrouterCatalog = require('./utils/openrouterCatalog');
+const openrouterAuth = require('./utils/openrouterAuth');
 const batchModels = require('./utils/batchModels');
 const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
-const { McpManager } = require('./utils/mcp');
+const { McpManager, readConfig, writeConfig } = require('./utils/mcp');
+const mcpAdmin = require('./utils/mcpAdmin');
+const mcpCatalog = require('./utils/mcpCatalog');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
 const chatWorktrees = require('./utils/chatWorktrees');
@@ -46,6 +49,12 @@ const https = require('https');
 const path = require('path');
 
 const app = express();
+// OpenRouter credentials: OPENROUTER_API_KEY, or workload identity federation (utils/openrouterAuth.js)
+const orAuth = openrouterAuth.createAuth();
+for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federation: ${problem}`);
+// The Gateway and Router call OpenRouter through here when federation is on, so they never hold a token that expires.
+// Before the password gate: they prove themselves with OPENROUTER_PROXY_KEY (or LITELLM_MASTER_KEY).
+if (openrouterAuth.federated()) app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth));
 // HARNESS_PASSWORD locks every page and API (see utils/access.js); unset, all stay open
 const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || '';
 // HARNESS_REQUIRE_LOGIN=1 puts named logins in front instead (utils/login.js)
@@ -287,7 +296,7 @@ app.use('/ui', express.static(path.join(__dirname, 'ui')));
 app.get('/ui/api/langfuse', async (req, res) => res.json(await langfuse.status(settings.get())));
 
 app.get('/ui/api/status', async (req, res) => {
-    res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats() });
+    res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats(), openrouter: orAuth.status() });
 });
 
 // Token totals by client, model and provider; days=N for the last N days
@@ -321,13 +330,20 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // anyone who gave it), and only to JSON: a plain cross-site form can't send
 // that without a CORS preflight, so another web page can't change settings either.
 function localJsonOnly(req, res, next) {
+    localOnly(req, res, () => {
+        if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+        next();
+    });
+}
+
+// Who may use the controls: admins when logins are on, otherwise this machine or a HARNESS_PASSWORD login
+function localOnly(req, res, next) {
     // With logins on, controls are for admins, wherever they sit
     if (req.harnessLogin && req.harnessUser.role !== 'admin') return res.status(403).json({ error: 'admins only' });
     // A request through a tunnel or proxy on this machine looks like loopback, but isn't "this machine"
     if (!req.harnessLogin && (!LOOPBACK.has(req.socket.remoteAddress) || viaProxy(req)) && !req.harnessAuthenticated) {
         return res.status(403).json({ error: 'controls work only from this machine, or with HARNESS_PASSWORD set' });
     }
-    if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
     next();
 }
 
@@ -596,17 +612,20 @@ app.post('/ui/api/model-stats', localJsonOnly, (req, res) => {
 // the Gateway instead. The chat page picks the model and voice; TTS_MODEL and
 // TTS_VOICE are only the defaults.
 const OPENROUTER_URL = (process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
-const TTS_URL = (process.env.TTS_URL || (process.env.OPENROUTER_API_KEY ? OPENROUTER_URL : '')).replace(/\/+$/, '');
+const TTS_URL = (process.env.TTS_URL || (orAuth.configured() ? OPENROUTER_URL : '')).replace(/\/+$/, '');
 const TTS_OPENROUTER = /openrouter\.ai/.test(TTS_URL);
 const TTS_MODEL = process.env.TTS_MODEL || (TTS_OPENROUTER ? 'fish-audio/s2.1-pro-free:free' : 'kokoro');
 const TTS_VOICE = process.env.TTS_VOICE ?? (TTS_OPENROUTER ? '' : 'af_heart'); // empty sends none: the model's default voice
-const TTS_KEY = process.env.TTS_API_KEY
+const ttsKey = async () => process.env.TTS_API_KEY
     || (TTS_URL.startsWith(GATEWAY_URL) ? GATEWAY_KEY : '')
-    || (TTS_OPENROUTER ? process.env.OPENROUTER_API_KEY || '' : '');
+    || (TTS_OPENROUTER ? await orAuth.key().catch((err) => { console.warn(`TTS: ${err.message}`); return ''; }) : '');
 const TTS_INSTRUCTIONS = process.env.TTS_INSTRUCTIONS || ''; // tone and pacing, for models that take it
 const TTS_VOICES = (process.env.TTS_VOICES || '').split(',').map(v => v.trim()).filter(Boolean);
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
-const ttsHeaders = () => ({ 'content-type': 'application/json', ...(TTS_KEY ? { authorization: `Bearer ${TTS_KEY}` } : {}) });
+const ttsHeaders = async () => {
+    const key = await ttsKey();
+    return { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) };
+};
 const voiceIds = (list) => (list || []).map(v => (typeof v === 'string' ? v : v.id || v.voice_id || v.name)).filter(Boolean);
 
 // Speech models the server offers, with their voices: [{ id, name, voices, free }]
@@ -616,7 +635,7 @@ async function listTtsModels() {
     let models = [];
     if (TTS_OPENROUTER) {
         try {
-            const upstream = await fetch(`${TTS_URL}/models?output_modalities=speech`, { headers: ttsHeaders(), signal: AbortSignal.timeout(8000) });
+            const upstream = await fetch(`${TTS_URL}/models?output_modalities=speech`, { headers: await ttsHeaders(), signal: AbortSignal.timeout(8000) });
             if (upstream.ok) {
                 models = ((await upstream.json()).data || []).map(m => ({
                     id: m.id,
@@ -630,7 +649,7 @@ async function listTtsModels() {
         // one model; Kokoro-FastAPI lists its voices, OpenAI and others don't
         let voices = [];
         try {
-            const upstream = await fetch(`${TTS_URL}/audio/voices`, { headers: ttsHeaders(), signal: AbortSignal.timeout(3000) });
+            const upstream = await fetch(`${TTS_URL}/audio/voices`, { headers: await ttsHeaders(), signal: AbortSignal.timeout(3000) });
             if (upstream.ok) {
                 const body = await upstream.json();
                 voices = voiceIds(Array.isArray(body) ? body : body.voices);
@@ -650,7 +669,7 @@ async function listTtsModels() {
 // is public, so this works without a key; it is kept for an hour.
 let openrouterCache = { at: 0, models: null };
 async function fetchOpenrouterCatalog(timeoutMs = 10000) {
-    const key = process.env.OPENROUTER_API_KEY;
+    const key = await orAuth.key().catch((err) => { console.warn(`OpenRouter catalog: ${err.message}`); return ''; });
     const upstream = await fetch(`${OPENROUTER_URL}/models`, {
         headers: key ? { authorization: `Bearer ${key}` } : {},
         signal: AbortSignal.timeout(timeoutMs),
@@ -699,16 +718,16 @@ app.get('/ui/api/tts', async (req, res) => {
 const pcmOnlyModels = new Set(); // models that refused MP3 once
 
 app.post('/ui/api/tts', async (req, res) => {
-    if (!TTS_URL) return res.status(404).json({ error: 'No TTS server: add OPENROUTER_API_KEY or TTS_URL to .env' });
+    if (!TTS_URL) return res.status(404).json({ error: 'No TTS server: add OPENROUTER_API_KEY (or the OPENROUTER_FEDERATION_* settings) or TTS_URL to .env' });
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
     const { text, voice, speed } = req.body || {};
     if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text is required' });
     const model = typeof req.body.model === 'string' && req.body.model ? req.body.model : TTS_MODEL;
     // the default voice belongs to the default model
     const chosenVoice = (typeof voice === 'string' && voice) || (model === TTS_MODEL ? TTS_VOICE : '');
-    const speak = (format) => fetch(`${TTS_URL}/audio/speech`, {
+    const speak = async (format) => fetch(`${TTS_URL}/audio/speech`, {
         method: 'POST',
-        headers: ttsHeaders(),
+        headers: await ttsHeaders(),
         body: JSON.stringify({
             model,
             input: text.slice(0, 4000),
@@ -823,6 +842,99 @@ app.get('/ui/api/tools', async (req, res) => {
 app.post('/ui/api/tools/reload', localJsonOnly, async (req, res) => {
     await mcp.reload();
     res.json(mcp.status());
+});
+
+// The Tools page: add, edit, test, switch off and remove MCP servers. Admin-only
+// (a stdio server is a program this machine runs); literal env and header
+// values are never sent back, only that they are set.
+function mcpList() {
+    const status = new Map(mcp.status().servers.map(s => [s.name, s]));
+    const tools = mcp.allTools();
+    return {
+        file: mcp.file,
+        error: mcp.configError || null,
+        servers: Object.entries(readConfig(mcp.file)).map(([name, spec]) => ({
+            name,
+            spec: mcpAdmin.describeSpec(spec),
+            status: status.get(name)?.status || (spec.disabled ? 'disabled' : 'connecting'),
+            error: status.get(name)?.error || null,
+            tools: tools.get(name) || [],
+        })),
+        catalog: mcpCatalog,
+    };
+}
+
+async function mcpEdit(res, change) {
+    try {
+        await mcp.start();
+        const servers = readConfig(mcp.file);
+        change(servers);
+        writeConfig(servers, mcp.file);
+        await mcp.sync();
+        res.json(mcpList());
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.message });
+    }
+}
+
+app.get('/ui/api/mcp', localOnly, async (req, res) => {
+    try {
+        await mcp.start();
+        res.json(mcpList());
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Add a server, or edit one (`from` is the name it had; a new name renames it)
+app.post('/ui/api/mcp/save', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+    const { from, name, spec } = req.body || {};
+    mcpAdmin.checkName(name);
+    if (from && servers[from] === undefined) throw Object.assign(new Error(`no server named ${from}`), { status: 404 });
+    if ((!from || from !== name) && servers[name] !== undefined) throw Object.assign(new Error(`a server named ${name} already exists`), { status: 409 });
+    const built = mcpAdmin.buildSpec(spec, from ? servers[from] : {});
+    if (from && from !== name) {
+        // keep the file's order when renaming
+        const entries = Object.entries(servers).map(([k, v]) => (k === from ? [name, built] : [k, v]));
+        for (const k of Object.keys(servers)) delete servers[k];
+        Object.assign(servers, Object.fromEntries(entries));
+    } else {
+        servers[name] = built;
+    }
+}));
+
+// Switch a server on or off, or choose which of its tools the model is offered
+app.post('/ui/api/mcp/patch', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+    const { name, disabled, disabledTools } = req.body || {};
+    const spec = servers[name];
+    if (!spec) throw Object.assign(new Error(`no server named ${name}`), { status: 404 });
+    if (disabled !== undefined) {
+        if (disabled) spec.disabled = true;
+        else delete spec.disabled;
+    }
+    if (disabledTools !== undefined) {
+        if (!Array.isArray(disabledTools) || disabledTools.some(t => typeof t !== 'string')) throw Object.assign(new Error('disabledTools must be a list of tool names'), { status: 400 });
+        if (disabledTools.length) spec.disabledTools = disabledTools;
+        else delete spec.disabledTools;
+    }
+}));
+
+app.post('/ui/api/mcp/remove', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+    const { name } = req.body || {};
+    if (servers[name] === undefined) throw Object.assign(new Error(`no server named ${name}`), { status: 404 });
+    delete servers[name];
+}));
+
+// Try an entry without saving it: connect, list the tools, disconnect
+app.post('/ui/api/mcp/test', localJsonOnly, async (req, res) => {
+    try {
+        const { from, spec } = req.body || {};
+        const stored = from ? readConfig(mcp.file)[from] : undefined;
+        const built = mcpAdmin.buildSpec(spec, stored || {});
+        res.json(await mcp.probe(built));
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.message });
+    }
 });
 
 app.post('/ui/api/repo', localJsonOnly, async (req, res) => {

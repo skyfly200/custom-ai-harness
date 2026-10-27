@@ -71,6 +71,25 @@ function readConfig(file = CONFIG_FILE) {
     return servers;
 }
 
+/**
+ * Write the server list back, keeping any other keys in the file and the key
+ * name it already uses (mcpServers or servers). Written whole, then renamed
+ * into place, so a crash never leaves half a file.
+ */
+function writeConfig(servers, file = CONFIG_FILE) {
+    let json = {};
+    try {
+        json = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+    }
+    const key = json.mcpServers === undefined && json.servers !== undefined ? 'servers' : 'mcpServers';
+    json[key] = servers;
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(json, null, 2)}\n`);
+    fs.renameSync(tmp, file);
+}
+
 function programName(spec) {
     return String(spec.command || '').split(/[\\/]/).pop().replace(/\.(exe|cmd|bat)$/i, '');
 }
@@ -191,11 +210,66 @@ class McpManager {
             this.configError = `${path.basename(this.file)}: ${err.message}`;
             specs = {};
         }
-        for (const [name, spec] of Object.entries(specs)) {
-            this.servers.set(name, { name, spec, type: transportType(spec), status: spec.disabled ? 'disabled' : 'connecting', tools: [] });
-        }
+        for (const [name, spec] of Object.entries(specs)) this.servers.set(name, this.entry(name, spec));
         await Promise.all([...this.servers.values()].filter(s => s.status === 'connecting').map(s => this.connect(s)));
         this.indexTools();
+    }
+
+    entry(name, spec) {
+        return { name, spec, type: transportType(spec), status: spec.disabled ? 'disabled' : 'connecting', tools: [] };
+    }
+
+    /**
+     * Bring the running servers in line with the file after an edit: servers
+     * that were removed or changed are closed, new or changed ones connect,
+     * and untouched ones keep running. Tool switches (disabledTools) don't
+     * restart a server.
+     */
+    async sync() {
+        await this.start();
+        let specs = {};
+        try {
+            specs = readConfig(this.file);
+            this.configError = null;
+        } catch (err) {
+            this.configError = `${path.basename(this.file)}: ${err.message}`;
+            return;
+        }
+        const restartKey = (spec) => JSON.stringify({ ...spec, disabledTools: undefined });
+        const old = this.servers;
+        this.servers = new Map();
+        const fresh = [];
+        for (const [name, spec] of Object.entries(specs)) {
+            const had = old.get(name);
+            if (had && restartKey(had.spec) === restartKey(spec)) {
+                had.spec = spec;
+                this.servers.set(name, had);
+                old.delete(name);
+                continue;
+            }
+            const next = this.entry(name, spec);
+            this.servers.set(name, next);
+            if (next.status === 'connecting') fresh.push(next);
+        }
+        await Promise.all([...old.values()].map(async (s) => {
+            const client = s.client;
+            s.client = null;
+            try { await client?.close(); } catch {}
+        }));
+        await Promise.all(fresh.map(s => this.connect(s)));
+        this.indexTools();
+    }
+
+    // Try a server that isn't (yet) in the file: connect, list the tools, disconnect
+    async probe(spec) {
+        const server = this.entry('test', spec);
+        const started = Date.now();
+        await this.connect(server);
+        const result = { ok: server.status === 'connected', error: server.error || null, tools: server.tools.map(t => ({ name: t.name, title: t.title || t.annotations?.title || t.name, description: t.description || '' })), ms: Date.now() - started };
+        const client = server.client;
+        server.client = null;
+        try { await client?.close(); } catch {}
+        return result;
     }
 
     async connect(server) {
@@ -288,7 +362,9 @@ class McpManager {
         this.byTool.clear();
         for (const server of this.servers.values()) {
             if (server.status !== 'connected') continue;
+            const off = new Set(server.spec.disabledTools || []);
             for (const tool of server.tools) {
+                if (off.has(tool.name)) continue;
                 this.byTool.set(toolName(server.name, tool.name, this.byTool), { server, tool });
             }
         }
@@ -305,9 +381,19 @@ class McpManager {
                 type: s.type,
                 status: s.status,
                 error: s.error || null,
-                tools: s.tools.map(t => ({ name: names.get(`${s.name}\0${t.name}`) || t.name, title: t.title || t.annotations?.title || t.name, description: t.description || '' })),
+                tools: s.tools.filter(t => names.has(`${s.name}\0${t.name}`)).map(t => ({ name: names.get(`${s.name}\0${t.name}`), title: t.title || t.annotations?.title || t.name, description: t.description || '' })),
             })),
         };
+    }
+
+    // Each server's own tools, the switched-off ones included, for the Tools page
+    allTools() {
+        return new Map([...this.servers.values()].map(s => [s.name, s.tools.map(t => ({
+            name: t.name,
+            title: t.title || t.annotations?.title || t.name,
+            description: t.description || '',
+            enabled: !(s.spec.disabledTools || []).includes(t.name),
+        }))]));
     }
 
     // OpenAI tool definitions for the connected servers, minus the ones switched off
@@ -349,4 +435,4 @@ class McpManager {
     }
 }
 
-module.exports = { McpManager, readConfig, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };
+module.exports = { McpManager, readConfig, writeConfig, transportType, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };

@@ -852,9 +852,10 @@ const SHOW_RESULT = 6000;
 function toolCallsHtml(rounds) {
   const calls = rounds.flatMap((r, k) => r.calls.map((call, j) => ({ call, key: `tool-${k}-${j}` })));
   if (!calls.length) return '';
+  const needsInput = calls.some(({ call }) => call.approval?.state === 'ask');
   const state = calls.some(({ call }) => call.result == null) ? 'now' : calls.some(({ call }) => call.isError) ? 'bad' : 'ok';
-  return `<details class="tool-calls ${state}" data-k="tools"><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
-      <span>Tool calls (${calls.length})</span></summary><div class="tool-list">${calls.map(({ call: c, key }) => {
+  return `<details class="tool-calls ${state}${needsInput ? ' needs-input' : ''}" data-k="tools"${needsInput ? ' open' : ''}><summary><span class="st">${state === 'ok' ? '✓' : state === 'bad' ? '✕' : ''}</span>
+      <span>Tool calls (${calls.length})</span>${needsInput ? '<span class="approval-needed">Needs your input: allow or decline</span>' : ''}</summary><div class="tool-list">${calls.map(({ call: c, key }) => {
     const [src, name] = toolLabel(c.name);
     const state = c.result == null ? 'now' : c.isError ? 'bad' : 'ok';
     const result = c.result == null ? '' : c.result.length > SHOW_RESULT ? `${c.result.slice(0, SHOW_RESULT)}\n… (${(c.result.length - SHOW_RESULT).toLocaleString()} more characters sent to the model)` : c.result;
@@ -2226,7 +2227,7 @@ function drawTools() {
   });
   if (toolInfo?.error) rows.unshift(`<li class="err">${esc(toolInfo.error)}</li>`);
   $('mcpList').innerHTML = rows.join('') || (toolInfo
-    ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. Add them to <code>${esc(toolInfo.file?.split(/[\\/]/).pop() || 'mcp-servers.json')}</code>.</li>`
+    ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. <a href="tools.html">Add one</a> on the Tools page.</li>`
     : '<li class="err">Could not reach the harness.</li>');
 }
 

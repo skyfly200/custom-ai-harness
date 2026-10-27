@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="runs.css">
+<link rel="stylesheet" href="vendor/xterm/xterm.css">
 <link rel="stylesheet" href="calm.css">
 </head>
 <body>
@@ -70,9 +71,16 @@
     <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
     <div class="card detail" id="detail"><p class="muted">Pick a run to see what the agent did.</p></div>
   </div>
+  <details class="card termpanel" id="termPanel" hidden>
+    <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
+    <div id="termHost" class="termhost"></div>
+  </details>
 </main>
 <script src="hints.js"></script>
 <script src="bright.js"></script>
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/addon-fit.js"></script>
+<script src="terminal.js"></script>
 <script src="runs.js"></script>
 </body>
 </html>

@@ -20,6 +20,8 @@ How it keeps your work safe:
 
 To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Runs** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Type or paste the repo's path, pick a recent one, or press **Browse…** to walk through the allowed folders (repos are marked ◆). The agent runs the project's tests itself when the task calls for it.
 
+**Terminal.** A **Terminal** panel under the run list (opens when the selected run has run a command) shows what the agent ran and what came back, in [xterm.js](https://xtermjs.org) (vendored in `ui/vendor/xterm/`, so it needs no install or internet): `$ command`, its output, and a red `[exit code N]` on failure, with stage names, approvals and file reads as dim one-liners. It follows the run live as the page refreshes. It is a replay of the run's record, not a shell: typing in it does nothing, and output is cut to the length the run's record keeps. A live interactive shell in the sandbox is not built.
+
 ### Workflows (recipes the agent follows)
 
 A workflow is a short list of stages. Each stage is its own agent loop with a role, the tools it may use, a step budget and optionally an effort, and it is handed what the stages before it found. The recipes live in `workflows/*.json`, one file each:

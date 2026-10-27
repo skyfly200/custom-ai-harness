@@ -98,6 +98,18 @@ async function loadDiff(id) {
   } catch { /* leave it */ }
 }
 
+// the terminal lives outside the detail pane, which is redrawn on every refresh
+let runTerminal = null;
+function drawTerminal(run) {
+  const panel = $('termPanel');
+  const has = run && run.events.some((e) => e.type === 'tool' && e.name === 'run_command');
+  panel.hidden = !has;
+  if (!has) return;
+  runTerminal ||= window.RunTerminal?.mount($('termHost'));
+  runTerminal?.update(run);
+}
+$('termPanel').addEventListener('toggle', () => { if ($('termPanel').open) setTimeout(() => runTerminal?.refit(), 0); });
+
 async function refresh() {
   if (busy) return;
   busy = true;
@@ -109,7 +121,8 @@ async function refresh() {
     if (selected) {
       const run = await api(`/${selected}`).catch(() => null);
       renderDetail(run);
-    }
+      drawTerminal(run);
+    } else drawTerminal(null);
     $('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('down').hidden = false;

@@ -53,3 +53,8 @@
 .pick-row.up { color: var(--muted); }
 .pad { padding: 12px; margin: 0; }
 .field[hidden] { display: none; }
+
+.termpanel { margin-top: 14px; }
+.termpanel > summary { cursor: pointer; font-weight: 600; }
+.termhost { margin-top: 10px; height: 320px; border-radius: 8px; overflow: hidden; background: #0b0a14; padding: 8px 4px 4px 8px; }
+.termhost .xterm-viewport { overscroll-behavior: contain; }

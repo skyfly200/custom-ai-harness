@@ -31,7 +31,7 @@ A run is a one-off. An **agent** is a named, long-lived worker for one repo that
 - **One task at a time.** Tasks given while it is busy wait their turn, in order. Different agents (and one-off runs) work side by side, up to `RUNNER_MAX_RUNS`.
 - **Deleting an agent** keeps its tasks as ordinary runs and leaves their branches in the repo. Changing an agent's repo starts its work over from that repo.
 - **Old runs keep working.** Runs made before agents existed are one-off runs under **All runs**.
-- **Storage.** One JSON file per agent in `runs/_agents/`, read and written only by `runner/agents.js`, so it can be replaced by a database table later. The API is `GET/POST /ui/api/agents`, `GET/PATCH/DELETE /ui/api/agents/<id>` and `POST /ui/api/agents/<id>/tasks` (`goal`, optional `plan`, `maxSteps`, `maxMinutes`); `/ui/api/runs` is unchanged.
+- **Storage.** One JSON file per agent in `runs/_agents/`, read and written only by `runner/agents.js`, so it can be replaced by a database table later. The API is `GET/POST /ui/api/agents`, `GET/PATCH/DELETE /ui/api/agents/<id>` and `POST /ui/api/agents/<id>/tasks` (`goal`, optional `plan`, `maxSteps`, `maxMinutes`, `maxCost`); `/ui/api/runs` is unchanged.
 
 **Agents and chat projects.** A chat project (see [Chat](chat.md)) can have agents. Tick them under **Agents in this project** in the project settings, or choose the **Chat project** in the agent's own form; the agent stores the project's id and name (projects live in your browser, agents in the runner). In a chat, `/agent TASK` hands the task to the project's agent (`/agent NAME TASK` when the project has several; outside a project it picks from all agents). The task carries the last six messages of the chat as context, the chat gets a note linking to the task, and the task on the Agents page links back to the chat. An agent's project name on the Agents page opens that project's chats. An agent belongs to at most one project. `/subagent` still starts a one-off run.
 
@@ -150,3 +150,11 @@ Approving pushes the run's branch, opens a pull request and merges it on GitHub 
 ### Proposals
 
 The widget's **Propose a fix only** (or `POST /apps/:id/proposals` with `kind` `error` or `feedback`, a `note` and the page `context`) runs a change that can only end as an **open pull request**: never merged, never deployed, a draft when it touches sensitive files. A page that hit console errors sends them as the problem; without errors it is a "this is confusing" note. It needs `GITHUB_TOKEN` like shipping; without it the branch is left in the repo and the run log says so. Limits: 3 proposals an hour per app (`RUNNER_PROPOSALS_PER_HOUR`), and the same problem is not proposed again while its earlier proposal is open or running (HTTP 429).
+
+## Cost
+
+Every model call a run makes is priced like the Usage page (the runner reads `/ui/api/model-info`; a cost the provider reports wins). A run record has `cost` (dollars) and `unpricedCalls` (calls to models with no known price, shown as `$1.20+`). A swarm's cost includes its workers.
+
+**Cost limit.** `maxCost` (dollars, on a run, on an agent, or on a task) stops a run when it has spent that much. It ends as `incomplete` with `outOfBudget: true` and shows as "cost limit"; Continue carries it on with the whole limit again, like steps and minutes. A call that is already running finishes, so a run can go a little over. 0 or blank means no limit. On a swarm each worker gets the limit; the swarm's own planner and reviewer count against it too.
+
+The Dashboard shows run spend per day, stacked by the four agents that spent most (the rest are "Other"). A run counts on the day it started.

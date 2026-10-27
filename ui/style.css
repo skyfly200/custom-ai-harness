@@ -119,3 +119,22 @@ a.agent-card:hover { border-color: var(--accent); }
 #quickTask .quick-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .dot.warn { background: var(--warn); }
 #agentRuns .row .proj { display: block; }
+
+/* Dashboard: run spend per day (categorical slots 1-4 of the shared palette, "other" in a neutral) */
+:root { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s-other: #8c8a99; }
+@media (prefers-color-scheme: dark) { :root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s-other: #6e6c80; } }
+.spend-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.spend-head b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.spend-chart { display: flex; gap: 6px; height: 120px; align-items: stretch; border-bottom: 1px solid var(--border); }
+.spend-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; position: relative; }
+.spend-stack { width: 100%; max-width: 24px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; }
+.spend-stack i { display: block; min-height: 2px; border-radius: 4px 4px 0 0; }
+.spend-stack i:not(:first-child) { border-radius: 0; }
+.spend-days, .spend-day { font-size: 11px; color: var(--muted); }
+.spend-day { position: absolute; top: calc(100% + 4px); }
+.spend-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 22px 0 6px; font-size: 12px; color: var(--muted); }
+.spend-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.spend-table { font-size: 12px; margin-top: 6px; }
+.spend-table summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.spend-table table { min-width: 0; margin-top: 6px; }
+.spend-table th, .spend-table td { padding: 3px 8px; }

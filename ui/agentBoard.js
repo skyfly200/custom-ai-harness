@@ -64,7 +64,46 @@
     };
   }
 
-  const api = { board, stateOf, tokensOf, rollups };
+  const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  // Run spend per day for the last `days` days (today last), stacked by agent.
+  // A run counts on the day it started, with its workers' cost. The `keep` agents
+  // that spent most get a series each; the rest, and runs of no agent, are "Other".
+  function daily(runs = [], agents = [], { days = 7, keep = 4, now = new Date() } = {}) {
+    const spend = rollups(runs);
+    const names = new Map(agents.map((a) => [a.id, a.name]));
+    const list = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      list.push({ key: dayKey(d), date: d, total: 0, by: new Map() });
+    }
+    const byKey = new Map(list.map((d) => [d.key, d]));
+    const totals = new Map();
+    for (const r of runs) {
+      if (r.parent) continue;
+      const day = byKey.get(dayKey(new Date(r.started || r.created)));
+      const cost = spend.get(r.id).cost;
+      if (!day || !cost) continue;
+      const id = r.agent && names.has(r.agent) ? r.agent : 'other';
+      day.by.set(id, (day.by.get(id) || 0) + cost);
+      day.total += cost;
+      totals.set(id, (totals.get(id) || 0) + cost);
+    }
+    const top = [...totals].filter(([id]) => id !== 'other').sort((a, b) => b[1] - a[1]).slice(0, keep).map(([id]) => id);
+    const series = top.map((id) => ({ id, name: names.get(id) }));
+    const hasOther = [...totals.keys()].some((id) => !top.includes(id));
+    if (hasOther) series.push({ id: 'other', name: top.length ? 'Other' : 'No agent' });
+    for (const d of list) {
+      d.parts = series.map((s) => ({
+        id: s.id, name: s.name,
+        cost: s.id === 'other' ? [...d.by].filter(([id]) => !top.includes(id)).reduce((n, [, c]) => n + c, 0) : d.by.get(s.id) || 0,
+      })).filter((p) => p.cost > 0);
+      delete d.by;
+    }
+    return { days: list, series, total: list.reduce((n, d) => n + d.total, 0), max: Math.max(0, ...list.map((d) => d.total)) };
+  }
+
+  const api = { board, stateOf, tokensOf, rollups, daily };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AgentBoard = api;
 })(typeof window !== 'undefined' ? window : globalThis);

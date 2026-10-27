@@ -213,6 +213,32 @@ test('a run ends as incomplete when it uses all its steps, and retries a busy mo
     assert.match(bad.error, /HTTP 400/);
 });
 
+test('a run stops at its cost limit, and a continue gets the whole limit again', async () => {
+    // each scripted call costs $0.0016 (100 in at 1e-5, 20 out at 3e-5), so $0.003 allows two
+    script = [
+        { calls: [['edit_file', { path: 'app.js', old: 'a - b', new: 'a + b' }]] },
+        { calls: [['run_command', { command: 'node check.js' }]] },
+        { calls: [['finish', { summary: 'should not be reached' }]] },
+    ];
+    const { id } = start({ maxCost: 0.003 });
+    const first = await settle(id);
+    assert.equal(first.status, 'incomplete');
+    assert.equal(first.outOfBudget, true);
+    assert.equal(first.outOfSteps, false);
+    assert.equal(first.steps, 2);
+    assert.ok(first.events.some((e) => /Stopped at its cost limit of \$0\.0030/.test(e.text || '')));
+    assert.match(first.result.commit, /^[0-9a-f]{40}$/);
+    // the part that carries on is told it ran out of budget, and may spend the limit again
+    script = [{ calls: [['finish', { summary: 'finished within the new limit' }]] }];
+    modelCalls = [];
+    manager.continueRun(id);
+    const done = await settle(id);
+    assert.equal(done.status, 'done');
+    assert.equal(done.outOfBudget, false);
+    assert.match(modelCalls[0].body.messages[1].content, /its cost limit of \$0\.0030/);
+    assert.ok(Math.abs(done.cost - 0.0048) < 1e-9, `cost ${done.cost}`);
+});
+
 test('a run that ran out of steps is carried on in the same run and branch', async () => {
     // the first part commits a change and then uses its last step
     script = [
@@ -247,7 +273,7 @@ test('a run that ran out of steps is carried on in the same run and branch', asy
     // a run only carried on while it has run out of steps or time, and one still going can't be
     script = [400];
     const broke = await settle(start().id);
-    assert.throws(() => manager.continueRun(broke.id), /only a run that ran out of steps or time/);
+    assert.throws(() => manager.continueRun(broke.id), /only a run that ran out of steps, time or budget/);
     script = [{ calls: [['finish', { summary: 'ok' }]] }];
     const busy = start({ maxSteps: 20 }).id;
     assert.throws(() => manager.continueRun(busy), /stop the run first/);

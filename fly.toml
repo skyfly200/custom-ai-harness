@@ -1,6 +1,6 @@
 # Fly.io config. Steps are in docs/fly.md. Change `app` to a name nobody else has taken.
 app = "skyler-agents"
-primary_region = "den"   # Denver; check `fly platform regions`, use "dfw" (Dallas) if it isn't listed
+primary_region = "dfw"   # Dallas: Fly has no Denver region
 
 [build]
   dockerfile = "Dockerfile.fly"

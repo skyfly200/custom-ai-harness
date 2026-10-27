@@ -96,7 +96,7 @@ Non-secret settings (`HARNESS_MODE`, `STRONG_MODEL` and the other `.env` launch 
 
 ### Region and domain
 
-- **Fly region.** Skyler is in Colorado. Fly lists a Denver region (`den`); confirm with `fly platform regions` before relying on it, and fall back to Dallas (`dfw`) if it is missing or doesn't offer shared-cpu Machines. Fly prices differ by region and the figures above are for `iad`/`ewr`, so check the Machine price for the chosen region.
+- **Fly region.** Skyler is in Colorado. Fly has no Denver region (checked at deploy time, 2026-10-27), so the app uses Dallas (`dfw`). Fly prices differ by region and the figures above are for `iad`/`ewr`, so check the Machine price for `dfw`.
 - **Neon region.** Neon has no Denver; the nearest AWS regions are `us-west-2` (Oregon) and `us-east-2` (Ohio). Pick one and keep the app in a region with a short round trip to it (every chat save is a database call). I'd choose Oregon, then measure a query from the Machine and switch if it is slow.
 - **Domain.** Use a subdomain such as `agents.skylerfly.com`. With DNS on Netlify: (1) `fly certs add agents.skylerfly.com` and read the DNS records it asks for; (2) in Netlify DNS add a `CNAME` for `harness` pointing at the app's `YOUR-APP.fly.dev` (Fly may also ask for an `_acme-challenge` CNAME, or an `A`/`AAAA` pair if you prefer); (3) wait for `fly certs check` to show the certificate issued. No Netlify hosting is involved, only its DNS.
 - This one address is used everywhere that needs a stable name: the OAuth callbacks (`https://agents.skylerfly.com/auth/github/callback`), the OIDC issuer URL for OpenRouter federation (OpenRouter requires the token's `iss` to equal it exactly, https only), and the PWA install.

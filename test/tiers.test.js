@@ -151,3 +151,15 @@ test('a named routing has its own tiers and images model', async () => {
     await send({}, [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AA' } }]);
     assert.equal(lastBody.model, 'mid');
 });
+
+test('a max tier keeps the score under the next tier up', () => {
+    const ts = [{ name: 'Mid', from: 0.3, model: 'm' }, { name: 'Frontier', from: 0.85, model: 'f' }];
+    assert.equal(tiers.ceiling(ts, 0.6, 'mid'), 0.599);
+    assert.equal(tiers.ceiling(ts, 0.6, 'Strong'), 0.849);
+    assert.equal(tiers.ceiling(ts, 0.6, 'weak'), 0.299);
+    assert.equal(tiers.ceiling(ts, 0.6, 'Frontier'), null, 'the top tier has no ceiling');
+    assert.equal(tiers.ceiling(ts, 0.6, ''), null);
+    assert.equal(tiers.ceiling(ts, 0.6, 'nope'), null);
+    const pickAt = (score) => tiers.pick(ts, 0.6, Math.min(score, tiers.ceiling(ts, 0.6, 'strong')), false);
+    assert.equal(pickAt(0.95), null, 'capped at Strong, so no extra tier takes it');
+});

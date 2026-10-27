@@ -137,3 +137,75 @@ test('stopping a swarm stops its workers', async () => {
     assert.equal(run.status, 'stopped');
     assert.equal((await settle(run.children[0])).status, 'stopped');
 });
+
+const { parseTickets } = require('../runner/tickets');
+
+test('a ticket draft becomes build tickets in waves, with the rest listed', () => {
+    const draft = { tickets: [
+        { id: 'why', kind: 'decision', title: 'Pick a format' },
+        { id: 'a', kind: 'build', title: 'A', description: 'do a', acceptance_criteria: ['a is 2'], depends_on: ['why'] },
+        { id: 'b', kind: 'build', title: 'B', description: 'do b', depends_on: ['a'] },
+        { id: 'c', kind: 'build', title: 'C', description: 'do c' },
+    ] };
+    const r = parseTickets(JSON.stringify(draft));
+    assert.deepEqual(r.waves, [['a', 'c'], ['b']]);
+    assert.deepEqual(r.other.map((t) => t.id), ['why']);
+    assert.match(r.tickets[0].task, /- a is 2/);
+    assert.deepEqual(r.tickets.find((t) => t.id === 'a').needs, [], 'a decision is not waited for');
+    assert.throws(() => parseTickets('nope'), /not valid JSON/);
+    assert.throws(() => parseTickets({ tickets: [{ id: 'x', depends_on: ['y'] }] }), /not in the draft/);
+    assert.throws(() => parseTickets({ tickets: [{ id: 'x', depends_on: ['y'] }, { id: 'y', depends_on: ['x'] }] }), /loop/);
+    assert.throws(() => parseTickets({ tickets: [{ id: 'x', kind: 'research' }] }), /no build tickets/);
+    assert.throws(() => manager.create({ goal: 'g', repo, tickets: '{"tickets":[{"id":"a"}]}' }), /needs the Swarm/);
+});
+
+test('a ticket that depends on another starts from the swarm branch after it', async () => {
+    modelCalls = [];
+    script = [
+        // wave 1: a; wave 2: b, which can see a's change
+        [['write_file', { path: 'a.js', content: 'exports.a = 2;\n' }]], [['finish', { summary: 'a is 2' }]],
+        [['read_file', { path: 'a.js' }]], [['write_file', { path: 'b.js', content: 'exports.b = require("./a").a + 1;\n' }]], [['finish', { summary: 'b follows a' }]],
+        [['finish', { summary: 'PASS: both.' }]],
+    ];
+    const tickets = { tickets: [
+        { id: 'b', kind: 'build', title: 'B', description: 'make b one more than a', depends_on: ['a'] },
+        { id: 'a', kind: 'build', title: 'A', description: 'set a to 2' },
+    ] };
+    const { id } = manager.create({ goal: 'a then b', repo, workflow: 'swarm', tickets: JSON.stringify(tickets) });
+    const run = await settle(id);
+    assert.equal(run.status, 'done', run.error);
+    assert.equal(run.children.length, 2);
+    assert.match(run.result.summary, /Merged 2 of 2 parts/);
+    assert.equal(git(repo, 'show', `${run.branch}:b.js`).trim(), 'exports.b = require("./a").a + 1;');
+    // the second worker was started from the swarm branch, so a's change was already there
+    const second = manager.get(run.children[0]);
+    assert.notEqual(second.base, run.base);
+    assert.equal(git(repo, 'show', `${second.base}:a.js`).trim(), 'exports.a = 2;');
+    assert.equal(modelCalls.some((c) => /Planner/i.test(JSON.stringify(c.messages[0]))), false, 'no planner ran');
+});
+
+test('tickets in the shape of Matt Pocock’s wayfinder are read, and a draft can be exported to it', () => {
+    const { toWayfinderMap } = require('../runner/tickets');
+    const issues = [
+        { number: 5, title: 'Pick a store', body: '## Question\n\nSQLite or files?', labels: [{ name: 'wayfinder:grilling' }] },
+        { number: 6, title: 'Build the store', body: 'Blocked by: #5\n\nwrite it', labels: [{ name: 'wayfinder:task' }, { name: 'build' }] },
+        { number: 7, title: 'The map', body: '## Destination', labels: [{ name: 'wayfinder:map' }] },
+    ];
+    const r = parseTickets(JSON.stringify(issues));
+    assert.deepEqual(r.tickets.map((t) => t.id), ['6'], 'only the build-labelled issue is code to write; the map is not a ticket');
+    assert.deepEqual(r.other.map((t) => t.id), ['5']);
+    assert.deepEqual(r.tickets[0].needs, [], 'a decision it was blocked by is not waited for');
+    assert.equal(r.tickets[0].task, 'write it');
+
+    const out = toWayfinderMap({ goal: 'Ship it', destinations: [{ outcome: 'It ships' }], fog_of_war: [{ question: 'Which host?', impact: 'deploy' }],
+        tickets: [{ id: 'a', kind: 'decision', title: 'A', description: 'Which?' }, { id: 'b', kind: 'build', title: 'B', description: 'Do', depends_on: ['a'], acceptance_criteria: ['works'] }] });
+    assert.deepEqual(out.map.labels, ['wayfinder:map']);
+    for (const h of ['## Destination', '## Notes', '## Decisions so far', '## Not yet specified', '## Out of scope']) assert.match(out.map.body, new RegExp(h));
+    assert.match(out.map.body, /Which host\?/);
+    assert.deepEqual(out.tickets[0].labels, ['wayfinder:grilling']);
+    assert.deepEqual(out.tickets[1].labels, ['wayfinder:task', 'build']);
+    assert.match(out.tickets[1].body, /^## Question/);
+    assert.deepEqual(out.tickets[1].blocked_by, ['a']);
+    // and what we export reads back in
+    assert.deepEqual(parseTickets(JSON.stringify(out.tickets)).tickets.map((t) => t.id), ['b']);
+});

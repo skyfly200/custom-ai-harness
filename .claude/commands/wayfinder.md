@@ -30,6 +30,7 @@ Return one valid JSON object, with no prose or Markdown fences, using this shape
     {
       "id": "short-kebab-case-id",
       "kind": "build",
+      "wayfinder_type": "task",
       "title": "concise issue title",
       "description": "self-contained issue description",
       "acceptance_criteria": ["verifiable condition"],
@@ -45,6 +46,7 @@ Planning rules:
 - Map the goal to concrete destinations and use the repository's existing terminology.
 - Record consequential unknowns in `fog_of_war`; do not silently make product or architectural decisions. Use decision tickets for questions that need a human decision and research tickets for questions that can be answered from evidence.
 - Break implementation into small, independently verifiable build tickets. Use a `build_parent` only when multiple build tickets form one batch.
+- `wayfinder_type` maps the ticket onto Matt Pocock's wayfinder (github.com/mattpocock/skills) so the two stay interchangeable: `research` for research tickets, `grilling` for decision tickets, `prototype` when a rough artifact would settle the question, `task` for build tickets. The draft's `destinations` are his Destination, `fog_of_war` his "Not yet specified", and `depends_on` his blocking edges.
 - Set `kind` to exactly one of `build`, `research`, `decision`, or `build_parent`.
 - Make `depends_on` express actual prerequisites, not merely suggested order. Every dependency must reference an existing ticket, and the graph must be acyclic. List tickets in topological order (prerequisites first).
 - Use stable, unique IDs throughout the JSON. `blocks` and `blocked_by_unknowns` must reference existing IDs in their respective lists.

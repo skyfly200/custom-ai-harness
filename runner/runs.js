@@ -12,6 +12,7 @@ const { makeTools } = require('./tools');
 const { runAgent, systemFor } = require('./agent');
 const workflows = require('../utils/workflows');
 const swarm = require('./swarm');
+const { parseTickets } = require('./tickets');
 
 const MAX_EVENTS = 2000;
 const EVENT_TEXT = 3000;
@@ -241,9 +242,14 @@ class RunManager {
         const isSwarm = cfg.workflow === 'swarm';
         const workflow = isSwarm ? { id: 'swarm', name: 'Swarm' } : workflows.get(cfg.workflow || workflows.FALLBACK);
         if (!workflow) throw new Error(`no workflow named ${cfg.workflow}`);
+        let tickets = null;
+        if (cfg.tickets && String(cfg.tickets).trim()) {
+            if (!isSwarm) throw new Error('a ticket draft needs the Swarm workflow');
+            tickets = parseTickets(cfg.tickets).tickets;
+        }
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
-            id, goal, repo, kind: isSwarm ? 'swarm' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
+            id, goal, repo, kind: isSwarm ? 'swarm' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             // Plan mode: the agent may read and search, but changes nothing. It

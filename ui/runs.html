@@ -35,6 +35,8 @@
         <select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select></label>
       <span class="pick-note muted" id="pickNote"></span>
     </div>
+    <label class="field wide" id="ticketsField" hidden><span data-hint="Optional. Paste the JSON that /wayfinder returned. The swarm then skips its planner and works the build tickets instead, a wave at a time: a ticket starts once the tickets it depends on are merged">Ticket draft (JSON from /wayfinder)</span>
+      <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea></label>
     <div class="row">
       <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
         <div class="repo-input"><input type="text" name="repo" id="repo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>

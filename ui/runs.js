@@ -74,6 +74,7 @@ function renderDetail(run) {
     ${run.debugRun && runs.some((x) => x.id === run.debugRun) ? `<p class="muted">Auto debug (or a retry) started <a href="#${esc(run.debugRun)}" data-go="${esc(run.debugRun)}">${esc(run.debugRun)}</a>.</p>` : ''}
     ${run.children?.length ? `<div class="result"><strong>Workers</strong><div class="workers">${run.children.map((id, i) => {
       const c = runs.find((x) => x.id === id);
+      if (!id) return `<span class="worker muted">${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} · waiting for what it depends on</span>`;
       return `<button class="worker" data-go="${esc(id)}"><span class="tag ${TAGS[c?.status] || ''}">${esc(NOTE_FOR[c?.status] || c?.status || '?')}</span> ${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} <span class="muted">step ${c?.steps ?? 0}</span></button>`;
     }).join('')}</div></div>` : ''}
     ${run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
@@ -215,7 +216,7 @@ async function initWorkflows() {
     $('workflow').insertAdjacentHTML('beforeend', '<option value="swarm" title="A planner splits the goal, workers do the parts at the same time on their own branches, the branches are merged, and a reviewer checks the result">Swarm (several agents at once)</option>');
   } catch { /* auto still works without the list */ }
   $('newRun').elements.goal.addEventListener('input', schedulePick);
-  $('workflow').addEventListener('change', () => { $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });
+  $('workflow').addEventListener('change', () => { $('ticketsField').hidden = $('workflow').value !== 'swarm'; $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });
 }
 
 // Repo picker: type or paste a path, pick a recent one, or browse the allowed folders

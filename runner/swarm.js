@@ -94,7 +94,7 @@ async function executeSwarm(manager, run, live) {
             run.children[i] = manager.create({
                 goal: `${p.task}\n\nThis is one part of a larger task that several engineers do at once, each on their own branch: "${run.goal}". Do only your part and leave files that belong to other parts alone.`,
                 repo: run.repo, base: from, workflow: run.auditParts && p.workflow === 'general' ? 'build-audit' : p.workflow, profile: run.profile, model: run.model, effort: run.effort, escalate: run.escalate, maxTier: run.maxTier, sandbox: run.sandbox,
-                maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, parent: run.id, autoDebug: run.autoDebug,
+                maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, maxCost: run.maxCost, parent: run.id, autoDebug: run.autoDebug,
             }).id;
         }
         manager.event(run, { type: 'note', text: `Started ${ready.length} worker${ready.length === 1 ? '' : 's'}${wave ? ` (wave ${wave + 1})` : ''}.` });

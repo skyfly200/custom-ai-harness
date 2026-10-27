@@ -11,6 +11,7 @@ primary_region = "den"   # Denver; check `fly platform regions`, use "dfw" (Dall
   HARNESS_PUBLIC_URL = "https://agents.skylerfly.com"
   HARNESS_DATA_DIR = "/app/data"
   OAUTH_PROVIDERS = "google"
+  HARNESS_IDLE_STOP_MIN = "30"   # sleep after 30 idle minutes; the Stop button on the Dashboard does it now
   # secrets (DATABASE_URL, NEON_AUTH_BASE_URL, HARNESS_ADMINS, HARNESS_ADMIN_EMAILS,
   # LITELLM_MASTER_KEY, OPENROUTER_API_KEY...) are set with `fly secrets set`, never here
 
@@ -22,7 +23,7 @@ primary_region = "den"   # Denver; check `fly platform regions`, use "dfw" (Dall
   internal_port = 3000
   force_https = true
   auto_start_machines = true      # opening the address (or a Claude Code call) wakes a stopped Machine
-  auto_stop_machines = "off"      # sleeping after 30 idle minutes comes with the Stop button (next PR); until then: fly machine stop
+  auto_stop_machines = "off"      # the app stops itself (HARNESS_IDLE_STOP_MIN), so Fly's own idle stop stays off
   min_machines_running = 0
 
   [http_service.concurrency]
@@ -36,6 +37,11 @@ primary_region = "den"   # Denver; check `fly platform regions`, use "dfw" (Dall
     interval = "30s"
     timeout = "5s"
     grace_period = "90s"        # LiteLLM takes a while to start
+
+# exiting 0 (the app stopping on purpose) leaves the Machine stopped; a crash (non-zero) restarts it
+[[restart]]
+  policy = "on-failure"
+  retries = 5
 
 [[vm]]
   size = "shared-cpu-1x"

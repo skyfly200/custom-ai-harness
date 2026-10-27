@@ -96,6 +96,10 @@ test('an agent is created, edited, linked to a chat project and listed', async (
     const patched = await call('PATCH', `/agents/${id}`, { name: 'Notes keeper', project: null, effort: 'high' });
     assert.deepEqual([patched.body.name, patched.body.project, patched.body.effort, patched.body.instructions], ['Notes keeper', null, 'high', 'Keep notes short.']);
     assert.equal((await call('PATCH', `/agents/${id}`, { effort: 'huge' })).status, 400);
+    // a cost limit in dollars: set, cleared with blank or 0, refused when not a number
+    assert.equal((await call('PATCH', `/agents/${id}`, { maxCost: '1.5' })).body.maxCost, 1.5);
+    assert.equal((await call('PATCH', `/agents/${id}`, { maxCost: 0 })).body.maxCost, null);
+    assert.equal((await call('PATCH', `/agents/${id}`, { maxCost: 'lots' })).status, 400);
     assert.equal((await call('GET', '/agents')).body.agents.length, 1);
     // it survives a restart of the runner
     const again = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposDir], harnessUrl: 'http://127.0.0.1:1' });

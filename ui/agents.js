@@ -12,6 +12,8 @@ const CONTINUABLE = new Set(['incomplete']);
 const DEBUGGABLE = new Set(['failed', 'stopped']);
 const TAGS = { done: 'ok', running: '', queued: '', waiting: 'warn', incomplete: 'warn', failed: 'bad', stopped: 'warn' };
 const NOTE_FOR = { done: 'finished', waiting: 'needs you' };
+// a run stopped at its cost limit is "incomplete" to the runner; say why
+const statusWord = (r) => (r.status === 'incomplete' && r.outOfBudget ? 'cost limit' : NOTE_FOR[r.status] || r.status);
 
 let selected = location.hash.slice(1) || null;
 let runs = [];
@@ -70,7 +72,7 @@ function renderList() {
   if (!list.length) { $('list').innerHTML = `<p class="muted">${agentSel ? 'No tasks yet. Give it one above.' : 'No runs yet.'}</p>`; return; }
   $('list').innerHTML = list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(NOTE_FOR[r.status] || r.status)}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
 }
 
 function eventHtml(e) {
@@ -98,13 +100,13 @@ function renderDetail(run) {
   const r = run.result;
   const diffOpen = openDetails.has('diff');
   $('detail').innerHTML = `
-    <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
+    <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status === 'incomplete' && run.outOfBudget ? 'cost limit' : run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
-    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
+    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
-    ${run.legs ? `<p class="muted">Carried on ${run.legs === 1 ? 'once' : `${run.legs} times`} after running out of ${run.outOfSteps ? 'steps' : 'time'}; every part worked on this one branch.</p>` : ''}
+    ${run.legs ? `<p class="muted">Carried on ${run.legs === 1 ? 'once' : `${run.legs} times`} after running out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}; every part worked on this one branch.</p>` : ''}
     ${run.debugRun && runs.some((x) => x.id === run.debugRun) ? `<p class="muted">Auto debug (or a retry) started <a href="#${esc(run.debugRun)}" data-go="${esc(run.debugRun)}">${esc(run.debugRun)}</a>.</p>` : ''}
     ${run.children?.length ? `<div class="result"><strong>Workers</strong><div class="workers">${run.children.map((id, i) => {
       const c = runs.find((x) => x.id === id);
@@ -347,7 +349,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -559,7 +561,7 @@ async function initAgentDialog() {
     const body = Object.fromEntries(new FormData(f));
     const link = chatProjects().find((p) => p.id === body.project);
     body.project = link ? { id: link.id, name: link.name } : (body.project && editingAgent?.project?.id === body.project ? editingAgent.project : null);
-    for (const k of ['maxSteps', 'maxMinutes', 'maxTier']) if (body[k] === '') body[k] = null;
+    for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier']) if (body[k] === '') body[k] = null;
     body.escalate = f.elements.escalate.checked;
     $('agentMsg').textContent = 'Saving…';
     try {
@@ -589,7 +591,7 @@ function openAgentDialog(agent) {
   const projects = chatProjects();
   const linked = agent?.project && !projects.some((p) => p.id === agent.project.id) ? [{ id: agent.project.id, name: `${agent.project.name || 'A project'} (not in this browser)` }] : [];
   $('agentProject').innerHTML = '<option value="">None</option>' + [...projects, ...linked].map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-  const v = agent || { name: '', repo: recentRepos()[0] || '', instructions: '', workflow: 'general', profile: '', effort: '', maxSteps: '', maxMinutes: '', project: null };
+  const v = agent || { name: '', repo: recentRepos()[0] || '', instructions: '', workflow: 'general', profile: '', effort: '', maxSteps: '', maxMinutes: '', maxCost: '', project: null };
   f.elements.name.value = v.name;
   f.elements.repo.value = v.repo;
   f.elements.instructions.value = v.instructions || '';
@@ -599,6 +601,7 @@ function openAgentDialog(agent) {
   f.elements.sandbox.value = v.sandbox || '';
   f.elements.maxSteps.value = v.maxSteps ?? '';
   f.elements.maxMinutes.value = v.maxMinutes ?? '';
+  f.elements.maxCost.value = v.maxCost ?? '';
   f.elements.maxTier.value = v.maxTier || '';
   f.elements.escalate.checked = v.escalate !== false;
   f.elements.project.value = v.project?.id || '';

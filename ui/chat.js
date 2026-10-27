@@ -74,6 +74,7 @@ const sync = {
   },
   snaps: new Map(), // chat id -> { version the server is at, known: Map(message id -> fingerprint of the copy it has) }
   pushChat(c) { this.queue(`c:${c.id}`, () => this.saveChat(c.id)); },
+  flushNow(id) { clearTimeout(this.timers.get(`c:${id}`)); this.timers.delete(`c:${id}`); this.saveChat(id).catch(() => { this.failed = true; }); },
   // Send only the messages that changed since the last save, with the version this copy is based on. If the
   // server has moved on (another device, or the server itself added messages) it answers 409: pull, join, retry.
   async saveChat(id, attempt = 0) {
@@ -1381,7 +1382,10 @@ async function runReply(c, turn) {
       else if (maxTokens > 0) body.max_tokens = maxTokens;
       if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
 
-      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
+      // with a database, the server also keeps the reply if this page goes away before it ends (utils/chatReplies.js)
+      const keep = round === 0 && sync.on ? { 'x-harness-chat-id': c.id, 'x-harness-message-id': reply.id } : {};
+      if (keep['x-harness-chat-id']) sync.flushNow(c.id); // so the server has the chat, and your message, before the reply starts
+      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, ...keep, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
       // the same facts the live feed sends, from the headers, in case it's not connected
       tr.routed = tr.routed || { model: res.headers.get('x-harness-model'), reason: res.headers.get('x-harness-route') };
       tr.answered = {
@@ -3816,6 +3820,40 @@ $('commandsDialog').addEventListener('close', () => {
   saveCommands();
   drawHint();
 });
+
+// Claude Code's own commands and skills (.claude/commands, .claude/skills), one click to copy in
+let claudeKit = null;
+async function drawImport(kind) {
+  const ul = $(kind === 'command' ? 'importCommandsList' : 'importSkillsList');
+  if (!claudeKit) {
+    ul.innerHTML = '<li class="muted small">Looking…</li>';
+    try {
+      const r = await fetch('/ui/api/claude-kit', { credentials: 'same-origin' });
+      claudeKit = r.ok ? (await r.json()).items : [];
+      if (!r.ok) ul.innerHTML = `<li class="muted small">${esc((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)}</li>`;
+    } catch { claudeKit = []; }
+  }
+  const have = new Set((kind === 'command' ? commands : skills).map(x => x.name.toLowerCase()));
+  const items = claudeKit.filter(i => i.kind === kind);
+  ul.innerHTML = items.map((i, n) => `<li class="muted small" title="${esc(i.body.slice(0, 300))}">${kind === 'command' ? '/' : ''}${esc(i.name)} <span class="muted">(${esc(i.source)})</span>${i.description ? ` · ${esc(i.description)}` : ''} <button type="button" class="mini" data-import="${n}"${have.has(i.name.toLowerCase()) ? ' disabled' : ''}>${have.has(i.name.toLowerCase()) ? 'Added' : 'Add'}</button></li>`).join('')
+    || '<li class="muted small">Nothing found in .claude/commands or .claude/skills (here or in your home folder).</li>';
+}
+for (const [id, kind] of [['importCommands', 'command'], ['importSkills', 'skill']]) {
+  $(id).addEventListener('toggle', () => { if ($(id).open) drawImport(kind); });
+  $(`${id}List`).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-import]');
+    if (!b) return;
+    const i = claudeKit.filter(x => x.kind === kind)[Number(b.dataset.import)];
+    if (kind === 'command') {
+      commands.push({ id: uid(), name: i.name, description: i.description, model: '', effort: '', body: i.body });
+      saveCommands(); editingCommand = commands[commands.length - 1]; drawCommandIndex();
+    } else {
+      skills.push({ id: uid(), name: i.name, description: i.description, body: i.body });
+      saveSkills(); editingSkill = skills[skills.length - 1]; drawSkillIndex();
+    }
+    drawImport(kind);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Scheduled messages: sent while this page is open in a tab; a run missed

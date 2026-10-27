@@ -15,6 +15,7 @@ const swarm = require('./swarm');
 const chatdev = require('./chatdev');
 const { parseTickets } = require('./tickets');
 const { createPricer } = require('../utils/runCost');
+const usd = (n) => `$${(n >= 1 ? n.toFixed(2) : n.toFixed(n >= 0.1 ? 3 : 4))}`;
 const { PreviewManager } = require('./preview');
 const { AgentStore } = require('./agents');
 const { AppStore, editableMatcher } = require('./apps');
@@ -26,7 +27,7 @@ const APPROVAL_WAIT_MS = 15 * 60 * 1000;
 const MAX_AUTO_DEBUG = 2;     // debug runs of a debug run, so a hopeless failure can't loop
 const MAX_DEBUG_DEPTH = 5;    // the deepest chain of retries a person may start by hand
 const DIAGNOSIS_CHARS = 6000; // how much of the failure a retry is told about
-// The statuses a run ends on when it ran out of steps or time rather than going wrong.
+// The statuses a run ends on when it ran out of steps, time or budget rather than going wrong.
 // Those are what Continue is for: Retry is for a run that failed.
 const OUT_OF_LIMIT = new Set(['incomplete']);
 const PARTIAL_CHARS = 8000;   // how much of what it was saying when it ran out a continue is told
@@ -88,7 +89,7 @@ function diagnosis(run) {
  * saying, not what went wrong.
  */
 function resumption(run) {
-    const why = run.outOfSteps ? (run.maxSteps ? `all ${run.maxSteps} of its steps` : 'every step it was allowed') : `${run.maxMinutes} minutes`;
+    const why = run.outOfBudget ? `its cost limit of ${usd(run.maxCost)}` : run.outOfSteps ? (run.maxSteps ? `all ${run.maxSteps} of its steps` : 'every step it was allowed') : `${run.maxMinutes} minutes`;
     const parts = [`This run is carried on from an earlier part of the same run (${run.id}, the same branch ${run.branch}), which used ${why} before it could finish.`];
     if (run.result?.commit) parts.push(`The work it did is committed on the branch: continue from there, and do not start the task over.`);
     else parts.push('It committed nothing, so the branch is as it started. Do not start the task over; carry on from what it said below.');
@@ -105,7 +106,7 @@ function resumption(run) {
     const tail = run.events.slice(-30).map(line).filter(Boolean).join('\n');
     if (tail) parts.push(`The last things it did:\n${tail}`);
     const said = run.partialSummary || run.partialText;
-    if (said) parts.push(`What it was saying when the ${run.outOfSteps ? 'steps' : 'time'} ran out:\n${short(said, 3000)}`);
+    if (said) parts.push(`What it was saying when the ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'} ran out:\n${short(said, 3000)}`);
     parts.push('Check the state of the workspace first: it may have been partway through a change. Then finish the task. You have a full set of steps and minutes again, not what was left.');
     const text = parts.join('\n\n');
     return text.length > PARTIAL_CHARS ? `${text.slice(0, PARTIAL_CHARS)}\n… [cut]` : text;
@@ -280,6 +281,8 @@ class RunManager {
             // 0 means no step limit: the agent runs until it calls finish, runs out of
             // time or is stopped. maxMinutes still bounds it, so it cannot run forever.
             maxSteps: num0(cfg.maxSteps, 0, 10000, 0), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
+            // dollars this run (or, after a Continue, this part of it) may spend; 0 means no limit
+            maxCost: Math.min(1000, Math.max(0, Number(cfg.maxCost) || 0)), costFrom: 0, outOfBudget: false,
             autoDebug: num(cfg.autoDebug, 0, 1, this.autoDebugDefault ? 1 : 0) === 1,
             sandbox, sandboxId: null,
             // ChatDev runs: the most the sandbox's model key may spend, in dollars
@@ -471,6 +474,9 @@ class RunManager {
         this.live.set(run.id, live);
         run.status = 'running';
         run.started = new Date().toISOString();
+        // a part carried on after a stop gets the whole limit again
+        run.costFrom = run.cost || 0;
+        run.outOfBudget = false;
         this.save(run);
         let n = 0;
         try {
@@ -497,7 +503,9 @@ class RunManager {
             run.result = result;
             // what it was saying when it ran out, kept for the part that carries on
             run.outOfSteps = outcome.status === 'out_of_steps';
-            run.partialText = run.outOfSteps || outcome.status === 'out_of_time' ? outcome.partial || null : null;
+            run.outOfBudget = outcome.status === 'out_of_budget';
+            if (run.outOfBudget) this.event(run, { type: 'note', text: `Stopped at its cost limit of ${usd(run.maxCost)}: it has spent ${usd((run.cost || 0) - run.costFrom)} in this part.` });
+            run.partialText = run.outOfSteps || run.outOfBudget || outcome.status === 'out_of_time' ? outcome.partial || null : null;
             run.status = { finished: 'done', stopped: 'stopped' }[outcome.status] || 'incomplete';
             if (run.status === 'done' && result.outside?.length) run.status = 'incomplete';
         } catch (err) {
@@ -690,7 +698,7 @@ class RunManager {
             ? { chat: cfg.source.chat ? { id: String(cfg.source.chat.id || '').slice(0, 80), title: String(cfg.source.chat.title || '').slice(0, 120) } : null } : null;
         return this.create({
             goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
-            maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined,
+            maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
         });
     }
@@ -850,7 +858,7 @@ class RunManager {
             const stageEffort = run.effort || stage.effort || null;
             if (stage.canWait) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageEffort, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
             else outcome = await runAgent({
-                run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped },
+                run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
                 chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
@@ -887,11 +895,11 @@ class RunManager {
         if (['queued', 'running', 'waiting'].includes(from.status)) throw new Error('stop the run first');
         if (from.kind === 'swarm' && !debug) throw new Error('a swarm cannot be retried as it is; use Debug');
         // running out of steps or time is not a failure: that is what Continue is for
-        if (OUT_OF_LIMIT.has(from.status)) throw new Error('that run only ran out of steps or time, so nothing went wrong: use Continue');
+        if (OUT_OF_LIMIT.has(from.status)) throw new Error('that run only ran out of steps, time or budget, so nothing went wrong: use Continue');
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };
@@ -917,7 +925,7 @@ class RunManager {
         if (run.kind === 'swarm') throw new Error('a swarm cannot be continued as it is');
         if (run.kind === 'chatdev') throw new Error('a ChatDev run cannot be continued; start it again');
         if (['queued', 'running', 'waiting'].includes(run.status)) throw new Error('stop the run first');
-        if (run.status !== 'incomplete') throw new Error(`only a run that ran out of steps or time can be continued, not one that ended as ${run.status}`);
+        if (run.status !== 'incomplete') throw new Error(`only a run that ran out of steps, time or budget can be continued, not one that ended as ${run.status}`);
         const continues = (run.continues || 0) + 1;
         if (continues > MAX_CONTINUES) throw new Error(`this run has already been continued ${MAX_CONTINUES} times`);
         // what this part did, said now, while the run's record still holds it
@@ -932,7 +940,7 @@ class RunManager {
         // the leg works on behalf of the run: the run's own record stays as it is
         this.active.set(leg.id, leg);
         this.save(leg);
-        this.event(leg, { type: 'note', text: `Carrying the run on after it ran out of ${run.outOfSteps ? 'steps' : 'time'}; it goes on from where the earlier part got to, on the same branch.` });
+        this.event(leg, { type: 'note', text: `Carrying the run on after it ran out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}; it goes on from where the earlier part got to, on the same branch.` });
         this.queue.push(leg.id);
         this.pump();
         return this.summary(leg);

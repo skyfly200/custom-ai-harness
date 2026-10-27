@@ -5,14 +5,10 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const { fakeGateway } = require('./helpers/stubs');
 
 let seen;
-const gateway = http.createServer((req, res) => {
-    seen = req.headers;
-    req.resume();
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ choices: [{ message: { content: 'hi' } }], usage: { prompt_tokens: 3, completion_tokens: 1 } }));
-});
+const gateway = fakeGateway((req) => { seen = req.headers; });
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-access-'));
 let harness, base;

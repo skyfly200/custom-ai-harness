@@ -27,6 +27,8 @@ const jevQuestions = require('./utils/jevQuestions');
 const guard = require('./utils/guard');
 const { askText, DEFAULT_WINDOW } = require('./utils/jevAsk');
 const usage = require('./utils/usage');
+const chatReplies = require('./utils/chatReplies');
+const idleStop = require('./utils/idleStop');
 const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
 const cacheMarkers = require('./utils/cacheMarkers');
@@ -40,6 +42,7 @@ const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager, readConfig, writeConfig } = require('./utils/mcp');
 const mcpAdmin = require('./utils/mcpAdmin');
 const mcpCatalog = require('./utils/mcpCatalog');
+const claudeKit = require('./utils/claudeKit');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
 const chatWorktrees = require('./utils/chatWorktrees');
@@ -57,6 +60,15 @@ const path = require('path');
 const app = express();
 // For Fly's health check and uptime pings: answers before any login, says nothing about the Gateway
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
+// Sleep after HARNESS_IDLE_STOP_MIN idle minutes, and the Dashboard's Stop button. Only where something can act on
+// a stop: the Fly launcher (HARNESS_STOP_VIA_PARENT) asks its parent to stop everything and exit cleanly.
+const idle = idleStop.create({
+    minutes: process.env.HARNESS_IDLE_STOP_MIN,
+    busy: [chatReplies.busy],
+    poll: Number(process.env.HARNESS_IDLE_CHECK_MS) || undefined,
+    stop: process.env.HARNESS_STOP_VIA_PARENT === '1' ? () => setTimeout(() => process.kill(process.ppid, 'SIGTERM'), 300) : null,
+});
+app.use(idle.middleware);
 // OpenRouter credentials: OPENROUTER_API_KEY, or workload identity federation (utils/openrouterAuth.js)
 const orAuth = openrouterAuth.createAuth();
 for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federation: ${problem}`);
@@ -216,7 +228,8 @@ function logRoute(path, { model, threshold, winRate, reason, tier, effort }) {
 function recordUsage(req, proxyRes) {
     const event = req.harnessEvent;
     if (!event || proxyRes.statusCode >= 400) return;
-    usage.tap(proxyRes, ({ usage: counts, outputChars, model: upstream }) => {
+    usage.tap(proxyRes, ({ usage: counts, outputChars, model: upstream, text, aborted }) => {
+        chatReplies.afterReply(req, { text, model: event.model, aborted });
         const row = usage.record({
             client: req.harnessClient,
             route: usage.routeOf(event),
@@ -341,6 +354,14 @@ app.get('/ui/api/langfuse', async (req, res) => res.json(await langfuse.status(s
 
 app.get('/ui/api/status', async (req, res) => {
     res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats(), openrouter: orAuth.status() });
+});
+
+// Can the server stop itself, and when will it sleep (the Dashboard's Server card)
+app.get('/ui/api/server', (req, res) => res.json(idle.status()));
+app.post('/ui/api/server/stop', localJsonOnly, (req, res) => {
+    if (!idle.status().canStop) return res.status(409).json({ error: 'this server has no way to stop itself (it is not running under the Fly launcher)' });
+    idle.requestStop(`asked by ${(req.harnessUser && req.harnessUser.name) || 'an admin'}`);
+    res.json({ stopping: true });
 });
 
 // Token totals by client, model and provider; days=N for the last N days
@@ -1011,6 +1032,9 @@ app.post('/ui/api/mcp/test', localJsonOnly, async (req, res) => {
     }
 });
 
+// Claude Code's commands and skills (.claude in this repo and in the home folder), to import into the chat page
+app.get('/ui/api/claude-kit', localOnly, (req, res) => res.json({ items: claudeKit.list() }));
+
 app.post('/ui/api/repo', localJsonOnly, async (req, res) => {
     try {
         const repo = await repoTools.inspect(req.body?.path);
@@ -1209,6 +1233,7 @@ app.use((err, req, res, next) => {
 });
 
 if (require.main === module) {
+    idle.start();
     app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
     mcp.start().then(() => {
         for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);

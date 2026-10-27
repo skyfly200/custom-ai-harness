@@ -84,6 +84,8 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
 * **Adversarial Audit & Closed-Loop Refactoring:** Run a short Opus 5 Audit over each Worker's pull request. If rejected, route a concise JSON critique back to the Worker for refactoring without burning high-cost frontier output tokens.
 * **Cross-Session Context Handoff:** When work moves between Workers or models, pass hash pointers (`Ref ID`) and Git diffs instead of re-sending full workspace files, backed by a local cache.
 
+* ✅ **Redesign: settings drawer and chat view (2026-10-27).** The Options panel is now a right-hand drawer with Model, Context, Tools and Voice tabs instead of a four-column strip that pushed the chat down; replies are plain text with a small orb beside them (your messages stay bubbles), actions sit under each reply, and the composer floats over a soft fade. All element ids are unchanged. **Still to do in the redesign:** the same drawer treatment for the activity panel, a per-message model label under each reply, and the Settings page.
+
 # Bugs
 * **Allow Tool Call messages should surface and show a clear indicator of user input being needed
 

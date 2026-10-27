@@ -149,10 +149,43 @@ test('failing tests, files outside the paths and a missing token block shipping'
     assert.match(r.body.error, /not shipping/);
     assert.equal((await call('POST', `/runs/${run.id}/undo`)).status, 409);
     await assert.rejects(new Shipper({ token: '' }).gh('GET', '/x'), /GITHUB_TOKEN/);
-    assert.equal((await call('GET', `/runs/${(await call('POST', '/runs', { goal: 'x', repo })).body.id}/ship`)).status, 400);
+    script = [];
+    const plain = (await call('POST', '/runs', { goal: 'x', repo })).body.id;
+    assert.equal((await call('GET', `/runs/${plain}/ship`)).status, 400);
+    await settle(plain);
 });
 
 test('a run with no commit cannot ship', async () => {
     const v = await verdict({ status: 'done', base: 'HEAD', result: { commit: null } }, repo);
     assert.equal(v.canShip, false);
+});
+
+test('a proposal opens a pull request that is never merged, and the same problem is not proposed twice', async () => {
+    const app = (await call('POST', '/apps', { name: 'P', repo, editablePaths: ['ui/**'], testCommand: 'true', githubRepo: 'o/r', baseBranch: 'main' })).body;
+    script = structuredClone(pass);
+    ghLog = [];
+    assert.equal((await call('POST', `/apps/${app.id}/proposals`, {})).status, 400);
+    const made = await call('POST', `/apps/${app.id}/proposals`, { kind: 'error', context: { consoleErrors: ['TypeError: x is undefined (app.js:3)'] } });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.proposal.kind, 'error');
+    await settle(made.body.id);
+    for (let i = 0; i < 200 && !manager.get(made.body.id).proposal.pr; i++) await sleep(25);
+    const run = manager.get(made.body.id);
+    assert.equal(run.proposal.pr.pr > 0, true);
+    assert.deepEqual(ghLog.filter((l) => /merge/.test(l)), []);
+    assert.ok(ghLog.some((l) => /POST .*\/pulls$/.test(l)));
+    const again = await call('POST', `/apps/${app.id}/proposals`, { kind: 'error', context: { consoleErrors: ['TypeError: x is undefined (app.js:3)'] } });
+    assert.equal(again.status, 429);
+    assert.match(again.body.error, /already proposed/);
+});
+
+test('proposals are limited per app per hour', async () => {
+    const app = (await call('POST', '/apps', { name: 'Q', repo, editablePaths: ['ui/**'], githubRepo: 'o/r', baseBranch: 'main' })).body;
+    for (const n of ['one', 'two', 'three']) {
+        script = [];
+        assert.equal((await call('POST', `/apps/${app.id}/proposals`, { note: n })).status, 201);
+    }
+    const blocked = await call('POST', `/apps/${app.id}/proposals`, { note: 'four' });
+    assert.equal(blocked.status, 429);
+    assert.match(blocked.body.error, /at most 3/);
 });

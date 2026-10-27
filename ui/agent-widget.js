@@ -57,7 +57,7 @@ if (typeof document !== 'undefined') (() => {
     <strong class="aw-title">Ask for a change</strong>
     <textarea placeholder="What should be different on this page?"></textarea>
     <div class="aw-row"><button type="button" class="aw-pick">Pick an element</button><span class="aw-picked"></span></div>
-    <div class="aw-row" style="margin-top:8px"><button type="button" class="aw-go">Start the change</button><button type="button" class="aw-close">Close</button></div>
+    <div class="aw-row" style="margin-top:8px"><button type="button" class="aw-go">Start the change</button><button type="button" class="aw-prop" title="The agent writes a fix and opens a pull request for a person to review. Nothing is merged or deployed.">Propose a fix only</button><button type="button" class="aw-close">Close</button></div>
     <div class="aw-note" aria-live="polite"></div>`);
   const q = (s) => panel.querySelector(s);
 
@@ -91,23 +91,25 @@ if (typeof document !== 'undefined') (() => {
         timer = setTimeout(() => poll(id), 3000);
       } else {
         q('.aw-note').innerHTML = `Change ${esc(run.status)}. ${link}, where you can preview it and approve or undo.`;
-        q('.aw-go').disabled = false;
+        q('.aw-go').disabled = false; q('.aw-prop').disabled = false;
       }
     } catch (err) { q('.aw-note').textContent = err.message; q('.aw-go').disabled = false; }
   }
-  q('.aw-go').addEventListener('click', async () => {
-    const request = q('textarea').value.trim();
-    if (!request) { q('.aw-note').textContent = 'Say what should change.'; return; }
+  async function send(path, extra, doneNote) {
+    const text = q('textarea').value.trim();
     const context = buildContext({ page: location.pathname + location.hash, title: document.title, element: picked, selection: String(getSelection?.() || ''), errors });
-    q('.aw-go').disabled = true; q('.aw-note').textContent = 'Starting…';
+    if (!text && !(extra.kind === 'error' && context.consoleErrors)) { q('.aw-note').textContent = 'Say what should change.'; return; }
+    q('.aw-go').disabled = true; q('.aw-prop').disabled = true; q('.aw-note').textContent = 'Starting…';
     try {
-      const res = await fetch(api(`apps/${app.id}/changes`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ request, context }) });
+      const res = await fetch(api(`apps/${app.id}/${path}`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...extra, [path === 'changes' ? 'request' : 'note']: text, context }) });
       const run = await res.json();
       if (!res.ok) throw new Error(run.error || `HTTP ${res.status}`);
       q('textarea').value = '';
       poll(run.id);
-    } catch (err) { q('.aw-note').textContent = err.message; q('.aw-go').disabled = false; }
-  });
+    } catch (err) { q('.aw-note').textContent = err.message; q('.aw-go').disabled = false; q('.aw-prop').disabled = false; }
+  }
+  q('.aw-go').addEventListener('click', () => send('changes', {}));
+  q('.aw-prop').addEventListener('click', () => send('proposals', { kind: errors.length ? 'error' : 'feedback' }));
 
   (async () => {
     try {

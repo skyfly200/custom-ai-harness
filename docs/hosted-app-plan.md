@@ -2,6 +2,16 @@
 
 Written 2026-10-27 for Skyler. Updated the same day with Skyler's answers: invite-only users, OpenRouter workload identity federation as the main credential path with $1 guest accounts as the fallback, attachments as a separate goal from text chats, a Fly region near Colorado and a `skylerfly.com` subdomain. A plan, not code. It covers running the harness on [Fly.io](https://fly.io), keeping chats and per-user data in [Neon](https://neon.com) Postgres, and adding accounts with OAuth sign-in. Back to the [README](../README.md). Related: [Run it on a server](server-docker.md), [Named logins](logins.md), [Task runner](task-runner.md), the [agentic roadmap](../ROADMAP.md).
 
+## Status (2026-10-27)
+
+PR 2 (database layer), PR 4 (chats in Neon) and PR 5 (sign-in) shipped in [PR #98](https://github.com/skyfly200/custom-ai-harness/pull/98); see [Chats and sign-in in Neon](neon.md). They differ from this plan in three ways, and where the two disagree below, `neon.md` and the code are right:
+
+- **Sign-in uses Neon Auth** (managed Better Auth) for the Google and GitHub buttons, invite-only, with `HARNESS_ADMIN_EMAILS` for admins. This plan recommended self-hosted OAuth; the managed option was chosen instead. Users, API keys and invites sit in `harness_store`, sessions in `sessions`.
+- **Chats are stored as the page keeps them**, one row per chat in `chats` (plus `user_data` for projects, skills, commands, schedules and prefs), not one row per message. The browser still works from localStorage and syncs about 1.5 s after each save. A message-per-row table and server-side message saving are not done.
+- **`DATABASE_DRIVER=http`** (Neon's HTTPS driver) exists for hosts that only allow port 443.
+
+**Next: PR 3, the Fly deploy to `agents.skylerfly.com`.** `fly.toml` and a Fly Dockerfile don't exist yet. Still not done: 3a (Stop button and idle stop), 6 to 11.
+
 ## The short version
 
 - **Fly:** one app, one Machine at first (shared-cpu, 1 GB, about $6.70 a month), running Gateway, Router and Interceptor from one image under the existing `npm run all` launcher. Fly gives https, so the Cloudflare tunnel is not needed. A 1 GB volume holds only the global `config.yaml` and settings. Split into one Machine per part only when memory or restarts make it worth it.
@@ -245,11 +255,11 @@ Runs are the one part that doesn't move to Fly in v1.
 Each is a separate PR that works on its own and keeps the local, no-database setup working.
 
 1. **Plan** (this document).
-2. **Database layer.** `utils/db.js`, `migrations/`, `npm run migrate`, `DATABASE_URL` optional. A `PgStore` for users, API keys and sessions behind the existing `Store` interface, with sessions in the database. Tests against a throwaway Postgres (Docker, or Neon branch in CI; the repo has no CI today, so local first). Hosted mode off by default.
+2. **Database layer.** *(Done, #98.)* `utils/db.js`, `migrations/`, `npm run migrate`, `DATABASE_URL` optional. A `PgStore` for users, API keys and sessions behind the existing `Store` interface, with sessions in the database. Tests against a throwaway Postgres (Docker, or Neon branch in CI; the repo has no CI today, so local first). Hosted mode off by default.
 3. **Fly deploy.** (With `auto_start_machines`/`auto_stop_machines` set, so it sleeps when idle from day one.) `Dockerfile.fly`, `fly.toml`, secrets list, volume, `trust proxy`, health check, `docs/fly.md` with step by step commands for Windows. Usable immediately with the current named logins. This is the first point where Skyler can reach it from a phone without Tailscale or a tunnel.
 3a. **Stop button and idle stop.** Admin-only Stop on the Dashboard (Fly Machines API with a scoped token), `HARNESS_IDLE_STOP_MIN`, an idle check that sees streams, Runs and pending approvals. Optional later: the always-on Start page.
-4. **Chats in the database (text only).** Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import". Attachments are not part of it.
-5. **OAuth sign-in.** GitHub and Google, `identities`, invite-only users page, `HARNESS_ADMIN_EMAILS`, account page (link or unlink providers, make API keys), sign-in page buttons.
+4. **Chats in the database (text only).** *(Done in #98 as whole-chat rows, not message rows.)* Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import". Attachments are not part of it.
+5. **OAuth sign-in.** *(Done in #98 through Neon Auth; Google by default, GitHub with its own OAuth app.)* GitHub and Google, `identities`, invite-only users page, `HARNESS_ADMIN_EMAILS`, account page (link or unlink providers, make API keys), sign-in page buttons.
 6. **Per-user settings, routings and MCP.** Global versus user split, encrypted MCP secrets, hosted lockdown for stdio MCP and shells.
 7. **Usage, limits and guest accounts.** `usage_events`, per-user spend, optional caps and a Users page column, 429 handling in chat, and the guest account (below): only an admin can make one, it uses your shared key with a hard $1 lifetime cap.
 8. **OpenRouter workload identity federation per user (the main credential path).** The harness as an OIDC issuer (discovery and JWKS), per-user JWTs, a policy id in Account settings, per-request credential in `/openrouter-proxy`. Needs an OpenRouter Business org, so it starts with a one-issuer, one-policy trial in your org.

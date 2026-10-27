@@ -50,53 +50,90 @@ async function executeSwarm(manager, run, live) {
     const deadline = Date.now() + run.maxMinutes * 60000;
     const stage = (s, extra = '') => manager.runStages({ run, live, sandbox, workflow: { stages: [s] }, context: context + extra, deadline, nextN: () => ++n });
 
-    const planned = await stage(PLANNER);
-    if (planned.status !== 'finished') return { status: planned.status, summary: `Planning: ${planned.summary}` };
-    const plan = parsePlan(planned.summary, run.goal);
-    if (plan.note) manager.event(run, { type: 'note', text: plan.note });
-    run.parts = plan.parts;
-    manager.event(run, { type: 'plan', text: plan.parts.map((p, i) => `${i + 1}. ${p.title}`).join('\n') });
-
-    run.children = plan.parts.map((p) => manager.create({
-        goal: `${p.task}\n\nThis is one part of a larger task that several engineers do at once, each on their own branch: "${run.goal}". Do only your part and leave files that belong to other parts alone.`,
-        repo: run.repo, base: run.base, workflow: p.workflow, profile: run.profile, model: run.model, effort: run.effort,
-        maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, parent: run.id, autoDebug: run.autoDebug,
-    }).id);
-    manager.event(run, { type: 'note', text: `Started ${run.children.length} worker${run.children.length === 1 ? '' : 's'}.` });
-    manager.save(run);
-
-    while (run.children.some((id) => !TERMINAL.has(manager.get(id).status))) {
-        if (live.stopped) {
-            for (const id of run.children) { try { manager.stop(id); } catch { /* already finished */ } }
-            return { status: 'stopped', summary: 'Stopped by a person.' };
-        }
-        await sleep(manager.pollMs);
+    let plan;
+    if (run.tickets) {
+        // the parts are the tickets of a draft a person already reviewed: no planner
+        plan = { parts: run.tickets.map((t) => ({ ...t })) };
+        manager.event(run, { type: 'plan', text: plan.parts.map((p, i) => `${i + 1}. ${p.title}${p.needs.length ? ` (after ${p.needs.join(', ')})` : ''}`).join('\n') });
+    } else {
+        const planned = await stage(PLANNER);
+        if (planned.status !== 'finished') return { status: planned.status, summary: `Planning: ${planned.summary}` };
+        plan = parsePlan(planned.summary, run.goal);
+        if (plan.note) manager.event(run, { type: 'note', text: plan.note });
+        plan.parts.forEach((p) => { p.needs = []; });
+        manager.event(run, { type: 'plan', text: plan.parts.map((p, i) => `${i + 1}. ${p.title}`).join('\n') });
     }
+    run.parts = plan.parts;
+    run.children = plan.parts.map(() => null);
 
     const merged = [];
     const skipped = [];
-    // a cloud sandbox has no copy of the workers' branches (they are in the repo here), so they
-    // are handed over as bundles first; on this machine a worktree already sees them
-    const toMerge = run.children.filter((id) => { const c = manager.get(id); return c.status === 'done' && c.result?.commit; });
-    if (sandbox.importBranches) await sandbox.importBranches(toMerge.map((id) => manager.get(id).branch));
-    for (const [i, id] of run.children.entries()) {
-        const child = manager.get(id);
-        const title = plan.parts[i].title;
-        if (child.status !== 'done' || !child.result?.commit) { skipped.push(`${title}: ${child.status === 'done' ? 'changed nothing' : child.status}${child.error ? ` (${child.error})` : ''}`); continue; }
-        try {
-            await sandbox.git(['-c', 'user.name=Bright Chat runner', '-c', 'user.email=runner@localhost', 'merge', '--no-ff', '-q', '-m', `Merge ${child.branch}: ${title}`, child.branch]);
-            merged.push(title);
-            manager.event(run, { type: 'note', text: `Merged “${title}” (${child.branch}).` });
-        } catch (err) {
-            await sandbox.git(['merge', '--abort']).catch(() => {});
-            skipped.push(`${title}: conflicts with the other parts, so its branch ${child.branch} was left out`);
-            manager.event(run, { type: 'note', text: `Could not merge “${title}”: ${err.message.split('\n')[0]}` });
+    const mergedIds = new Set();
+    const settled = new Set();   // part indexes that ran or were left out
+    let wave = 0;
+    while (settled.size < plan.parts.length) {
+        const idOf = (p, i) => p.id || String(i);
+        // a part is ready once everything it needs has been merged; one that needs a part
+        // that was left out cannot run, and is left out too
+        const todo = plan.parts.map((p, i) => i).filter((i) => !settled.has(i));
+        for (const i of todo) {
+            const p = plan.parts[i];
+            const lost = p.needs.find((d) => settled.has(plan.parts.findIndex((q, j) => idOf(q, j) === d)) && !mergedIds.has(d));
+            if (lost) { skipped.push(`${p.title}: needs “${lost}”, which was left out`); settled.add(i); }
         }
+        const ready = todo.filter((i) => !settled.has(i) && plan.parts[i].needs.every((d) => mergedIds.has(d)));
+        if (!ready.length) break;
+        // later waves start from the branch the earlier ones were merged into
+        const from = wave === 0 ? run.base : run.branch;
+        if (wave > 0 && sandbox.kind === 'e2b') {
+            for (const i of todo) if (!settled.has(i)) { skipped.push(`${plan.parts[i].title}: tickets that depend on others need the local sandbox (RUNNER_SANDBOX unset)`); settled.add(i); }
+            break;
+        }
+        for (const i of ready) {
+            const p = plan.parts[i];
+            run.children[i] = manager.create({
+                goal: `${p.task}\n\nThis is one part of a larger task that several engineers do at once, each on their own branch: "${run.goal}". Do only your part and leave files that belong to other parts alone.`,
+                repo: run.repo, base: from, workflow: p.workflow, profile: run.profile, model: run.model, effort: run.effort,
+                maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, parent: run.id, autoDebug: run.autoDebug,
+            }).id;
+        }
+        manager.event(run, { type: 'note', text: `Started ${ready.length} worker${ready.length === 1 ? '' : 's'}${wave ? ` (wave ${wave + 1})` : ''}.` });
+        manager.save(run);
+        const ids = ready.map((i) => run.children[i]);
+        while (ids.some((id) => !TERMINAL.has(manager.get(id).status))) {
+            if (live.stopped) {
+                for (const id of run.children.filter(Boolean)) { try { manager.stop(id); } catch { /* already finished */ } }
+                return { status: 'stopped', summary: 'Stopped by a person.' };
+            }
+            await sleep(manager.pollMs);
+        }
+        // a cloud sandbox has no copy of the workers' branches (they are in the repo here), so they
+        // are handed over as bundles first; on this machine a worktree already sees them
+        const toMerge = ids.filter((id) => { const c = manager.get(id); return c.status === 'done' && c.result?.commit; });
+        if (sandbox.importBranches) await sandbox.importBranches(toMerge.map((id) => manager.get(id).branch));
+        for (const i of ready) {
+            settled.add(i);
+            const child = manager.get(run.children[i]);
+            const title = plan.parts[i].title;
+            if (child.status !== 'done' || !child.result?.commit) { skipped.push(`${title}: ${child.status === 'done' ? 'changed nothing' : child.status}${child.error ? ` (${child.error})` : ''}`); continue; }
+            try {
+                await sandbox.git(['-c', 'user.name=Bright Chat runner', '-c', 'user.email=runner@localhost', 'merge', '--no-ff', '-q', '-m', `Merge ${child.branch}: ${title}`, child.branch]);
+                merged.push(title);
+                mergedIds.add(idOf(plan.parts[i], i));
+                manager.event(run, { type: 'note', text: `Merged “${title}” (${child.branch}).` });
+            } catch (err) {
+                await sandbox.git(['merge', '--abort']).catch(() => {});
+                skipped.push(`${title}: conflicts with the other parts, so its branch ${child.branch} was left out`);
+                manager.event(run, { type: 'note', text: `Could not merge “${title}”: ${err.message.split('\n')[0]}` });
+            }
+        }
+        wave += 1;
     }
+    for (const i of plan.parts.keys()) if (!settled.has(i)) skipped.push(`${plan.parts[i].title}: could not be started`);
     const lines = [`Merged ${merged.length} of ${plan.parts.length} parts${merged.length ? `: ${merged.join(', ')}` : ''}.`, ...skipped.map((s) => `Left out - ${s}`)];
     if (!merged.length) return { status: 'incomplete', summary: lines.join('\n') };
 
-    const workers = run.children.map((id, i) => `${plan.parts[i].title} (${manager.get(id).status}): ${manager.get(id).result?.summary || manager.get(id).error || ''}`).join('\n');
+    const workers = run.children.map((id, i) => (id ? `${plan.parts[i].title} (${manager.get(id).status}): ${manager.get(id).result?.summary || manager.get(id).error || ''}` : `${plan.parts[i].title}: not run`)).join('\n');
     const review = await stage(REVIEWER, `\n\nThe base commit is ${run.base}.\nThe parts and what each engineer reported:\n${workers}\n${lines.join('\n')}`);
     const failed = /^\W*FAIL/i.test(review.summary);
     run.swarmSummary = lines;

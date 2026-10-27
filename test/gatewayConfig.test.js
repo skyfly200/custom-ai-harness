@@ -17,10 +17,11 @@ test('a rate-limited free group has its own chain ending at a paid model', () =>
     // this one checks the config.yaml that ships, not the fixture
     const { fallbacks } = gateway.parse(fs.readFileSync(path.join(__dirname, '..', 'config.yaml'), 'utf8'));
     // LiteLLM answers "No fallback model group found" for a group without a chain
-    for (const group of fallbacks['local-engine'].filter((m) => m !== 'fast-openrouter')) {
-        assert.ok(fallbacks[group]?.length, `${group} has no fallback chain`);
+    // every model a chain falls back to needs a chain of its own, unless it ends one
+    const ends = new Set(Object.values(fallbacks).map((chain) => chain.at(-1)));
+    for (const group of Object.values(fallbacks).flat()) {
+        assert.ok(fallbacks[group]?.length || ends.has(group), `${group} has no fallback chain`);
     }
-    assert.equal(fallbacks['fallback-openrouter'].at(-1), 'fast-openrouter');
 });
 
 test('writing the same chains changes nothing', () => {

@@ -23,6 +23,8 @@ Any client can skip the Router for one request the same way: send the model name
 
 **Effort.** The `x-harness-effort` header moves a request's score before tiers are matched: `low` and `high` by 0.2, `min` sends it to Weak and `max` to the top tier (a number from -1 to 1 works too). In Bright Chat it is the **Effort** button next to Send, saved per chat. A new chat also has an **Answer with** menu on its start screen: pick a strategy or one Gateway model directly (with its quality and price when known); outside projects the next new chat starts with the same pick. Claude Code: `ANTHROPIC_CUSTOM_HEADERS="x-harness-effort: low"`.
 
+**Max tier.** The `x-harness-max-tier` header (a tier name such as `Strong`, `Mid` or `Weak`) caps cost: the score, effort included, is held just under the next tier up, so the request never goes higher than the one named. Unknown names and the top tier mean no cap. Claude Code: `ANTHROPIC_CUSTOM_HEADERS="x-harness-max-tier: Strong"`.
+
 ## How routing decisions are made
 
 The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the strategy of the request that started them. Requests that define tools (every Claude Code request) go to `strong_model_tools` when hard (unset: the strong model) or `weak_model_tools` when easy (`fallback-openrouter-tools`, the free NVIDIA Nemotron model), because a model without tool support answers them with text instead of tool calls. On the Routing page these are the Router's **Strong, with tools** and **Weak, with tools** outputs:

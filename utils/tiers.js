@@ -73,4 +73,22 @@ function pick(tiers, threshold, score, tools) {
     return { tier: best.name, model: (tools && best.tools) || best.model };
 }
 
-module.exports = { clean, pick, effortShift, clamp01, EFFORTS, MAX_TIERS };
+/**
+ * The highest score a request may reach when `maxTier` (x-harness-max-tier) caps cost:
+ * just under where the next tier up begins. Tiers are Weak (from 0), Strong (from the
+ * threshold) and the extra ones, in score order. Null when there is no cap, the name is
+ * not a tier here, or the named tier is the top one.
+ */
+function ceiling(tiers, threshold, maxTier) {
+    const name = String(maxTier || '').trim().toLowerCase();
+    if (!name) return null;
+    const ladder = [{ name: 'weak', from: 0 }, { name: 'strong', from: threshold }, ...(tiers || []).map(t => ({ name: t.name.toLowerCase(), from: t.from }))]
+        .sort((a, b) => a.from - b.from);
+    const at = ladder.findLastIndex(t => t.name === name);
+    if (at < 0 || at === ladder.length - 1) return null;
+    // equal starts are one step: the cap holds for every tier that begins there
+    const next = ladder.slice(at + 1).find(t => t.from > ladder[at].from);
+    return next ? clamp01(next.from - 0.001) : null;
+}
+
+module.exports = { ceiling, clean, pick, effortShift, clamp01, EFFORTS, MAX_TIERS };

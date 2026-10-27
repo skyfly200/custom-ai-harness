@@ -52,3 +52,4 @@
 .pick-row .ico { width: 1.2em; text-align: center; color: var(--muted); }
 .pick-row.up { color: var(--muted); }
 .pad { padding: 12px; margin: 0; }
+.field[hidden] { display: none; }

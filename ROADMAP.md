@@ -76,7 +76,7 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
     * **Glossary-Primed Transcription:** Run Whisper (local or Groq free tier) with `CONTEXT.md` glossary terms in its `prompt` parameter so domain words (Orchestrator, Build Ticket, ADR) transcribe correctly.
     * **Gateway Audio Routes (optional):** Add `/v1/audio/transcriptions` and `/v1/audio/speech` pass-through to the Interceptor so audio calls use LiteLLM fallbacks like chat does. Only if dictation accuracy becomes a real problem.
 
-* **Parallel Worker Fan-Out:** Dispatch Ready Build Tickets to parallel Workers, each in its own branch and worktree.
+* ✅ **Parallel Worker Fan-Out (from a ticket draft):** a swarm can take the `/wayfinder` JSON draft instead of planning (`runner/tickets.js`): build tickets run in dependency waves, each worker on its own branch, merged into the swarm branch, then reviewed. **Not done:** creating the GitHub issues, reading Ready marks from the tracker, and writing the status comment (ADR 0001).
 
 * **Agentic Teams (ChatDev vs. build in-house):** Evaluate ChatDev against extending the existing Runner/Orchestrator with collaborating specialist agents. Compare integration effort, fit with isolated worktrees and ticket state, model flexibility, and operational overhead; choose an approach and define a small MVP before committing to a framework.
 

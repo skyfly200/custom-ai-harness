@@ -112,9 +112,10 @@ function estimateTokens(body) {
  * With a named strategy (`profile`, utils/profiles.js) the Router only scores
  * the request and the profile's own outputs pick the model.
  * `effort` (x-harness-effort) moves the score up or down before the
- * threshold and the extra tiers (utils/tiers.js) are applied.
+ * threshold and the extra tiers (utils/tiers.js) are applied; `maxTier`
+ * (x-harness-max-tier) names the highest tier the request may use.
  */
-async function routeModel(body, requested, profile, effort) {
+async function routeModel(body, requested, profile, effort, maxTier) {
     const { messages } = body;
     const config = settings.get();
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
@@ -146,7 +147,9 @@ async function routeModel(body, requested, profile, effort) {
             throw new Error(`HTTP ${res.status}${detail ? `: ${detail.slice(0, 300)}` : ''}`);
         }
         const { model, win_rate } = await res.json();
-        const score = win_rate + shift;
+        // x-harness-max-tier keeps the score under the next tier up, so cost stays capped
+        const top = tiers.ceiling(profile ? profile.tiers : config.tiers, threshold, maxTier);
+        const score = top === null ? win_rate + shift : Math.min(win_rate + shift, top);
         const extra = tiers.pick(profile ? profile.tiers : config.tiers, threshold, score, hasTools);
         if (extra) return { ...base, model: extra.model, tier: extra.tier, winRate: win_rate };
         const strong = score >= threshold;
@@ -1062,7 +1065,7 @@ async function routeAndRecord(req, res) {
     const prompt = latestUserText(req.body.messages);
     monitor.recordRouting({ path: req.path, clientId, prompt });
     const started = Date.now();
-    const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile, req.get('x-harness-effort'));
+    const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile, req.get('x-harness-effort'), req.get('x-harness-max-tier'));
     route.model = profiles.currentName(route.model);
     req.body.model = route.model;
     // A strategy's own fallback chains replace the Gateway's for this request

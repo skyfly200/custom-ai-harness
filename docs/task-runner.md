@@ -75,16 +75,26 @@ Notes:
 - It runs under Docker with `COMPOSE_PROFILES=runs` (see [Cloud sandboxes](#cloud-sandboxes-e2b) for the setup), which on a server is how to use it.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
 
-### Cloud sandboxes (E2B)
+### Cloud sandboxes (E2B and Fly Sprites)
 
-A run can work in a sandbox in the cloud instead of a worktree on this machine: the agent's commands then run in a Linux VM from [E2B](https://e2b.dev), never on your PC. Set `RUNNER_SANDBOX=e2b` and `E2B_API_KEY` in `.env` (the key is on your E2B dashboard; get one from the free tier), keep the repo in `RUNNER_ROOTS` as usual, and start the runner as always. Nothing else changes: the same workflows, tools, guard and approvals apply, and the run page looks the same.
+A run can work in a sandbox in the cloud instead of a worktree on this machine: the agent's commands then run in a Linux VM, never on your PC. Two providers are built in, and **Sandbox** on the Agents page (for a one-off run, and in an agent's settings) picks one per run or per agent; `RUNNER_SANDBOX` (`local`, `e2b` or `sprites`) is the default for runs that pick none. A provider whose key is not set shows as disabled in the picker, and the API refuses it.
+
+| Sandbox | Needs | Notes |
+|---|---|---|
+| `local` | nothing | a git worktree here |
+| `e2b` | `E2B_API_KEY` | [E2B](https://e2b.dev) Firecracker VMs, billed while running |
+| `sprites` | `SPRITES_TOKEN`, and `npm install @fly/sprites` (optional dependency, needs Node 24+) | [Fly Sprites](https://sprites.dev): Linux VMs that cost nothing while idle; the Sprite is named `harness-…`, work lands in `/home/sprite/work` (`SPRITES_WORKDIR`) |
+
+Every driver offers the same methods, so the workflows, tools, guard and approvals are identical on all three: each command and file write still goes past `/v1/guard` before it reaches the sandbox. A swarm's workers use the swarm's sandbox. The Sprites driver is only tested against a stand-in so far, not a live Fly account.
+
+For E2B, set `RUNNER_SANDBOX=e2b` and `E2B_API_KEY` in `.env` (the key is on your E2B dashboard; get one from the free tier), keep the repo in `RUNNER_ROOTS` as usual, and start the runner as always. Nothing else changes: the same workflows, tools, guard and approvals apply, and the run page looks the same.
 
 How the branch gets there and back:
 
 1. The base commit of your repo is packed into a git bundle and written into a fresh sandbox (template `E2B_TEMPLATE`, default `base`), which checks it out on a branch `harness/<id>` of its own in `/home/user/work` (set `E2B_WORKDIR`).
 2. The agent works there; every file call and command goes to the sandbox.
 3. When the run ends, everything is committed and the branch is packed back into a bundle and fetched into your repo here, so `git diff`, **Continue**, **Retry** and pushing work exactly as with a local run. A swarm's own branch is handed back after its merges, and each worker's branch is handed *to* it before they are merged. A continued run gets a new sandbox holding its branch as it stands.
-4. The sandbox is killed as soon as the run ends (and if the runner is restarted mid-run), so nothing keeps billing. Its record keeps the sandbox id.
+4. The sandbox is killed (a Sprite is deleted) as soon as the run ends (and if the runner is restarted mid-run), so nothing keeps billing. Its record keeps the sandbox id.
 5. On a Docker server, the runner is a container (`COMPOSE_PROFILES=runs`) whose commands all go to the sandbox; see below.
 
 Notes:

@@ -87,7 +87,7 @@ function renderDetail(run) {
   $('detail').innerHTML = `
     <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
-    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}</div>
+    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
@@ -339,7 +339,18 @@ async function initRepoPicker() {
   $('pickUse').addEventListener('click', () => { (pickInto || $('repo')).value = pickRepo; $('picker').close(); });
 }
 
+// the sandbox drivers (this machine, E2B, Sprites): fill both Sandbox pickers, marking the ones whose key is missing
+const SANDBOX_NAMES = { local: 'This machine', e2b: 'E2B', sprites: 'Fly Sprite' };
+async function initSandboxes() {
+  try {
+    const { default: def, drivers } = await api('/sandboxes');
+    const options = drivers.map((d) => `<option value="${esc(d.id)}"${d.configured ? '' : ' disabled'}>${esc(d.name)}${d.configured ? '' : ` (needs ${esc(d.needs)})`}</option>`).join('');
+    for (const sel of document.querySelectorAll('.sandbox-select')) sel.innerHTML = `<option value="">Default (${esc(SANDBOX_NAMES[def] || def)})</option>${options}`;
+  } catch { /* the runner's default is enough */ }
+}
+
 async function init() {
+  initSandboxes();
   initWorkflows();
   await initRepoPicker();
   try {
@@ -367,7 +378,7 @@ function renderAgents() {
   const a = agentOf(agentSel);
   $('agentInfo').hidden = !a;
   if (a) {
-    $('agentInfo').innerHTML = `<div class="facts"><span>Repo <code>${esc(a.repo)}</code></span><span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}<span>${a.taskCount} task${a.taskCount === 1 ? '' : 's'}</span>${a.project ? `<span>Chat project <a href="chat.html#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+    $('agentInfo').innerHTML = `<div class="facts"><span>Repo <code>${esc(a.repo)}</code></span><span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span>${a.taskCount} task${a.taskCount === 1 ? '' : 's'}</span>${a.project ? `<span>Chat project <a href="chat.html#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
   }
@@ -455,6 +466,7 @@ function openAgentDialog(agent) {
   f.elements.workflow.value = v.workflow || 'general';
   f.elements.profile.value = v.profile || '';
   f.elements.effort.value = v.effort || '';
+  f.elements.sandbox.value = v.sandbox || '';
   f.elements.maxSteps.value = v.maxSteps ?? '';
   f.elements.maxMinutes.value = v.maxMinutes ?? '';
   f.elements.project.value = v.project?.id || '';

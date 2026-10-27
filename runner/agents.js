@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const workflows = require('../utils/workflows');
+const { DRIVERS, normalizeKind } = require('./sandbox');
 
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const clean = (v, n) => String(v ?? '').trim().slice(0, n);
@@ -47,6 +48,10 @@ class AgentStore {
             if (!workflows.get(w)) throw new Error(`no workflow named ${w} (an agent uses one workflow; Jev-picks and Swarm are for one-off runs)`);
             out.workflow = w;
         }
+        if (has('sandbox')) {
+            if (cfg.sandbox && !normalizeKind(cfg.sandbox)) throw new Error(`no sandbox named ${cfg.sandbox}; use ${Object.keys(DRIVERS).join(', ')}`);
+            out.sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : null;
+        }
         if (has('profile')) out.profile = cfg.profile ? clean(cfg.profile, 80) : null;
         if (has('effort')) {
             if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
@@ -73,7 +78,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', profile: null, effort: null, maxSteps: null, maxMinutes: null, project: null,
+            instructions: '', profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

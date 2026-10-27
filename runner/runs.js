@@ -32,6 +32,7 @@ const PARTIAL_CHARS = 8000;   // how much of what it was saying when it ran out 
 const MAX_CONTINUES = 50;     // four times what a run of 200 steps and 240 minutes needs
 const AGENT_HISTORY = 6;      // how many of an agent's earlier tasks a new one is told about
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
+const escalation = require('./escalate');
 const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const short = (v, n = EVENT_TEXT) => (typeof v === 'string' && v.length > n ? `${v.slice(0, n)}… [${v.length - n} more characters]` : v);
@@ -114,8 +115,9 @@ class RunManager {
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, autoDebug = false, sandbox = 'local' }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoDebug = false, sandbox = 'local' }) {
         this.pollMs = pollMs;
+        this.batchPollMs = batchPollMs; // how often a waiting batch stage asks whether its batch is done
         this.dir = dir;
         this.roots = roots.map((r) => { try { return fs.realpathSync(r); } catch { return path.resolve(r); } });
         this.harnessUrl = harnessUrl.replace(/\/$/, '');
@@ -267,6 +269,8 @@ class RunManager {
         const run = {
             id, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, app: cfg.app ? String(cfg.app) : null, editable: Array.isArray(cfg.editable) ? cfg.editable.map(String).slice(0, 50) : null, source: cfg.source || null, kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
+            // escalate: on a failure, ask for more effort (up to two rungs); maxTier caps the tier it can reach
+            escalate: !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false'), bumps: 0, maxTier: cfg.maxTier ? String(cfg.maxTier).trim().slice(0, 40) : null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             // Plan mode: the agent may read and search, but changes nothing. It
             // finishes with a plan instead of an edit, and the branch gets no commit.
@@ -330,38 +334,64 @@ class RunManager {
         return Object.fromEntries(Object.entries(args).map(([k, v]) => [k, short(v, 600)]));
     }
 
-    headers(run, n) {
+    headers(run, n, baseEffort = run.effort, stageModel = null) {
         const h = { 'content-type': 'application/json', 'x-harness-request-id': `run-${run.id}-${n}` };
         if (this.password) h['x-harness-password'] = this.password;
-        if (run.model) h['x-harness-model'] = run.model;
+        if (run.model || stageModel) h['x-harness-model'] = run.model || stageModel;
         if (run.profile) h['x-harness-profile'] = run.profile;
-        if (run.effort) h['x-harness-effort'] = run.effort;
+        // a run that has escalated asks for more effort than the person set
+        const effort = run.bumps ? escalation.effortAfter(baseEffort, run.bumps) : baseEffort;
+        if (effort) h['x-harness-effort'] = effort;
+        if (run.maxTier) h['x-harness-max-tier'] = run.maxTier;
         return h;
     }
 
-    async chat(run, messages, tools, n) {
+    /**
+     * One model call. When it fails in a way a stronger model might not (the harness
+     * is down or overloaded after its retries, the reply is empty), the run climbs one
+     * effort rung and asks again, up to escalation.MAX_BUMPS times in all.
+     */
+    async chat(run, messages, tools, n, effort = run.effort, stageModel = null) {
+        for (;;) {
+            try { return await this.chatOnce(run, messages, tools, n, effort, stageModel); } catch (err) {
+                if (!escalation.worthEscalating(err) || !escalation.canClimb(run, effort)) throw err;
+                this.escalate(run, effort, `the model call failed (${short(err.message, 160)})`);
+            }
+        }
+    }
+
+    /** Climb one effort rung and say so in the run's log. */
+    escalate(run, base, why) {
+        run.bumps = (run.bumps || 0) + 1;
+        this.event(run, { type: 'note', text: `Trying a stronger model: ${why}. Effort is now ${escalation.effortAfter(base, run.bumps)}${run.maxTier ? `, no higher than ${run.maxTier}` : ''}.` });
+    }
+
+    async chatOnce(run, messages, tools, n, effort, stageModel = null) {
         let lastError;
         await this.pricer.refresh();
         for (let attempt = 0; attempt < 3; attempt++) {
             if (attempt) await sleep(this.retryDelayMs * attempt * attempt);
             try {
                 const res = await fetch(`${this.harnessUrl}/v1/chat/completions`, {
-                    method: 'POST', headers: this.headers(run, n), signal: AbortSignal.timeout(6 * 60 * 1000),
-                    body: JSON.stringify({ model: 'auto', messages, tools, tool_choice: 'auto', stream: false }),
+                    method: 'POST', headers: this.headers(run, n, effort, stageModel), signal: AbortSignal.timeout(6 * 60 * 1000),
+                    body: JSON.stringify({ model: 'auto', messages, ...(tools?.length ? { tools, tool_choice: 'auto' } : {}), stream: false }),
                 });
                 const body = await res.json().catch(() => ({}));
                 if (res.ok) {
                     const message = body.choices?.[0]?.message;
-                    if (!message) throw new Error('the model answered with no message');
+                    if (!message) throw Object.assign(new Error('the model answered with no message'), { escalatable: true });
+                    if (!message.content && !message.tool_calls?.length) throw Object.assign(new Error('the model answered with an empty reply'), { escalatable: true });
                     return { message, usage: body.usage, model: body.model };
                 }
                 lastError = new Error(`the harness answered HTTP ${res.status}: ${short(JSON.stringify(body.error || body), 300)}`);
                 if (![429, 502, 503, 504].includes(res.status)) throw lastError;
             } catch (err) {
                 lastError = err;
+                if (err.escalatable) throw err;
                 if (err.message.startsWith('the harness answered HTTP') && !/HTTP (429|50[234])/.test(err.message)) throw err;
             }
         }
+        lastError.escalatable = true; // out of retries on a busy or failing upstream
         throw lastError;
     }
 
@@ -572,7 +602,7 @@ class RunManager {
         const source = cfg?.source && typeof cfg.source === 'object'
             ? { chat: cfg.source.chat ? { id: String(cfg.source.chat.id || '').slice(0, 80), title: String(cfg.source.chat.title || '').slice(0, 120) } : null } : null;
         return this.create({
-            goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, sandbox: agent.sandbox || undefined,
+            goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
         });
@@ -648,6 +678,63 @@ class RunManager {
     }
 
     /**
+     * A stage with canWait: one request, no tools, answered as a half-price batch. The run
+     * waits for it (a stop still works), and falls back to an ordinary call when the model
+     * is not a batch model, there is no key, the batch fails, or maxWaitMinutes pass.
+     */
+    async runWaitStage({ run, live, sandbox, stage, stageEffort, context, handoff, nextN }) {
+        const diff = stage.diff ? (await sandbox.exec('git add -A -N . && git diff HEAD')).output.slice(0, 60000) : '';
+        const messages = [
+            { role: 'system', content: `You are the ${stage.role} in a software task. ${stage.prompt}\n\nYou have no tools: answer from what you are given, in plain text.` },
+            { role: 'user', content: `Task:\n${run.goal}${context ? `\n\n${context}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}${diff ? `\n\nThe workspace's changes (git diff):\n${diff}` : ''}` },
+        ];
+        const emit = (e) => this.event(run, { ...e, stage: stage.id });
+        const fallback = async (why) => {
+            emit({ type: 'note', text: `${why}; asking ${stage.model} normally instead.` });
+            const reply = await this.chat(run, messages, [], nextN(), stageEffort, stage.model);
+            emit({ type: 'model', text: reply.message.content || '', calls: 0, usage: reply.usage, model: reply.model });
+            return { status: 'finished', summary: reply.message.content || 'The model answered with nothing.' };
+        };
+        const headers = this.headers(run, nextN(), stage.model);
+        let id;
+        try {
+            const res = await fetch(`${this.harnessUrl}/v1/batch`, { method: 'POST', headers, body: JSON.stringify({ model: stage.model, messages }), signal: AbortSignal.timeout(60000) });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) return await fallback(`it could not be batched (${body.error || `HTTP ${res.status}`})`);
+            id = body.id;
+        } catch (err) { return await fallback(`it could not be batched (${err.message})`); }
+        emit({ type: 'note', text: `Sent as a half-price batch to ${stage.model} (${id}); waiting for it.` });
+        const until = Date.now() + stage.maxWaitMinutes * 60000;
+        while (Date.now() < until) {
+            if (live.stopped) return { status: 'stopped', summary: 'Stopped by a person.' };
+            await sleep(this.batchPollMs);
+            let got;
+            try {
+                const res = await fetch(`${this.harnessUrl}/v1/batch/${encodeURIComponent(id)}`, { headers, signal: AbortSignal.timeout(60000) });
+                got = await res.json();
+                if (!res.ok) throw new Error(got.error || `HTTP ${res.status}`);
+            } catch (err) { emit({ type: 'note', text: `Could not check the batch (${err.message}); trying again.` }); continue; }
+            if (!got.done) continue;
+            if (got.result?.text !== undefined) {
+                // billed at half price: count the tokens, and the cost at half what the same call would be
+                const usage = got.result.usage;
+                if (usage) {
+                    run.tokens.in += usage.prompt_tokens || 0; run.tokens.out += usage.completion_tokens || 0;
+                    const c = this.pricer.cost(usage, stage.model);
+                    run.cost = (run.cost || 0) + c.cost * 0.5;
+                    run.batchSaved = (run.batchSaved || 0) + c.cost * 0.5;
+                    if (c.unpriced) run.unpricedCalls = (run.unpricedCalls || 0) + 1;
+                }
+                run.batchRequests = (run.batchRequests || 0) + 1;
+                emit({ type: 'model', text: got.result.text, calls: 0, model: stage.model });
+                return { status: 'finished', summary: got.result.text || 'The model answered with nothing.' };
+            }
+            return await fallback(`the batch ${got.status === 'completed' ? 'had no answer' : got.status}${got.result?.error || got.error ? `: ${got.result?.error || got.error}` : ''}`);
+        }
+        return await fallback(`the batch had not finished in ${stage.maxWaitMinutes} minutes`);
+    }
+
+    /**
      * Run a workflow's stages in order in one sandbox. Each stage is its own
      * agent loop with its own prompt, tools and effort, and gets the earlier
      * stages' summaries. A verdict stage that says FAIL sends the run back to
@@ -673,12 +760,13 @@ class RunManager {
             });
             const handoff = notes.map((n) => `## ${n.role} (${n.stage})\n${n.summary}`).join('\n\n');
             // the stage's effort replaces the run's only when the person set none
-            const stageRun = run.effort || !stage.effort ? run : { ...run, effort: stage.effort };
-            outcome = await runAgent({
+            const stageEffort = run.effort || stage.effort || null;
+            if (stage.canWait) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageEffort, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
+            else outcome = await runAgent({
                 run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
-                chat: (messages, defs) => this.chat(stageRun, messages, defs, nextN()),
+                chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
             });
             if (outcome.status === 'out_of_steps') run.partialSummary = outcome.summary;
             notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
@@ -686,11 +774,12 @@ class RunManager {
             if (stage.verdict && /^\W*FAIL/i.test(outcome.summary)) {
                 retries[stage.id] = (retries[stage.id] || 0) + 1;
                 if (retries[stage.id] <= stage.maxRetries) {
-                    this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo}.` });
+                    this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo} (round ${retries[stage.id] + 1} of ${stage.maxRetries + 1}).` });
+                    if (escalation.canClimb(run, stageEffort)) this.escalate(run, stageEffort, `${stage.role} said FAIL`);
                     i = workflow.stages.findIndex((s) => s.id === stage.retryTo) - 1;
                     continue;
                 }
-                this.event(run, { type: 'note', text: `${stage.role} still says FAIL; stopping here for a person to look.` });
+                this.event(run, { type: 'note', text: `${stage.role} still says FAIL after ${stage.maxRetries + 1} round${stage.maxRetries ? 's' : ''}; stopping here for a person to look.` });
                 outcome = { status: 'incomplete', summary: outcome.summary };
                 break;
             }
@@ -715,7 +804,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };

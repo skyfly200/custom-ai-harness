@@ -100,7 +100,7 @@ function renderDetail(run) {
   $('detail').innerHTML = `
     <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
-    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
+    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
@@ -263,6 +263,35 @@ $('detail').addEventListener('toggle', (e) => {
   if (k === 'diff' && e.target.open && selected) loadDiff(selected);
 }, true);
 
+// Save the ticket draft as markdown files in the repo (preview, ask, write), or load a folder back
+async function ticketCall(path, body) {
+  const res = await fetch(`api/tickets/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+  return out;
+}
+$('fileTickets').addEventListener('click', async () => {
+  const f = $('newRun'), msg = $('ticketsMsg');
+  const body = { tickets: f.elements.tickets.value, repo: f.elements.repo.value.trim() };
+  try {
+    msg.textContent = 'Checking…';
+    const plan = await ticketCall('files', { ...body, confirm: false });
+    if (!confirm(`Write ${plan.files.length} files into ${plan.repo}/${plan.folder}?\n\n${plan.files.map((x) => `· ${x.name}`).join('\n')}`)) { msg.textContent = ''; return; }
+    const made = await ticketCall('files', { ...body, confirm: true });
+    msg.textContent = `Wrote ${made.files.length} files to ${made.relative}. Commit them when you are happy.`;
+  } catch (err) { msg.textContent = err.message; }
+});
+$('loadTickets').addEventListener('click', async () => {
+  const f = $('newRun'), msg = $('ticketsMsg');
+  const folder = prompt('Folder inside the repo, for example wayfinder/add-export');
+  if (!folder) return;
+  try {
+    const draft = await ticketCall('read', { repo: f.elements.repo.value.trim(), folder });
+    f.elements.tickets.value = JSON.stringify({ tickets: draft.tickets }, null, 2);
+    msg.textContent = `Loaded ${draft.tickets.length} tickets${draft.skipped.length ? `; skipped ${draft.skipped.join(', ')}` : ''}.`;
+  } catch (err) { msg.textContent = err.message; }
+});
+
 $('newRun').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
@@ -271,6 +300,7 @@ $('newRun').addEventListener('submit', async (e) => {
   // an unchecked box is absent from FormData, and the runner's default may be on
   body.autoDebug = f.elements.autoDebug?.checked ? '1' : '0';
   body.plan = f.elements.plan?.checked ? '1' : '0';
+  body.escalate = f.elements.escalate?.checked ? '1' : '0';
   try {
     $('startMsg').textContent = 'Starting…';
     if (body.workflow === 'auto') {
@@ -491,7 +521,8 @@ async function initAgentDialog() {
     const body = Object.fromEntries(new FormData(f));
     const link = chatProjects().find((p) => p.id === body.project);
     body.project = link ? { id: link.id, name: link.name } : (body.project && editingAgent?.project?.id === body.project ? editingAgent.project : null);
-    for (const k of ['maxSteps', 'maxMinutes']) if (body[k] === '') body[k] = null;
+    for (const k of ['maxSteps', 'maxMinutes', 'maxTier']) if (body[k] === '') body[k] = null;
+    body.escalate = f.elements.escalate.checked;
     $('agentMsg').textContent = 'Saving…';
     try {
       const saved = editingAgent ? await sendAgent('PATCH', `/${editingAgent.id}`, body) : await sendAgent('POST', '', body);
@@ -530,6 +561,8 @@ function openAgentDialog(agent) {
   f.elements.sandbox.value = v.sandbox || '';
   f.elements.maxSteps.value = v.maxSteps ?? '';
   f.elements.maxMinutes.value = v.maxMinutes ?? '';
+  f.elements.maxTier.value = v.maxTier || '';
+  f.elements.escalate.checked = v.escalate !== false;
   f.elements.project.value = v.project?.id || '';
   $('agentDialog').showModal();
   f.elements.name.focus();

@@ -23,6 +23,7 @@ const langfuse = require('./utils/langfuse');
 const autoStrategy = require('./utils/autoStrategy');
 const workflows = require('./utils/workflows');
 const tiers = require('./utils/tiers');
+const jevQuestions = require('./utils/jevQuestions');
 const guard = require('./utils/guard');
 const { askText, DEFAULT_WINDOW } = require('./utils/jevAsk');
 const usage = require('./utils/usage');
@@ -31,6 +32,7 @@ const modelInfo = require('./utils/modelInfo');
 const cacheMarkers = require('./utils/cacheMarkers');
 const openrouterCatalog = require('./utils/openrouterCatalog');
 const openrouterAuth = require('./utils/openrouterAuth');
+const openrouterBatch = require('./utils/openrouterBatch');
 const batchModels = require('./utils/batchModels');
 const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
@@ -143,7 +145,7 @@ async function routeModel(body, requested, profile, effort, maxTier) {
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
     const fixed = profile ? profile.threshold : config.fixedThreshold;
     const threshold = fixed ?? deriveThreshold(messages);
-    const shift = tiers.effortShift(effort);
+    let shift = tiers.effortShift(effort);
     const base = { threshold, winRate: null, tools: hasTools, ...(profile && { profile: profile.name }), ...(shift && { effort: shift }) };
     // A client can name a model in the x-harness-model header (the chat page does)
     if (requested && !profiles.isClaudeAlias(requested)) return { ...base, model: requested, reason: 'chosen by the client' };
@@ -153,6 +155,16 @@ async function routeModel(body, requested, profile, effort, maxTier) {
     // since an images model that can't call tools would end the agent's loop
     const images = profile ? profile.images : config.imagesModel;
     if (images && !hasTools && latestUserHasImage(messages)) return { ...base, model: images, tier: 'Images', reason: 'the message has an image' };
+    // Extra yes/no questions put to Jev (utils/jevQuestions.js): they can lean the effort or pick a model
+    if (config.jevQuestions.length) {
+        const got = await jevQuestions.ask(config.jevQuestions, latestUserText(messages), askRouter);
+        const effect = jevQuestions.apply(config.jevQuestions, got.answers, { tools: hasTools });
+        const asked = { answers: got.answers, hits: effect.hits.map(h => h.id), ...(got.error && { error: got.error }) };
+        shift = Math.max(-1, Math.min(1, shift + effect.shift));
+        if (shift) base.effort = shift; else delete base.effort;
+        base.asked = asked;
+        if (effect.model) return { ...base, model: effect.model, tier: 'Question', reason: `Jev said yes to ${effect.by} (${Math.round(effect.hits.find(h => h.id === effect.by).p * 100)}%)` };
+    }
     try {
         const tokens = estimateTokens(body);
         // Effort moves the score; moving the threshold the other way makes the Router's own pick agree
@@ -395,8 +407,8 @@ async function forwardToRouter(req, res, routerPath) {
 // through here so it sits behind the same login. Starting, approving, stopping
 // and deleting runs are controls, so they get the same local-or-password check.
 const RUNNER_URL = (process.env.RUNNER_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
-// /ui/api/runs, /agents and /apps are the runner's /runs, /agents and /apps
-for (const part of ['runs', 'agents', 'apps']) {
+// /ui/api/runs, /agents, /tickets and /apps are the runner's /runs, /agents, /tickets and /apps
+for (const part of ['runs', 'agents', 'tickets', 'apps']) {
     app.use(`/ui/api/${part}`, (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
         const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
         try {
@@ -554,6 +566,24 @@ app.delete('/v1/run-keys/:id', localOnly, (req, res) => {
     const spent = runKeys.revoke(req.params.id);
     if (!spent) return res.status(404).json({ error: 'no such run key' });
     res.json(spent);
+});
+// Half-price batch calls (utils/openrouterBatch.js) for work that can wait: the task runner's
+// canWait stages use these. One request per batch; POST starts it, GET polls it.
+const batchClient = openrouterBatch.createBatchClient({ key: () => orAuth.key() });
+app.post('/v1/batch', async (req, res) => {
+    const { model, messages, max_tokens } = req.body || {};
+    if (typeof model !== 'string' || !Array.isArray(messages) || !messages.length) return res.status(400).json({ error: 'send model and messages' });
+    if (!batchModels.isBatch(model, batchModels.load())) return res.status(400).json({ error: `${model} is not listed in batch-models.json as a batch model` });
+    try {
+        const id = await batchClient.submit(model, [{ id: 'r1', body: { messages, ...(max_tokens ? { max_tokens } : {}) } }]);
+        res.status(202).json({ id });
+    } catch (err) { res.status(502).json({ error: err.message }); }
+});
+app.get('/v1/batch/:id', async (req, res) => {
+    try {
+        const b = await batchClient.get(req.params.id);
+        res.json({ status: b.status, done: b.done, error: b.error, result: b.results.r1 || null });
+    } catch (err) { res.status(502).json({ error: err.message }); }
 });
 app.post('/v1/guard', async (req, res) => {
     const { guardJev, guardAskAt, guardDenyAt } = settings.get();

@@ -1662,7 +1662,7 @@ function submit() {
   const asAdvice = advisorCommand(text);
   if (asAdvice) return asAdvice;
   // /subagent and /plan start a run of their own and send nothing to this chat
-  const asRun = subagentCommand(text);
+  const asRun = subagentCommand(text) || agentCommand(text);
   if (asRun) return asRun;
   // a command sends this one message to the command's model
   const slash = slashCommand(text);
@@ -1721,7 +1721,7 @@ function advisorCommand(text) {
 
 // ---------------------------------------------------------------------------
 // Subagents: hand one task to an agent of its own, on its own branch, while this
-// chat carries on. It is an ordinary run of the Runs page (so it has its own page
+// chat carries on. It is an ordinary run of the Agents page (so it has its own page
 // entry, approvals and diff), started from here with the chat's repo, routing and
 // effort, and a model of its own if one is named: "subagent [model] task". A
 // cheaper model is the point: the chat does the thinking, the subagent does the
@@ -1771,14 +1771,73 @@ function subagentCommand(text) {
       chat.draft = '';
       autoGrow();
       const what = plan ? 'Plan' : 'Subagent';
-      toast(`${what} started: ${run.id}${model ? ` on ${model}` : ''}. It runs on its own branch; open Runs to watch it.`);
+      toast(`${what} started: ${run.id}${model ? ` on ${model}` : ''}. It runs on its own branch; open Agents to watch it.`);
       // the chat itself says what it started, so the conversation keeps the thread
-      const note = { id: uid(), role: 'assistant', content: `*${what} started: \`${run.id}\`${model ? ` on \`${model}\`` : ''}${plan ? ', changing nothing' : `, on branch \`${run.branch}\``}. Watch it on the [Runs page](runs.html#${run.id}).*`, time: Date.now(), meta: { note: true } };
+      const note = { id: uid(), role: 'assistant', content: `*${what} started: \`${run.id}\`${model ? ` on \`${model}\`` : ''}${plan ? ', changing nothing' : `, on branch \`${run.branch}\``}. Watch it on the [Agents page](agents.html#${run.id}).*`, time: Date.now(), meta: { note: true } };
       c.messages.push(note);
       saveChat(c);
       if (chat === c) drawLog();
     } catch (err) {
       toast(err.message.includes('not running') ? 'The task runner is not running: start it with npm run all.' : `Could not start it: ${err.message}`);
+    }
+  })();
+}
+
+// "/agent [name] task": hand a task to a standing agent (Agents page). In a project
+// that is one of its linked agents; outside one, any agent. The task carries the tail of
+// this chat, so the agent knows what was being talked about, and the run remembers
+// the chat so the Agents page can link back.
+const AGENT_CONTEXT_MESSAGES = 6;
+function agentCommand(text) {
+  const m = /^\/agent(?:\s+([\s\S]*))?$/i.exec(String(text || '').trim());
+  if (!m) return null;
+  const typed = (m[1] || '').trim();
+  const c = chat;
+  return (async () => {
+    let agents;
+    try {
+      const res = await fetch('api/agents');
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      agents = body.agents;
+    } catch (err) {
+      toast(err.message.includes('not running') ? 'The task runner is not running: start it with npm run all.' : `Could not reach the agents: ${err.message}`);
+      return;
+    }
+    const proj = projectOf(c);
+    const pool = proj ? agents.filter(a => a.project?.id === proj.id) : agents;
+    if (!pool.length) {
+      toast(proj ? `No agent is linked to “${proj.name}”. Link one in the project settings, or make one on the Agents page.` : 'No agents yet. Make one on the Agents page.');
+      return;
+    }
+    // the longest agent name the text starts with; one agent in reach is used without being named
+    const lower = typed.toLowerCase();
+    const named = pool.filter(a => lower === a.name.toLowerCase() || lower.startsWith(`${a.name.toLowerCase()} `))
+      .sort((a, b) => b.name.length - a.name.length)[0];
+    const agent = named || (pool.length === 1 ? pool[0] : null);
+    const task = named ? typed.slice(named.name.length).trim() : typed;
+    if (!agent) {
+      toast(`Which agent? Type /agent NAME TASK. ${proj ? 'In this project' : 'Agents'}: ${pool.map(a => a.name).join(', ')}.`);
+      return;
+    }
+    if (!task) { toast(`Type /agent ${pool.length > 1 ? `${agent.name} ` : ''}TASK to hand ${agent.name} a task.`); return; }
+    const recent = c.messages.filter(x => (x.role === 'user' || x.role === 'assistant') && !x.meta?.note && typeof x.content === 'string' && x.content.trim())
+      .slice(-AGENT_CONTEXT_MESSAGES).map(x => `${x.role === 'user' ? 'User' : 'Assistant'}: ${x.content.trim().slice(0, 1500)}`);
+    const title = chatTitle(c);
+    const goal = recent.length ? `${task}\n\nContext, the latest messages of the chat “${title}” this task came from:\n\n${recent.join('\n\n')}` : task;
+    try {
+      const res = await fetch(`api/agents/${agent.id}/tasks`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ goal, source: { chat: { id: c.id, title } } }) });
+      const run = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(run.error || `HTTP ${res.status}`);
+      $('input').value = '';
+      chat.draft = '';
+      autoGrow();
+      toast(`${agent.name} has the task: ${run.id}. It builds on its earlier work; open Agents to watch it.`);
+      c.messages.push({ id: uid(), role: 'assistant', content: `*Handed to the agent **${agent.name}**: \`${run.id}\`${agent.active ? ' (it is busy, so this waits its turn)' : ''}. Follow it on the [Agents page](agents.html#${run.id}).*`, time: Date.now(), meta: { note: true } });
+      saveChat(c);
+      if (chat === c) drawLog();
+    } catch (err) {
+      toast(`Could not hand it over: ${err.message}`);
     }
   })();
 }
@@ -1928,7 +1987,8 @@ function commandItem(c) {
 // setting the advisor, and starting a subagent or a plan.
 const BUILTIN_COMMANDS = [
   { name: 'advisor', what: 'A better model this chat can ask for a second opinion', tag: 'set once', example: '/advisor opus' },
-  { name: 'subagent', what: 'Hand one task to an agent on its own branch, on a model of its own', tag: 'runs page', example: '/subagent haiku find the config loader' },
+  { name: 'subagent', what: 'Hand one task to an agent on its own branch, on a model of its own', tag: 'one-off run', example: '/subagent haiku find the config loader' },
+  { name: 'agent', what: 'Hand a task, with this chat for context, to a standing agent on the Agents page', tag: 'agents page', example: '/agent Docs keeper update the install steps' },
   { name: 'plan', what: 'An agent writes down what it would change, touching nothing', tag: 'no changes', example: '/plan how would you add a --version flag?' },
 ];
 function builtinItem(b) {
@@ -3318,6 +3378,7 @@ function openProjectDialog(id) {
   $('pSkills').innerHTML = skills.map(k => `<label class="check"><input type="checkbox" value="${k.id}"${on.has(k.id) ? ' checked' : ''}> ${esc(k.name)}</label>`).join('')
     || '<span class="muted small">No skills yet. Add them from the composer’s skills button.</span>';
   $('pDelete').hidden = !editingProject;
+  drawProjectAgents(p.id);
   if (editingProject) {
     const u = projectUsage(p.id);
     $('pUsage').innerHTML = `${u.chats} chat${u.chats === 1 ? '' : 's'} · ${fmtTok(u.input + u.output)} tokens (${fmtTok(u.input)} in, ${fmtTok(u.output)} out) · ${u.usd ? fmtUsd(u.usd) : 'free'}${u.priced ? '' : '+'}`;
@@ -3326,6 +3387,43 @@ function openProjectDialog(id) {
   $('pName').focus();
 }
 $('newProject').addEventListener('click', () => openProjectDialog(null));
+
+// Agents (the Agents page) linked to a project: the agent keeps the project's id and name,
+// so this list is read from the runner and saving updates the agents that changed.
+let projectAgents = null;   // null = the runner could not be reached
+async function drawProjectAgents(projectId) {
+  const box = $('pAgents');
+  projectAgents = null;
+  box.innerHTML = '<span class="muted small">Loading…</span>';
+  try {
+    const res = await fetch('api/agents');
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || '');
+    projectAgents = body.agents;
+  } catch {
+    box.innerHTML = '<span class="muted small">The task runner is not running, so agents can’t be linked now (npm run all starts it).</span>';
+    return;
+  }
+  box.innerHTML = projectAgents.map(a => {
+    const other = a.project && a.project.id !== projectId ? projects.find(x => x.id === a.project.id)?.name || a.project.name || 'another project' : '';
+    return `<label class="check" title="${esc(a.repo)}"><input type="checkbox" value="${esc(a.id)}"${projectId && a.project?.id === projectId ? ' checked' : ''}> ${esc(a.name)}${other ? ` <span class="muted small">(now in ${esc(other)})</span>` : ''}</label>`;
+  }).join('') || '<span class="muted small">No agents yet. Make one on the <a href="agents.html">Agents page</a>.</span>';
+}
+// link or unlink the agents ticked in the dialog (best effort: the project saves either way)
+async function saveProjectAgents(p) {
+  if (!projectAgents) return;
+  const want = new Set([...$('pAgents').querySelectorAll('input:checked')].map(i => i.value));
+  const patches = projectAgents.filter(a => {
+    const is = a.project?.id === p.id;
+    return want.has(a.id) ? (!is || a.project.name !== p.name) : is;
+  });
+  for (const a of patches) {
+    try {
+      const res = await fetch(`api/agents/${a.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: want.has(a.id) ? { id: p.id, name: p.name } : null }) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) { toast(`Could not update the agent ${a.name}: ${err.message}`); }
+  }
+}
 
 $('projectForm').addEventListener('submit', async (e) => {
   if (e.submitter?.value !== 'save') return;
@@ -3357,6 +3455,7 @@ $('projectForm').addEventListener('submit', async (e) => {
   if (route === 'model') p.model = $('pModel').value.trim(); else delete p.model;
   if (!editingProject) projects.push(p);
   saveProjects();
+  saveProjectAgents(p);
   $('projectDialog').close();
   if (!editingProject) {
     // a new project opens with a fresh chat in it
@@ -3377,6 +3476,8 @@ $('pDelete').addEventListener('click', () => {
   if (chat?.project === p.id) delete chat.project;
   projects = projects.filter(x => x.id !== p.id);
   saveProjects();
+  fetch('api/agents').then(r => r.json()).then(({ agents = [] }) => agents.filter(a => a.project?.id === p.id).forEach(a =>
+    fetch(`api/agents/${a.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: null }) }))).catch(() => {});
   if (scope === p.id) setScope('');
   $('projectDialog').close();
   drawSide(); drawRepo(); drawHint();
@@ -3947,7 +4048,17 @@ const linked = decodeURIComponent((location.hash.match(/^#chat=(.+)$/) || [])[1]
 if (linked) history.replaceState(null, '', location.pathname + location.search);
 let lastOpen = null;
 try { lastOpen = localStorage.getItem('harness-chat-open'); } catch {}
-openChat([linked, lastOpen].find(id => id && index.some(e => e.id === id)) || index[0]?.id);
+// chat.html#project=ID (an agent's project link) shows that project's chats
+const linkedProject = decodeURIComponent((location.hash.match(/^#project=(.+)$/) || [])[1] || '');
+let openProject = false;
+if (linkedProject && projects.some(x => x.id === linkedProject)) {
+  openProject = true;
+  scope = linkedProject;
+  store.set('harness-chat-scope', scope);
+  history.replaceState(null, '', location.pathname + location.search);
+}
+openChat(openProject ? index.find(e => e.project === scope)?.id
+  : [linked, lastOpen].find(id => id && index.some(e => e.id === id)) || index[0]?.id);
 drawSide();
 setTimeout(checkSchedules, 1500);
 connectLive();

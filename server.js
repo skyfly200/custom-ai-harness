@@ -368,18 +368,21 @@ async function forwardToRouter(req, res, routerPath) {
 // through here so it sits behind the same login. Starting, approving, stopping
 // and deleting runs are controls, so they get the same local-or-password check.
 const RUNNER_URL = (process.env.RUNNER_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
-app.use('/ui/api/runs', (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
-    const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
-    try {
-        const upstream = await fetch(`${RUNNER_URL}/runs${req.url === '/' ? '' : req.url}`, {
-            method: req.method, headers, signal: AbortSignal.timeout(60000),
-            ...(req.method === 'GET' ? {} : { body: JSON.stringify(req.body ?? {}) }),
-        });
-        res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(await upstream.text());
-    } catch (err) {
-        res.status(502).json({ error: `The task runner is not running (${err.cause?.code || err.message}). Start it with npm run all, or node runner/server.js.` });
-    }
-});
+// /ui/api/runs and /ui/api/agents are the runner's /runs and /agents
+for (const part of ['runs', 'agents']) {
+    app.use(`/ui/api/${part}`, (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
+        const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
+        try {
+            const upstream = await fetch(`${RUNNER_URL}/${part}${req.url === '/' ? '' : req.url}`, {
+                method: req.method, headers, signal: AbortSignal.timeout(60000),
+                ...(req.method === 'GET' ? {} : { body: JSON.stringify(req.body ?? {}) }),
+            });
+            res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(await upstream.text());
+        } catch (err) {
+            res.status(502).json({ error: `The task runner is not running (${err.cause?.code || err.message}). Start it with npm run all, or node runner/server.js.` });
+        }
+    });
+}
 app.post('/ui/api/router/backend', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/backend'));
 app.post('/ui/api/router/reload', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/reload'));
 app.post('/ui/api/router/config', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/config'));
@@ -508,7 +511,7 @@ async function askRouter(text, questions) {
     return body.answers;
 }
 // Workflows (workflows/*.json): the recipes the task runner follows. /pick asks
-// Jev which one fits a goal, so the Runs page can show it before the run starts.
+// Jev which one fits a goal, so the Agents page can show it before the run starts.
 app.get('/ui/api/workflows', (req, res) => {
     const { list, problems } = workflows.load();
     res.json({ workflows: list.map(({ id, name, when, fallback, stages }) => ({ id, name, when, fallback, stages: stages.map(({ id: sid, role, tools, effort, verdict }) => ({ id: sid, role, tools, effort, verdict })) })), problems });

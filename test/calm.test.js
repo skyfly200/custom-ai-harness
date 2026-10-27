@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ui = path.join(__dirname, '..', 'ui');
-const pages = ['chat', 'index', 'usage', 'routing', 'settings', 'runs'];
+const pages = ['chat', 'index', 'usage', 'routing', 'settings', 'agents'];
 
 test('every page loads the calm stylesheet, which only hides things on devices that can hover', () => {
   for (const p of pages) assert.match(fs.readFileSync(path.join(ui, `${p}.html`), 'utf8'), /href="calm\.css"/, p);

@@ -13,6 +13,7 @@ const { runAgent, systemFor } = require('./agent');
 const workflows = require('../utils/workflows');
 const swarm = require('./swarm');
 const { parseTickets } = require('./tickets');
+const { AgentStore } = require('./agents');
 
 const MAX_EVENTS = 2000;
 const EVENT_TEXT = 3000;
@@ -25,6 +26,7 @@ const DIAGNOSIS_CHARS = 6000; // how much of the failure a retry is told about
 const OUT_OF_LIMIT = new Set(['incomplete']);
 const PARTIAL_CHARS = 8000;   // how much of what it was saying when it ran out a continue is told
 const MAX_CONTINUES = 50;     // four times what a run of 200 steps and 240 minutes needs
+const AGENT_HISTORY = 6;      // how many of an agent's earlier tasks a new one is told about
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -123,6 +125,7 @@ class RunManager {
         this.live = new Map();      // id -> { sandbox, stop, resolve }
         this.queue = [];
         fs.mkdirSync(dir, { recursive: true });
+        this.agents = new AgentStore(path.join(dir, '_agents'));
         this.load();
     }
 
@@ -249,7 +252,7 @@ class RunManager {
         }
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
-            id, goal, repo, kind: isSwarm ? 'swarm' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
+            id, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, source: cfg.source || null, kind: isSwarm ? 'swarm' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             // Plan mode: the agent may read and search, but changes nothing. It
@@ -279,9 +282,17 @@ class RunManager {
     pump() {
         const working = () => [...this.live.values()].filter((l) => !l.swarm).length;
         // a swarm only waits for its workers, so it doesn't take a place from them
-        while (this.queue.length && (working() < this.maxRuns || this.runs.get(this.queue[0])?.kind === 'swarm')) {
-            const id = this.queue.shift();
-            const run = this.active.get(id) || this.runs.get(id);
+        // an agent's tasks go one at a time, since each starts from what the last one left
+        const agentBusy = (agentId) => agentId && [...this.live.keys()].some((k) => (this.active.get(k) || this.runs.get(k))?.agent === agentId);
+        for (;;) {
+            const at = this.queue.findIndex((id) => {
+                const r = this.active.get(id) || this.runs.get(id);
+                return !r || r.status !== 'queued' || !agentBusy(r.agent);
+            });
+            if (at < 0) return;
+            const run = this.active.get(this.queue[at]) || this.runs.get(this.queue[at]);
+            if (run?.status === 'queued' && working() >= this.maxRuns && run.kind !== 'swarm') return;
+            this.queue.splice(at, 1);
             if (run?.status === 'queued') this.execute(run).catch(() => {});
         }
     }
@@ -365,6 +376,7 @@ class RunManager {
     }
 
     async plainRun(run, live, nextN) {
+        if (run.agent && !run.base && !run.carriesOn) await this.startFromAgent(run);
         // a part carried on from an earlier one takes the branch as it stands, with that part's work on it
         live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind: run.sandbox || this.sandboxKind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
         const sandbox = live.sandbox;
@@ -418,9 +430,110 @@ class RunManager {
             // worktree stays, so the run page keeps working and its branch can still be inspected
             if (live.sandbox?.kind === 'e2b') live.sandbox.destroy().catch(() => {});
             else await live.sandbox?.close?.();
+            this.noteAgent(run);
             this.startAutoDebug(run);
             this.pump();
         }
+    }
+
+    // --- agents: long-lived, with tasks that build on each other ---------------------
+
+    /** The agent's tasks, newest first (a task being carried on is shown as its live part). */
+    tasksOf(agentId) {
+        return [...this.runs.values()].filter((r) => r.agent === agentId).map((r) => this.active.get(r.id) || r)
+            .sort((a, b) => b.created.localeCompare(a.created));
+    }
+
+    agentView(agent) {
+        const tasks = this.tasksOf(agent.id);
+        const active = tasks.filter((t) => ['queued', 'running', 'waiting'].includes(t.status));
+        return { ...agent, taskCount: tasks.length, active: active.length, waiting: active.some((t) => t.status === 'waiting'), lastTask: tasks[0] ? this.summary(tasks[0]) : null };
+    }
+
+    listAgents() { return this.agents.list().map((a) => this.agentView(a)); }
+
+    getAgent(id) {
+        const agent = this.agents.get(id);
+        if (!agent) return null;
+        return { ...this.agentView(agent), tasks: this.tasksOf(id).map((t) => this.summary(t)) };
+    }
+
+    createAgent(cfg) {
+        const repo = this.checkRepo(cfg?.repo);
+        return this.agentView(this.agents.create(cfg || {}, repo));
+    }
+
+    updateAgent(id, cfg) {
+        const repo = cfg?.repo !== undefined ? this.checkRepo(cfg.repo) : null;
+        return this.agentView(this.agents.update(id, cfg || {}, repo));
+    }
+
+    /** Delete an agent. Its tasks stay in the list as ordinary runs, and their branches stay in the repo. */
+    removeAgent(id) {
+        if (!this.agents.get(id)) throw new Error('no such agent');
+        if (this.tasksOf(id).some((t) => ['queued', 'running', 'waiting'].includes(t.status))) throw new Error('stop its tasks first');
+        for (const t of this.tasksOf(id)) {
+            const run = this.runs.get(t.id);
+            run.agent = null;
+            this.save(run);
+        }
+        this.agents.remove(id);
+    }
+
+    /** Give an agent a task: a run with the agent's repo, workflow, routing and effort. */
+    assign(agentId, cfg) {
+        const agent = this.agents.get(agentId);
+        if (!agent) throw new Error('no such agent');
+        const source = cfg?.source && typeof cfg.source === 'object'
+            ? { chat: cfg.source.chat ? { id: String(cfg.source.chat.id || '').slice(0, 80), title: String(cfg.source.chat.title || '').slice(0, 120) } : null } : null;
+        return this.create({
+            goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort,
+            maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined,
+            plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
+        });
+    }
+
+    /**
+     * Where an agent's next task starts: the commit its last finished task left, so the
+     * work builds up. If the repo has since taken that work in (merged it), or the commit
+     * is gone, it starts from the repo's current commit like any run.
+     */
+    async startFromAgent(run) {
+        const agent = this.agents.get(run.agent);
+        const git = (...args) => new Promise((resolve, reject) => execFile('git', ['-C', run.repo, ...args], (err, out) => (err ? reject(err) : resolve(out.trim()))));
+        if (!agent?.head) return;
+        try {
+            await git('rev-parse', '--verify', `${agent.head}^{commit}`);
+            const merged = await git('merge-base', '--is-ancestor', agent.head, 'HEAD').then(() => true, () => false);
+            if (merged) { this.event(run, { type: 'note', text: `${agent.name}'s earlier work is already in the repo; starting from its current commit.` }); return; }
+            run.base = agent.head;
+            this.event(run, { type: 'note', text: `Carrying on ${agent.name}'s work from ${agent.head.slice(0, 10)} (branch ${agent.branch}).` });
+        } catch {
+            this.event(run, { type: 'note', text: `${agent.name}'s earlier commit is no longer in the repo; starting from its current commit.` });
+        }
+    }
+
+    /** What the agent is, and what its earlier tasks did, as the start of a task. */
+    agentBrief(run) {
+        const agent = this.agents.get(run.agent);
+        if (!agent) return '';
+        const parts = [`You are ${agent.name}, a standing agent for this repo. Your work builds up over tasks: the workspace starts from what your earlier tasks committed, and you are told what they did.`];
+        if (agent.instructions) parts.push(`Your standing instructions:\n${agent.instructions}`);
+        const before = this.tasksOf(agent.id).filter((t) => t.id !== run.id && t.created < run.created && ['done', 'incomplete'].includes(t.status) && !t.plan).slice(0, AGENT_HISTORY).reverse();
+        if (before.length) {
+            parts.push(`Your earlier tasks, oldest first:\n${before.map((t) => `- ${short(t.goal.split('\n')[0], 200)} (${t.status}${t.result?.commit ? `, committed on ${t.branch}` : ''})${t.result?.summary ? `\n  ${short(t.result.summary, 500).replace(/\n/g, '\n  ')}` : ''}`).join('\n')}`);
+        }
+        return parts.join('\n\n');
+    }
+
+    /** A finished task moves its agent's head on, so the next task builds on it. */
+    noteAgent(run) {
+        const agent = run.agent && this.agents.get(run.agent);
+        if (!agent || run.status !== 'done' || !run.result?.commit || run.plan) return;
+        agent.head = run.result.commit;
+        agent.branch = run.branch;
+        agent.updated = new Date().toISOString();
+        this.agents.save(agent);
     }
 
     /** What the run being retried or debugged did and got wrong, for its successor. */
@@ -460,7 +573,7 @@ class RunManager {
         const retries = {};
         // a retry or a debug run is told what the attempt before it got wrong, and a part
         // carried on from one that ran out of steps or time is told where that part got to
-        const brief = !run.briefGiven ? (run.debugOf ? this.brief(run.debugOf) : String(run.resumeNote || '')) : '';
+        const brief = !run.briefGiven ? [run.agent ? this.agentBrief(run) : '', run.debugOf ? this.brief(run.debugOf) : String(run.resumeNote || '')].filter(Boolean).join('\n\n') : '';
         if (brief) run.briefGiven = true;
         let outcome = { status: 'finished', summary: '' };
         for (let i = 0; i < workflow.stages.length; i++) {
@@ -516,7 +629,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, test: from.test, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };

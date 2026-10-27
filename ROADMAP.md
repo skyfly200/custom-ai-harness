@@ -59,7 +59,7 @@ Agent runs can work in a Linux VM from [E2B](https://e2b.dev) instead of a workt
 * ✅ **Billing stops with the run:** the sandbox is killed when the run ends and when a restart finds a run that was in progress; `destroyById` covers one whose process died. `E2B_API_KEY` is never passed into the commands the agent runs (the trimmed env allowlist applies here too).
 * ✅ **Tests:** `test/e2bSandbox.test.js` covers the start point, the handed-back branch, an unchanged run, exit codes and timeouts, workspace bounds, a swarm merge, `createSandbox`'s choice and error, and a non-tip base, with a stand-in for `e2b` so it needs neither network nor key.
 * **Not done:** no real-key smoke test yet (mocked only), and `E2B_WORKDIR`/template choice is per-runner, not per-run.
-* ✅ **Terminal panel on the Runs page:** xterm.js (vendored in `ui/vendor/xterm/`) replays a run's commands and output as the page refreshes. **Not done:** an interactive shell in the sandbox, and streaming output while a long command is still running (it appears when the command ends).
+* ✅ **Terminal panel on the Agents page (formerly Runs):** xterm.js (vendored in `ui/vendor/xterm/`) replays a run's commands and output as the page refreshes. **Not done:** an interactive shell in the sandbox, and streaming output while a long command is still running (it appears when the command ends).
 
 ---
 

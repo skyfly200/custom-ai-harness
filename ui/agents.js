@@ -1,5 +1,6 @@
-// Runs page: start a task for an agent, watch it work, answer its questions
-// about risky commands, and look at what it changed.
+// Agents page: named, long-lived agents and their tasks, plus one-off runs. Start
+// a task, watch it work, answer its questions about risky commands, and look at
+// what it changed.
 'use strict';
 
 const $ = (id) => document.getElementById(id);
@@ -14,6 +15,8 @@ const NOTE_FOR = { done: 'finished', waiting: 'needs you' };
 
 let selected = location.hash.slice(1) || null;
 let runs = [];
+let agents = [];
+let agentSel = null;   // the agent whose tasks are shown, or null for every run
 let busy = false;
 let openDetails = new Set(); // which <details> are open, kept across redraws
 
@@ -23,6 +26,19 @@ async function api(path, options) {
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;
 }
+const agentApi = async (path, options) => {
+  const res = await fetch(`api/agents${path}`, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  return body;
+};
+const sendAgent = (method, path, body) => agentApi(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+const agentOf = (id) => agents.find((a) => a.id === id);
+// chat projects live in the browser; the agent keeps a project's id and name
+function chatProjects() {
+  try { const p = JSON.parse(localStorage.getItem('harness-projects')); return Array.isArray(p) ? p : []; } catch { return []; }
+}
+const projectName = (link) => chatProjects().find((p) => p.id === link.id)?.name || link.name || 'a project';
 const post = (path, body) => api(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
 
 function ago(iso) {
@@ -33,11 +49,15 @@ function ago(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
+const shown = () => (agentSel ? runs.filter((r) => r.agent === agentSel) : runs);
+
 function renderList() {
-  if (!runs.length) { $('list').innerHTML = '<p class="muted">No runs yet.</p>'; return; }
-  $('list').innerHTML = runs.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
+  const list = shown();
+  $('listTitle').textContent = agentSel ? `${agentOf(agentSel)?.name || 'Agent'}: tasks` : 'Runs';
+  if (!list.length) { $('list').innerHTML = `<p class="muted">${agentSel ? 'No tasks yet. Give it one above.' : 'No runs yet.'}</p>`; return; }
+  $('list').innerHTML = list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(NOTE_FOR[r.status] || r.status)}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(NOTE_FOR[r.status] || r.status)}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
 }
 
 function eventHtml(e) {
@@ -60,7 +80,7 @@ function eventHtml(e) {
 }
 
 function renderDetail(run) {
-  if (!run) { $('detail').innerHTML = '<p class="muted">Pick a run to see what the agent did.</p>'; return; }
+  if (!run) { $('detail').innerHTML = `<p class="muted">Pick a ${agentSel ? 'task' : 'run'} to see what the agent did.</p>`; return; }
   const active = ACTIVE.has(run.status);
   const r = run.result;
   const diffOpen = openDetails.has('diff');
@@ -68,6 +88,7 @@ function renderDetail(run) {
     <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
     <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}</div>
+    ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
     ${run.legs ? `<p class="muted">Carried on ${run.legs === 1 ? 'once' : `${run.legs} times`} after running out of ${run.outOfSteps ? 'steps' : 'time'}; every part worked on this one branch.</p>` : ''}
@@ -114,9 +135,12 @@ async function refresh() {
   if (busy) return;
   busy = true;
   try {
-    const list = await api('');
+    const [list, ag] = await Promise.all([api(''), agentApi('')]);
     $('down').hidden = true;
     runs = list.runs;
+    agents = ag.agents;
+    if (agentSel && !agentOf(agentSel)) agentSel = null;
+    renderAgents();
     renderList();
     if (selected) {
       const run = await api(`/${selected}`).catch(() => null);
@@ -144,6 +168,8 @@ $('list').addEventListener('click', (e) => {
 });
 
 $('detail').addEventListener('click', async (e) => {
+  const goAgent = e.target.closest('[data-agent]')?.dataset.agent;
+  if (goAgent) { e.preventDefault(); chooseAgent(goAgent); return; }
   const go = e.target.closest('[data-go]')?.dataset.go;
   if (go) { e.preventDefault(); selected = go; location.hash = go; openDetails = new Set(); renderList(); refresh(); return; }
   const act = e.target.closest('[data-act]')?.dataset.act;
@@ -190,8 +216,12 @@ $('newRun').addEventListener('submit', async (e) => {
       const pick = lastPick?.goal === body.goal ? lastPick : await pickWorkflow(body.goal);
       body.workflow = pick?.id || 'general';
     }
-    const run = await post('', body);
-    if (body.repo) { rememberRepo(body.repo); renderRecent(); }
+    let run;
+    if (agentSel) {
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}) };
+      run = await sendAgent('POST', `/${agentSel}/tasks`, task);
+    } else run = await post('', body);
+    if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
     selected = run.id; location.hash = run.id; openDetails = new Set();
     f.elements.goal.value = '';
     $('startMsg').textContent = '';
@@ -217,7 +247,7 @@ async function pickWorkflow(goal) {
 function schedulePick() {
   clearTimeout(pickTimer);
   const goal = $('newRun').elements.goal.value.trim();
-  if ($('workflow').value !== 'auto' || goal.length < 8) { $('pickNote').textContent = ''; return; }
+  if (agentSel || $('workflow').value !== 'auto' || goal.length < 8) { $('pickNote').textContent = ''; return; }
   pickTimer = setTimeout(() => pickWorkflow(goal).catch(() => {}), 700);
 }
 
@@ -236,6 +266,7 @@ async function initWorkflows() {
 const RECENT_KEY = 'harness-runs-recent-repos';
 let pickData = null;   // the folder listing shown in the dialog
 let pickRepo = '';     // the repo chosen in the dialog
+let pickInto = null;   // the input the chosen repo goes into
 
 function recentRepos() {
   try { const r = JSON.parse(localStorage.getItem(RECENT_KEY)); return Array.isArray(r) ? r.filter((x) => typeof x === 'string') : []; } catch { return []; }
@@ -292,7 +323,9 @@ async function initRepoPicker() {
   if (!$('repo').value && last) $('repo').value = last;
   renderRecent(repos);
   $('recent').addEventListener('click', (e) => { const b = e.target.closest('[data-repo]'); if (b) $('repo').value = b.dataset.repo; });
-  $('browse').addEventListener('click', () => { $('picker').showModal(); pickerGo($('repo').value.trim(), true); });
+  const browseFor = (input) => { pickInto = input; $('picker').showModal(); pickerGo(input.value.trim(), true); };
+  $('browse').addEventListener('click', () => browseFor($('repo')));
+  $('agentBrowse').addEventListener('click', () => browseFor($('agentRepo')));
   $('pickClose').addEventListener('click', () => $('picker').close());
   $('pickFilter').addEventListener('input', () => pickData && renderPicker());
   $('crumbs').addEventListener('click', (e) => { if (e.target.closest('[data-dir]')) pickerGo(''); });
@@ -303,7 +336,7 @@ async function initRepoPicker() {
   });
   $('pickList').addEventListener('dblclick', (e) => { const row = e.target.closest('.pick-row'); if (row && row.dataset.git === '1') pickerGo(row.dataset.dir); });
   $('pickList').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.closest('.pick-row')?.click(); });
-  $('pickUse').addEventListener('click', () => { $('repo').value = pickRepo; $('picker').close(); });
+  $('pickUse').addEventListener('click', () => { (pickInto || $('repo')).value = pickRepo; $('picker').close(); });
 }
 
 async function init() {
@@ -313,7 +346,118 @@ async function init() {
     const { profiles } = await (await fetch('api/profiles')).json();
     $('newRun').elements.profile.insertAdjacentHTML('beforeend', profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('') + '<option value="auto">Jev picks (auto)</option>');
   } catch { /* the default routing is enough */ }
-  refresh();
+  await initAgentDialog();
+  const first = location.hash.slice(1);
+  if (first.startsWith('a')) { selected = null; agentSel = first; }
+  await refresh();
+  // a run's link opens on the agent it belongs to
+  if (selected && !agentSel) agentSel = runs.find((r) => r.id === selected)?.agent || null;
+  applyMode();
+  renderAgents(); renderList();
   setInterval(refresh, 1500);
 }
 init();
+
+// ---------------------------------------------------------------------------
+// Agents: a bar to pick one, its details, and the dialog to make or edit one
+// ---------------------------------------------------------------------------
+function renderAgents() {
+  const chip = (a) => `<button type="button" class="agent-chip${agentSel === a.id ? ' on' : ''}" data-aid="${esc(a.id)}" title="${esc(a.repo)}">${a.active ? `<i class="dot${a.waiting ? ' warn' : ''}" title="${a.waiting ? 'Needs you' : 'Working'}"></i>` : ''}${esc(a.name)}</button>`;
+  $('agentChips').innerHTML = `<button type="button" class="agent-chip${agentSel ? '' : ' on'}" data-aid="">All runs</button>${agents.map(chip).join('')}<button type="button" class="chip" id="newAgent" data-hint="Make a named agent for a repo that keeps working on it task after task">+ New agent</button>`;
+  const a = agentOf(agentSel);
+  $('agentInfo').hidden = !a;
+  if (a) {
+    $('agentInfo').innerHTML = `<div class="facts"><span>Repo <code>${esc(a.repo)}</code></span><span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}<span>${a.taskCount} task${a.taskCount === 1 ? '' : 's'}</span>${a.project ? `<span>Chat project <a href="chat.html#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+      ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
+      <div class="actions"><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
+  }
+}
+
+// the form is for one-off runs, or for a task of the selected agent
+function applyMode() {
+  const f = $('newRun');
+  const a = agentOf(agentSel);
+  for (const el of f.querySelectorAll('.oneoff')) {
+    el.hidden = Boolean(a) || (el.id === 'ticketsField' && $('workflow').value !== 'swarm');
+    for (const input of el.querySelectorAll('input, select, textarea')) input.disabled = Boolean(a);
+  }
+  $('formTitle').textContent = a ? `Give ${a.name} a task` : 'Start a run';
+  $('startBtn').textContent = a ? 'Give task' : 'Start run';
+  f.elements.goal.placeholder = a ? 'What should it do next? It starts from what its last task committed.' : 'Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI';
+  if (a) $('pickNote').textContent = '';
+}
+
+function chooseAgent(id) {
+  agentSel = id || null;
+  selected = null;
+  location.hash = agentSel || '';
+  openDetails = new Set();
+  applyMode(); renderAgents(); renderList(); renderDetail(null); drawTerminal(null);
+}
+$('agentChips').addEventListener('click', (e) => {
+  if (e.target.closest('#newAgent')) return openAgentDialog(null);
+  const b = e.target.closest('[data-aid]');
+  if (b) chooseAgent(b.dataset.aid);
+});
+$('agentInfo').addEventListener('click', async (e) => {
+  const act = e.target.closest('[data-aact]')?.dataset.aact;
+  const a = agentOf(agentSel);
+  if (!act || !a) return;
+  if (act === 'edit') return openAgentDialog(a);
+  if (act === 'delete') {
+    if (!confirm(`Delete the agent “${a.name}”? Its tasks stay in the list as ordinary runs, and their branches stay in your repo.`)) return;
+    try { await sendAgent('DELETE', `/${a.id}`); chooseAgent(null); refresh(); } catch (err) { alert(err.message); }
+  }
+});
+
+let editingAgent = null;
+async function initAgentDialog() {
+  const f = $('agentForm');
+  $('agentClose').addEventListener('click', () => $('agentDialog').close());
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(f));
+    const link = chatProjects().find((p) => p.id === body.project);
+    body.project = link ? { id: link.id, name: link.name } : (body.project && editingAgent?.project?.id === body.project ? editingAgent.project : null);
+    for (const k of ['maxSteps', 'maxMinutes']) if (body[k] === '') body[k] = null;
+    $('agentMsg').textContent = 'Saving…';
+    try {
+      const saved = editingAgent ? await sendAgent('PATCH', `/${editingAgent.id}`, body) : await sendAgent('POST', '', body);
+      $('agentMsg').textContent = '';
+      $('agentDialog').close();
+      if (body.repo) { rememberRepo(body.repo); renderRecent(); }
+      await refresh();
+      chooseAgent(saved.id);
+    } catch (err) { $('agentMsg').textContent = err.message; }
+  });
+  try {
+    const { workflows } = await (await fetch('api/workflows')).json();
+    $('agentWorkflow').innerHTML = workflows.map((w) => `<option value="${esc(w.id)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join('');
+  } catch { $('agentWorkflow').innerHTML = '<option value="general">Do the task</option>'; }
+  try {
+    const { profiles } = await (await fetch('api/profiles')).json();
+    $('agentProfile').insertAdjacentHTML('beforeend', profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('') + '<option value="auto">Jev picks (auto)</option>');
+  } catch { /* the default routing is enough */ }
+}
+
+function openAgentDialog(agent) {
+  editingAgent = agent;
+  const f = $('agentForm');
+  $('agentDialogTitle').textContent = agent ? `Edit ${agent.name}` : 'New agent';
+  $('agentMsg').textContent = '';
+  const projects = chatProjects();
+  const linked = agent?.project && !projects.some((p) => p.id === agent.project.id) ? [{ id: agent.project.id, name: `${agent.project.name || 'A project'} (not in this browser)` }] : [];
+  $('agentProject').innerHTML = '<option value="">None</option>' + [...projects, ...linked].map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  const v = agent || { name: '', repo: recentRepos()[0] || '', instructions: '', workflow: 'general', profile: '', effort: '', maxSteps: '', maxMinutes: '', project: null };
+  f.elements.name.value = v.name;
+  f.elements.repo.value = v.repo;
+  f.elements.instructions.value = v.instructions || '';
+  f.elements.workflow.value = v.workflow || 'general';
+  f.elements.profile.value = v.profile || '';
+  f.elements.effort.value = v.effort || '';
+  f.elements.maxSteps.value = v.maxSteps ?? '';
+  f.elements.maxMinutes.value = v.maxMinutes ?? '';
+  f.elements.project.value = v.project?.id || '';
+  $('agentDialog').showModal();
+  f.elements.name.focus();
+}

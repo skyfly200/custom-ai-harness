@@ -3,8 +3,8 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-const pages = { 'index.html': 'Dashboard', 'chat.html': 'Chat', 'usage.html': 'Usage', 'routing.html': 'Routing', 'runs.html': 'Runs', 'settings.html': 'Settings' };
-const ORDER = ['Dashboard', 'Chat', 'Usage', 'Routing', 'Runs', 'Settings'];
+const pages = { 'index.html': 'Dashboard', 'chat.html': 'Chat', 'usage.html': 'Usage', 'routing.html': 'Routing', 'agents.html': 'Agents', 'settings.html': 'Settings' };
+const ORDER = ['Dashboard', 'Chat', 'Usage', 'Routing', 'Agents', 'Settings'];
 
 test('every page shows the same nav links in the same order, current one marked in place', () => {
   for (const [file, name] of Object.entries(pages)) {

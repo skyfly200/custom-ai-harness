@@ -1,4 +1,4 @@
-/* Runs page (runs.html) */
+/* Agents page (agents.html) */
 .notice { color: var(--warn); border-color: var(--warn); }
 #newRun .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 10px; }
 #newRun .field.wide textarea { width: 100%; resize: vertical; font: inherit; }
@@ -58,3 +58,20 @@
 .termpanel > summary { cursor: pointer; font-weight: 600; }
 .termhost { margin-top: 10px; height: 320px; border-radius: 8px; overflow: hidden; background: #0b0a14; padding: 8px 4px 4px 8px; }
 .termhost .xterm-viewport { overscroll-behavior: contain; }
+
+/* Agents */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.agent-chip { margin: 0; padding: 4px 12px; border-radius: 999px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.agent-chip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.agent-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.agent-chip .dot.warn { background: var(--warn); }
+.agent-info { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; }
+.agent-info .facts { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); margin-bottom: 8px; }
+.agent-info .instr { white-space: pre-wrap; margin: 6px 0 10px; }
+.agent-info .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.agentdlg form { display: grid; gap: 10px; }
+.agentdlg textarea { width: 100%; resize: vertical; font: inherit; }
+.agentdlg .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.agentdlg { width: min(640px, calc(100vw - 32px)); overflow: auto; }
+#newRun .oneoff[hidden] { display: none; }
+.run-item .agent-tag { color: var(--accent); }

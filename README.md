@@ -424,6 +424,35 @@ ANTHROPIC_API_KEY=your_anthropic_key   # optional
 
 `HARNESS_PASSWORD` is optional on your own PC and required by the Docker setup. When set, every page and API asks for it: browsers show a login box (any user name), and agents send it as their API key (`Authorization: Bearer`, `x-api-key`) or in an `x-harness-password` header. The harness doesn't pass it on to the Gateway. It also lets the Settings page's controls work from other machines, which otherwise answer only on the machine the harness runs on.
 
+### OpenRouter without a long-lived key (workload identity federation)
+
+If your OpenRouter organization is on the Business or Enterprise plan, you can skip `OPENROUTER_API_KEY` and let the harness sign in the way [OpenRouter's workload identity federation](https://openrouter.ai/docs/guides/overview/auth/workload-identity-federation) describes: it sends a JWT from your own identity provider (a CI job, a Kubernetes service account, a cloud service account) to OpenRouter and gets back an access token that lasts 15 minutes. The harness asks for a new one a minute before it runs out, so a key that expires or leaks stops being a problem. The static key still works; federation is used only when `OPENROUTER_FEDERATION_POLICY_ID` is set (and then `OPENROUTER_API_KEY` is ignored).
+
+**In OpenRouter** (an org admin, Settings → Workload identity): add your identity provider as an *issuer*, then add a *policy* with the audience your JWT carries, a subject or CEL condition, and the workspace API key it should act as. Copy the policy's id.
+
+**In `.env`:**
+
+```
+OPENROUTER_FEDERATION_POLICY_ID=the-policy-id
+# and exactly one way to get the identity provider's JWT:
+OPENROUTER_FEDERATION_TOKEN_FILE=/var/run/secrets/tokens/openrouter   # re-read on every renewal
+# OPENROUTER_FEDERATION_TOKEN_URL=http://metadata.google.internal/...  # a URL that returns the JWT, bare or as JSON
+# OPENROUTER_FEDERATION_TOKEN_HEADERS=Metadata-Flavor: Google          # headers for that URL
+# OPENROUTER_FEDERATION_TOKEN_COMMAND=my-idp-cli print-token           # a command that prints the JWT
+```
+
+Restart everything. The Interceptor does the exchange and uses the token for the model picker, read-aloud and prices. The Gateway (LiteLLM) and the Router (Jev) can only hold a fixed key, so with federation on they call OpenRouter through the Interceptor's `/openrouter-proxy`, which adds the current token. They prove themselves to it with `OPENROUTER_PROXY_KEY`, or `LITELLM_MASTER_KEY` when that is set; `npm run all` makes a random one if neither is. `GET /ui/api/status` shows `openrouter: { mode: "federation", ok, expiresInSec }` (never the token), and a failed exchange is logged with OpenRouter's reason (for example `invalid_grant: policy paused`).
+
+**With Docker:** nothing else to change in `docker-compose.yml`; the Gateway and Router already reach the harness at `http://harness:3000` (`OPENROUTER_PROXY_URL` changes that). The harness container must be able to read the JWT, so use a file in a folder it has, such as `data/`:
+
+```
+OPENROUTER_FEDERATION_TOKEN_FILE=/app/data/idp-token
+```
+
+and have your identity provider's agent (or a cron job) write the JWT to `./data/idp-token`. `TOKEN_COMMAND` runs inside the container, where your tools aren't, so prefer a file or a URL there. Then `docker compose up -d --build`.
+
+Not covered: the Router's own `OPENROUTER_API_KEY` is only swapped for URLs on `openrouter.ai`; an `ROUTER_BASE_URL` pointing at your own Laya server is untouched.
+
 ### Named logins with admins (`HARNESS_REQUIRE_LOGIN`)
 
 For more than one person, or to give each program its own key, turn on logins. This replaces the single shared password: every page, `/ui/api` and `/v1` request then needs a signed-in user.
@@ -879,7 +908,9 @@ The chat page can give the model tools. While it answers, the model can call the
 
 **Link a chat to a git repo.** Under Options → Tools, type the path of a folder inside a git repo on this computer (for example `C:\Users\you\code\my-project`) and press **Link**. Each chat has its own link. The model then gets read-only tools to list, read and search the repo's files (`git grep`), and to look at `git status`, the log, diffs and single commits. It can't change files, commit or push. Files that `.gitignore` covers are not listed, paths outside the repo and the `.git` folder are refused, and git must be installed.
 
-**MCP servers.** Copy `mcp-servers.example.json` to `mcp-servers.json` next to `server.js` and list your servers. The layout is the same as Claude Code's `.mcp.json`, so you can copy entries from there:
+**MCP servers, from the page.** Open **Tools** (a link on the Settings page, or Manage in the chat Options). **Add a server** takes a program (`npx`/`uvx` command, arguments, environment variables) or a web address (HTTP or SSE, with headers). **Test connection** connects without saving and lists the tools, or says what is wrong (for example that `uvx` isn't installed). **Popular servers** adds Memory, Fetch, Playwright and others in one click, or opens the form filled in for ones that need a folder or a key. Each server has an on/off switch and a tick per tool, so the model is offered only what you leave on. Saved values of environment variables and headers are never shown again (type a new one to replace it), and `${NAME}` references are shown as they are. Only admins, or this machine, can change servers, because a program server runs a command here. The page edits `mcp-servers.json`, so everything below still applies.
+
+**MCP servers, from the file.** Copy `mcp-servers.example.json` to `mcp-servers.json` next to `server.js` and list your servers. The layout is the same as Claude Code's `.mcp.json`, so you can copy entries from there:
 
 ```json
 {
@@ -893,7 +924,7 @@ The chat page can give the model tools. While it answers, the model can call the
 - A server with a `command` is started by the Interceptor and talks over stdio. One with a `url` is reached over HTTP (`"type": "http"`, the default for a `url`) or SSE (`"type": "sse"`).
 - `${NAME}` and `${NAME:-default}` are filled in from your environment and `.env`, so keys can stay in `.env`. `${HOME}` is your home folder (also on Windows) and `${HARNESS_DIR}` is this repo's folder. A `${NAME}` with no value and no default stops that server with a message naming it. `mcp-servers.json` is gitignored anyway.
 - The example file works as it is: `filesystem` (your `Documents` folder; change the path, and the folder must exist) and `jev-files` (needs the harness running) are on, `fetch` (needs [uv](https://docs.astral.sh/uv/)) and `github` (needs `GITHUB_TOKEN` in `.env`) are off until you remove `"disabled"`. Servers start in the repo folder, so `scripts/jev-files-mcp.js` needs no full path, and they get your whole environment (proxy and npm settings included). If a program such as `npx` or `uvx` isn't installed, the error says which one to install.
-- `"disabled": true` keeps a server listed but not started.
+- `"disabled": true` keeps a server listed but not started. `"disabledTools": ["name", ...]` leaves those tools of a running server out of the chat (the Tools page's ticks).
 - Slow or failing servers: each server connects on its own, so one that fails never holds up the others. Servers started with `npx`, `uvx` or `docker` get 120 s to connect (they download the package the first time) and one more try after a timeout; others get 30 s and no retry. Change this per server with `"timeoutMs"` (connect and list tools), `"retries"` (more tries after a timeout) and `"callTimeoutMs"` (one tool call, 120 s by default). A failed server's error says what to do: a timeout says to run its command once in a terminal to warm the cache, a 404 means the `url` is wrong or the service was removed (fix it or set `"disabled": true`), 401/403 means check its `headers`.
 - You don't need an MCP entry for Artificial Analysis: model ratings come from `ARTIFICIAL_ANALYSIS_API_KEY` in `.env`.
 - The Interceptor connects when it starts and prints each server's state. Options → Tools lists them with their tool counts and any start-up error. Untick a server to leave its tools out of your chats. Press **Reload** after editing the file.

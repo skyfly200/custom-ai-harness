@@ -2227,7 +2227,7 @@ function drawTools() {
   });
   if (toolInfo?.error) rows.unshift(`<li class="err">${esc(toolInfo.error)}</li>`);
   $('mcpList').innerHTML = rows.join('') || (toolInfo
-    ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. Add them to <code>${esc(toolInfo.file?.split(/[\\/]/).pop() || 'mcp-servers.json')}</code>.</li>`
+    ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. <a href="tools.html">Add one</a> on the Tools page.</li>`
     : '<li class="err">Could not reach the harness.</li>');
 }
 

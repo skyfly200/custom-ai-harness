@@ -64,6 +64,17 @@ function buildCommands(opts = {}) {
         { name: 'runner',      command: 'node runner/server.js', prefixColor: 'blue' },
     ];
 
+    // Federation: the Gateway calls OpenRouter through the Interceptor, which holds the short-lived tokens
+    if (env.OPENROUTER_FEDERATION_POLICY_ID && env.OPENROUTER_FEDERATION_POLICY_ID.trim()) {
+        const key = env.OPENROUTER_PROXY_KEY || env.LITELLM_MASTER_KEY;
+        const gateway = commands[0];
+        gateway.env = {
+            ...gateway.env,
+            OPENROUTER_API_KEY: key,
+            OPENROUTER_API_BASE: `${(env.OPENROUTER_PROXY_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '')}/openrouter-proxy/v1`,
+        };
+    }
+
     if (wantsOllama(argv, env)) {
         if (opts.ollamaRunning) warnings.push('Ollama is already running, so it is not started again.');
         else commands.push({ name: 'ollama', command: 'ollama serve', prefixColor: 'yellow' });
@@ -89,6 +100,10 @@ async function main() {
     const argv = process.argv.slice(2);
     // The Interceptor and the task runner share this, so nothing else on this machine can drive the runner
     if (!process.env.RUNNER_TOKEN) process.env.RUNNER_TOKEN = require('crypto').randomBytes(16).toString('hex');
+    // Only the Interceptor, Gateway and Router know it
+    if (process.env.OPENROUTER_FEDERATION_POLICY_ID && !process.env.OPENROUTER_PROXY_KEY && !process.env.LITELLM_MASTER_KEY) {
+        process.env.OPENROUTER_PROXY_KEY = require('crypto').randomBytes(16).toString('hex');
+    }
     const running = wantsOllama(argv, process.env) && await ollamaRunning(process.env);
     const { commands, warnings } = buildCommands({ argv, ollamaRunning: running });
     for (const w of warnings) console.log(`[start-all] ${w}`);

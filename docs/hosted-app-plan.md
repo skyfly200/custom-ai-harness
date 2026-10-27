@@ -55,7 +55,7 @@ Fly runs a Docker image as a Machine (a small VM) with https in front. It has no
 
 - One image with Node, the Python venv (LiteLLM and the Router), started by `scripts/start-all.js`, which already starts all three in order from one window. Memory was measured at about 425 MB, so **shared-cpu-1x / 1 GB** fits with room for a few chats; 512 MB is too tight.
 - Only the Interceptor listens on the public port (`internal_port = 3000`); Gateway and Router bind to 127.0.0.1 inside the Machine. No private-network wiring, no shared secrets between Machines, no cross-Machine latency.
-- `min_machines_running = 1` and **no auto-stop**. Auto-stop would kill chat keep-alive pings, schedules, live SSE and in-flight streams.
+- **Sleeps when idle at first** (Skyler's ask, 2026-10-27; see [Start and stop to save cost](#start-and-stop-to-save-cost)). Once schedules and keep-alive pings run on the server (PR 10) it should stay on, with `min_machines_running = 1`.
 - One region, close to Skyler. Fly's Machines are per region; Neon's region should be the same one (or nearest), because every chat save is a database round trip.
 - **Why not three Machines now?** Fly can run Gateway, Router and Interceptor as separate Machines (separate apps or process groups, talking over the private `.internal` network). That gives independent restarts, which matters because a model-list change needs a Gateway restart (the Routing page notes this). It costs about 3x the base price and adds three more places for things to go wrong. Do it when the Gateway restart is a real annoyance or memory grows.
 - One Dockerfile for Fly is a new file; the compose images stay for self-hosting.
@@ -84,6 +84,22 @@ Fly runs a Docker image as a Machine (a small VM) with https in front. It has no
 
 Non-secret settings (`HARNESS_MODE`, `STRONG_MODEL` and the other `.env` launch settings from PR #47) go in the `[env]` block of `fly.toml`. Setting them there means they win over the dashboard at start, as documented.
 
+### Start and stop to save cost
+
+Asked for on 2026-10-27: let the UI start and stop the Fly server so it costs nothing while unused.
+
+**What a stopped Machine costs.** Per [Fly's pricing page](https://docs.fly.io/about/pricing), Machines are billed by the second while running, so a stopped one adds no CPU or memory charge. The volume ($0.15 a month per GB) is billed even when the Machine is stopped. I did not confirm whether Fly also bills stopped Machines for their root disk; check the invoice after a week. Neon already sleeps by itself, so nothing to do there. Used a few hours a day, the Machine cost drops from about $6.70 to roughly $1 to $2 a month.
+
+**The catch.** A button in the harness UI can't start the harness, because when the Machine is stopped there is no UI to click. Starting has to come from somewhere that is always on. Three ways, in the order I'd do them:
+
+1. **Fly starts it for you (recommended first step).** Fly's proxy can start a stopped Machine when a request arrives and stop it again after it has been idle for a while (`auto_start_machines = true`, `auto_stop_machines = "stop"`, `min_machines_running = 0` in `fly.toml`). Opening the app's address on your phone, or a request from Claude Code, is the start button. No new code and no extra service. The first request waits while the Machine boots and LiteLLM starts; I'd guess 10 to 30 seconds, not measured, so the first Claude Code call may need a retry.
+2. **A Stop button in the UI.** An admin-only "Stop server" on the Dashboard, with a confirm. It asks Fly's Machines API to stop this Machine, which needs a Fly token as a secret (`fly tokens create deploy` limited to this app). The page shows "stops itself after N idle minutes" (`HARNESS_IDLE_STOP_MIN`, off by default). The app, not Fly's proxy, decides when it is idle, because it knows things the proxy can't: a streaming reply, a Run in progress, or an unanswered approval keep it awake. It refuses to stop (and says why) while any of those exist. Fly's own idle stop stays on as a backstop only if the app's own check is off.
+3. **A Start button on an always-on page (only if 1 feels clumsy).** A tiny separate page, for example on Cloudflare Pages or Vercel's free tier, that signs you in (GitHub, your login only) and calls the Machines API to start the Machine, then shows its status and forwards you when it is up. It holds the Fly token, so it must never run in the browser. This is a second thing to host and secure, so only build it if opening the address is not good enough.
+
+**What doesn't work while it sleeps:** schedules, keep-alive pings, anything that must happen with no one there. Show a plain note on the Schedules page ("runs only while the server is awake") until PR 10 moves them to the server and the Machine stays on. Chat history is safe either way because it lives in Neon.
+
+**Safety:** the Fly token can start, stop and delete Machines in that app, so it lives only in `fly secrets`, is scoped to one app, and the Stop route is admin-only and logged. Auto-stopping during a deploy is not a problem; `fly deploy` starts the Machine.
+
 ### Traffic, https and headers
 
 - Fly terminates https and forwards with `X-Forwarded-For` / `Fly-Client-IP`. `utils/access.js` already treats proxied requests as non-local, so the local-only controls never open to the internet. Needed changes: `app.set('trust proxy', 1)` so rate limits key on the real client address and cookies get `Secure`, and `force_https = true`.
@@ -93,7 +109,7 @@ Non-secret settings (`HARNESS_MODE`, `STRONG_MODEL` and the other `.env` launch 
 
 ### Rough monthly cost
 
-Fly Machine about $6.70 + volume $0.15 + traffic (outbound is billed, and that includes every request the Machine forwards to OpenRouter; Claude Code requests are 100 KB to 1 MB each, so heavy use is a few GB a month, about $0.02 per GB) = **about $7 to $9**. Neon Free: $0. Auth: $0. Model spend on OpenRouter is the real cost and is the reason for per-user limits below. I did not check the price of a dedicated IPv4 address; a shared one is free per Fly's page.
+Fly Machine about $6.70 if left running all month (much less if it sleeps; see above) + volume $0.15 + traffic (outbound is billed, and that includes every request the Machine forwards to OpenRouter; Claude Code requests are 100 KB to 1 MB each, so heavy use is a few GB a month, about $0.02 per GB) = **about $7 to $9**. Neon Free: $0. Auth: $0. Model spend on OpenRouter is the real cost and is the reason for per-user limits below. I did not check the price of a dedicated IPv4 address; a shared one is free per Fly's page.
 
 ## Neon
 
@@ -209,7 +225,8 @@ Each is a separate PR that works on its own and keeps the local, no-database set
 
 1. **Plan** (this document).
 2. **Database layer.** `utils/db.js`, `migrations/`, `npm run migrate`, `DATABASE_URL` optional. A `PgStore` for users, API keys and sessions behind the existing `Store` interface, with sessions in the database. Tests against a throwaway Postgres (Docker, or Neon branch in CI; the repo has no CI today, so local first). Hosted mode off by default.
-3. **Fly deploy.** `Dockerfile.fly`, `fly.toml`, secrets list, volume, `trust proxy`, health check, `docs/fly.md` with step by step commands for Windows. Usable immediately with the current named logins. This is the first point where Skyler can reach it from a phone without Tailscale or a tunnel.
+3. **Fly deploy.** (With `auto_start_machines`/`auto_stop_machines` set, so it sleeps when idle from day one.) `Dockerfile.fly`, `fly.toml`, secrets list, volume, `trust proxy`, health check, `docs/fly.md` with step by step commands for Windows. Usable immediately with the current named logins. This is the first point where Skyler can reach it from a phone without Tailscale or a tunnel.
+3a. **Stop button and idle stop.** Admin-only Stop on the Dashboard (Fly Machines API with a scoped token), `HARNESS_IDLE_STOP_MIN`, an idle check that sees streams, Runs and pending approvals. Optional later: the always-on Start page.
 4. **Chats in the database (text only).** Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import". Attachments are not part of it.
 5. **OAuth sign-in.** GitHub and Google, `identities`, invite-only users page, `HARNESS_ADMIN_EMAILS`, account page (link or unlink providers, make API keys), sign-in page buttons.
 6. **Per-user settings, routings and MCP.** Global versus user split, encrypted MCP secrets, hosted lockdown for stdio MCP and shells.
@@ -233,6 +250,7 @@ Steps 3 and 4 can swap if you would rather have chats in the database before the
 
 - Users are **invited**, not open sign-up (Skyler, 2026-10-27).
 - **Bring your own OpenRouter credential**, with OpenRouter workload identity federation as the keyless option (Skyler, 2026-10-27).
+- **Start and stop to save cost:** the server sleeps when idle; Fly wakes it on a request, and the UI gets a Stop button (Skyler, 2026-10-27).
 - **Attachments are a separate goal** from text chats (PR 9 above).
 
 ## Open questions for Skyler
@@ -245,5 +263,6 @@ Steps 3 and 4 can swap if you would rather have chats in the database before the
 6. **Region and domain:** which Fly region (closest to where you are), and do you have a domain name for the app? A `*.fly.dev` address works without one; OAuth callbacks and the OIDC issuer URL need a stable https address.
 7. **MCP and shell for other users:** remote MCP servers only for non-admins, with stdio and shell for you alone. OK?
 8. **Runs:** hidden until PR 11, or earlier than attachments and WIF?
-9. **Neon plan:** Free to start (sleeps after 5 idle minutes), or Launch from day one?
-10. **Existing chats:** import from the browser you use now, and keep localStorage working offline when no database is set (the plan says yes)?
+9. **Start and stop:** is "open the address to wake it, plus a Stop button and idle stop" enough, or do you also want a Start button on a separate always-on page? How many idle minutes before it sleeps (I'd say 30)?
+10. **Neon plan:** Free to start (sleeps after 5 idle minutes), or Launch from day one?
+11. **Existing chats:** import from the browser you use now, and keep localStorage working offline when no database is set (the plan says yes)?

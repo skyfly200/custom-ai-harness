@@ -112,8 +112,9 @@ class RunManager {
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, autoDebug = false, sandbox = 'local' }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoDebug = false, sandbox = 'local' }) {
         this.pollMs = pollMs;
+        this.batchPollMs = batchPollMs; // how often a waiting batch stage asks whether its batch is done
         this.dir = dir;
         this.roots = roots.map((r) => { try { return fs.realpathSync(r); } catch { return path.resolve(r); } });
         this.harnessUrl = harnessUrl.replace(/\/$/, '');
@@ -343,7 +344,7 @@ class RunManager {
             try {
                 const res = await fetch(`${this.harnessUrl}/v1/chat/completions`, {
                     method: 'POST', headers: this.headers(run, n, stageModel), signal: AbortSignal.timeout(6 * 60 * 1000),
-                    body: JSON.stringify({ model: 'auto', messages, tools, tool_choice: 'auto', stream: false }),
+                    body: JSON.stringify({ model: 'auto', messages, ...(tools?.length ? { tools, tool_choice: 'auto' } : {}), stream: false }),
                 });
                 const body = await res.json().catch(() => ({}));
                 if (res.ok) {
@@ -603,6 +604,63 @@ class RunManager {
     }
 
     /**
+     * A stage with canWait: one request, no tools, answered as a half-price batch. The run
+     * waits for it (a stop still works), and falls back to an ordinary call when the model
+     * is not a batch model, there is no key, the batch fails, or maxWaitMinutes pass.
+     */
+    async runWaitStage({ run, live, sandbox, stage, stageRun, context, handoff, nextN }) {
+        const diff = stage.diff ? (await sandbox.exec('git add -A -N . && git diff HEAD')).output.slice(0, 60000) : '';
+        const messages = [
+            { role: 'system', content: `You are the ${stage.role} in a software task. ${stage.prompt}\n\nYou have no tools: answer from what you are given, in plain text.` },
+            { role: 'user', content: `Task:\n${run.goal}${context ? `\n\n${context}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}${diff ? `\n\nThe workspace's changes (git diff):\n${diff}` : ''}` },
+        ];
+        const emit = (e) => this.event(run, { ...e, stage: stage.id });
+        const fallback = async (why) => {
+            emit({ type: 'note', text: `${why}; asking ${stage.model} normally instead.` });
+            const reply = await this.chat(stageRun, messages, [], nextN(), stage.model);
+            emit({ type: 'model', text: reply.message.content || '', calls: 0, usage: reply.usage, model: reply.model });
+            return { status: 'finished', summary: reply.message.content || 'The model answered with nothing.' };
+        };
+        const headers = this.headers(run, nextN(), stage.model);
+        let id;
+        try {
+            const res = await fetch(`${this.harnessUrl}/v1/batch`, { method: 'POST', headers, body: JSON.stringify({ model: stage.model, messages }), signal: AbortSignal.timeout(60000) });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) return await fallback(`it could not be batched (${body.error || `HTTP ${res.status}`})`);
+            id = body.id;
+        } catch (err) { return await fallback(`it could not be batched (${err.message})`); }
+        emit({ type: 'note', text: `Sent as a half-price batch to ${stage.model} (${id}); waiting for it.` });
+        const until = Date.now() + stage.maxWaitMinutes * 60000;
+        while (Date.now() < until) {
+            if (live.stopped) return { status: 'stopped', summary: 'Stopped by a person.' };
+            await sleep(this.batchPollMs);
+            let got;
+            try {
+                const res = await fetch(`${this.harnessUrl}/v1/batch/${encodeURIComponent(id)}`, { headers, signal: AbortSignal.timeout(60000) });
+                got = await res.json();
+                if (!res.ok) throw new Error(got.error || `HTTP ${res.status}`);
+            } catch (err) { emit({ type: 'note', text: `Could not check the batch (${err.message}); trying again.` }); continue; }
+            if (!got.done) continue;
+            if (got.result?.text !== undefined) {
+                // billed at half price: count the tokens, and the cost at half what the same call would be
+                const usage = got.result.usage;
+                if (usage) {
+                    run.tokens.in += usage.prompt_tokens || 0; run.tokens.out += usage.completion_tokens || 0;
+                    const c = this.pricer.cost(usage, stage.model);
+                    run.cost = (run.cost || 0) + c.cost * 0.5;
+                    run.batchSaved = (run.batchSaved || 0) + c.cost * 0.5;
+                    if (c.unpriced) run.unpricedCalls = (run.unpricedCalls || 0) + 1;
+                }
+                run.batchRequests = (run.batchRequests || 0) + 1;
+                emit({ type: 'model', text: got.result.text, calls: 0, model: stage.model });
+                return { status: 'finished', summary: got.result.text || 'The model answered with nothing.' };
+            }
+            return await fallback(`the batch ${got.status === 'completed' ? 'had no answer' : got.status}${got.result?.error || got.error ? `: ${got.result?.error || got.error}` : ''}`);
+        }
+        return await fallback(`the batch had not finished in ${stage.maxWaitMinutes} minutes`);
+    }
+
+    /**
      * Run a workflow's stages in order in one sandbox. Each stage is its own
      * agent loop with its own prompt, tools and effort, and gets the earlier
      * stages' summaries. A verdict stage that says FAIL sends the run back to
@@ -628,7 +686,8 @@ class RunManager {
             const handoff = notes.map((n) => `## ${n.role} (${n.stage})\n${n.summary}`).join('\n\n');
             // the stage's effort replaces the run's only when the person set none
             const stageRun = run.effort || !stage.effort ? run : { ...run, effort: stage.effort };
-            outcome = await runAgent({
+            if (stage.canWait) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageRun, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
+            else outcome = await runAgent({
                 run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,

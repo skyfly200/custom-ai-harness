@@ -31,6 +31,7 @@ const modelInfo = require('./utils/modelInfo');
 const cacheMarkers = require('./utils/cacheMarkers');
 const openrouterCatalog = require('./utils/openrouterCatalog');
 const openrouterAuth = require('./utils/openrouterAuth');
+const openrouterBatch = require('./utils/openrouterBatch');
 const batchModels = require('./utils/batchModels');
 const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
@@ -554,6 +555,24 @@ app.delete('/v1/run-keys/:id', localOnly, (req, res) => {
     const spent = runKeys.revoke(req.params.id);
     if (!spent) return res.status(404).json({ error: 'no such run key' });
     res.json(spent);
+});
+// Half-price batch calls (utils/openrouterBatch.js) for work that can wait: the task runner's
+// canWait stages use these. One request per batch; POST starts it, GET polls it.
+const batchClient = openrouterBatch.createBatchClient({ key: () => orAuth.key() });
+app.post('/v1/batch', async (req, res) => {
+    const { model, messages, max_tokens } = req.body || {};
+    if (typeof model !== 'string' || !Array.isArray(messages) || !messages.length) return res.status(400).json({ error: 'send model and messages' });
+    if (!batchModels.isBatch(model, batchModels.load())) return res.status(400).json({ error: `${model} is not listed in batch-models.json as a batch model` });
+    try {
+        const id = await batchClient.submit(model, [{ id: 'r1', body: { messages, ...(max_tokens ? { max_tokens } : {}) } }]);
+        res.status(202).json({ id });
+    } catch (err) { res.status(502).json({ error: err.message }); }
+});
+app.get('/v1/batch/:id', async (req, res) => {
+    try {
+        const b = await batchClient.get(req.params.id);
+        res.json({ status: b.status, done: b.done, error: b.error, result: b.results.r1 || null });
+    } catch (err) { res.status(502).json({ error: err.message }); }
 });
 app.post('/v1/guard', async (req, res) => {
     const { guardJev, guardAskAt, guardDenyAt } = settings.get();

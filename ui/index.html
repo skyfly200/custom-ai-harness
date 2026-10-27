@@ -214,7 +214,7 @@ function renderUsage({ rows = [] }) {
     m.requests += r.requests; m.tokens += r.input + r.output; m.cost += r.cost;
     byModel.set(r.servedBy, m);
   }
-  const s = Costs.savings(rows);
+  const s = Costs.savings(rows, Costs.SONNET, Costs.loadAssumptions());
   const tile = (label, v, sub = '', hint = '') => `<div class="card stat"${hint ? ` data-hint="${esc(hint)}"` : ''}><div class="num">${v}</div><div class="sub">${label}${sub ? ` · ${sub}` : ''}</div></div>`;
   $('usageTiles').innerHTML = [
     tile('Spend', usd(t.cost), t.unpriced ? `+${t.unpriced} unpriced` : ''),

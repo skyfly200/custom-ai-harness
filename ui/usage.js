@@ -20,7 +20,7 @@ const shortV = (n, m = state.measure) => (m === 'cost' ? usd(n) : short(n));
 // models with no known price)
 let prices = {};
 const price = (rows) => Costs.priceRows(rows, prices);
-const state = { days: 7, measure: 'total', data: { rows: [] } };
+const state = { days: 7, measure: 'total', baseline: 'sonnet', data: { rows: [] } };
 try { Object.assign(state, JSON.parse(localStorage.getItem('usage-view') || '{}')); } catch {}
 
 const valueOf = (r, m = state.measure) => m === 'total' ? r.input + r.output : r[m] || 0;
@@ -320,39 +320,78 @@ function renderSankey(rows, colors) {
 }
 
 // ---- savings ------------------------------------------------------------------
-// What the same requests would have cost sent straight to Claude Sonnet 5.5,
-// and how much each part of the stack took off (ui/costs.js does the sums)
-const LAYER_COLORS = { compression: 'var(--s3)', router: 'var(--s1)', pinned: 'var(--s7)', down: 'var(--s4)', fallback: 'var(--s2)', caching: 'var(--s5)' };
+// What the same work would have cost sent straight to a Claude model, and how
+// much each part of the stack took off (ui/costs.js does the sums). The token
+// multipliers behind "Tokens needed" are assumptions the person can edit.
+const LAYER_COLORS = { compression: 'var(--s3)', tokens: 'var(--s6)', router: 'var(--s1)', pinned: 'var(--s7)', down: 'var(--s4)', fallback: 'var(--s2)', caching: 'var(--s5)' };
+const BASIS = { measured: 'Counted from real requests and prices', estimated: 'Counted, but from a rough character count', assumed: 'From your assumptions, not measured' };
 const pct = (part, whole) => (whole > 0 ? `${Math.round(100 * part / whole)}%` : '–');
+let assumptions = Costs.loadAssumptions();
+const baseOf = () => Costs.BASELINES.find(b => b.id === state.baseline) || Costs.SONNET;
+const signed = (v) => (v < 0 ? `<span class="warn">${usd(v)}</span>` : usd(v));
 
 function layerTokens(l) {
   if (!l.tokens) return '–';
   if (l.id === 'compression') return `${short(l.tokens)} trimmed`;
   if (l.id === 'caching') return `${short(l.tokens)} cached`;
+  if (l.id === 'tokens') return `${short(Math.abs(l.tokens))} ${l.tokens > 0 ? 'more' : 'fewer'}`;
   return `${short(l.tokens)} on free models`;
 }
 
 function renderSavings(rows, daily) {
-  const s = Costs.savings(rows);
+  const base = baseOf();
+  const s = Costs.savings(rows, base, assumptions);
   const shown = s.layers.filter(l => l.saved || l.requests);
   const leftOut = s.unpriced ? ` ${fmt(s.unpriced)} request${s.unpriced === 1 ? '' : 's'} on models with no known price are left out.` : '';
+  for (const b of $('baseline').querySelectorAll('button')) b.classList.toggle('on', b.dataset.b === base.id);
+  $('baseNote').textContent = `$${+(base.inputCost * 1e6).toPrecision(3)} in · $${+(base.outputCost * 1e6).toPrecision(3)} out per million`;
   const fig = (label, v, sub = '', cls = '') => `<div class="fig${cls}"><div class="label">${label}</div><div class="num">${v}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
   $('saveHead').innerHTML = s.requests ? [
-    fig(`${Costs.SONNET.name} directly`, usd(s.baseline), 'same requests, no compression or caching'),
+    fig(`${base.name} directly`, usd(s.baseline), 'same work, no compression or caching'),
     fig('Through the harness', usd(s.actual), `${fmt(s.requests)} priced request${s.requests === 1 ? '' : 's'}`),
-    fig(s.saved >= 0 ? 'Saved' : 'Cost extra', usd(Math.abs(s.saved)), `${pct(Math.abs(s.saved), s.baseline)} of the Sonnet price`, ' money'),
+    fig(s.saved >= 0 ? 'Saved' : 'Cost extra', usd(Math.abs(s.saved)), `${pct(Math.abs(s.saved), s.baseline)} of the ${base.name.replace('Claude ', '')} price`, ' money'),
   ].join('') : '';
+  $('saveGroups').innerHTML = s.requests ? s.groups.map(g => {
+    const assumed = g.id === 'tokens';
+    return `<div class="grp${assumed ? ' assumed' : ''}" data-hint="${esc(g.what)}"><div class="label">${esc(g.label)} <span class="basis${assumed ? ' assumed' : ''}">${assumed ? 'assumed' : g.id === 'technique' ? 'measured · compression estimated' : 'measured'}</span></div>
+      <div class="num">${signed(g.saved)}</div><div class="sub">${s.baseline > 0 ? `${pct(Math.abs(g.saved), s.baseline)} of the baseline price${g.saved < 0 ? ', cost extra' : ''}` : ''}</div></div>`;
+  }).join('') : '';
   $('saveLegend').innerHTML = shown.map(l => `<span><i class="sw" style="background:${LAYER_COLORS[l.id]}"></i>${esc(l.label)}</span>`).join('');
   renderWaterfall(s, shown);
   renderSaveTime(daily, shown);
+  $('saveCompare').innerHTML = s.requests ? Costs.BASELINES.map(b => {
+    const c = Costs.savings(rows, b, assumptions), g = Object.fromEntries(c.groups.map(x => [x.id, x.saved]));
+    return `<tr${b.id === base.id ? ' class="here"' : ''}><td>${esc(b.name)}</td><td class="num r">${usd(c.baseline)}</td><td class="num r">${usd(c.actual)}</td>
+      <td class="num r">${signed(c.saved)} <span class="muted">${c.baseline > 0 ? pct(c.saved, c.baseline) : ''}</span></td>
+      <td class="num r">${signed(g.model)}</td><td class="num r">${signed(g.routing)}</td><td class="num r">${signed(g.technique)}</td><td class="num r">${signed(g.tokens)}</td></tr>`;
+  }).join('') : '<tr><td colspan="8" class="muted">No priced requests in this range yet.</td></tr>';
   $('saveRows').innerHTML = shown.length ? shown.map(l => `<tr>
       <td><i class="sw" style="background:${LAYER_COLORS[l.id]};margin-right:6px"></i>${esc(l.label)}</td><td class="muted">${esc(l.what)}</td>
+      <td><span class="basis ${l.basis}" title="${esc(BASIS[l.basis])}">${l.basis}</span></td>
       <td class="num r">${l.requests ? fmt(l.requests) : '–'}</td><td class="num r">${layerTokens(l)}</td>
-      <td class="num r">${l.saved < 0 ? `<span class="warn">${usd(l.saved)}</span>` : usd(l.saved)}</td><td class="num r">${s.saved > 0 && l.saved > 0 ? pct(l.saved, s.saved) : '–'}</td></tr>`).join('')
-    : '<tr><td colspan="6" class="muted">No priced requests in this range yet.</td></tr>';
-  const cached = s.requests ? ` Counting Sonnet’s own prompt caching on the same cache hits, Sonnet would have cost ${usd(s.baselineCached)}, so the harness ${s.savedCached >= 0 ? 'saved' : 'cost'} ${usd(Math.abs(s.savedCached))} (${pct(Math.abs(s.savedCached), s.baselineCached)}).` : '';
-  const trimmed = s.trimmed ? ` Compression took out about ${short(s.trimmed)} input tokens (${short(s.headroom)} by Headroom, ${short(s.anchor)} by the context anchor).` : '';
-  $('saveNote').textContent = `Sonnet 5.5 at $2 per million input tokens and $10 per million output, on the same token counts.${cached}${trimmed} Model layers save the difference between Sonnet’s price and the answering model’s; negative means that model cost more than Sonnet would have. Caveman’s shorter replies aren’t measured.${leftOut}`;
+      <td class="num r">${signed(l.saved)}</td><td class="num r">${s.saved > 0 && l.saved > 0 ? pct(l.saved, s.saved) : '–'}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="muted">No priced requests in this range yet.</td></tr>';
+  renderAssumptions(rows);
+  const cached = s.requests ? ` Counting ${base.name.replace('Claude ', '')}’s own prompt caching on the same cache hits, it would have cost ${usd(s.baselineCached)}, so the harness ${s.savedCached >= 0 ? 'saved' : 'cost'} ${usd(Math.abs(s.savedCached))} (${pct(Math.abs(s.savedCached), s.baselineCached)}).` : '';
+  const trimmed = s.trimmed ? ` Compression took out about ${short(s.trimmed)} input tokens (${short(s.headroom)} by Headroom, ${short(s.anchor)} by the context anchor), counted at about 4 characters a token.` : '';
+  $('saveNote').textContent = `Token counts and prices are measured; the baseline is those same requests priced at ${base.name}’s list prices.${cached}${trimmed} “Tokens needed” is modeled from the assumptions above and is the only part not counted from real traffic. Negative means that part cost more than the baseline would have. Caveman’s shorter replies aren’t measured.${leftOut}`;
+}
+
+// Edit the token multipliers; each change saves in the browser and redraws
+function renderAssumptions(rows) {
+  const open = $('assume').open;
+  if (open && $('assume').contains(document.activeElement)) return; // don't pull an input out from under the typist
+  const num = (id, label, v) => `<label>${label}<input type="number" step="0.05" min="0.1" max="10" data-k="${id}" value="${v}"></label>`;
+  $('assumeGrid').innerHTML = [
+    num('opus', 'Claude Opus', assumptions.opus), num('sonnet', 'Claude Sonnet', assumptions.sonnet), num('haiku', 'Claude Haiku', assumptions.haiku),
+    num('other', 'Other paid models', assumptions.other), num('free', 'Free and local models', assumptions.free),
+  ].join('');
+  const served = [...groupBy(rows, 'servedBy')].filter(([k]) => k).sort((a, b) => b[1].requests - a[1].requests);
+  $('assumeModels').innerHTML = served.map(([name, v]) => {
+    const own = assumptions.perModel[name], byKind = Costs.multiplier(name, { ...assumptions, perModel: {} }, v.freeRequests > 0);
+    return `<tr><td><code>${esc(name)}</code></td><td class="num r">${fmt(v.requests)}</td><td class="num r">${byKind}</td>
+      <td class="num r"><input type="number" step="0.05" min="0.1" max="10" data-model="${esc(name)}" placeholder="${byKind}" value="${own > 0 ? own : ''}"></td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="muted">No models in this range yet.</td></tr>';
 }
 
 // Bars from the Sonnet price down to what was paid, a step per layer
@@ -360,7 +399,7 @@ function renderWaterfall(s, shown) {
   const svg = $('waterfall');
   if (!s.requests) return emptyChart(svg, 'No priced requests in this range yet.');
   svg.replaceChildren();
-  const steps = [{ label: `${Costs.SONNET.name} directly`, from: 0, to: s.baseline, total: true }];
+  const steps = [{ label: `${s.base.name} directly`, from: 0, to: s.baseline, total: true }];
   let run = s.baseline;
   for (const l of shown) { steps.push({ label: l.label, from: run - l.saved, to: run, layer: l }); run -= l.saved; }
   steps.push({ label: 'Through the harness', from: 0, to: s.actual, total: true });
@@ -399,7 +438,7 @@ function renderSaveTime(daily, shown) {
   const sums = Object.fromEntries(ids.map(id => [id, 0]));
   let net = 0;
   const points = days.map(d => {
-    const s = Costs.savings(daily.filter(r => r.day === d));
+    const s = Costs.savings(daily.filter(r => r.day === d), baseOf(), assumptions);
     for (const l of s.layers) if (l.id in sums) sums[l.id] += l.saved;
     net += s.saved;
     return { day: d, layers: { ...sums }, net };
@@ -530,7 +569,7 @@ async function refresh() {
   }
 }
 
-const saveView = () => { try { localStorage.setItem('usage-view', JSON.stringify({ days: state.days, measure: state.measure })); } catch {} };
+const saveView = () => { try { localStorage.setItem('usage-view', JSON.stringify({ days: state.days, measure: state.measure, baseline: state.baseline })); } catch {} };
 $('range').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   state.days = Number(b.dataset.days); saveView(); refresh();
@@ -539,6 +578,19 @@ $('measure').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   state.measure = b.dataset.m; saveView(); render();
 });
+$('baseline').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.baseline = b.dataset.b; saveView(); render();
+});
+$('assume').addEventListener('change', (e) => {
+  const i = e.target.closest('input'); if (!i) return;
+  const v = parseFloat(i.value), ok = v > 0 && v <= 10;
+  if (i.dataset.k) assumptions[i.dataset.k] = ok ? v : Costs.ASSUMED[i.dataset.k];
+  else if (ok) assumptions.perModel[i.dataset.model] = v; else delete assumptions.perModel[i.dataset.model];
+  Costs.saveAssumptions(assumptions);
+  i.blur(); render();
+});
+$('assumeReset').addEventListener('click', () => { assumptions = { ...Costs.ASSUMED, perModel: {} }; Costs.saveAssumptions(assumptions); render(); });
 $('clear').addEventListener('click', async () => {
   if (!confirm('Clear all saved token totals? This cannot be undone.')) return;
   const res = await fetch('api/usage/clear', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });

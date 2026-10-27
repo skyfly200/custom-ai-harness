@@ -119,3 +119,6 @@ a.agent-card:hover { border-color: var(--accent); }
 #quickTask .quick-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .dot.warn { background: var(--warn); }
 #agentRuns .row .proj { display: block; }
+
+/* The Dashboard's Server card (Stop button), shown only where the server can stop itself */
+.server-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 12px 0 4px; }

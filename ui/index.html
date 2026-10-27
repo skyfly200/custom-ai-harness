@@ -23,6 +23,11 @@
     <span class="muted" id="updated" data-hint="This page refreshes itself every few seconds">Loading…</span>
   </header>
 
+  <div class="card server-card" id="serverCard" hidden>
+    <div><b>Server</b> <span class="sub" id="serverNote"></span></div>
+    <button id="serverStop" type="button" data-hint="Stops the server so it stops costing money. Opening the address again starts it, which takes a minute">Stop server</button>
+  </div>
+
   <h2 data-hint="Each part of the harness and whether it answers. Optional parts can be off">Components</h2>
   <div class="grid" id="components"></div>
 
@@ -374,6 +379,25 @@ $('quickTask').addEventListener('submit', async (e) => {
 
 // ---- loop ------------------------------------------------------------------
 
+// Shown only where the server can stop itself (the Fly setup); admins only, the server refuses anyone else
+async function loadServer() {
+  let st;
+  try { st = await getJSON('api/server'); } catch { return; }
+  $('serverCard').hidden = !st.canStop;
+  if (!st.canStop) return;
+  const mins = (ms) => Math.max(1, Math.round(ms / 60000));
+  $('serverNote').textContent = st.stopping ? 'Stopping…'
+    : st.busy ? 'Busy, so it will not sleep yet.'
+    : st.stopsInMs !== null ? `Sleeps after ${st.sleepsAfterMin} idle minutes (about ${mins(st.stopsInMs)} left).`
+    : 'Stays on until you stop it.';
+  $('serverStop').disabled = st.stopping;
+}
+$('serverStop').addEventListener('click', async () => {
+  if (!confirm('Stop the server? It starts again when you open its address (this takes about a minute), and replies in progress are cut off.')) return;
+  try { await getJSON('api/server/stop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); $('serverNote').textContent = 'Stopping…'; $('serverStop').disabled = true; }
+  catch (err) { $('serverNote').textContent = `Could not stop: ${err.message}`; }
+});
+
 async function refresh() {
   try {
     const [status, events] = await Promise.all([getJSON('api/status'), getJSON('api/events?limit=100')]);
@@ -391,7 +415,9 @@ renderChats();
 loadUsage();
 loadAgents();
 refresh();
+loadServer();
 setInterval(refresh, 3000);
+setInterval(loadServer, 15000);
 setInterval(loadUsage, 30000);
 setInterval(loadAgents, 3000);
 // Chats saved in another tab show up here as they change

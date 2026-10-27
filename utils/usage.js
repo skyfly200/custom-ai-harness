@@ -115,8 +115,23 @@ function outputChars(obj) {
     return Tokens.charsOf(obj);
 }
 
+const MAX_TEXT_CHARS = 200000;
+
+// The words of the reply, from either format, streamed or whole
+function textOf(obj) {
+    if (obj.type === 'content_block_delta' && obj.delta?.type === 'text_delta') return String(obj.delta.text || '');
+    const choice = obj.choices?.[0];
+    if (choice) {
+        if (typeof choice.delta?.content === 'string') return choice.delta.content;
+        if (typeof choice.message?.content === 'string') return choice.message.content;
+    }
+    if (obj.type === 'message' && Array.isArray(obj.content)) return obj.content.filter((b) => b && b.type === 'text').map((b) => String(b.text || '')).join('');
+    return '';
+}
+
 function inspect(obj, state) {
     if (!obj || typeof obj !== 'object') return;
+    if (state.text.length < MAX_TEXT_CHARS) state.text += textOf(obj);
     state.usage = merge(state.usage, normalize(obj.usage));
     if (obj.type === 'message_start') state.usage = merge(state.usage, normalize(obj.message?.usage));
     state.model = state.model || obj.model || obj.message?.model || null;
@@ -125,7 +140,7 @@ function inspect(obj, state) {
 
 /**
  * Follow a Gateway reply as it streams to the client, without touching it,
- * and call done({ usage, model, outputChars }) when it ends. Handles JSON and
+ * and call done({ usage, model, outputChars, text, aborted }) when it ends (text: what it said; aborted: it was cut off). Handles JSON and
  * Server-Sent Events, compressed or not. usage is null if the reply had none.
  */
 function tap(res, done) {
@@ -137,7 +152,7 @@ function tap(res, done) {
         : encoding === 'deflate' ? zlib.createInflate()
         : null;
     const text = new StringDecoder('utf8');
-    const state = { usage: null, model: null, chars: 0 };
+    const state = { usage: null, model: null, chars: 0, text: '', aborted: false };
     let buffer = '';
     let finished = false;
 
@@ -167,7 +182,7 @@ function tap(res, done) {
             buffer += rest;
             if (/json/.test(type) || /^\s*\{/.test(buffer)) { try { inspect(JSON.parse(buffer), state); } catch {} }
         }
-        done({ usage: state.usage, model: state.model, outputChars: state.chars });
+        done({ usage: state.usage, model: state.model, outputChars: state.chars, text: state.text, aborted: state.aborted });
     };
 
     if (decoder) {
@@ -180,8 +195,8 @@ function tap(res, done) {
         res.on('data', onText);
         res.on('end', finish);
     }
-    res.on('error', finish);
-    res.on('aborted', finish);
+    res.on('error', () => { state.aborted = true; finish(); });
+    res.on('aborted', () => { state.aborted = true; finish(); });
 }
 
 // ---- totals ----------------------------------------------------------------

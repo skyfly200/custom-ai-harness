@@ -9,6 +9,8 @@
  * the volume's as <name>.new and the volume's copy is left alone.
  *
  * If any of the three stops, the rest are stopped and this exits non-zero, so Fly restarts the Machine.
+ * The Interceptor stops the Machine on purpose (the Stop button, or HARNESS_IDLE_STOP_MIN idle minutes) by sending
+ * this process SIGTERM: everything is stopped and this exits 0, which the Machine's "on-failure" restart policy leaves stopped.
  */
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -55,7 +57,8 @@ function commands(dataDir = DATA, env = process.env) {
           env: { GATEWAY_SOURCE: config, GATEWAY_TARGET: '/tmp/config.yaml', GATEWAY_HOST: '127.0.0.1', GATEWAY_PORT: '4000' } },
         { name: 'router', cmd: 'python', args: ['router.py', '--config', path.join(dataDir, 'routellm-config.yaml'), '--host', '127.0.0.1', '--port', '6060'], env: {} },
         { name: 'interceptor', cmd: 'node', args: ['server.js'],
-          env: { GATEWAY_URL: 'http://127.0.0.1:4000', ROUTER_URL: 'http://127.0.0.1:6060', OPENROUTER_PROXY_URL: 'http://127.0.0.1:3000' } },
+          env: { GATEWAY_URL: 'http://127.0.0.1:4000', ROUTER_URL: 'http://127.0.0.1:6060', OPENROUTER_PROXY_URL: 'http://127.0.0.1:3000',
+                 HARNESS_STOP_VIA_PARENT: '1' } },
     ];
     return list.map((c) => ({ ...c, env: { ...env, ...shared, ...c.env } }));
 }

@@ -74,6 +74,7 @@ const sync = {
   },
   snaps: new Map(), // chat id -> { version the server is at, known: Map(message id -> fingerprint of the copy it has) }
   pushChat(c) { this.queue(`c:${c.id}`, () => this.saveChat(c.id)); },
+  flushNow(id) { clearTimeout(this.timers.get(`c:${id}`)); this.timers.delete(`c:${id}`); this.saveChat(id).catch(() => { this.failed = true; }); },
   // Send only the messages that changed since the last save, with the version this copy is based on. If the
   // server has moved on (another device, or the server itself added messages) it answers 409: pull, join, retry.
   async saveChat(id, attempt = 0) {
@@ -1381,7 +1382,10 @@ async function runReply(c, turn) {
       else if (maxTokens > 0) body.max_tokens = maxTokens;
       if ($('temperature').value !== '') body.temperature = Number($('temperature').value);
 
-      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
+      // with a database, the server also keeps the reply if this page goes away before it ends (utils/chatReplies.js)
+      const keep = round === 0 && sync.on ? { 'x-harness-chat-id': c.id, 'x-harness-message-id': reply.id } : {};
+      if (keep['x-harness-chat-id']) sync.flushNow(c.id); // so the server has the chat, and your message, before the reply starts
+      const res = await fetch('/v1/chat/completions', { method: 'POST', headers: { ...headers, ...keep, 'x-harness-request-id': clientId, 'x-harness-cache': 'auto' }, body: JSON.stringify(body), signal: controller.signal });
       // the same facts the live feed sends, from the headers, in case it's not connected
       tr.routed = tr.routed || { model: res.headers.get('x-harness-model'), reason: res.headers.get('x-harness-route') };
       tr.answered = {

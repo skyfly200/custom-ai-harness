@@ -49,11 +49,14 @@ A workflow is a short list of stages. Each stage is its own agent loop with a ro
 | Fix a bug | Investigator (reads, runs tests), Implementer, Verifier | a bug report or failing test |
 | Build a feature | Planner (high effort), Implementer, Verifier | new behaviour |
 | Refactor | Planner (runs the tests first), Implementer, Verifier | restructuring without changing behaviour |
+| Refactor with an audit loop | Refactorer, Auditor (an adversarial critic) | a big or risky refactor; the critic sends it back up to 3 times until it finds nothing real |
 | Review | Reviewer, Skeptic (tries to disprove each finding) | "review this branch", changes nothing |
 | Research the code | Reader, Writer | how something works, changes nothing |
 | Do the task | Engineer | anything else (the fallback) |
 
 Tool sets: `read` (list, read), `check` (also run commands) and `all` (also write files). A **Verifier** starts its summary with PASS or FAIL; FAIL sends the run back to the Implementer once, with what was wrong, and a second FAIL stops the run for you to look at.
+
+**Audit loop.** *Refactor with an audit loop* is a Refactorer and an Auditor whose job is to prove the work wrong: it reads the diff, runs the tests and reports only problems it checked. Its `FAIL` list goes back to the Refactorer, and this repeats for up to 4 rounds in all (`maxRetries: 3`; any verdict stage may set up to 5). The run log says which round it is. If the Auditor still says FAIL after the last round, the run ends `incomplete` for you to look at, with the Auditor's list as the summary. A stage may set `"model": "some-gateway-model"` so the critic is a different model than the one whose work it checks (add it to `workflows/audit-refactor.json`; a model pinned on the run itself overrides it).
 
 On the Runs page the Workflow box is **Jev picks (auto)** by default. A moment after you stop typing the goal, Jev is asked one yes/no question per recipe ("Is this task a bug report, a failing test or an error message...?"), the best answer at 50% or more wins (otherwise "Do the task"), and the pick is shown under the box. Choose another workflow in the box to override it. To add your own recipe, copy a file in `workflows/`, change the `id`, `name`, `when` (the sentence Jev is asked about) and `stages`; a file with a mistake is skipped and listed by `GET /ui/api/workflows` under `problems`. Set `HARNESS_WORKFLOWS_DIR` to keep recipes elsewhere.
 

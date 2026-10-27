@@ -331,10 +331,10 @@ class RunManager {
         return Object.fromEntries(Object.entries(args).map(([k, v]) => [k, short(v, 600)]));
     }
 
-    headers(run, n, baseEffort = run.effort) {
+    headers(run, n, baseEffort = run.effort, stageModel = null) {
         const h = { 'content-type': 'application/json', 'x-harness-request-id': `run-${run.id}-${n}` };
         if (this.password) h['x-harness-password'] = this.password;
-        if (run.model) h['x-harness-model'] = run.model;
+        if (run.model || stageModel) h['x-harness-model'] = run.model || stageModel;
         if (run.profile) h['x-harness-profile'] = run.profile;
         // a run that has escalated asks for more effort than the person set
         const effort = run.bumps ? escalation.effortAfter(baseEffort, run.bumps) : baseEffort;
@@ -348,9 +348,9 @@ class RunManager {
      * is down or overloaded after its retries, the reply is empty), the run climbs one
      * effort rung and asks again, up to escalation.MAX_BUMPS times in all.
      */
-    async chat(run, messages, tools, n, effort = run.effort) {
+    async chat(run, messages, tools, n, effort = run.effort, stageModel = null) {
         for (;;) {
-            try { return await this.chatOnce(run, messages, tools, n, effort); } catch (err) {
+            try { return await this.chatOnce(run, messages, tools, n, effort, stageModel); } catch (err) {
                 if (!escalation.worthEscalating(err) || !escalation.canClimb(run, effort)) throw err;
                 this.escalate(run, effort, `the model call failed (${short(err.message, 160)})`);
             }
@@ -363,14 +363,14 @@ class RunManager {
         this.event(run, { type: 'note', text: `Trying a stronger model: ${why}. Effort is now ${escalation.effortAfter(base, run.bumps)}${run.maxTier ? `, no higher than ${run.maxTier}` : ''}.` });
     }
 
-    async chatOnce(run, messages, tools, n, effort) {
+    async chatOnce(run, messages, tools, n, effort, stageModel = null) {
         let lastError;
         await this.pricer.refresh();
         for (let attempt = 0; attempt < 3; attempt++) {
             if (attempt) await sleep(this.retryDelayMs * attempt * attempt);
             try {
                 const res = await fetch(`${this.harnessUrl}/v1/chat/completions`, {
-                    method: 'POST', headers: this.headers(run, n, effort), signal: AbortSignal.timeout(6 * 60 * 1000),
+                    method: 'POST', headers: this.headers(run, n, effort, stageModel), signal: AbortSignal.timeout(6 * 60 * 1000),
                     body: JSON.stringify({ model: 'auto', messages, tools, tool_choice: 'auto', stream: false }),
                 });
                 const body = await res.json().catch(() => ({}));
@@ -663,7 +663,7 @@ class RunManager {
                 run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
-                chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort),
+                chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
             });
             if (outcome.status === 'out_of_steps') run.partialSummary = outcome.summary;
             notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
@@ -671,12 +671,12 @@ class RunManager {
             if (stage.verdict && /^\W*FAIL/i.test(outcome.summary)) {
                 retries[stage.id] = (retries[stage.id] || 0) + 1;
                 if (retries[stage.id] <= stage.maxRetries) {
-                    this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo}.` });
+                    this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo} (round ${retries[stage.id] + 1} of ${stage.maxRetries + 1}).` });
                     if (escalation.canClimb(run, stageEffort)) this.escalate(run, stageEffort, `${stage.role} said FAIL`);
                     i = workflow.stages.findIndex((s) => s.id === stage.retryTo) - 1;
                     continue;
                 }
-                this.event(run, { type: 'note', text: `${stage.role} still says FAIL; stopping here for a person to look.` });
+                this.event(run, { type: 'note', text: `${stage.role} still says FAIL after ${stage.maxRetries + 1} round${stage.maxRetries ? 's' : ''}; stopping here for a person to look.` });
                 outcome = { status: 'incomplete', summary: outcome.summary };
                 break;
             }

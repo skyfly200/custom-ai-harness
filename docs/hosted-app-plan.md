@@ -88,8 +88,8 @@ Non-secret settings (`HARNESS_MODE`, `STRONG_MODEL` and the other `.env` launch 
 
 - **Fly region.** Skyler is in Colorado. Fly lists a Denver region (`den`); confirm with `fly platform regions` before relying on it, and fall back to Dallas (`dfw`) if it is missing or doesn't offer shared-cpu Machines. Fly prices differ by region and the figures above are for `iad`/`ewr`, so check the Machine price for the chosen region.
 - **Neon region.** Neon has no Denver; the nearest AWS regions are `us-west-2` (Oregon) and `us-east-2` (Ohio). Pick one and keep the app in a region with a short round trip to it (every chat save is a database call). I'd choose Oregon, then measure a query from the Machine and switch if it is slow.
-- **Domain.** Use a subdomain such as `harness.skylerfly.com`. With DNS on Netlify: (1) `fly certs add harness.skylerfly.com` and read the DNS records it asks for; (2) in Netlify DNS add a `CNAME` for `harness` pointing at the app's `YOUR-APP.fly.dev` (Fly may also ask for an `_acme-challenge` CNAME, or an `A`/`AAAA` pair if you prefer); (3) wait for `fly certs check` to show the certificate issued. No Netlify hosting is involved, only its DNS.
-- This one address is used everywhere that needs a stable name: the OAuth callbacks (`https://harness.skylerfly.com/auth/github/callback`), the OIDC issuer URL for OpenRouter federation (OpenRouter requires the token's `iss` to equal it exactly, https only), and the PWA install.
+- **Domain.** Use a subdomain such as `agents.skylerfly.com`. With DNS on Netlify: (1) `fly certs add agents.skylerfly.com` and read the DNS records it asks for; (2) in Netlify DNS add a `CNAME` for `harness` pointing at the app's `YOUR-APP.fly.dev` (Fly may also ask for an `_acme-challenge` CNAME, or an `A`/`AAAA` pair if you prefer); (3) wait for `fly certs check` to show the certificate issued. No Netlify hosting is involved, only its DNS.
+- This one address is used everywhere that needs a stable name: the OAuth callbacks (`https://agents.skylerfly.com/auth/github/callback`), the OIDC issuer URL for OpenRouter federation (OpenRouter requires the token's `iss` to equal it exactly, https only), and the PWA install.
 - Pick the final subdomain before registering the OAuth apps and the OpenRouter issuer, since both store the address. Changing it later means redoing both.
 
 ### Start and stop to save cost
@@ -206,7 +206,7 @@ Request handling: the Interceptor already reads `x-harness-profile` and similar 
 - **How WIF would work for hosted users.** PR #90 already does the exchange for one install-wide policy (`utils/openrouterAuth.js`, Gateway and Router go through `/openrouter-proxy`). Per user it needs two additions: (a) the harness becomes a small **OIDC issuer** (publishes `/.well-known/openid-configuration` and a JWKS, signs ES256 or RS256 JWTs with `iss` = the app's https address, `sub` = the user id, `aud` = the policy's audience), and (b) the user (or you, for your own org) adds the harness as a trusted issuer in OpenRouter and creates a policy with `sub` = their user id, then pastes the **policy id** into Account settings. Nothing secret is stored; revoking is pausing the policy. The Interceptor mints the JWT, exchanges it (cached for about 14 minutes, as #90 does) and uses the resulting token for that user's requests.
 - **Wiring.** Today the Gateway and Router reach OpenRouter through `/openrouter-proxy` with one proxy key. Hosted mode makes that proxy per-request: the Interceptor tags each internal call with the signed-in user (an internal-only header the Gateway cannot be tricked into sending from outside, because the proxy is on the loopback or private network) and the proxy swaps in that user's key or exchanged token. If the user has no credential, the request is refused with a plain message, or falls back to the shared key when the admin allows it for that user.
 - **Guest accounts (decided 2026-10-27).** Someone with no credential of their own is not refused: an admin (only an admin, never self-service) can create a **guest** user. A guest uses your shared key but has a hard **$1 lifetime cap** (not monthly; the credit does not renew), and is limited to cheap models (an allowed-model list on the account; the Frontier tier is off). The Interceptor checks the cap before forwarding, as for other limits; once spent, requests get a plain 429 saying the guest credit is used up, and you can raise it on the Users page. Users who are not guests and have no credential are refused with a message to add one. **No overshoot (Skyler, 2026-10-27):** the guest cap is enforced by reserving money before the request goes out, not by counting afterwards. See [Hard caps](#hard-caps-no-overshoot).
-- **Constraint to decide on:** WIF needs the user to own an OpenRouter Business organisation, which most invited people won't. Skyler chose federation as the main path (2026-10-27), so WIF is PR 8; a pasted key (PR 8b) is optional for people without an org, and guests cover the rest. A middle option inside your own org is one policy per invited person, each acting as a workspace key you create with its own limit, which gives OpenRouter-side spend caps per person without anyone pasting a key.
+- **Decided (2026-10-27):** full users bring their own credential, so a full user needs their own OpenRouter Business org for federation, or (PR 8b, optional) a pasted key. Guests use Skyler's key. One policy per person in Skyler's org was considered and dropped.
 - **Verify before building:** the exact JWT and issuer rules above come from OpenRouter's docs as read today; nothing has been tried against a real org. Test with one issuer, one policy and one key before designing the UI.
 - **Programs.** Each user makes `hk_` keys on the Users page (exists). The key identifies the user, so Claude Code traffic counts against the same limits as chat. Keys can be named, revoked, and show last-used time (adding columns to what `login.js` has).
 - **Metering and limits still apply.** Even with their own key, the harness records spend per user so people (and you) can see it, and an optional admin-set cap per person still stops requests with a 429. A person's own OpenRouter key limits are theirs to set on OpenRouter.
@@ -270,6 +270,9 @@ Steps 3 and 4 can swap if you would rather have chats in the database before the
 
 ## Decisions so far
 
+- **Subdomain: `agents.skylerfly.com`** (Skyler, 2026-10-27).
+- **Two kinds of user:** guests use Skyler's key (hard $1 cap); full users bring their own OpenRouter credential. No per-person policies or workspace keys in Skyler's org. A full user without a credential is refused until they add one (Skyler, 2026-10-27).
+- **Sleeps after 30 idle minutes** (`HARNESS_IDLE_STOP_MIN=30` in hosted mode).
 - **Federation** is the main OpenRouter credential path. No-credential users get a **guest account** only Skyler can make, with a $1 lifetime cap on the shared key (Skyler, 2026-10-27).
 - **Region and domain:** a Fly region near Colorado, and a subdomain of `skylerfly.com` (DNS is on Netlify). See [Region and domain](#region-and-domain).
 - Users are **invited**, not open sign-up (Skyler, 2026-10-27).
@@ -280,11 +283,9 @@ Steps 3 and 4 can swap if you would rather have chats in the database before the
 ## Open questions for Skyler
 
 1. **OAuth providers:** GitHub and Google first. Any others (Apple, Microsoft, email-and-password only)?
-2. **Auth:** happy with self-hosted OAuth now and AuthKit only if needs grow? With invite-only users the case for AuthKit is weaker still.
-3. **Federation:** the invited people each need an OpenRouter Business org to use it, or you give them a policy in your org (a workspace key per person, with a cap). Which is the plan? Guests cover everyone else.
-4. **Subdomain name:** `harness.skylerfly.com`, or another name?
-5. **MCP and shell for other users:** remote MCP servers only for non-admins, with stdio and shell for you alone. OK?
-6. **Runs:** hidden until PR 11, or earlier than attachments and WIF?
-7. **Start and stop:** is "open the address to wake it, plus a Stop button and idle stop" enough, or do you also want a Start button on a separate always-on page? How many idle minutes before it sleeps (I'd say 30)?
-8. **Neon plan:** Free to start (sleeps after 5 idle minutes), or Launch from day one?
-9. **Existing chats:** import from the browser you use now, and keep localStorage working offline when no database is set (the plan says yes)?
+2. **Auth:** happy with self-hosted OAuth now and AuthKit only if needs grow?
+3. **MCP and shell for other users:** remote MCP servers only for non-admins, with stdio and shell for you alone. OK?
+4. **Runs:** hidden until PR 11, or earlier than attachments and WIF?
+5. **Start button:** is waking by opening the address, plus Stop and idle stop, enough, or do you also want a separate always-on Start page?
+6. **Neon plan:** Free to start (sleeps after 5 idle minutes), or Launch from day one?
+7. **Existing chats:** import from the browser you use now, and keep localStorage working offline when no database is set (the plan says yes)?

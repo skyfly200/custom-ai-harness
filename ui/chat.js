@@ -72,7 +72,38 @@ const sync = {
       try { const r = await fn(); if (r && r.status >= 500) throw new Error(r.status); this.failed = false; } catch { this.failed = true; }
     }, 1500));
   },
-  pushChat(c) { this.queue(`c:${c.id}`, () => this.api(`/chats/${c.id}`, { method: 'PUT', body: c })); },
+  snaps: new Map(), // chat id -> { version the server is at, known: Map(message id -> fingerprint of the copy it has) }
+  pushChat(c) { this.queue(`c:${c.id}`, () => this.saveChat(c.id)); },
+  // Send only the messages that changed since the last save, with the version this copy is based on. If the
+  // server has moved on (another device, or the server itself added messages) it answers 409: pull, join, retry.
+  async saveChat(id, attempt = 0) {
+    const c = cache.get(id) || store.get(CHAT_KEY(id), null);
+    if (!c || c.deleted) return;
+    const snap = this.snaps.get(id) || { version: Number(c.syncVersion) || 0, known: new Map() };
+    const { upserts, order, fingerprints } = ChatMerge.delta(c.messages || [], snap.known);
+    const { messages, syncVersion, ...chatMeta } = c;
+    const r = await this.api(`/chats/${id}/delta`, { method: 'PUT', body: { chat: chatMeta, order, upserts, base: snap.version } });
+    if (r.status === 409 && attempt < 2) {
+      const got = await this.api(`/chats/${id}`);
+      if (got.status === 404) { this.snaps.delete(id); c.syncVersion = 0; return this.saveChat(id, attempt + 1); }
+      if (!got.ok) return got;
+      const remote = await got.json();
+      const merged = ChatMerge.mergeChats(c, remote);
+      const { messages: joined, ...rest } = merged;
+      Object.assign(c, rest);
+      c.messages.splice(0, c.messages.length, ...joined);
+      this.noteSaved(c.id, remote.syncVersion, remote.messages);
+      return this.saveChat(id, attempt + 1);
+    }
+    if (!r.ok) return r;
+    const { version } = await r.json();
+    this.snaps.set(id, { version, known: fingerprints });
+    c.syncVersion = version;
+    try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(c)); } catch {} // remember the version, without another push
+  },
+  noteSaved(id, version, messages) {
+    this.snaps.set(id, { version, known: new Map((messages || []).map(m => [m.id, ChatMerge.fingerprint(m)])) });
+  },
   pushData(key, value) {
     const updated = Date.now();
     try { localStorage.setItem(`harness-sync-ts:${key}`, String(updated)); } catch {}
@@ -104,6 +135,7 @@ const sync = {
         if (!r.ok) continue;
         const c = await r.json();
         raw(CHAT_KEY(c.id), c);
+        this.noteSaved(c.id, c.syncVersion, c.messages);
         cache.delete(c.id);
         const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches };
         const i = index.findIndex(x => x.id === c.id);

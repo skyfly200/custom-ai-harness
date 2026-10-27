@@ -15,6 +15,7 @@ const swarm = require('./swarm');
 const chatdev = require('./chatdev');
 const { parseTickets } = require('./tickets');
 const { createPricer } = require('../utils/runCost');
+const { PreviewManager } = require('./preview');
 const { AgentStore } = require('./agents');
 
 const MAX_EVENTS = 2000;
@@ -126,6 +127,7 @@ class RunManager {
         this.runs = new Map();      // id -> record
         this.active = new Map();    // id -> the part a continued run is working as now
         this.live = new Map();      // id -> { sandbox, stop, resolve }
+        this.previews = new PreviewManager(); // a run's dev server, for looking at its work
         this.queue = [];
         fs.mkdirSync(dir, { recursive: true });
         this.agents = new AgentStore(path.join(dir, '_agents'));
@@ -771,9 +773,30 @@ class RunManager {
     }
 
     /** Remove a finished run's workspace and record. The branch stays in the repo. */
+    /**
+     * Start the app's dev server in a local run's worktree so its work can be looked at.
+     * The command goes past the guard first, like any command the agent would run.
+     */
+    async startPreview(id, { command, port, approved } = {}) {
+        const run = this.get(id);
+        if (!run) throw new Error('no such run');
+        if (isCloud(run.sandbox)) throw new Error('previews work for local runs for now; this one ran in a cloud sandbox');
+        if (run.plan) throw new Error('a plan-only run changes nothing, so there is nothing to preview');
+        const dir = path.join(this.dir, id, 'work');
+        if (!fs.existsSync(dir)) throw new Error('this run has no workspace to preview');
+        const verdict = await this.guard('bash', String(command || '').replaceAll('{port}', '0'));
+        if (verdict.decision === 'deny') throw new Error(`the command guard blocked it: ${verdict.reason || 'not allowed'}`);
+        if (verdict.decision === 'ask' && approved !== true) throw Object.assign(new Error(`the command guard asks for your OK: ${verdict.reason || 'risky'}`), { needsApproval: true });
+        return this.previews.start(id, dir, command, { port });
+    }
+
+    previewStatus(id) { return this.previews.status(id); }
+    stopPreview(id) { this.previews.stop(id); }
+
     async remove(id) {
         const run = this.get(id);
         if (!run) throw new Error('no such run');
+        this.previews.stop(id);
         if (this.live.has(id) || run.status === 'queued') throw new Error('stop the run first');
         const dir = path.join(this.dir, id, 'work');
         if (isCloud(run.sandbox)) {

@@ -1,0 +1,87 @@
+# Task runner, workflows and swarm
+
+Agents that do a whole task on their own branch, in a worktree or a cloud sandbox. Back to the [README](../README.md).
+
+## Task runner (agents that do a whole task)
+
+The **Runs** page gives an agent a goal, such as "fix the failing test in `utils/tiers.js`", and lets it work until it is done. The agent reads and edits files and runs commands in its own copy of your repo, using the models your routing picks. When it finishes you get a summary and the changes.
+
+How it keeps your work safe:
+
+- **Its own branch.** Each run is a `git worktree` of your repo on a new branch named `harness/<id>`, or (with `RUNNER_SANDBOX=e2b`) a [cloud sandbox](#cloud-sandboxes-e2b) that gets the same branch. Your checked-out files are never touched. Review the branch with `git diff <start>..harness/<id>` (the page shows the exact command) and push it yourself if you like. Nothing is ever pushed or published for you.
+- **Every command and file write goes past the [command guard](claude-code.md#command-guard-jev-checks-commands-before-they-run).** Dangerous ones are refused, risky ones wait on the Runs page for you to **Allow** or **Decline** (no answer for 15 minutes counts as decline), and an unreachable guard counts as "ask".
+- **Only chosen folders.** Repos must be inside `RUNNER_ROOTS` (default the `repos` folder next to the harness; set it in `.env`, separating folders with `;` on Windows). Files the agent reads and writes must stay inside its workspace, and `.git` is off limits.
+- **One working tree per chat.** Linking a repo to a chat gives it a persistent `git worktree` on its own `harness/chat-…` branch. Chats linked to the same repo therefore do not share uncommitted edits or shell commands, and the original checkout is left alone. A chat's worktree starts at the linked repo's current `HEAD`; it does not copy uncommitted files from the original checkout. Worktrees are kept under `data/chat-worktrees` (or `CHAT_WORKTREES_DIR` if set) so the chat can resume in the same workspace later.
+- **No keys.** Commands the agent runs get a trimmed environment, so they can't print the harness's API keys.
+- **Faster local tool rounds.** Independent file and directory reads requested together run concurrently; writes and shell commands stay ordered. On Windows, local runs and the linked-repo shell reuse a PowerShell process, while starting each command back in the repository root. A run's shell closes when that run ends.
+- **Plan mode.** Tick **Plan only, change nothing** on the form, or start one from a chat with `/plan TASK`. The agent reads and searches the repository but is offered no shell, write or edit tool, so it cannot change files or run commands. Its rules tell it to answer with the plan itself, and the run makes no commit. What comes back is the plan — what it would change file by file, the order, what to check after each step, and the risks or open questions. Read it, then start the same task without plan mode (or with an agent that has a different model) when you are happy. The Runs page marks such a run **Plan only** and hides the branch and diff, since there is nothing to review.
+- **Limits.** Each run stops after its max minutes (30), and at most `RUNNER_MAX_RUNS` (2) run at once. **Max steps** is off by default (0), so a run goes on until the agent calls finish or its minutes run out; set a number to cap the model calls it may make (a workflow stage may also cap its own). **Stop** ends a run, even in the middle of a command.
+- **Continue, retry and auto debug.** A run that only ran out of steps or time has **Continue**: the same run, the same `harness/<id>` branch, starting from the commits and the files the earlier part left (what it was saying when it ran out goes into the prompt), with a fresh set of minutes (and steps, if it was capped) rather than whatever was left of the old ones. Nothing went wrong, so it is not a new run and nothing is thrown away; continue it as often as it needs, and the page shows how many parts it took. With no step limit a run only ends this way on its minutes, which is what the default of 30 makes likely on a long task. A run that **failed** has **Retry run** (the same task again from the same commit, on a fresh `harness/<id>` branch) and **Auto debug**: the new agent is told what the earlier attempt got wrong (the error, the failing test output, the last tools it ran and what they returned) and is asked to work out the real cause instead of repeating it. Tick **Auto debug a failed run** on the form (or set `RUNNER_AUTO_DEBUG=1`) and the runner does that by itself, at most 2 generations deep, so a failure it cannot fix stops and waits for you. An earlier run's branch is not deleted, so you can compare the two.
+
+To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Runs** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Type or paste the repo's path, pick a recent one, or press **Browse…** to walk through the allowed folders (repos are marked ◆). The agent runs the project's tests itself when the task calls for it.
+
+### Workflows (recipes the agent follows)
+
+A workflow is a short list of stages. Each stage is its own agent loop with a role, the tools it may use, a step budget and optionally an effort, and it is handed what the stages before it found. The recipes live in `workflows/*.json`, one file each:
+
+| Workflow | Stages | Fits |
+| --- | --- | --- |
+| Quick answer | Explainer (read-only) | a question about the code |
+| Fix a bug | Investigator (reads, runs tests), Implementer, Verifier | a bug report or failing test |
+| Build a feature | Planner (high effort), Implementer, Verifier | new behaviour |
+| Refactor | Planner (runs the tests first), Implementer, Verifier | restructuring without changing behaviour |
+| Review | Reviewer, Skeptic (tries to disprove each finding) | "review this branch", changes nothing |
+| Research the code | Reader, Writer | how something works, changes nothing |
+| Do the task | Engineer | anything else (the fallback) |
+
+Tool sets: `read` (list, read), `check` (also run commands) and `all` (also write files). A **Verifier** starts its summary with PASS or FAIL; FAIL sends the run back to the Implementer once, with what was wrong, and a second FAIL stops the run for you to look at.
+
+On the Runs page the Workflow box is **Jev picks (auto)** by default. A moment after you stop typing the goal, Jev is asked one yes/no question per recipe ("Is this task a bug report, a failing test or an error message...?"), the best answer at 50% or more wins (otherwise "Do the task"), and the pick is shown under the box. Choose another workflow in the box to override it. To add your own recipe, copy a file in `workflows/`, change the `id`, `name`, `when` (the sentence Jev is asked about) and `stages`; a file with a mistake is skipped and listed by `GET /ui/api/workflows` under `problems`. Set `HARNESS_WORKFLOWS_DIR` to keep recipes elsewhere.
+
+### Swarm (several agents on one task)
+
+Choose **Swarm (several agents at once)** in the Workflow box for a task that splits into separate parts. It runs in four steps:
+
+1. A **Planner** (read-only, high effort) reads the repo and splits the goal into up to 5 parts that touch different files. If its plan can't be read, the whole task runs as one part.
+2. A **worker** per part starts as an ordinary run (its own branch, its own approvals, the workflow the planner chose for it). They run side by side, as many as `RUNNER_MAX_RUNS` (default 2) allow, and the rest wait their turn.
+3. Each finished branch is merged into the swarm's own branch `harness/<id>`. A part that fails, changes nothing or conflicts with another is left out and named in the summary; its branch stays in your repo.
+4. A **Reviewer** runs the tests and checks that the combined result does the whole task.
+
+The swarm's page lists its workers; click one to watch it or answer its approval. Stopping the swarm stops every worker. A swarm is marked finished only when every part merged and the reviewer said PASS. Raise `RUNNER_MAX_RUNS` for more workers at once (each one is a stream of model calls, so mind your rate limits).
+
+Notes:
+
+- The runner is its own process (`node runner/server.js`, port 3100, only reachable from this machine). The Interceptor passes the Runs page's requests to it after its own login check, and `npm run all` sets a shared `RUNNER_TOKEN` so nothing else on the machine can drive it. If you start the parts yourself, set the same `RUNNER_TOKEN` in `.env` for both.
+- Run records are kept in `runs/` (gitignored). A run that was in progress when the runner stopped shows as failed; its branch keeps whatever was committed. The record is written to a temporary file and renamed into place; where Windows refuses the rename for a moment (a virus scanner or the indexer holding `run.json` open, `EPERM`) it retries, then writes in place, so a run is never lost to that.
+- It runs under Docker with `COMPOSE_PROFILES=runs` (see [Cloud sandboxes](#cloud-sandboxes-e2b) for the setup), which on a server is how to use it.
+- Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
+
+### Cloud sandboxes (E2B)
+
+A run can work in a sandbox in the cloud instead of a worktree on this machine: the agent's commands then run in a Linux VM from [E2B](https://e2b.dev), never on your PC. Set `RUNNER_SANDBOX=e2b` and `E2B_API_KEY` in `.env` (the key is on your E2B dashboard; get one from the free tier), keep the repo in `RUNNER_ROOTS` as usual, and start the runner as always. Nothing else changes: the same workflows, tools, guard and approvals apply, and the run page looks the same.
+
+How the branch gets there and back:
+
+1. The base commit of your repo is packed into a git bundle and written into a fresh sandbox (template `E2B_TEMPLATE`, default `base`), which checks it out on a branch `harness/<id>` of its own in `/home/user/work` (set `E2B_WORKDIR`).
+2. The agent works there; every file call and command goes to the sandbox.
+3. When the run ends, everything is committed and the branch is packed back into a bundle and fetched into your repo here, so `git diff`, **Continue**, **Retry** and pushing work exactly as with a local run. A swarm's own branch is handed back after its merges, and each worker's branch is handed *to* it before they are merged. A continued run gets a new sandbox holding its branch as it stands.
+4. The sandbox is killed as soon as the run ends (and if the runner is restarted mid-run), so nothing keeps billing. Its record keeps the sandbox id.
+5. On a Docker server, the runner is a container (`COMPOSE_PROFILES=runs`) whose commands all go to the sandbox; see below.
+
+Notes:
+
+- The cloud sandbox has no copy of your other branches, and `E2B_API_KEY` is never given to the commands the agent runs.
+- The run's own record and the branch stay here, in `runs/<id>/run.json` and your repo; delete the run to remove the record.
+- `apt-get install git` runs once in a new sandbox if the template has no git.
+- Reading files, listing folders and running commands are network calls now, so a cloud run is slower per step than a local one; `MAX_OUTPUT` trimming and the run's step and minute limits work as before.
+
+**On a Docker server.** The runner has its own container. Set these in `.env` on the server, then `docker compose up -d --build`:
+
+```
+COMPOSE_PROFILES=runs
+RUNNER_TOKEN=any-long-random-text
+E2B_API_KEY=e2b_...
+RUNNER_SANDBOX=e2b            # the compose default for this container
+```
+
+The runner comes up beside the Interceptor (`http://runner:3100`, no ports published) and the Interceptor sends it the Runs page's requests with the same `RUNNER_TOKEN`, so nothing else on the network can drive it. Runs and their branches land in the `runs` and `repos` folders on the server, so **Continue**, **Retry** and `git diff` work as they do on your PC, and the branch is pushed from the server. Local mode is possible too but pointless there: the worktree is made from the copy of the repo in `repos`, and commands run inside the runner's image, which has only Node and git.

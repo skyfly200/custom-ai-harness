@@ -1,0 +1,59 @@
+# Utility scripts and tests
+
+Start-everything, config validation, context compression and the test suite. Back to the [README](../README.md).
+
+## Utility scripts
+
+### Start everything
+
+`npm run all` (`scripts/start-all.js`) runs the Gateway, Router and Interceptor together from `.venv` (`.venv\Scripts` on Windows, `.venv/bin` elsewhere; falls back to `PATH`). Ollama starts only with `npm run all:ollama`, `npm run all -- --ollama` or `START_OLLAMA=1` in `.env`, and not when something already answers at `OLLAMA_URL`. `--no-ollama` overrides `START_OLLAMA`. `npm run full` runs `validate` and the tests first, then starts everything.
+
+### Compress standing context files
+
+Trims `CLAUDE.md` and `.qwen/settings.json` before a session to reduce foundational token overhead. Originals are backed up as `.bak`.
+
+```bash
+npm run compress
+# target specific files:
+node caveman-compress.js path/to/CLAUDE.md
+```
+
+### Validate config directories
+
+Scans `.vscode`, `.qwen`, and `.claude` for non-breaking spaces, BOM characters, smart quotes, and en/em dashes that silently break VS Code's JSON parser.
+
+```bash
+npm run validate          # report only
+npm run validate:fix      # auto-correct in place
+```
+
+
+## How routing decisions are made
+
+The interceptor scores the text typed in the latest user turn for complexity signals before forwarding to RouteLLM. The system prompt and tool output are never scored, and turns that only carry tool results keep the strategy of the request that started them. Requests that define tools (every Claude Code request) go to `strong_model_tools` when hard (unset: the strong model) or `weak_model_tools` when easy (`fallback-openrouter-tools`, the free NVIDIA Nemotron model), because a model without tool support answers them with text instead of tool calls. On the Routing page these are the Router's **Strong, with tools** and **Weak, with tools** outputs:
+
+| Signal type | Examples | Threshold | Effect |
+|-------------|----------|-----------|--------|
+| Complex | architect, refactor, debug, security, algorithm | 0.20 | Favours strong model |
+| Balanced | (mixed or no signal) | 0.50 | Default |
+| Simple | test, format, lint, rename, comment | 0.80 | Favours free weak model |
+
+The threshold is encoded as `router-bert-<threshold>` — the strict three-part format required to prevent RouteLLM `ValueError` parser crashes.
+
+
+## Tests
+
+```bash
+npm test                                   # Interceptor (Node)
+pip install -r requirements-test.txt
+python -m pytest test/                     # Router: contract tests and every backend end to end
+```
+
+`test/test_router_backends.py` starts the real Router for each backend and calls `/route` over HTTP. It runs RouteLLM on a tiny BERT checkpoint built on the spot, the real `laya` Router and a real `laya-serve` (the Jev protocol, with auth), a local stand-in for a reasoning model, and a custom scorer; only model weights and paid endpoints are faked. To run against the real thing, set any of:
+
+| Variable | Runs |
+|---|---|
+| `ROUTER_LIVE_ROUTELLM=1` | the `routellm/bert_gpt4_augmented` checkpoint (downloads from Hugging Face) |
+| `ROUTER_LIVE_LAYA=1` | real Laya weights (downloads from Hugging Face) |
+| `ROUTER_LIVE_JEV_URL` (+ `ROUTER_LIVE_JEV_KEY`, `ROUTER_LIVE_JEV_MODEL`) | a real Jev or `laya-serve` |
+| `ROUTER_LIVE_LLM_URL` + `ROUTER_LIVE_LLM_MODEL` (+ `ROUTER_LIVE_LLM_KEY`) | a real OpenAI-compatible reasoning model |

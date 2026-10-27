@@ -25,4 +25,4 @@ Use this for a quick manual validation pass on a real phone or tablet. It is int
 8. From a computer, open `https://YOUR-ADDRESS/ui/api/status` with no password.
    - Expect a 401, never data.
 
-This checklist is also referenced from the main README under the phone setup section.
+This checklist is also referenced from [Phone and installable app](phone-and-app.md#phone-test-checklist).

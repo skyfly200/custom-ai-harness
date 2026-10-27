@@ -86,6 +86,7 @@
     </div>
     <div class="row">
       <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
+      <label class="field"><span data-hint="Most it may spend, in dollars, priced like the Usage page. It stops there and you can Continue it. Blank or 0: no limit. For a swarm, each worker gets this limit">Max cost ($)</span><input type="number" name="maxCost" min="0" max="1000" step="0.01" placeholder="no limit"></label>
       <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
     </div>
     <div class="row">
@@ -118,6 +119,7 @@
       <div class="row">
         <label class="field"><span data-hint="Most model calls a task may use. Blank or 0: no limit besides the minutes">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
         <label class="field"><span>Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+        <label class="field"><span data-hint="Most one task may spend, in dollars. It stops there and you can Continue it. Blank or 0: no limit">Max cost ($)</span><input type="number" name="maxCost" min="0" max="1000" step="0.01" placeholder="no limit"></label>
         <label class="field"><span data-hint="The highest routing tier its tasks may use, by name. Blank means no cap">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
         <label class="field"><span data-hint="A chat project this agent belongs to. Chats in that project can hand it work with /agent, and the project lists it">Chat project</span><select name="project" id="agentProject"><option value="">None</option></select></label>
       </div>

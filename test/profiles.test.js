@@ -13,6 +13,7 @@ process.env.HARNESS_PROFILES_FILE = path.join(dir, 'profiles.json');
 process.env.HARNESS_SETTINGS_FILE = path.join(dir, 'settings.json');
 process.env.HARNESS_USAGE_FILE = path.join(dir, 'usage.json');
 const profiles = require('../utils/profiles');
+const { fakeGateway } = require('./helpers/stubs');
 
 const CHEAP = {
     name: 'Cheap and quick', down: 'free', downTools: 'free-tools', strong: 'mid', weak: 'tiny',
@@ -93,15 +94,7 @@ const router = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ model: 'router-strong', win_rate: 0.9 }));
 });
-const gateway = http.createServer((req, res) => {
-    let data = '';
-    req.on('data', (c) => { data += c; });
-    req.on('end', () => {
-        lastBody = JSON.parse(data || '{}');
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ choices: [{ message: { content: 'hi' } }], usage: { prompt_tokens: 3, completion_tokens: 1 } }));
-    });
-});
+const gateway = fakeGateway((req, body) => { lastBody = body || {}; });
 let harness, base;
 
 test.before(async () => {

@@ -605,3 +605,8 @@ button.icon.on { color: var(--accent); }
 }
 .options a { color: var(--accent); }
 .options .sliders { display: grid; gap: 8px; }
+
+/* Import from Claude Code, in the Commands and Skills dialogs */
+.import { margin-top: 10px; font-size: 13px; }
+.import summary { cursor: pointer; color: var(--muted); }
+.import li { white-space: normal; overflow: visible; text-overflow: clip; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }

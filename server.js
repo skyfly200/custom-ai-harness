@@ -42,6 +42,7 @@ const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager, readConfig, writeConfig } = require('./utils/mcp');
 const mcpAdmin = require('./utils/mcpAdmin');
 const mcpCatalog = require('./utils/mcpCatalog');
+const claudeKit = require('./utils/claudeKit');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
 const chatWorktrees = require('./utils/chatWorktrees');
@@ -1030,6 +1031,9 @@ app.post('/ui/api/mcp/test', localJsonOnly, async (req, res) => {
         res.status(err.status || 500).json({ error: err.message });
     }
 });
+
+// Claude Code's commands and skills (.claude in this repo and in the home folder), to import into the chat page
+app.get('/ui/api/claude-kit', localOnly, (req, res) => res.json({ items: claudeKit.list() }));
 
 app.post('/ui/api/repo', localJsonOnly, async (req, res) => {
     try {

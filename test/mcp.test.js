@@ -128,11 +128,10 @@ test('a server that times out once is tried again; "timeoutMs" and "retries" are
     const file = path.join(dir, 'flaky.json');
     const marker = path.join(dir, 'flaky-marker');
     const flaky = path.join(__dirname, 'fixtures', 'flaky-mcp-server.js');
-    // The retried one has to answer on its second try, and starting a Node server takes
-    // a second or two on a slow machine, so its window is generous: what is being tested
-    // is that a second try happens at all, not how fast the machine boots Node.
+    // The first try hangs for the whole window, so a long window makes the test slow; 4 s
+    // still leaves the second try time to boot Node even on a slow machine.
     fs.writeFileSync(file, JSON.stringify({ mcpServers: {
-        retried: { command: process.execPath, args: [flaky], env: { FLAKY_MARKER: marker }, timeoutMs: 15000, retries: 1 },
+        retried: { command: process.execPath, args: [flaky], env: { FLAKY_MARKER: marker }, timeoutMs: 4000, retries: 1 },
         once: { command: process.execPath, args: [flaky], env: { FLAKY_MARKER: path.join(dir, 'once-marker') }, timeoutMs: 1000, retries: 0 },
     } }));
     const mcp = new McpManager({ file });

@@ -44,6 +44,8 @@
       <div class="card list" id="agentRuns"><div class="sub muted">Loading…</div></div>
     </section>
     <section>
+      <h2 data-hint="What runs cost per day, stacked by agent. A run counts on the day it started, with its swarm workers">Run spend, last 7 days</h2>
+      <div class="card spend" id="spend"><div class="sub muted">Loading…</div></div>
       <h2 data-hint="Hands a task to one of your agents. It starts from where that agent's last task left off">Give an agent a task</h2>
       <form class="card" id="quickTask" autocomplete="off">
         <label class="field"><span>Agent</span><select name="agent" id="quickAgent"></select></label>
@@ -279,6 +281,7 @@ function renderGuard(g) {
 
 const RUN_TAGS = { done: 'ok', waiting: 'warn', incomplete: 'warn', failed: 'bad', stopped: 'warn' };
 const RUN_WORD = { done: 'finished', waiting: 'needs you' };
+const runWord = (r) => (r.status === 'incomplete' && r.outOfBudget ? 'cost limit' : RUN_WORD[r.status] || r.status);
 const STATE_DOT = { waiting: 'warn', working: 'ok', queued: 'ok', idle: 'off' };
 const STATE_WORD = { waiting: 'Needs you', working: 'Working', queued: 'Queued', idle: 'Idle' };
 // $ for what was priced; "+" when some calls had no known price
@@ -308,14 +311,14 @@ function renderAgentCards(b) {
     return `<a class="card agent-card" href="agents.html#${esc(a.id)}">
       <div class="name"><span class="dot ${STATE_DOT[a.state]}"></span>${esc(a.name)}<span class="tag ${a.state === 'waiting' ? 'warn' : a.state === 'idle' ? '' : 'ok'}">${STATE_WORD[a.state]}</span></div>
       <div class="sub"><code>${esc(repoName(a.repo))}</code>${a.project?.name ? ` · ${esc(a.project.name)}` : ''}</div>
-      <div class="sub agent-last">${last ? `${esc(firstLine(last.goal, 80))}<br><span class="tag ${RUN_TAGS[last.status] || ''}" style="margin-left:0">${esc(RUN_WORD[last.status] || last.status)}</span> ${since(last.created)}` : 'No tasks yet'}</div>
+      <div class="sub agent-last">${last ? `${esc(firstLine(last.goal, 80))}<br><span class="tag ${RUN_TAGS[last.status] || ''}" style="margin-left:0">${esc(runWord(last))}</span> ${since(last.created)}` : 'No tasks yet'}</div>
       <div class="sub">${a.taskCount || 0} task${a.taskCount === 1 ? '' : 's'}${a.done ? ` · ${a.done} done` : ''}${a.failed ? ` · ${a.failed} failed` : ''} · ${short(a.tokens)} tokens · <b title="${a.unpriced ? `${a.unpriced} call(s) had no known price, so the real cost is higher` : 'What its tasks cost'}">${spendText(a.cost, a.unpriced)}</b></div></a>`;
   }).join('');
 }
 
 function runRow(r) {
   return `<a class="row" href="agents.html#${esc(r.id)}"><span class="title">${esc(firstLine(r.goal, 200))}</span>
-    <span class="meta"><span class="tag ${RUN_TAGS[r.status] || ''}" style="margin-left:0">${esc(RUN_WORD[r.status] || r.status)}</span> ${since(r.created)}</span>
+    <span class="meta"><span class="tag ${RUN_TAGS[r.status] || ''}" style="margin-left:0">${esc(runWord(r))}</span> ${since(r.created)}</span>
     <span class="proj">${r.agentName ? `${esc(r.agentName)} · ` : ''}${r.kind === 'swarm' ? 'swarm · ' : ''}<code>${esc(repoName(r.repo))}</code>${r.plan ? ' · plan only' : r.branch && r.status !== 'queued' ? ` · <code>${esc(r.branch)}</code>` : ''} · ${short(r.spent.tokens)} tokens · ${spendText(r.spent.cost, r.spent.unpriced)}${r.steps ? ` · ${r.steps} steps` : ''}</span></a>`;
 }
 
@@ -333,6 +336,20 @@ function renderQuick(agents) {
   $('quickTask').querySelector('button').disabled = !agents.length;
 }
 
+// Run spend per day, stacked by agent. Colours follow the agent, not its rank.
+const SPEND_SLOTS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)'];
+function renderSpend(runs, agents) {
+  const d = AgentBoard.daily(runs, agents);
+  if (!d.total) { $('spend').innerHTML = '<div class="sub muted">No run spend in the last 7 days.</div>'; return; }
+  const color = (s, i) => (s.id === 'other' ? 'var(--s-other)' : SPEND_SLOTS[i % SPEND_SLOTS.length]);
+  const idx = new Map(d.series.map((s, i) => [s.id, i]));
+  const label = (day) => day.date.toLocaleDateString(undefined, { weekday: 'short' });
+  $('spend').innerHTML = `<div class="spend-head"><b>${usd(d.total)}</b><span class="sub">total · busiest day ${usd(d.max)}</span></div>
+    <div class="spend-chart" role="img" aria-label="Run spend per day, last 7 days, ${usd(d.total)} in total">${d.days.map(day => `<div class="spend-col"><div class="spend-stack" title="${esc(label(day))}: ${usd(day.total)}">${[...day.parts].reverse().map(p => `<i style="height:${(100 * p.cost / d.max).toFixed(2)}%;background:${color(d.series[idx.get(p.id)], idx.get(p.id))}" title="${esc(p.name)}: ${usd(p.cost)} on ${esc(label(day))}"></i>`).join('')}</div><span class="spend-day">${esc(label(day))}</span></div>`).join('')}</div>
+    <div class="spend-legend">${d.series.map((s, i) => `<span><i style="background:${color(s, i)}"></i>${esc(s.name)}</span>`).join('')}</div>
+    <details class="spend-table"><summary>Show as a table</summary><table><thead><tr><th>Day</th>${d.series.map(s => `<th>${esc(s.name)}</th>`).join('')}<th>Total</th></tr></thead><tbody>${d.days.map(day => `<tr><td>${esc(label(day))} ${day.date.getDate()}</td>${d.series.map(s => `<td class="num">${usd(day.parts.find(p => p.id === s.id)?.cost || 0)}</td>`).join('')}<td class="num">${usd(day.total)}</td></tr>`).join('')}</tbody></table></details>`;
+}
+
 async function loadAgents() {
   if (agentsBusy) return;
   agentsBusy = true;
@@ -344,6 +361,7 @@ async function loadAgents() {
     renderAgentCards(b);
     renderAgentRuns(b);
     renderQuick(a.agents);
+    renderSpend(r.runs, a.agents);
     $('agentSummary').textContent = `${b.totals.active ? `${b.totals.active} running` : 'none running'} · ${spendText(b.totals.cost, b.totals.unpriced)} spent on runs${b.needs.length ? ` · ${b.needs.length} need${b.needs.length === 1 ? 's' : ''} you` : ''}`;
   } catch (err) {
     $('agentDown').hidden = false;

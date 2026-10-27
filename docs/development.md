@@ -44,7 +44,12 @@ The threshold is encoded as `router-bert-<threshold>` — the strict three-part 
 ## Tests
 
 ```bash
-npm test                                   # Interceptor (Node)
+npm test                                   # Interceptor (Node): about 430 tests, ~25 s
+npm run test:fast                          # everything except the 3 slowest files (mcp, gateway, spritesSandbox)
+npm run test:slow                          # just those 3
+npm run test:for                           # only the Node tests that mention files you changed
+npm run test:for -- utils/guard.js         # ...or files you name
+node --test test/guard.test.js             # one file
 pip install -r requirements-test.txt
 python -m pytest test/                     # Router: contract tests and every backend end to end
 ```
@@ -57,3 +62,18 @@ python -m pytest test/                     # Router: contract tests and every ba
 | `ROUTER_LIVE_LAYA=1` | real Laya weights (downloads from Hugging Face) |
 | `ROUTER_LIVE_JEV_URL` (+ `ROUTER_LIVE_JEV_KEY`, `ROUTER_LIVE_JEV_MODEL`) | a real Jev or `laya-serve` |
 | `ROUTER_LIVE_LLM_URL` + `ROUTER_LIVE_LLM_MODEL` (+ `ROUTER_LIVE_LLM_KEY`) | a real OpenAI-compatible reasoning model |
+
+### Which tests cover what
+
+| Area | Test files |
+|---|---|
+| Login, passwords, API keys | `access`, `login`, `oauth`, `runKeys` |
+| Routing, tiers, profiles, Auto | `interceptor`, `profiles`, `tiers`, `autoStrategy`, `autoroute`, `escalate`, `jevQuestions` |
+| Command guard, Jev file tools | `guard`, `gatewayGuard`, `jevFiles` |
+| Gateway config and model info | `gateway`, `gatewayConfig`, `modelInfo`, `modelInfoApi`, `modelStats`, `openrouterCatalog` |
+| Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `e2bSandbox`, `spritesSandbox` |
+| MCP tools | `mcp`, `mcpAdmin`, `toolsApi` |
+| Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `chatCommands` |
+| Router (Python) | `test_router.py`, `test_router_backends.py`, `test_gateway_start.py` |
+
+Shared fake servers live in `test/helpers/stubs.js` (`fakeGateway(onRequest)` answers like an OpenAI-style Gateway); use them instead of writing another `http.createServer` stub. When a test file isn't listed here, `npm run test:for -- path/to/file.js` finds the tests that mention it.

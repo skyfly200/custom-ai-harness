@@ -3821,6 +3821,40 @@ $('commandsDialog').addEventListener('close', () => {
   drawHint();
 });
 
+// Claude Code's own commands and skills (.claude/commands, .claude/skills), one click to copy in
+let claudeKit = null;
+async function drawImport(kind) {
+  const ul = $(kind === 'command' ? 'importCommandsList' : 'importSkillsList');
+  if (!claudeKit) {
+    ul.innerHTML = '<li class="muted small">Looking…</li>';
+    try {
+      const r = await fetch('/ui/api/claude-kit', { credentials: 'same-origin' });
+      claudeKit = r.ok ? (await r.json()).items : [];
+      if (!r.ok) ul.innerHTML = `<li class="muted small">${esc((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)}</li>`;
+    } catch { claudeKit = []; }
+  }
+  const have = new Set((kind === 'command' ? commands : skills).map(x => x.name.toLowerCase()));
+  const items = claudeKit.filter(i => i.kind === kind);
+  ul.innerHTML = items.map((i, n) => `<li class="muted small" title="${esc(i.body.slice(0, 300))}">${kind === 'command' ? '/' : ''}${esc(i.name)} <span class="muted">(${esc(i.source)})</span>${i.description ? ` · ${esc(i.description)}` : ''} <button type="button" class="mini" data-import="${n}"${have.has(i.name.toLowerCase()) ? ' disabled' : ''}>${have.has(i.name.toLowerCase()) ? 'Added' : 'Add'}</button></li>`).join('')
+    || '<li class="muted small">Nothing found in .claude/commands or .claude/skills (here or in your home folder).</li>';
+}
+for (const [id, kind] of [['importCommands', 'command'], ['importSkills', 'skill']]) {
+  $(id).addEventListener('toggle', () => { if ($(id).open) drawImport(kind); });
+  $(`${id}List`).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-import]');
+    if (!b) return;
+    const i = claudeKit.filter(x => x.kind === kind)[Number(b.dataset.import)];
+    if (kind === 'command') {
+      commands.push({ id: uid(), name: i.name, description: i.description, model: '', effort: '', body: i.body });
+      saveCommands(); editingCommand = commands[commands.length - 1]; drawCommandIndex();
+    } else {
+      skills.push({ id: uid(), name: i.name, description: i.description, body: i.body });
+      saveSkills(); editingSkill = skills[skills.length - 1]; drawSkillIndex();
+    }
+    drawImport(kind);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Scheduled messages: sent while this page is open in a tab; a run missed
 // while it was closed happens when it opens

@@ -1,0 +1,29 @@
+# The whole harness in one Machine for Fly.io: Gateway (LiteLLM), Router and Interceptor.
+# docker/fly-start.js starts the three; only the Interceptor (:3000) is published. See docs/fly.md.
+# The compose files in this repo are for your own server; this is for Fly, which has no compose.
+FROM node:22-slim AS node-modules
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+FROM python:3.12-slim
+# git: chat repo linking; ca-certificates: https to OpenRouter and Neon
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+# langfuse: only used when LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set
+RUN pip install --no-cache-dir "litellm[proxy]" langfuse fastapi uvicorn pyyaml httpx
+COPY --from=node-modules /usr/local/bin/node /usr/local/bin/node
+WORKDIR /app
+COPY --from=node-modules /app/node_modules ./node_modules
+COPY package.json package-lock.json ./
+COPY server.js caveman-compress.js validate-config.js router.py ./
+COPY config.yaml routellm-config.yaml guard-rules.json batch-models.json ./
+COPY utils ./utils
+COPY migrations ./migrations
+COPY workflows ./workflows
+COPY ui ./ui
+COPY scripts/migrate.js ./scripts/migrate.js
+COPY docker/gateway-start.py docker/fly-start.js ./docker/
+ENV HARNESS_DATA_DIR=/app/data PYTHONUTF8=1
+EXPOSE 3000
+CMD ["node", "docker/fly-start.js"]

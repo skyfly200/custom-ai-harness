@@ -55,6 +55,8 @@ const https = require('https');
 const path = require('path');
 
 const app = express();
+// For Fly's health check and uptime pings: answers before any login, says nothing about the Gateway
+app.get('/healthz', (req, res) => res.type('text').send('ok'));
 // OpenRouter credentials: OPENROUTER_API_KEY, or workload identity federation (utils/openrouterAuth.js)
 const orAuth = openrouterAuth.createAuth();
 for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federation: ${problem}`);

@@ -63,14 +63,19 @@ Other tools use `https://agents.skylerfly.com/v1` with the key as their API key.
 
 ## Keeping the cost down
 
-The Machine bills only while it runs. For now you stop it yourself and Fly wakes it when something opens the address:
+The Machine bills only while it runs, so the app stops itself:
 
-```powershell
-fly machine list --app YOUR-APP-NAME      # shows the Machine id
-fly machine stop MACHINE-ID --app YOUR-APP-NAME
-```
+- **It sleeps after 30 idle minutes** (`HARNESS_IDLE_STOP_MIN` in `fly.toml`; `0` turns it off). Opening a page, a request to `/v1` (Claude Code, other tools) or any save counts as use. The Dashboard polling for status or holding the live feed open does not, or an open tab would keep it awake. A reply still being answered or saved keeps it awake whatever the clock says.
+- **The Dashboard has a Stop server button** (admins only) for stopping it right now. It asks first.
+- **Opening the address wakes it.** Fly starts a stopped Machine when a request arrives. The first request waits while the Machine boots and LiteLLM starts (a minute, not measured); Claude Code may need to retry its first call.
 
-The first request after a stop waits while the Machine boots and LiteLLM starts. A Stop button in the app and sleeping after 30 idle minutes are the next PR. The volume is billed even while the Machine is stopped. Neon sleeps on its own after 5 idle minutes.
+How it works: the app asks the launcher to stop, which stops all three parts and exits with code 0. `fly.toml` sets the Machine's restart policy to `on-failure`, so a clean exit leaves it stopped and only a crash restarts it. If your Machine restarts itself after a stop, check `fly machine status MACHINE-ID` for its restart policy. To stop it from your own computer instead: `fly machine stop MACHINE-ID --app YOUR-APP-NAME`.
+
+While it sleeps, anything that must happen with no one there (schedules, cache keep-alive pings) does not run. Chats are safe: they are in Neon. If you were halfway through a reply when it stopped, the server keeps what it had (see below). The volume is billed even while the Machine is stopped, and Neon sleeps on its own after 5 idle minutes.
+
+## Replies survive a closed tab
+
+With a database set, the chat page tells the server which chat and message a reply belongs to. If the page goes away (tab closed, phone locked, connection lost) before the reply ends, the server saves the words that arrived, with a note that it was cut off, and the next device you open shows it. If the page is still there it saves its own, fuller copy a moment earlier and the server's copy is skipped. This keeps text only; a reply that was in the middle of running tools stops at the tools, because the page runs them.
 
 ## Looking after it
 

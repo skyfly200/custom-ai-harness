@@ -10,7 +10,7 @@ PR 2 (database layer), PR 4 (chats in Neon) and PR 5 (sign-in) shipped in [PR #9
 - **Chats are stored as the page keeps them**, one row per chat in `chats` (plus `user_data` for projects, skills, commands, schedules and prefs), not one row per message. The staged move to message rows is in [Moving chats to message rows](#moving-chats-to-message-rows). The browser still works from localStorage and syncs about 1.5 s after each save. A message-per-row table and server-side message saving are not done.
 - **`DATABASE_DRIVER=http`** (Neon's HTTPS driver) exists for hosts that only allow port 443.
 
-**Next: PR 3, the Fly deploy to `agents.skylerfly.com`.** `fly.toml` and a Fly Dockerfile don't exist yet. Still not done: 3a (Stop button and idle stop), 6 to 11.
+**Fly deploy (PR 3) and the Stop button with idle sleep (3a) are built; next is a real deploy to `agents.skylerfly.com`.** `fly.toml` and a Fly Dockerfile don't exist yet. Still not done: 3a (Stop button and idle stop), 6 to 11.
 
 ## The short version
 
@@ -191,6 +191,8 @@ Notes:
 7. **Schedules and keep-alive pings** (they need stage 2 of [Moving chats to message rows](#moving-chats-to-message-rows)) currently run in the open browser tab. In a hosted app they should run on the server (a timer in the Interceptor reading `skills` rows of kind `schedule`), or they stop whenever the tab closes. Treat as a follow-up; it is the main "works anywhere" gain after chats.
 
 ## Moving chats to message rows
+
+**Update 2 (2026-10-27): stage 2 is built too** (the server saves a reply, text only, when the page goes away mid-answer; the Stop button and 30-minute idle sleep are built as well). Still open from this section: a stable user id instead of the name as chat owner, paging long chats, and server-side saving for tool-using replies and for schedules, Agents and Runs writing into chats.
 
 **Update (2026-10-27): stages 1, 3 and 4 are built** (migration `003`, delta sync with join-on-conflict, no whole-chat blob), with almost nothing to migrate so the stages went out as one PR. **Stage 2 (the server saving replies itself) is not built yet** and is the next piece; schedules, Agents and Runs depend on it. The user id (stage 1's last part) is also still to do. The rest of this section is the original plan.
 

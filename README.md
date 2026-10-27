@@ -102,6 +102,7 @@ These settings only last for that window. Other tools such as Cursor, Aider, Con
 
 - Use Bright Chat from your phone, or install it as an app: [Phone and installable app](docs/phone-and-app.md).
 - Run the harness on a server so it is always on: [Run it on a server](docs/server-docker.md).
+- Run it on Fly.io at your own address, with chats in Neon: [Run it on Fly.io](docs/fly.md).
 - Plan work with `/wayfinder` and check commands with the guard: [Claude Code and agent tools](docs/claude-code.md).
 
 ### If something goes wrong
@@ -131,6 +132,7 @@ Everything past the quick start lives in `docs/`. Each page starts with a one-li
 | [Task runner](docs/task-runner.md) | Agents that do a whole task: workflows, swarm, E2B cloud sandboxes |
 | [ChatDev](docs/chatdev.md) | Run the ChatDev multi-agent tool in a Fly Sprite with its models routed through the harness |
 | [Run it on a server](docs/server-docker.md) | Docker, Oracle and Google Cloud free tiers, Tailscale, `HARNESS_MODE` and local models |
+| [Run it on Fly.io](docs/fly.md) | One Machine, Neon, your own domain, start and stop to save cost |
 | [Phone and installable app](docs/phone-and-app.md) | Install Bright Chat as an app, and a Cloudflare tunnel for your phone |
 | [Named logins and API keys](docs/logins.md) | `HARNESS_REQUIRE_LOGIN`, admins and per-program keys |
 | [Langfuse](docs/langfuse.md) | See every model call grouped by chat or run |

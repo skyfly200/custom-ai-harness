@@ -97,6 +97,10 @@ class RunKeys {
 }
 
 /** Skip a gate (password or login) for a request that carries a valid run key. */
-const unlessRunKey = (gate) => (req, res, next) => (req.harnessRunKey ? next() : gate(req, res, next));
+// `gate` is one middleware, or a list of them (the login gate is a list)
+const unlessRunKey = (gate) => {
+    const handler = Array.isArray(gate) ? require('express').Router().use(...gate) : gate;
+    return (req, res, next) => (req.harnessRunKey ? next() : handler(req, res, next));
+};
 
 module.exports = { RunKeys, costOf, unlessRunKey, PREFIX, UNKNOWN_PRICE };

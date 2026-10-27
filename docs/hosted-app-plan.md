@@ -1,6 +1,6 @@
 # Plan: the harness as a hosted app with accounts
 
-Written 2026-10-27 for Skyler. A plan, not code. It covers running the harness on [Fly.io](https://fly.io), keeping chats and per-user data in [Neon](https://neon.com) Postgres, and adding accounts with OAuth sign-in. Back to the [README](../README.md). Related: [Run it on a server](server-docker.md), [Named logins](logins.md), [Task runner](task-runner.md), the [agentic roadmap](../ROADMAP.md).
+Written 2026-10-27 for Skyler. Updated the same day with Skyler's answers: invite-only users, each person brings their own OpenRouter credential (static key or workload identity federation), and attachments are a separate goal from text chats. A plan, not code. It covers running the harness on [Fly.io](https://fly.io), keeping chats and per-user data in [Neon](https://neon.com) Postgres, and adding accounts with OAuth sign-in. Back to the [README](../README.md). Related: [Run it on a server](server-docker.md), [Named logins](logins.md), [Task runner](task-runner.md), the [agentic roadmap](../ROADMAP.md).
 
 ## The short version
 
@@ -8,7 +8,7 @@ Written 2026-10-27 for Skyler. A plan, not code. It covers running the harness o
 - **Neon:** holds everything that belongs to a person: accounts, sessions, API keys, chats, messages, projects, routings, settings, MCP servers, usage and limits. The app uses the pooled connection string; migrations use the direct one. The Free plan is enough to start; chat attachments are the thing that will outgrow it.
 - **Accounts:** keep what already exists (named logins, `hk_` API keys, per-address rate limits) and add "Sign in with GitHub / Google" on top. Recommendation: do **not** adopt WorkOS AuthKit yet. Build GitHub and Google sign-in with a small OAuth library behind an interface, and revisit AuthKit if you want public sign-up, MFA or company SSO. Reasons are in [Auth choice](#auth-choice).
 - **Local use keeps working.** With no `DATABASE_URL`, the harness behaves as it does today (files, localStorage). The hosted features switch on with environment variables, the same pattern as `HARNESS_REQUIRE_LOGIN`.
-- **Order:** database layer, Fly deploy (usable right away with the current named logins), chats in the database, OAuth, per-user settings, usage limits, then Runs. Details in [PR order](#pr-order).
+- **Order:** database layer, Fly deploy (usable right away with the current named logins), chats in the database, OAuth, per-user settings, usage limits, per-user OpenRouter keys (then keyless federation), attachments, then Runs. Details in [PR order](#pr-order).
 
 ## What exists today (and what it means for hosting)
 
@@ -45,7 +45,7 @@ What the harness needs from auth, in order of importance:
 
 Put the choice behind a small interface, `identify(req) -> { userId, email, name }`, and keep the `users` and `identities` tables ours. Then AuthKit becomes "one more provider" if you want it later, not a rewrite. Choose AuthKit now instead if you expect strangers to sign up, or want MFA or passkeys without writing them.
 
-Admin bootstrap: keep `HARNESS_ADMINS` (password admins) and add `HARNESS_ADMIN_EMAILS` / `HARNESS_ADMIN_GITHUB` so your own OAuth login is an admin from the first start. Everyone else is invite-only by default (admin adds an email or GitHub name on the Users page); `HARNESS_SIGNUP=open` is a deliberate opt-in.
+Admin bootstrap: keep `HARNESS_ADMINS` (password admins) and add `HARNESS_ADMIN_EMAILS` / `HARNESS_ADMIN_GITHUB` so your own OAuth login is an admin from the first start. Everyone else is **invite-only** (decided): an admin adds an email or GitHub name on the Users page, and only invited people can finish sign-in. There is no open sign-up setting in v1.
 
 ## Fly.io layout
 
@@ -98,7 +98,7 @@ Fly Machine about $6.70 + volume $0.15 + traffic (outbound is billed, and that i
 ## Neon
 
 - **Plan.** Free gives 100 compute-hours per project, 1 GB storage per project, scale-to-zero after 5 minutes that cannot be turned off, and 5 GB of egress ([Neon pricing](https://neon.com/pricing)). Launch is pay-as-you-go: $0.106 per compute-hour, $0.35 per GB-month, scale-to-zero optional. Chat text is tiny; start on Free.
-- **What will outgrow 1 GB:** chat attachments (images and files in base64). Keep text in Postgres, put attachments in object storage (Fly's Tigris, or any S3-compatible bucket) and store only a key in the message. Decide at the chats PR, not now.
+- **What will outgrow 1 GB:** chat attachments (images and files in base64). Decided: attachments are a **separate goal** from text chats. The chats PRs store text, tool calls and metadata only; messages with attachments keep a placeholder (name, type, size) and, until the attachments PR lands, the attachment bytes stay in the browser as today. The attachments PR then adds object storage (Fly's Tigris, or any S3-compatible bucket), a `attachments` table (owner, key, size, type), uploads by signed URL, and a size limit per user.
 - **Scale-to-zero.** After 5 idle minutes the database sleeps, and the next query waits for it to wake. Acceptable for a personal app. The app must retry the first connection once and never hold a connection open across idle time. Launch plan with scale-to-zero off removes this if it annoys.
 - **Connections.** Use the pooled connection string (the host with `-pooler`) for the app, with a `pg` Pool of 5 to 10; use the direct string only for migrations and long-lived `LISTEN`. With pooling in transaction mode, don't rely on session state (`SET`, advisory locks held across requests, prepared statements the driver names itself). I did not find Neon's exact connection limit on its pricing page; read its docs before setting the Pool size.
 - **Migrations.** Plain SQL files in `migrations/`, `npm run migrate`, a `schema_migrations` table. Run from Fly's `release_command`. No ORM needed; keep `pg` and a thin `utils/db.js`.
@@ -119,7 +119,7 @@ api_keys     (id, user_id, name, key_hash, last4, last_used, created_at, revoked
 projects     (id, user_id, name, system_prompt, settings jsonb, updated_at)
 chats        (id, user_id, project_id null, title, settings jsonb,   -- routing choice, effort, mcp on/off, repo link
               pinned, created_at, updated_at, deleted_at null)
-messages     (id, chat_id, seq, role, content jsonb,                 -- text parts, tool calls, attachment keys
+messages     (id, chat_id, seq, role, content jsonb,                 -- text parts, tool calls, attachment placeholders
               meta jsonb,                                            -- model, routing, tokens, cost, request id
               created_at)                                            -- unique(chat_id, seq)
 skills       (id, user_id, kind 'skill'|'command'|'schedule', name, body jsonb, updated_at)
@@ -176,13 +176,20 @@ Request handling: the Interceptor already reads `x-harness-profile` and similar 
 
 ## Per-user API key and cost limits
 
-- **Who pays.** Default: all users share the one provider key (`OPENROUTER_API_KEY`), and the harness meters each user. Option: a user pastes their **own** OpenRouter key (stored encrypted in `user_limits.byo_key_enc`) and their requests use it, which removes the cost worry for that user. This needs the Interceptor to pass a per-request key down to the Gateway; LiteLLM supports a key per call, but I haven't tested this path.
+- **Who pays (decided: bring your own).** Each person supplies their own OpenRouter credential; the shared key is only the admin's own. Two kinds, stored per user:
+  1. **A static OpenRouter key**, pasted in Account settings, encrypted with `ENCRYPTION_KEY` (`user_limits.byo_key_enc`). Works for anyone, including personal OpenRouter accounts.
+  2. **Workload identity federation (WIF)**, which stores no secret. Facts from [OpenRouter's WIF page](https://openrouter.ai/docs/guides/overview/auth/workload-identity-federation): it is for Business and Enterprise organisations only; an org admin creates a *policy* (trusted issuer, audience, subject or CEL condition) that "acts as" one workspace API key owned by that org; the workload exchanges a signed JWT for a token that lasts up to 15 minutes; usage is billed to that key as if it were used directly. Personal accounts can't use it, and the page describes no spend cap on the policy itself, so limits come from the target key.
+- **How WIF would work for hosted users.** PR #90 already does the exchange for one install-wide policy (`utils/openrouterAuth.js`, Gateway and Router go through `/openrouter-proxy`). Per user it needs two additions: (a) the harness becomes a small **OIDC issuer** (publishes `/.well-known/openid-configuration` and a JWKS, signs ES256 or RS256 JWTs with `iss` = the app's https address, `sub` = the user id, `aud` = the policy's audience), and (b) the user (or you, for your own org) adds the harness as a trusted issuer in OpenRouter and creates a policy with `sub` = their user id, then pastes the **policy id** into Account settings. Nothing secret is stored; revoking is pausing the policy. The Interceptor mints the JWT, exchanges it (cached for about 14 minutes, as #90 does) and uses the resulting token for that user's requests.
+- **Wiring.** Today the Gateway and Router reach OpenRouter through `/openrouter-proxy` with one proxy key. Hosted mode makes that proxy per-request: the Interceptor tags each internal call with the signed-in user (an internal-only header the Gateway cannot be tricked into sending from outside, because the proxy is on the loopback or private network) and the proxy swaps in that user's key or exchanged token. If the user has no credential, the request is refused with a plain message, or falls back to the shared key when the admin allows it for that user.
+- **Constraint to decide on:** WIF needs the user to own an OpenRouter Business organisation, which most invited people won't. Plan: ship the static-key path first (PR 7), and WIF as its own follow-up (PR 8) that you can use yourself and offer to anyone with an org. A middle option inside your own org is one policy per invited person, each acting as a workspace key you create with its own limit, which gives OpenRouter-side spend caps per person without anyone pasting a key.
+- **Verify before building:** the exact JWT and issuer rules above come from OpenRouter's docs as read today; nothing has been tried against a real org. Test with one issuer, one policy and one key before designing the UI.
 - **Programs.** Each user makes `hk_` keys on the Users page (exists). The key identifies the user, so Claude Code traffic counts against the same limits as chat. Keys can be named, revoked, and show last-used time (adding columns to what `login.js` has).
+- **Metering and limits still apply.** Even with their own key, the harness records spend per user so people (and you) can see it, and an optional admin-set cap per person still stops requests with a 429. A person's own OpenRouter key limits are theirs to set on OpenRouter.
 - **Metering.** `utils/usage.js` already reads real token counts from replies and `utils/modelInfo.js` has prices. Write one `usage_events` row per request with `user_id` and cost. Cost in USD is the common unit for limits.
 - **Limits enforced before forwarding.** A middleware looks up `user_limits` and the user's month-to-date spend (a cached sum, refreshed on each event write) and answers `429` with a plain message when over. Controls: monthly and daily dollars, requests per minute, allowed models or tiers (for example no Frontier tier), max output tokens. Admins see all users on the Usage page and set limits there.
 - **Known limits of this design.** Spend is counted after a request finishes, so concurrent requests can pass the limit by one request's worth; a single huge streaming reply can't be cut off mid-way except by `max_tokens`. Good enough for a small group; call it a soft limit in the UI.
 - **LiteLLM virtual keys** (per-key budgets inside the Gateway) are the other way. They need the Gateway to have its own Postgres, and the Interceptor already knows who the user is, so it isn't needed.
-- OpenRouter can also cap spend on its side (per-key limits). Create a dedicated key for the hosted app with a monthly cap as a last-resort stop. I haven't checked the current OpenRouter key-management API.
+- Your own shared key (for you, and for anyone you allow to use it) should be a dedicated OpenRouter key with a monthly cap on OpenRouter's side, as a last-resort stop.
 
 ## How the Runs page and sandbox runner fit
 
@@ -203,12 +210,14 @@ Each is a separate PR that works on its own and keeps the local, no-database set
 1. **Plan** (this document).
 2. **Database layer.** `utils/db.js`, `migrations/`, `npm run migrate`, `DATABASE_URL` optional. A `PgStore` for users, API keys and sessions behind the existing `Store` interface, with sessions in the database. Tests against a throwaway Postgres (Docker, or Neon branch in CI; the repo has no CI today, so local first). Hosted mode off by default.
 3. **Fly deploy.** `Dockerfile.fly`, `fly.toml`, secrets list, volume, `trust proxy`, health check, `docs/fly.md` with step by step commands for Windows. Usable immediately with the current named logins. This is the first point where Skyler can reach it from a phone without Tailscale or a tunnel.
-4. **Chats in the database.** Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import".
+4. **Chats in the database (text only).** Schema, API, server-side message saving, `ChatStore` in `ui/chat.js`, import from browser, export all. Biggest PR; may split into "API and saving" then "page and import". Attachments are not part of it.
 5. **OAuth sign-in.** GitHub and Google, `identities`, invite-only users page, `HARNESS_ADMIN_EMAILS`, account page (link or unlink providers, make API keys), sign-in page buttons.
 6. **Per-user settings, routings and MCP.** Global versus user split, encrypted MCP secrets, hosted lockdown for stdio MCP and shells.
-7. **Usage and limits.** `usage_events`, per-user spend, limits and a Users page column, 429 handling in chat, optional own-key.
-8. **Server-side schedules and keep-alive** (so they run with the tab closed).
-9. **Runs on Fly.** Runner Machine, Postgres run records, GitHub-token clone and push, per-user quotas.
+7. **Usage, limits and own OpenRouter key.** `usage_events`, per-user spend, optional caps and a Users page column, 429 handling in chat, a pasted OpenRouter key per user (encrypted), per-request credential in `/openrouter-proxy`.
+8. **OpenRouter workload identity federation per user.** The harness as an OIDC issuer (discovery and JWKS), per-user JWTs, a policy id in Account settings. Needs an OpenRouter Business org, so it follows a one-issuer, one-policy trial.
+9. **Attachments (separate goal).** Object storage, `attachments` table, signed uploads, size limits, moving attachment bytes out of the browser, import of existing attachments.
+10. **Server-side schedules and keep-alive** (so they run with the tab closed).
+11. **Runs on Fly.** Runner Machine, Postgres run records, GitHub-token clone and push, per-user quotas.
 
 Steps 3 and 4 can swap if you would rather have chats in the database before the first deploy; 3 first gives the earliest real use.
 
@@ -220,16 +229,21 @@ Steps 3 and 4 can swap if you would rather have chats in the database before the
 - **Single Machine.** No failover. A deploy restarts everything for several seconds, interrupting streams. Acceptable for personal use.
 - **Not tested on real Fly, Neon, LiteLLM or OAuth providers.** This plan is based on the repo and the vendors' pricing pages; I haven't deployed anything.
 
+## Decisions so far
+
+- Users are **invited**, not open sign-up (Skyler, 2026-10-27).
+- **Bring your own OpenRouter credential**, with OpenRouter workload identity federation as the keyless option (Skyler, 2026-10-27).
+- **Attachments are a separate goal** from text chats (PR 9 above).
+
 ## Open questions for Skyler
 
-1. **Who will use it:** just you, a few invited people, or open sign-up? That sets the auth choice (AuthKit becomes more attractive for open sign-up) and how strict limits must be.
-2. **OAuth providers:** GitHub and Google first. Any others (Apple, Microsoft, email-and-password only)?
-3. **Auth:** happy with self-hosted OAuth now and AuthKit only if needs grow, or do you want AuthKit from the start?
-4. **Who pays for models:** one shared OpenRouter key with limits per person, or each person brings their own key?
-5. **Default limits** for a new user (for example $5 a month, no Frontier tier)?
-6. **Chat attachments:** keep images and files, and if so, is a storage bucket (Tigris or S3) acceptable, or text only in v1?
-7. **Existing chats:** import from the browser you use now, and should the harness also keep working offline with localStorage (the plan says yes)?
-8. **Region and domain:** which Fly region (closest to where you are), and do you have a domain name for the app? A `*.fly.dev` address works without one; OAuth callbacks need a stable address.
-9. **MCP and shell for other users:** remote MCP servers only for non-admins, with stdio and shell for you alone. OK?
-10. **Runs in v1:** hidden until PR 9, or do you want it earlier than chats and accounts?
-11. **Neon plan:** Free to start (sleeps after 5 idle minutes), or Launch from day one?
+1. **OAuth providers:** GitHub and Google first. Any others (Apple, Microsoft, email-and-password only)?
+2. **Auth:** happy with self-hosted OAuth now and AuthKit only if needs grow? With invite-only users the case for AuthKit is weaker still.
+3. **Federation:** do the invited people have OpenRouter Business orgs, or is it mainly you? If mainly you, WIF is a "for my own use" PR and everyone else pastes a key. Would you rather give each person a workspace key in your org (with its own cap) behind a per-person policy?
+4. **Fallback to your key:** when someone has no credential of their own, refuse, or let them use your shared key within a small cap?
+5. **Caps:** any harness-side spend cap per person on top of their own key (for example none by default)?
+6. **Region and domain:** which Fly region (closest to where you are), and do you have a domain name for the app? A `*.fly.dev` address works without one; OAuth callbacks and the OIDC issuer URL need a stable https address.
+7. **MCP and shell for other users:** remote MCP servers only for non-admins, with stdio and shell for you alone. OK?
+8. **Runs:** hidden until PR 11, or earlier than attachments and WIF?
+9. **Neon plan:** Free to start (sleeps after 5 idle minutes), or Launch from day one?
+10. **Existing chats:** import from the browser you use now, and keep localStorage working offline when no database is set (the plan says yes)?

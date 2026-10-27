@@ -54,6 +54,26 @@
     }
   }
 
+  function drawInvites({ invites, providers }) {
+    $('inviteSection').hidden = false;
+    if (providers && !providers.length) $('inviteNote').textContent = 'Google and GitHub sign-in is off (set NEON_AUTH_BASE_URL in .env). Invites are kept for when it is on.';
+    const t = $('inviteTable');
+    t.replaceChildren();
+    if (!invites.length) { const tr = document.createElement('tr'); tr.append(cell('Nobody invited yet.')); t.append(tr); }
+    for (const i of invites) {
+      const tr = document.createElement('tr');
+      tr.append(cell(i.email), cell(i.role), cell(when(i.added)));
+      const td = document.createElement('td');
+      td.style.cssText = 'padding:6px 8px;text-align:right';
+      td.append(btn('Remove', async () => {
+        if (!confirm(`Remove the invite for ${i.email}? Existing sessions keep working until they end.`)) return;
+        drawInvites(await api('DELETE', `/ui/api/invites/${encodeURIComponent(i.email)}`));
+      }));
+      tr.append(td);
+      t.append(tr);
+    }
+  }
+
   const owner = () => (me.role === 'admin' ? $('owner').value || me.name : me.name);
   async function fillOwners() {
     if (me.role !== 'admin') return;
@@ -91,6 +111,14 @@
       e.target.reset(); say(`Added ${f.name}.`); fillOwners();
     } catch (err) { say(err.message, true); }
   });
+  $('addInvite').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const f = Object.fromEntries(new FormData(e.target));
+      drawInvites(await api('POST', '/ui/api/invites', f));
+      e.target.reset(); say(`Invited ${f.email}.`);
+    } catch (err) { say(err.message, true); }
+  });
   $('addKey').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -114,7 +142,7 @@
     $('who').textContent = `${me.name} · ${me.role}`;
     $('minpw').textContent = `At least ${me.minPassword} characters.`;
     $('pwSection').hidden = me.core;
-    if (me.role === 'admin') { $('admin').hidden = false; $('ownerRow').hidden = false; await fillOwners(); }
+    if (me.role === 'admin') { $('admin').hidden = false; $('ownerRow').hidden = false; await fillOwners(); drawInvites(await api('GET', '/ui/api/invites')); }
     loadKeys();
   })();
 })();

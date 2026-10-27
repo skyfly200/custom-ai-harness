@@ -36,6 +36,19 @@
     </div>
   </section>
 
+  <section id="inviteSection" hidden>
+    <h2>Invited people</h2>
+    <div class="card">
+      <p class="muted" style="margin-top:0" id="inviteNote">People you invite can sign in with Google or GitHub using this email address. Nobody else can.</p>
+      <table id="inviteTable" style="width:100%;border-collapse:collapse"></table>
+      <form id="addInvite" class="form" autocomplete="off" style="margin-top:12px">
+        <label class="field"><span>Email</span><input name="email" type="email" required autocapitalize="none"></label>
+        <label class="field"><span>Role</span><select name="role"><option value="user">User: chat and API</option><option value="admin">Admin: also Settings and Users</option></select></label>
+        <div class="field"><span>&nbsp;</span><button class="primary">Invite</button></div>
+      </form>
+    </div>
+  </section>
+
   <h2 id="keysHead">API keys</h2>
   <div class="card">
     <p class="muted" style="margin-top:0">For programs such as Claude Code: set <code>ANTHROPIC_AUTH_TOKEN</code> (or an OpenAI key) to the key. A key is shown once.</p>

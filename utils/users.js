@@ -16,6 +16,8 @@ const path = require('path');
 const COST = 16384;
 const NAME = /^[A-Za-z0-9._-]{1,40}$/;
 const MIN_PASSWORD = 8;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const normEmail = (e) => String(e || '').trim().toLowerCase();
 
 function hashPassword(password, cost = COST) {
     const salt = crypto.randomBytes(16);
@@ -56,10 +58,10 @@ const sha = (value) => crypto.createHash('sha256').update(String(value)).digest(
 class FileStore {
     constructor(file) {
         this.file = file;
-        this.data = { users: [], keys: [] };
+        this.data = { users: [], keys: [], invites: [] };
         try {
             const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-            this.data = { users: saved.users || [], keys: saved.keys || [] };
+            this.data = { users: saved.users || [], keys: saved.keys || [], invites: saved.invites || [] };
         } catch { /* first run */ }
     }
     save() {
@@ -104,6 +106,42 @@ class Users {
         if (this.find(name)) throw new Error('that user already exists');
         this.data.users.push({ name, hash: hashPassword(password), role: role === 'admin' ? 'admin' : 'user', created: new Date().toISOString() });
         this.store.save();
+    }
+    // --- sign-in with Google or GitHub (utils/oauth.js): invite-only ---
+    // An invite is { email, role }. HARNESS_ADMIN_EMAILS are admins without an invite.
+    get invites() { return (this.data.invites = this.data.invites || []); }
+    listInvites() { return this.invites.map(({ email, role, added }) => ({ email, role, added })); }
+    addInvite(email, role = 'user') {
+        const e = normEmail(email);
+        if (!EMAIL.test(e)) throw new Error('that is not an email address');
+        if (this.invites.some((i) => i.email === e)) throw new Error('already invited');
+        this.invites.push({ email: e, role: role === 'admin' ? 'admin' : 'user', added: new Date().toISOString() });
+        this.store.save();
+    }
+    removeInvite(email) {
+        const before = this.invites.length;
+        this.data.invites = this.invites.filter((i) => i.email !== normEmail(email));
+        if (this.data.invites.length === before) throw new Error('no such invite');
+        this.store.save();
+    }
+    // Returns the user an invited (or env-admin) email may sign in as, creating it on first use; null if not invited
+    forEmail(email, adminEmails = []) {
+        const e = normEmail(email);
+        if (!EMAIL.test(e)) return null;
+        const invite = this.invites.find((i) => i.email === e);
+        const admin = adminEmails.map(normEmail).includes(e);
+        if (!invite && !admin) return null;
+        const role = admin || invite.role === 'admin' ? 'admin' : 'user';
+        let user = this.data.users.find((u) => u.email === e);
+        if (user) {
+            if (user.role !== role && admin) { user.role = role; this.store.save(); }
+            return this.find(user.name);
+        }
+        let name = e.split('@')[0].replace(/[^A-Za-z0-9._-]/g, '').slice(0, 36) || 'user';
+        for (let n = 2; this.find(name); n++) name = `${name.slice(0, 34)}${n}`;
+        this.data.users.push({ name, email: e, hash: '', role, created: new Date().toISOString() });
+        this.store.save();
+        return this.find(name);
     }
     mutable(name) {
         const user = this.data.users.find((u) => u.name.toLowerCase() === String(name).toLowerCase());

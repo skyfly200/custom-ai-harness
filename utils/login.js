@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { passwordsFrom, viaCloudflare, PASSWORD_HEADER } = require('./access');
 const { sha, MIN_PASSWORD } = require('./users');
+const oauth = require('./oauth');
 
 const COOKIE = 'harness_session';
 const SESSION_MS = 7 * 24 * 3600 * 1000;
@@ -22,7 +23,8 @@ const ADMIN_ONLY_PAGES = new Set(['/ui/settings.html']);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const safeNext = (next) => (typeof next === 'string' && /^\/(?!\/|\\)/.test(next) ? next : '/ui/');
 
-function loginPage({ next, error }) {
+function loginPage({ next, error, providers = [] }) {
+    const buttons = providers.map((p) => `<a class="oauth" href="/auth/${p}?next=${encodeURIComponent(next)}">Continue with ${p === 'github' ? 'GitHub' : 'Google'}</a>`).join('');
     return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · Bright Chat</title>
@@ -37,10 +39,11 @@ h1{margin:0;font-size:20px}p{margin:0;color:var(--muted);font-size:14px}label{di
 input{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 input:focus{outline:2px solid var(--accent);outline-offset:1px}
 button{font:inherit;font-weight:600;padding:10px;border:0;border-radius:10px;background:var(--accent);color:#fff;cursor:pointer}
-button:disabled{opacity:.6}.err{color:var(--bad);font-size:14px;min-height:1.2em}
+button:disabled{opacity:.6}.oauth{display:block;text-align:center;font-weight:600;padding:10px;border:1px solid var(--line);border-radius:10px;color:var(--ink);text-decoration:none}.or{color:var(--muted);font-size:13px;text-align:center}.err{color:var(--bad);font-size:14px;min-height:1.2em}
 </style></head><body>
 <form id="f" method="post" action="/login">
 <h1>Bright Chat</h1><p>Sign in to continue.</p>
+${buttons}${buttons ? '<div class="or">or with a user name</div>' : ''}
 <label>User name<input name="username" autocomplete="username" autocapitalize="none" autofocus required></label>
 <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
 <input type="hidden" name="next" value="${esc(next)}">
@@ -56,8 +59,10 @@ catch{err.textContent='Could not reach the harness'}b.disabled=false});
 </script></body></html>`;
 }
 
-function createLogin({ users, legacyPassword = '' }) {
+function createLogin({ users, legacyPassword = '', sessionStore = null }) {
     const sessions = new Map(); // sha(token) -> { name, expires }
+    // sessions saved in a database come back after a restart; requests wait for them (see `gate`)
+    const loaded = sessionStore ? sessionStore.load().then((rows) => { for (const [k, v] of rows) sessions.set(k, v); }).catch((err) => console.error(`[db] loading sessions failed: ${err.message}`)) : null;
     const fails = new Map(); // key -> [timestamps]
     const basicOk = new Map(); // sha(name\0password) -> { name, expires }, spares scrypt on every API call
 
@@ -99,6 +104,7 @@ function createLogin({ users, legacyPassword = '' }) {
         if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value);
         const token = crypto.randomBytes(32).toString('base64url');
         sessions.set(sha(token), { name, expires: now + SESSION_MS });
+        if (sessionStore) sessionStore.put(sha(token), { name, expires: now + SESSION_MS });
         setCookie(req, res, token, SESSION_MS / 1000);
     }
 
@@ -170,8 +176,9 @@ function createLogin({ users, legacyPassword = '' }) {
     const router = express.Router();
     router.get('/login', (req, res) => {
         if (identify(req).user) return res.redirect(safeNext(req.query.next));
-        res.set('cache-control', 'no-store').type('html').send(loginPage({ next: safeNext(req.query.next) }));
+        res.set('cache-control', 'no-store').type('html').send(loginPage({ next: safeNext(req.query.next), providers: oauth.enabled() ? oauth.providers() : [] }));
     });
+    if (oauth.enabled()) router.use(oauth.createOAuth({ users, startSession, safeNext }));
     router.get('/login/favicon.svg', (req, res) => res.sendFile(require('path').join(__dirname, '..', 'ui', 'favicon.svg')));
     router.post('/login', express.json({ limit: '4kb' }), (req, res) => {
         const { username = '', password = '', next } = req.body || {};
@@ -188,11 +195,12 @@ function createLogin({ users, legacyPassword = '' }) {
     });
     router.post('/logout', (req, res) => {
         sessions.delete(sha(cookieOf(req)));
+        if (sessionStore) sessionStore.drop(sha(cookieOf(req)));
         setCookie(req, res, '', 0);
         res.json({ ok: true });
     });
 
-    const gate = [router, (req, res, next) => {
+    const gate = [(req, res, next) => (loaded ? loaded.then(() => next()) : next()), router, (req, res, next) => {
         const found = identify(req);
         if (found.wait) return res.set('retry-after', String(found.wait)).status(429).json({ error: 'too many wrong passwords; wait and try again' });
         if (!found.user) {
@@ -247,8 +255,19 @@ function createLogin({ users, legacyPassword = '' }) {
         if (req.params.name.toLowerCase() === req.harnessUser.name.toLowerCase()) throw new Error('you can\'t remove yourself');
         users.remove(req.params.name);
         for (const [k, s] of sessions) if (s.name.toLowerCase() === req.params.name.toLowerCase()) sessions.delete(k);
+        if (sessionStore) sessionStore.dropUser(req.params.name);
         basicOk.clear();
         res.json({ users: users.list() });
+    }));
+    // Invited emails for Google / GitHub sign-in
+    api.get('/ui/api/invites', admin, (req, res) => res.json({ invites: users.listInvites(), providers: oauth.enabled() ? oauth.providers() : [] }));
+    api.post('/ui/api/invites', admin, guarded((req, res) => {
+        users.addInvite(req.body?.email, req.body?.role);
+        res.json({ invites: users.listInvites() });
+    }));
+    api.delete('/ui/api/invites/:email', admin, guarded((req, res) => {
+        users.removeInvite(req.params.email);
+        res.json({ invites: users.listInvites() });
     }));
     // API keys: yours, or anyone's if you're an admin
     const ownerOf = (req) => {

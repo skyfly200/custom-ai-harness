@@ -1,7 +1,7 @@
 // A test run must not pick up the developer's .env: the tests set the variables
 // they need themselves, and a value left over from .env (a master key, say) would
 // silently reach a fake Gateway and make a test pass or fail for the wrong reason.
-if (!process.env.NODE_TEST_CONTEXT) require('dotenv').config();
+if (!process.env.NODE_TEST_CONTEXT) { require('dotenv').config(); require('dotenv').config({ path: '.env.local' }); }
 const express = require('express');
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 const {
@@ -43,6 +43,9 @@ const chatWorktrees = require('./utils/chatWorktrees');
 const { requirePassword, viaProxy } = require('./utils/access');
 const { createLogin } = require('./utils/login');
 const { parseAdmins, Users, FileStore } = require('./utils/users');
+const db = require('./utils/db');
+const { PgStore } = require('./utils/pgStore');
+const { createChatSync } = require('./utils/chatSync');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -65,8 +68,14 @@ if (LOGIN_ON) {
         throw new Error('HARNESS_REQUIRE_LOGIN is on but HARNESS_ADMINS is ' + (problems.length ? `invalid:\n  ${problems.join('\n  ')}` : 'empty')
             + '\nMake a hash with `npm run hash`, then set HARNESS_ADMINS=name:HASH (several: name:HASH,name2:HASH2). Refusing to start open.');
     }
-    const users = new Users({ admins, store: new FileStore(process.env.HARNESS_USERS_FILE || 'users.json') });
-    app.use(createLogin({ users, legacyPassword: HARNESS_PASSWORD }).gate);
+    // With DATABASE_URL the users and keys live in Postgres; requests wait for the first load
+    const store = db.enabled() ? new PgStore('users') : new FileStore(process.env.HARNESS_USERS_FILE || 'users.json');
+    if (store.load) {
+        const loaded = store.load();
+        app.use((req, res, next) => loaded.then(() => next(), next));
+    }
+    const users = new Users({ admins, store });
+    app.use(createLogin({ users, legacyPassword: HARNESS_PASSWORD, sessionStore: db.enabled() ? require('./utils/pgSessions').pgSessions() : null }).gate);
 } else if (process.env.HARNESS_SERVER === '1' && !HARNESS_PASSWORD) {
     throw new Error('Running as a server (Docker) needs HARNESS_PASSWORD, or HARNESS_REQUIRE_LOGIN=1 with HARNESS_ADMINS, in .env');
 } else {
@@ -74,6 +83,14 @@ if (LOGIN_ON) {
 }
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Chats and per-person data in Postgres; without DATABASE_URL the page reports db:false and stays on localStorage
+if (db.enabled()) {
+    const ready = db.init();
+    app.use((req, res, next) => (req.path.startsWith('/ui/api/sync') ? ready.then(() => next(), next) : next()));
+    app.use(createChatSync());
+} else {
+    app.get('/ui/api/sync', (req, res) => res.json({ db: false }));
+}
 
 const ROUTER_URL = process.env.ROUTER_URL || 'http://127.0.0.1:6060';
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:4000';

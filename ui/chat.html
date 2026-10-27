@@ -23,7 +23,7 @@
   <!-- Top bar: the brand, the pages, and the button that folds the chats panel away -->
   <header class="top">
     <button class="icon" id="toggleSide" title="Hide chats" aria-label="Chats" aria-expanded="true"></button>
-    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span></h1><a href="./">Dashboard</a><a href="chat.html" class="here" aria-current="page">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a><a href="runs.html">Runs</a><a href="settings.html">Settings</a></nav>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span></h1><a href="./">Dashboard</a><a href="chat.html" class="here" aria-current="page">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a><a href="agents.html">Agents</a><a href="settings.html">Settings</a></nav>
   </header>
 
   <!-- Chat bar, over the conversation: this chat's name, context and controls -->
@@ -220,6 +220,7 @@
       <label id="pModelRow" hidden>Model <input type="text" id="pModel" list="models" placeholder="e.g. fast-openrouter" autocomplete="off"></label>
     </div>
     <div class="dlg-skills"><span class="small"><b>Skills for every chat</b></span><div class="pick" id="pSkills"></div></div>
+    <div class="dlg-skills"><span class="small" title="Agents on the Agents page that belong to this project. Chats here can hand them tasks with /agent"><b>Agents in this project</b></span><div class="pick" id="pAgents"></div></div>
     <div class="proj-usage muted small" id="pUsage"></div>
     <div class="dlg-actions">
       <button type="button" class="link danger" id="pDelete">Delete project</button>

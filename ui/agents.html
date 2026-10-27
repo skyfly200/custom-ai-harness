@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bright Chat · Agents</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bright Chat">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="agents.css">
+<link rel="stylesheet" href="vendor/xterm/xterm.css">
+<link rel="stylesheet" href="calm.css">
+</head>
+<body>
+<main>
+  <header>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Agents</span></h1><a href="./" data-hint="Health of each part, recent chats, usage and requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a><a href="agents.html" data-hint="Named agents that keep working on your repos, and one-off runs" class="here" aria-current="page">Agents</a><a href="settings.html" data-hint="Interceptor and Router settings">Settings</a></nav>
+    <span class="muted" id="updated">Loading…</span>
+  </header>
+
+  <div id="down" class="card notice" hidden></div>
+
+  <h2 data-hint="An agent has a name, a repo and standing instructions. Each task you give it starts from what its last task committed, and it is told what the earlier ones did">Your agents</h2>
+  <div class="card" id="agentBar">
+    <div class="chips" id="agentChips"></div>
+    <div id="agentInfo" class="agent-info" hidden></div>
+  </div>
+
+  <h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2>
+  <form class="card" id="newRun" autocomplete="off">
+    <label class="field wide"><span>What should it do?</span>
+      <textarea name="goal" rows="4" required placeholder="Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI"></textarea></label>
+    <div class="row oneoff">
+      <label class="field"><span data-hint="The steps the agent follows. Auto asks Jev which recipe fits your goal, and shows its pick before you start">Workflow</span>
+        <select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select></label>
+      <span class="pick-note muted" id="pickNote"></span>
+    </div>
+    <label class="field wide oneoff" id="ticketsField" hidden><span data-hint="Optional. Paste the JSON that /wayfinder returned. The swarm then skips its planner and works the build tickets instead, a wave at a time: a ticket starts once the tickets it depends on are merged">Ticket draft (JSON from /wayfinder)</span>
+      <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea></label>
+    <div class="row oneoff">
+      <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
+        <div class="repo-input"><input type="text" name="repo" id="repo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
+        <div class="recent" id="recent"></div></div>
+      <label class="field"><span data-hint="Which routing picks the models for this run">Routing</span><select name="profile"><option value="">Default</option></select></label>
+      <label class="field"><span data-hint="Nudges every request toward cheaper or stronger models">Effort</span>
+        <select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
+    </div>
+    <div class="row">
+      <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
+      <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+    </div>
+    <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
+      <input type="checkbox" name="autoDebug" value="1"><span>Auto debug a failed run</span></label>
+    <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
+      <input type="checkbox" name="plan" value="1"><span>Plan only, change nothing</span></label>
+    <div class="actions"><button class="primary" type="submit" id="startBtn">Start run</button><span class="note" id="startMsg"></span></div>
+    <p class="sub muted fine">Risky commands and writes wait here for your OK. Nothing is pushed; the result is a branch.</p>
+  </form>
+
+  <dialog id="agentDialog" class="picker agentdlg" aria-label="Agent">
+    <form id="agentForm" autocomplete="off">
+      <div class="picker-head"><strong id="agentDialogTitle">New agent</strong><button type="button" id="agentClose" aria-label="Close">×</button></div>
+      <label class="field"><span>Name</span><input type="text" name="name" required maxlength="60" placeholder="Docs keeper"></label>
+      <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use. Changing it starts the agent's work over from that repo">Repo</span>
+        <div class="repo-input"><input type="text" name="repo" id="agentRepo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
+      <label class="field"><span data-hint="Told to the agent at the start of every task">Standing instructions</span>
+        <textarea name="instructions" rows="4" placeholder="Keep changes small. Update the docs when behaviour changes. Run npm test before finishing."></textarea></label>
+      <div class="row">
+        <label class="field"><span data-hint="The steps every task follows">Workflow</span><select name="workflow" id="agentWorkflow"></select></label>
+        <label class="field"><span data-hint="Which routing picks the models">Routing</span><select name="profile" id="agentProfile"><option value="">Default</option></select></label>
+        <label class="field"><span>Effort</span><select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
+      </div>
+      <div class="row">
+        <label class="field"><span data-hint="Most model calls a task may use. Blank or 0: no limit besides the minutes">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
+        <label class="field"><span>Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+        <label class="field"><span data-hint="A chat project this agent belongs to. Chats in that project can hand it work with /agent, and the project lists it">Chat project</span><select name="project" id="agentProject"><option value="">None</option></select></label>
+      </div>
+      <div class="picker-foot"><span class="note" id="agentMsg"></span><button type="submit" class="primary" id="agentSave">Save agent</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="picker" class="picker" aria-label="Choose a repo">
+    <div class="picker-head"><strong>Choose a repo</strong><button type="button" id="pickClose" aria-label="Close">×</button></div>
+    <div class="crumbs" id="crumbs"></div>
+    <input type="search" id="pickFilter" placeholder="Filter this folder" autocomplete="off" spellcheck="false">
+    <div class="picker-list" id="pickList" role="listbox"></div>
+    <div class="picker-foot"><span class="muted" id="pickHint"></span><button type="button" class="primary" id="pickUse" disabled>Use this repo</button></div>
+  </dialog>
+
+  <h2 id="listTitle">Runs</h2>
+  <div class="split">
+    <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
+    <div class="card detail" id="detail"><p class="muted">Pick a run to see what the agent did.</p></div>
+  </div>
+  <details class="card termpanel" id="termPanel" hidden>
+    <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
+    <div id="termHost" class="termhost"></div>
+  </details>
+</main>
+<script src="hints.js"></script>
+<script src="bright.js"></script>
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/addon-fit.js"></script>
+<script src="terminal.js"></script>
+<script src="agents.js"></script>
+</body>
+</html>

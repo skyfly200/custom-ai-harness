@@ -46,6 +46,24 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
     app.post('/runs', (req, res) => {
         try { res.status(201).json(manager.create(req.body)); } catch (err) { fail(res, err); }
     });
+    // Agents: named, long-lived; their tasks are runs
+    app.get('/agents', (req, res) => res.json({ agents: manager.listAgents() }));
+    app.post('/agents', (req, res) => {
+        try { res.status(201).json(manager.createAgent(req.body)); } catch (err) { fail(res, err); }
+    });
+    app.get('/agents/:id', (req, res) => {
+        const agent = manager.getAgent(req.params.id);
+        return agent ? res.json(agent) : fail(res, new Error('no such agent'), 404);
+    });
+    app.patch('/agents/:id', (req, res) => {
+        try { res.json(manager.updateAgent(req.params.id, req.body)); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 400); }
+    });
+    app.delete('/agents/:id', (req, res) => {
+        try { manager.removeAgent(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 409); }
+    });
+    app.post('/agents/:id/tasks', (req, res) => {
+        try { res.status(201).json(manager.assign(req.params.id, req.body)); } catch (err) { fail(res, err, /no such agent/.test(err.message) ? 404 : 400); }
+    });
     app.get('/runs/:id', (req, res) => {
         const run = manager.get(req.params.id);
         return run ? res.json(run) : fail(res, new Error('no such run'), 404);

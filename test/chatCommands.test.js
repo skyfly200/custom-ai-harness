@@ -127,7 +127,7 @@ test('/subagent starts a separate run with the selected model and the chat route
   assert.equal(ctx.requests[0].body.model, 'anthropic/claude-haiku-4.5');
   assert.equal(ctx.requests[0].body.plan, '0');
   assert.match(ctx.toasts.at(-1), /Subagent started: r1/);
-  assert.match(ctx.chat.messages[0].content, /Runs page/);
+  assert.match(ctx.chat.messages[0].content, /Agents page/);
 });
 
 test('/plan starts a no-change run without treating the task as a model name', async () => {

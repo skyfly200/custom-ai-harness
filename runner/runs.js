@@ -12,6 +12,7 @@ const { makeTools } = require('./tools');
 const { runAgent, systemFor } = require('./agent');
 const workflows = require('../utils/workflows');
 const swarm = require('./swarm');
+const chatdev = require('./chatdev');
 const { parseTickets } = require('./tickets');
 const { createPricer } = require('../utils/runCost');
 const { AgentStore } = require('./agents');
@@ -246,11 +247,13 @@ class RunManager {
         };
         if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
         // which sandbox driver this run works in; blank is the runner's default
-        const sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : this.sandboxKind;
+        const sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : cfg.workflow === 'chatdev' && !isCloud(this.sandboxKind) ? 'sprites' : this.sandboxKind;
         if (!sandbox) throw new Error(`unknown sandbox ${cfg.sandbox}`);
         driverFor(sandbox); // an unknown driver, or one whose key is not set, fails now rather than when the run starts
         const isSwarm = cfg.workflow === 'swarm';
-        const workflow = isSwarm ? { id: 'swarm', name: 'Swarm' } : workflows.get(cfg.workflow || workflows.FALLBACK);
+        const isChatDev = cfg.workflow === 'chatdev';
+        if (isChatDev && !isCloud(sandbox)) throw new Error('ChatDev runs in a cloud sandbox: pick Fly Sprite or E2B');
+        const workflow = isSwarm ? { id: 'swarm', name: 'Swarm' } : isChatDev ? { id: 'chatdev', name: 'ChatDev' } : workflows.get(cfg.workflow || workflows.FALLBACK);
         if (!workflow) throw new Error(`no workflow named ${cfg.workflow}`);
         let tickets = null;
         if (cfg.tickets && String(cfg.tickets).trim()) {
@@ -259,7 +262,7 @@ class RunManager {
         }
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
-            id, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, source: cfg.source || null, kind: isSwarm ? 'swarm' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
+            id, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, source: cfg.source || null, kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             // escalate: on a failure, ask for more effort (up to two rungs); maxTier caps the tier it can reach
             escalate: !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false'), bumps: 0, maxTier: cfg.maxTier ? String(cfg.maxTier).trim().slice(0, 40) : null,
@@ -272,6 +275,8 @@ class RunManager {
             maxSteps: num0(cfg.maxSteps, 0, 10000, 0), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
             autoDebug: num(cfg.autoDebug, 0, 1, this.autoDebugDefault ? 1 : 0) === 1,
             sandbox, sandboxId: null,
+            // ChatDev runs: the most the sandbox's model key may spend, in dollars
+            maxUsd: isChatDev ? Math.min(1000, Math.max(0.01, Number(cfg.maxUsd) || Number(process.env.CHATDEV_MAX_USD) || 2)) : null,
             debugOf: cfg.debugOf ? String(cfg.debugOf) : null, debugDepth: num(cfg.debugDepth, 0, 9, 0), debugRun: null,
             // a run carried on after it ran out of steps or time: the same run and branch,
             // not a new one. continues counts the carries-on, legs the parts done so far and
@@ -385,6 +390,24 @@ class RunManager {
         throw lastError;
     }
 
+    /** A capped, short-lived model key for one run's sandbox (utils/runKeys.js on the harness). */
+    async mintRunKey({ label, maxUsd, ttlMinutes }) {
+        const headers = { 'content-type': 'application/json', ...(this.password ? { 'x-harness-password': this.password } : {}) };
+        const res = await fetch(`${this.harnessUrl}/v1/run-keys`, { method: 'POST', headers, body: JSON.stringify({ label, maxUsd, ttlMinutes }), signal: AbortSignal.timeout(15000) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(`the harness would not make a run key (HTTP ${res.status}: ${body.error || 'no reason given'})`);
+        return body;
+    }
+
+    /** Revoke it; resolves { spent, requests } or null when that failed. Never throws. */
+    async revokeRunKey(id) {
+        try {
+            const headers = this.password ? { 'x-harness-password': this.password } : {};
+            const res = await fetch(`${this.harnessUrl}/v1/run-keys/${encodeURIComponent(id)}`, { method: 'DELETE', headers, signal: AbortSignal.timeout(15000) });
+            return res.ok ? await res.json() : null;
+        } catch { return null; }
+    }
+
     async guard(kind, text) {
         const body = kind === 'write' ? { tool: 'Write', path: text } : { tool: 'Bash', command: text };
         const headers = { 'content-type': 'application/json', ...(this.password ? { 'x-harness-password': this.password } : {}) };
@@ -416,6 +439,11 @@ class RunManager {
         return { sandbox: live.sandbox, outcome };
     }
 
+    async chatdevRun(run, live) {
+        const outcome = await chatdev.executeChatDev(this, run, live);
+        return { sandbox: live.sandbox, outcome };
+    }
+
     async plainRun(run, live, nextN) {
         if (run.agent && !run.base && !run.carriesOn) await this.startFromAgent(run);
         // a part carried on from an earlier one takes the branch as it stands, with that part's work on it
@@ -439,7 +467,7 @@ class RunManager {
         this.save(run);
         let n = 0;
         try {
-            const { sandbox, outcome } = run.kind === 'swarm' ? await this.swarmRun(run, live) : await this.plainRun(run, live, () => ++n);
+            const { sandbox, outcome } = run.kind === 'swarm' ? await this.swarmRun(run, live) : run.kind === 'chatdev' ? await this.chatdevRun(run, live) : await this.plainRun(run, live, () => ++n);
             // Plan mode changes nothing, so there is nothing to commit and no branch to
             // hand back: the plan itself is the result.
             let commit = run.plan ? null : await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
@@ -589,7 +617,7 @@ class RunManager {
      * generations, so a failure that cannot be fixed from here stops on its own.
      */
     startAutoDebug(run) {
-        if (!run.autoDebug || run.debugRun || run.parent || run.kind === 'swarm') return;
+        if (!run.autoDebug || run.debugRun || run.parent || run.kind === 'swarm' || run.kind === 'chatdev') return;
         if (!['failed', 'incomplete'].includes(run.status)) return;
         if (run.debugDepth >= MAX_AUTO_DEBUG) {
             this.event(run, { type: 'note', text: `Auto debug has tried ${MAX_AUTO_DEBUG} times already; stopping here for a person to look.` });
@@ -671,7 +699,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };
@@ -695,6 +723,7 @@ class RunManager {
         if (!run) throw new Error('no such run');
         if (run.parent) throw new Error('this is one part of a swarm; continue the swarm instead');
         if (run.kind === 'swarm') throw new Error('a swarm cannot be continued as it is');
+        if (run.kind === 'chatdev') throw new Error('a ChatDev run cannot be continued; start it again');
         if (['queued', 'running', 'waiting'].includes(run.status)) throw new Error('stop the run first');
         if (run.status !== 'incomplete') throw new Error(`only a run that ran out of steps or time can be continued, not one that ended as ${run.status}`);
         const continues = (run.continues || 0) + 1;

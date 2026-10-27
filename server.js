@@ -16,6 +16,7 @@ const {
     applyContextAnchor,
 } = require('./utils/messageTransforms');
 const monitor = require('./utils/monitor');
+const { RunKeys, costOf, unlessRunKey } = require('./utils/runKeys');
 const settings = require('./utils/settings');
 const profiles = require('./utils/profiles');
 const langfuse = require('./utils/langfuse');
@@ -58,6 +59,10 @@ for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federa
 // The Gateway and Router call OpenRouter through here when federation is on, so they never hold a token that expires.
 // Before the password gate: they prove themselves with OPENROUTER_PROXY_KEY (or LITELLM_MASTER_KEY).
 if (openrouterAuth.federated()) app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth));
+// Run keys: capped, short-lived keys for one agent run's model calls (utils/runKeys.js).
+// Checked before the password gate, which they replace for POST /v1/chat/completions only.
+const runKeys = new RunKeys();
+app.use(runKeys.middleware());
 // HARNESS_PASSWORD locks every page and API (see utils/access.js); unset, all stay open
 const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || '';
 // HARNESS_REQUIRE_LOGIN=1 puts named logins in front instead (utils/login.js)
@@ -75,11 +80,11 @@ if (LOGIN_ON) {
         app.use((req, res, next) => loaded.then(() => next(), next));
     }
     const users = new Users({ admins, store });
-    app.use(createLogin({ users, legacyPassword: HARNESS_PASSWORD, sessionStore: db.enabled() ? require('./utils/pgSessions').pgSessions() : null }).gate);
+    app.use(unlessRunKey(createLogin({ users, legacyPassword: HARNESS_PASSWORD, sessionStore: db.enabled() ? require('./utils/pgSessions').pgSessions() : null }).gate));
 } else if (process.env.HARNESS_SERVER === '1' && !HARNESS_PASSWORD) {
     throw new Error('Running as a server (Docker) needs HARNESS_PASSWORD, or HARNESS_REQUIRE_LOGIN=1 with HARNESS_ADMINS, in .env');
 } else {
-    app.use(requirePassword(HARNESS_PASSWORD));
+    app.use(unlessRunKey(requirePassword(HARNESS_PASSWORD)));
 }
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -210,6 +215,11 @@ function recordUsage(req, proxyRes) {
             saved: req.harnessSaved,
         });
         monitor.recordUsage(event, row);
+        // a run key pays for its own replies (utils/runKeys.js)
+        if (req.harnessRunKey) {
+            getModelInfo().then((info) => info.models[event.servedBy] || info.models[event.model], () => null)
+                .then((price) => runKeys.charge(req.harnessRunKey.id, costOf(price, row)));
+        }
     });
 }
 
@@ -535,6 +545,15 @@ app.get('/ui/api/workflows', (req, res) => {
 });
 app.post('/ui/api/workflows/pick', async (req, res) => {
     res.json(await workflows.pick(String(req.body?.goal || ''), { ask: askRouter }));
+});
+// The task runner makes a run key for an agent run's model calls and revokes it when the run ends
+app.post('/v1/run-keys', localJsonOnly, (req, res) => {
+    try { res.json(runKeys.create(req.body || {})); } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.delete('/v1/run-keys/:id', localOnly, (req, res) => {
+    const spent = runKeys.revoke(req.params.id);
+    if (!spent) return res.status(404).json({ error: 'no such run key' });
+    res.json(spent);
 });
 app.post('/v1/guard', async (req, res) => {
     const { guardJev, guardAskAt, guardDenyAt } = settings.get();

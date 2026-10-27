@@ -79,6 +79,8 @@ Notes:
 - It runs under Docker with `COMPOSE_PROFILES=runs` (see [Cloud sandboxes](#cloud-sandboxes-e2b) for the setup), which on a server is how to use it.
 - Tested with a scripted model, not with real models or on Windows (commands run in PowerShell there).
 
+See also [ChatDev as an external tool](chatdev.md), a workflow that runs the ChatDev multi-agent tool in a cloud sandbox.
+
 ### Cloud sandboxes (E2B and Fly Sprites)
 
 A run can work in a sandbox in the cloud instead of a worktree on this machine: the agent's commands then run in a Linux VM, never on your PC. Two providers are built in, and **Sandbox** on the Agents page (for a one-off run, and in an agent's settings) picks one per run or per agent; `RUNNER_SANDBOX` (`local`, `e2b` or `sprites`) is the default for runs that pick none. A provider whose key is not set shows as disabled in the picker, and the API refuses it.

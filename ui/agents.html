@@ -43,7 +43,8 @@
       <span class="pick-note muted" id="pickNote"></span>
     </div>
     <label class="field wide oneoff" id="ticketsField" hidden><span data-hint="Optional. Paste the JSON that /wayfinder returned. The swarm then skips its planner and works the build tickets instead, a wave at a time: a ticket starts once the tickets it depends on are merged">Ticket draft (JSON from /wayfinder)</span>
-      <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea></label>
+      <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea>
+      <span class="fine muted"><button type="button" id="fileTickets" data-hint="Write this draft into the repo below as markdown files (wayfinder/<map>/map.md and one file per ticket) you can read, edit and commit. Shows what it will write and asks first">Save as markdown files…</button> <button type="button" id="loadTickets" data-hint="Read a folder of wayfinder markdown files in the repo below back into this box">Load from a folder…</button> <span id="ticketsMsg" role="status"></span></span></label>
     <div class="row oneoff">
       <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
         <div class="repo-input"><input type="text" name="repo" id="repo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
@@ -57,6 +58,11 @@
       <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
       <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
     </div>
+    <div class="row">
+      <label class="field"><span data-hint="The highest routing tier this run may use, by name (for example Strong). Blank means no cap. Stronger-model retries stay under it">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
+    </div>
+    <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so the harness picks a stronger model. Up to two steps up, never above Highest tier">
+      <input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
     <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
       <input type="checkbox" name="autoDebug" value="1"><span>Auto debug a failed run</span></label>
     <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
@@ -82,8 +88,10 @@
       <div class="row">
         <label class="field"><span data-hint="Most model calls a task may use. Blank or 0: no limit besides the minutes">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
         <label class="field"><span>Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+        <label class="field"><span data-hint="The highest routing tier its tasks may use, by name. Blank means no cap">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
         <label class="field"><span data-hint="A chat project this agent belongs to. Chats in that project can hand it work with /agent, and the project lists it">Chat project</span><select name="project" id="agentProject"><option value="">None</option></select></label>
       </div>
+      <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so a stronger model answers"><input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
       <div class="picker-foot"><span class="note" id="agentMsg"></span><button type="submit" class="primary" id="agentSave">Save agent</button></div>
     </form>
   </dialog>
@@ -104,6 +112,14 @@
   <details class="card termpanel" id="termPanel" hidden>
     <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
     <div id="termHost" class="termhost"></div>
+  </details>
+  <details class="card termpanel" id="previewPanel" hidden>
+    <summary data-hint="Start the app's dev server inside this run's workspace and open it, to look at what the agent changed before you merge anything. Local runs only">Preview</summary>
+    <form id="previewForm" class="row" autocomplete="off">
+      <label class="field wide"><span data-hint="The command that starts the app. {port} becomes a free port (also set as PORT)">Dev server command</span><input type="text" name="command" id="previewCmd" placeholder="npm run dev -- --port {port}" spellcheck="false" maxlength="500"></label>
+      <div class="actions"><button class="primary" type="submit" id="previewStart">Start preview</button><button type="button" id="previewStop" hidden>Stop preview</button><span class="note" id="previewMsg" role="status"></span></div>
+    </form>
+    <div id="previewInfo"></div>
   </details>
 </main>
 <script src="hints.js"></script>

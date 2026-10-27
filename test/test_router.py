@@ -285,3 +285,21 @@ def test_ask_needs_a_backend_that_takes_questions():
 
 def test_yes_no_builds_the_jev_questions_block():
     assert router.yes_no({"a": "Is it?"}) == {"a": {"type": "noul", "instructions": "Is it?"}}
+
+
+def test_federation_sends_openrouter_calls_through_the_harness_proxy(monkeypatch):
+    env = {"OPENROUTER_FEDERATION_POLICY_ID": "pol_1", "LITELLM_MASTER_KEY": "sk-master",
+           "OPENROUTER_PROXY_URL": "http://127.0.0.1:3000"}
+    jev = {"backend": "systemone", "base_url": "https://openrouter.ai/api", "api_key_env": "OPENROUTER_API_KEY"}
+    router.apply_federation(jev, env)
+    assert jev["base_url"] == "http://127.0.0.1:3000/openrouter-proxy"
+    assert jev["api_key_env"] == "OPENROUTER_PROXY_KEY" and env["OPENROUTER_PROXY_KEY"] == "sk-master"
+    llm = {"backend": "llm", "base_url": "https://openrouter.ai/api/v1"}
+    router.apply_federation(llm, dict(env))
+    assert llm["base_url"] == "http://127.0.0.1:3000/openrouter-proxy/v1"
+    other = {"backend": "systemone", "base_url": "http://localhost:8001", "api_key_env": "X"}
+    router.apply_federation(other, dict(env))
+    assert other == {"backend": "systemone", "base_url": "http://localhost:8001", "api_key_env": "X"}
+    plain = {"base_url": "https://openrouter.ai/api"}
+    router.apply_federation(plain, {})
+    assert plain == {"base_url": "https://openrouter.ai/api"}

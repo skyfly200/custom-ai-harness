@@ -421,6 +421,35 @@ ANTHROPIC_API_KEY=your_anthropic_key   # optional
 
 `HARNESS_PASSWORD` is optional on your own PC and required by the Docker setup. When set, every page and API asks for it: browsers show a login box (any user name), and agents send it as their API key (`Authorization: Bearer`, `x-api-key`) or in an `x-harness-password` header. The harness doesn't pass it on to the Gateway. It also lets the Settings page's controls work from other machines, which otherwise answer only on the machine the harness runs on.
 
+### OpenRouter without a long-lived key (workload identity federation)
+
+If your OpenRouter organization is on the Business or Enterprise plan, you can skip `OPENROUTER_API_KEY` and let the harness sign in the way [OpenRouter's workload identity federation](https://openrouter.ai/docs/guides/overview/auth/workload-identity-federation) describes: it sends a JWT from your own identity provider (a CI job, a Kubernetes service account, a cloud service account) to OpenRouter and gets back an access token that lasts 15 minutes. The harness asks for a new one a minute before it runs out, so a key that expires or leaks stops being a problem. The static key still works; federation is used only when `OPENROUTER_FEDERATION_POLICY_ID` is set (and then `OPENROUTER_API_KEY` is ignored).
+
+**In OpenRouter** (an org admin, Settings → Workload identity): add your identity provider as an *issuer*, then add a *policy* with the audience your JWT carries, a subject or CEL condition, and the workspace API key it should act as. Copy the policy's id.
+
+**In `.env`:**
+
+```
+OPENROUTER_FEDERATION_POLICY_ID=the-policy-id
+# and exactly one way to get the identity provider's JWT:
+OPENROUTER_FEDERATION_TOKEN_FILE=/var/run/secrets/tokens/openrouter   # re-read on every renewal
+# OPENROUTER_FEDERATION_TOKEN_URL=http://metadata.google.internal/...  # a URL that returns the JWT, bare or as JSON
+# OPENROUTER_FEDERATION_TOKEN_HEADERS=Metadata-Flavor: Google          # headers for that URL
+# OPENROUTER_FEDERATION_TOKEN_COMMAND=my-idp-cli print-token           # a command that prints the JWT
+```
+
+Restart everything. The Interceptor does the exchange and uses the token for the model picker, read-aloud and prices. The Gateway (LiteLLM) and the Router (Jev) can only hold a fixed key, so with federation on they call OpenRouter through the Interceptor's `/openrouter-proxy`, which adds the current token. They prove themselves to it with `OPENROUTER_PROXY_KEY`, or `LITELLM_MASTER_KEY` when that is set; `npm run all` makes a random one if neither is. `GET /ui/api/status` shows `openrouter: { mode: "federation", ok, expiresInSec }` (never the token), and a failed exchange is logged with OpenRouter's reason (for example `invalid_grant: policy paused`).
+
+**With Docker:** nothing else to change in `docker-compose.yml`; the Gateway and Router already reach the harness at `http://harness:3000` (`OPENROUTER_PROXY_URL` changes that). The harness container must be able to read the JWT, so use a file in a folder it has, such as `data/`:
+
+```
+OPENROUTER_FEDERATION_TOKEN_FILE=/app/data/idp-token
+```
+
+and have your identity provider's agent (or a cron job) write the JWT to `./data/idp-token`. `TOKEN_COMMAND` runs inside the container, where your tools aren't, so prefer a file or a URL there. Then `docker compose up -d --build`.
+
+Not covered: the Router's own `OPENROUTER_API_KEY` is only swapped for URLs on `openrouter.ai`; an `ROUTER_BASE_URL` pointing at your own Laya server is untouched.
+
 ### Named logins with admins (`HARNESS_REQUIRE_LOGIN`)
 
 For more than one person, or to give each program its own key, turn on logins. This replaces the single shared password: every page, `/ui/api` and `/v1` request then needs a signed-in user.

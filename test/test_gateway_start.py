@@ -55,3 +55,20 @@ def test_passthrough_to_a_provider_id(monkeypatch):
 def test_passthrough_needs_a_model(monkeypatch):
     with pytest.raises(SystemExit, match="PASSTHROUGH_MODEL"):
         build(monkeypatch, HARNESS_MODE="passthrough")
+
+
+def test_federation_points_the_gateway_at_the_harness_proxy(monkeypatch):
+    for k in ("OPENROUTER_FEDERATION_POLICY_ID", "OPENROUTER_PROXY_KEY", "OPENROUTER_PROXY_URL", "LITELLM_MASTER_KEY",
+              "OPENROUTER_API_KEY", "OPENROUTER_API_BASE"):
+        monkeypatch.delenv(k, raising=False)
+    gateway_start.use_federation()
+    assert "OPENROUTER_API_BASE" not in os.environ  # off: the static key path is untouched
+    monkeypatch.setenv("OPENROUTER_FEDERATION_POLICY_ID", "pol_1")
+    with pytest.raises(SystemExit):
+        gateway_start.use_federation()
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "sk-master")
+    monkeypatch.setenv("OPENROUTER_PROXY_URL", "http://harness:3000/")
+    gateway_start.use_federation()
+    assert os.environ["OPENROUTER_API_KEY"] == "sk-master"
+    assert os.environ["OPENROUTER_API_BASE"] == "http://harness:3000/openrouter-proxy/v1"
+    monkeypatch.delenv("OPENROUTER_API_KEY"); monkeypatch.delenv("OPENROUTER_API_BASE")

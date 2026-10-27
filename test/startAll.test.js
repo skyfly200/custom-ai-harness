@@ -41,3 +41,12 @@ test('does not start Ollama twice when it already answers', () => {
     assert.deepStrictEqual(names(r), ['gateway', 'router', 'interceptor', 'runner']);
     assert.match(r.warnings[0], /already running/);
 });
+
+test('with federation on, the Gateway is pointed at the Interceptor\'s OpenRouter proxy', () => {
+    const env = { OPENROUTER_FEDERATION_POLICY_ID: 'pol_1', LITELLM_MASTER_KEY: 'sk-master' };
+    const gateway = buildCommands({ platform: 'linux', env, argv: [], exists: () => true }).commands[0];
+    assert.equal(gateway.env.OPENROUTER_API_KEY, 'sk-master');
+    assert.equal(gateway.env.OPENROUTER_API_BASE, 'http://127.0.0.1:3000/openrouter-proxy/v1');
+    const plain = buildCommands({ platform: 'linux', env: {}, argv: [], exists: () => true }).commands[0];
+    assert.equal(plain.env.OPENROUTER_API_KEY, undefined);
+});

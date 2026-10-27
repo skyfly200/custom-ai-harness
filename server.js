@@ -26,6 +26,7 @@ const { pcmRate, pcmToWav } = require('./utils/audio');
 const modelInfo = require('./utils/modelInfo');
 const cacheMarkers = require('./utils/cacheMarkers');
 const openrouterCatalog = require('./utils/openrouterCatalog');
+const openrouterAuth = require('./utils/openrouterAuth');
 const batchModels = require('./utils/batchModels');
 const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
@@ -39,6 +40,12 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
+// OpenRouter credentials: OPENROUTER_API_KEY, or workload identity federation (utils/openrouterAuth.js)
+const orAuth = openrouterAuth.createAuth();
+for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federation: ${problem}`);
+// The Gateway and Router call OpenRouter through here when federation is on, so they never hold a token that expires.
+// Before the password gate: they prove themselves with OPENROUTER_PROXY_KEY (or LITELLM_MASTER_KEY).
+if (openrouterAuth.federated()) app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth));
 // HARNESS_PASSWORD locks every page and API (see utils/access.js); unset, all stay open
 const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || '';
 // HARNESS_REQUIRE_LOGIN=1 puts named logins in front instead (utils/login.js)
@@ -264,7 +271,7 @@ const toGateway = createProxyMiddleware({
 app.use('/ui', express.static(path.join(__dirname, 'ui')));
 
 app.get('/ui/api/status', async (req, res) => {
-    res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats() });
+    res.json({ components: await monitor.checkComponents(COMPONENT_URLS), stats: monitor.stats(), openrouter: orAuth.status() });
 });
 
 // Token totals by client, model and provider; days=N for the last N days
@@ -573,17 +580,20 @@ app.post('/ui/api/model-stats', localJsonOnly, (req, res) => {
 // the Gateway instead. The chat page picks the model and voice; TTS_MODEL and
 // TTS_VOICE are only the defaults.
 const OPENROUTER_URL = (process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
-const TTS_URL = (process.env.TTS_URL || (process.env.OPENROUTER_API_KEY ? OPENROUTER_URL : '')).replace(/\/+$/, '');
+const TTS_URL = (process.env.TTS_URL || (orAuth.configured() ? OPENROUTER_URL : '')).replace(/\/+$/, '');
 const TTS_OPENROUTER = /openrouter\.ai/.test(TTS_URL);
 const TTS_MODEL = process.env.TTS_MODEL || (TTS_OPENROUTER ? 'fish-audio/s2.1-pro-free:free' : 'kokoro');
 const TTS_VOICE = process.env.TTS_VOICE ?? (TTS_OPENROUTER ? '' : 'af_heart'); // empty sends none: the model's default voice
-const TTS_KEY = process.env.TTS_API_KEY
+const ttsKey = async () => process.env.TTS_API_KEY
     || (TTS_URL.startsWith(GATEWAY_URL) ? GATEWAY_KEY : '')
-    || (TTS_OPENROUTER ? process.env.OPENROUTER_API_KEY || '' : '');
+    || (TTS_OPENROUTER ? await orAuth.key().catch((err) => { console.warn(`TTS: ${err.message}`); return ''; }) : '');
 const TTS_INSTRUCTIONS = process.env.TTS_INSTRUCTIONS || ''; // tone and pacing, for models that take it
 const TTS_VOICES = (process.env.TTS_VOICES || '').split(',').map(v => v.trim()).filter(Boolean);
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
-const ttsHeaders = () => ({ 'content-type': 'application/json', ...(TTS_KEY ? { authorization: `Bearer ${TTS_KEY}` } : {}) });
+const ttsHeaders = async () => {
+    const key = await ttsKey();
+    return { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) };
+};
 const voiceIds = (list) => (list || []).map(v => (typeof v === 'string' ? v : v.id || v.voice_id || v.name)).filter(Boolean);
 
 // Speech models the server offers, with their voices: [{ id, name, voices, free }]
@@ -593,7 +603,7 @@ async function listTtsModels() {
     let models = [];
     if (TTS_OPENROUTER) {
         try {
-            const upstream = await fetch(`${TTS_URL}/models?output_modalities=speech`, { headers: ttsHeaders(), signal: AbortSignal.timeout(8000) });
+            const upstream = await fetch(`${TTS_URL}/models?output_modalities=speech`, { headers: await ttsHeaders(), signal: AbortSignal.timeout(8000) });
             if (upstream.ok) {
                 models = ((await upstream.json()).data || []).map(m => ({
                     id: m.id,
@@ -607,7 +617,7 @@ async function listTtsModels() {
         // one model; Kokoro-FastAPI lists its voices, OpenAI and others don't
         let voices = [];
         try {
-            const upstream = await fetch(`${TTS_URL}/audio/voices`, { headers: ttsHeaders(), signal: AbortSignal.timeout(3000) });
+            const upstream = await fetch(`${TTS_URL}/audio/voices`, { headers: await ttsHeaders(), signal: AbortSignal.timeout(3000) });
             if (upstream.ok) {
                 const body = await upstream.json();
                 voices = voiceIds(Array.isArray(body) ? body : body.voices);
@@ -627,7 +637,7 @@ async function listTtsModels() {
 // is public, so this works without a key; it is kept for an hour.
 let openrouterCache = { at: 0, models: null };
 async function fetchOpenrouterCatalog(timeoutMs = 10000) {
-    const key = process.env.OPENROUTER_API_KEY;
+    const key = await orAuth.key().catch((err) => { console.warn(`OpenRouter catalog: ${err.message}`); return ''; });
     const upstream = await fetch(`${OPENROUTER_URL}/models`, {
         headers: key ? { authorization: `Bearer ${key}` } : {},
         signal: AbortSignal.timeout(timeoutMs),
@@ -676,16 +686,16 @@ app.get('/ui/api/tts', async (req, res) => {
 const pcmOnlyModels = new Set(); // models that refused MP3 once
 
 app.post('/ui/api/tts', async (req, res) => {
-    if (!TTS_URL) return res.status(404).json({ error: 'No TTS server: add OPENROUTER_API_KEY or TTS_URL to .env' });
+    if (!TTS_URL) return res.status(404).json({ error: 'No TTS server: add OPENROUTER_API_KEY (or the OPENROUTER_FEDERATION_* settings) or TTS_URL to .env' });
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
     const { text, voice, speed } = req.body || {};
     if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text is required' });
     const model = typeof req.body.model === 'string' && req.body.model ? req.body.model : TTS_MODEL;
     // the default voice belongs to the default model
     const chosenVoice = (typeof voice === 'string' && voice) || (model === TTS_MODEL ? TTS_VOICE : '');
-    const speak = (format) => fetch(`${TTS_URL}/audio/speech`, {
+    const speak = async (format) => fetch(`${TTS_URL}/audio/speech`, {
         method: 'POST',
-        headers: ttsHeaders(),
+        headers: await ttsHeaders(),
         body: JSON.stringify({
             model,
             input: text.slice(0, 4000),

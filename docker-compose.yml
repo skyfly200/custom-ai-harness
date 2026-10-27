@@ -29,6 +29,7 @@ services:
       HARNESS_ADMINS: ${HARNESS_ADMINS:-}
       HARNESS_USERS_FILE: /app/data/users.json
       ROUTER_URL: http://router:6060
+      # with OPENROUTER_FEDERATION_POLICY_ID set, the Gateway and Router call OpenRouter through here
       GATEWAY_URL: http://gateway:4000
       HARNESS_SETTINGS_FILE: /app/data/harness-settings.json
       HARNESS_PROFILES_FILE: /app/data/routing-profiles.json
@@ -53,6 +54,8 @@ services:
         ROUTER_BACKENDS: ${ROUTER_BACKENDS:-${HARNESS_MODE:-}}
     restart: unless-stopped
     env_file: .env
+    environment:
+      OPENROUTER_PROXY_URL: ${OPENROUTER_PROXY_URL:-http://harness:3000}   # used with OPENROUTER_FEDERATION_POLICY_ID
     volumes:
       - ./routellm-config.yaml:/app/routellm-config.yaml   # Router settings save here
 
@@ -65,6 +68,7 @@ services:
     environment:
       # LiteLLM won't start without one; the harness sends the same key
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env (any string starting with sk-)}
+      OPENROUTER_PROXY_URL: ${OPENROUTER_PROXY_URL:-http://harness:3000}   # used with OPENROUTER_FEDERATION_POLICY_ID
       <<: *local-urls
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:

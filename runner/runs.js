@@ -12,6 +12,7 @@ const { makeTools } = require('./tools');
 const { runAgent, systemFor } = require('./agent');
 const workflows = require('../utils/workflows');
 const swarm = require('./swarm');
+const chatdev = require('./chatdev');
 const { parseTickets } = require('./tickets');
 const { AgentStore } = require('./agents');
 
@@ -243,11 +244,13 @@ class RunManager {
         };
         if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
         // which sandbox driver this run works in; blank is the runner's default
-        const sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : this.sandboxKind;
+        const sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : cfg.workflow === 'chatdev' && !isCloud(this.sandboxKind) ? 'sprites' : this.sandboxKind;
         if (!sandbox) throw new Error(`unknown sandbox ${cfg.sandbox}`);
         driverFor(sandbox); // an unknown driver, or one whose key is not set, fails now rather than when the run starts
         const isSwarm = cfg.workflow === 'swarm';
-        const workflow = isSwarm ? { id: 'swarm', name: 'Swarm' } : workflows.get(cfg.workflow || workflows.FALLBACK);
+        const isChatDev = cfg.workflow === 'chatdev';
+        if (isChatDev && !isCloud(sandbox)) throw new Error('ChatDev runs in a cloud sandbox: pick Fly Sprite or E2B');
+        const workflow = isSwarm ? { id: 'swarm', name: 'Swarm' } : isChatDev ? { id: 'chatdev', name: 'ChatDev' } : workflows.get(cfg.workflow || workflows.FALLBACK);
         if (!workflow) throw new Error(`no workflow named ${cfg.workflow}`);
         let tickets = null;
         if (cfg.tickets && String(cfg.tickets).trim()) {
@@ -256,7 +259,7 @@ class RunManager {
         }
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
-            id, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, source: cfg.source || null, kind: isSwarm ? 'swarm' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
+            id, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, source: cfg.source || null, kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             // Plan mode: the agent may read and search, but changes nothing. It
@@ -379,6 +382,11 @@ class RunManager {
         return { sandbox: live.sandbox, outcome };
     }
 
+    async chatdevRun(run, live) {
+        const outcome = await chatdev.executeChatDev(this, run, live);
+        return { sandbox: live.sandbox, outcome };
+    }
+
     async plainRun(run, live, nextN) {
         if (run.agent && !run.base && !run.carriesOn) await this.startFromAgent(run);
         // a part carried on from an earlier one takes the branch as it stands, with that part's work on it
@@ -402,7 +410,7 @@ class RunManager {
         this.save(run);
         let n = 0;
         try {
-            const { sandbox, outcome } = run.kind === 'swarm' ? await this.swarmRun(run, live) : await this.plainRun(run, live, () => ++n);
+            const { sandbox, outcome } = run.kind === 'swarm' ? await this.swarmRun(run, live) : run.kind === 'chatdev' ? await this.chatdevRun(run, live) : await this.plainRun(run, live, () => ++n);
             // Plan mode changes nothing, so there is nothing to commit and no branch to
             // hand back: the plan itself is the result.
             let commit = run.plan ? null : await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
@@ -552,7 +560,7 @@ class RunManager {
      * generations, so a failure that cannot be fixed from here stops on its own.
      */
     startAutoDebug(run) {
-        if (!run.autoDebug || run.debugRun || run.parent || run.kind === 'swarm') return;
+        if (!run.autoDebug || run.debugRun || run.parent || run.kind === 'swarm' || run.kind === 'chatdev') return;
         if (!['failed', 'incomplete'].includes(run.status)) return;
         if (run.debugDepth >= MAX_AUTO_DEBUG) {
             this.event(run, { type: 'note', text: `Auto debug has tried ${MAX_AUTO_DEBUG} times already; stopping here for a person to look.` });
@@ -657,6 +665,7 @@ class RunManager {
         if (!run) throw new Error('no such run');
         if (run.parent) throw new Error('this is one part of a swarm; continue the swarm instead');
         if (run.kind === 'swarm') throw new Error('a swarm cannot be continued as it is');
+        if (run.kind === 'chatdev') throw new Error('a ChatDev run cannot be continued; start it again');
         if (['queued', 'running', 'waiting'].includes(run.status)) throw new Error('stop the run first');
         if (run.status !== 'incomplete') throw new Error(`only a run that ran out of steps or time can be continued, not one that ended as ${run.status}`);
         const continues = (run.continues || 0) + 1;

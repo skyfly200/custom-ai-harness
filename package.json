@@ -11,6 +11,8 @@
     "validate:fix": "node validate-config.js --fix",
     "test": "node --test \"test/*.test.js\"",
     "test:for": "node scripts/test-for.js",
+    "test:fast": "node scripts/test-tier.js --fast",
+    "test:slow": "node scripts/test-tier.js --slow",
     "ollama": "ollama serve",
     "hash": "node scripts/hash-password.js",
     "all": "node scripts/start-all.js",

@@ -71,83 +71,6 @@
   <!-- Conversation -->
   <main class="convo">
 
-    <section class="options" id="options" hidden>
-      <div class="opt-grid">
-        <fieldset>
-          <legend>Model</legend>
-          <label title="Where this chat's messages go. Routings are made on the Routing page">Routing <select id="routeSel"></select></label>
-          <label id="directRow" hidden>Model <input type="text" id="model" list="models" placeholder="e.g. fast-openrouter" autocomplete="off"></label>
-          <div class="muted small" id="routeNote"></div>
-          <label>Max tokens <input type="number" id="maxTokens" min="1" value="2048"></label>
-          <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
-          <label class="check"><input type="checkbox" id="stream" checked> Stream</label>
-          <label class="check" title="After the first reply, ask the model for a short name for the chat"><input type="checkbox" id="autoName" checked> Auto-name chats</label>
-          <label class="check" title="Keep the newest text in view while a reply arrives. Off, the chat stays where you scrolled; it still jumps to the end when you send or open a chat."><input type="checkbox" id="autoScroll" checked> Follow the reply</label>
-          <div class="pair">
-            <label title="Give up when no reply has started after this long. 0 waits forever.">Start limit (s) <input type="number" id="timeoutFirst" min="0" step="10" value="310"></label>
-            <label title="Give up when a reply stops arriving for this long. 0 waits forever.">Stall limit (s) <input type="number" id="timeoutStall" min="0" step="10" value="130"></label>
-          </div>
-        </fieldset>
-        <fieldset>
-          <legend>Context</legend>
-          <label>Project <select id="chatProject"></select></label>
-          <label>System prompt
-            <textarea id="system" rows="3" placeholder="Optional" title="Optional. The Interceptor still adds its caveman line unless it's off in Settings."></textarea>
-          </label>
-          <label title="Background, requirements, pasted docs. Sent with every message in this chat.">Notes
-            <textarea id="notes" rows="3" placeholder="Always sent to the model"></textarea>
-          </label>
-          <div class="muted small" id="contextSize"></div>
-        </fieldset>
-        <fieldset>
-          <legend>Tools</legend>
-          <label title="Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).">Git repo
-            <span class="repo-row">
-              <input type="text" id="repoPath" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false">
-              <button type="button" id="repoLink" class="mini">Link</button>
-            </span>
-          </label>
-          <div class="muted small" id="repoInfo">Read-only for the model.</div>
-          <label class="check" title="Let the model run commands in the linked repo with run_command. Every command goes past the command guard first, and a risky one waits in the chat for you to Allow or Decline. Commands run in your own working copy, so uncommitted work is not protected."><input type="checkbox" id="shellInRepo" checked> Shell in the linked repo</label>
-          <div class="tools-head"><span>MCP servers</span><span><a href="tools.html" class="mini" title="Add, test and edit MCP servers">Manage</a> <button type="button" id="mcpReload" class="mini" title="Read mcp-servers.json again and reconnect">Reload</button></span></div>
-          <ul class="mcp-list" id="mcpList"><li class="muted small">Loading…</li></ul>
-          <label title="Stop a reply after this many rounds of tool calls. 0 means no limit: the reply keeps going until the model stops calling tools or you press Stop (the stall and no-reply timeouts still apply).">Max tool rounds <input type="number" id="maxToolRounds" min="0" max="500" value="0" placeholder="0 = no limit"></label>
-          <div class="muted small">0 or empty: no limit.</div>
-        </fieldset>
-        <fieldset>
-          <legend>Voice</legend>
-          <label title="Auto uses this browser's speech service and falls back to the harness's speech model if the browser has none (Brave does not)">Dictation
-            <select id="sttEngine">
-              <option value="auto">Auto (browser, else server)</option>
-              <option value="browser">This browser</option>
-              <option value="server">Speech model</option>
-            </select>
-          </label>
-          <label>Dictation language <input type="text" id="sttLang" placeholder="en-US"></label>
-          <label class="check"><input type="checkbox" id="autoSend"> Send on pause</label>
-          <label>Read aloud
-            <select id="ttsEngine">
-              <option value="browser">Browser voices</option>
-              <option value="server">Speech model</option>
-            </select>
-          </label>
-          <label id="serverModelRow" hidden>Speech model <select id="serverModel"></select></label>
-          <div class="voice-row">
-            <label>Voice <select id="voice"></select><select id="serverVoice" hidden></select></label>
-            <button type="button" id="testVoice" class="mini" title="Hear this voice">Test</button>
-          </div>
-          <div class="sliders">
-            <label>Speed <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1"> <span id="rateOut">1.0×</span></label>
-            <label data-engine="browser">Pitch <input type="range" id="pitch" min="0" max="2" step="0.1" value="1"> <span id="pitchOut">1.0</span></label>
-            <label>Volume <input type="range" id="volume" min="0" max="1" step="0.05" value="1"> <span id="volumeOut">100%</span></label>
-          </div>
-          <label class="check" title="Says symbols, abbreviations, numbers like 10k and names like max_tokens as words"><input type="checkbox" id="speakClear" checked> Read clearly</label>
-          <label class="check"><input type="checkbox" id="autoSpeak"> Read replies aloud</label>
-          <label class="check" title="Listen again after each reply"><input type="checkbox" id="handsFree"> Hands-free</label>
-          <div class="muted small" id="voiceNote"></div>
-        </fieldset>
-      </div>
-    </section>
 
     <div class="log" id="log"></div>
     <button type="button" class="jump-down" id="jumpDown" hidden title="Scroll to the newest message" aria-label="Scroll to bottom"></button>
@@ -188,6 +111,99 @@
       <div class="compose-hint muted small" id="hint"></div>
     </form>
   </main>
+
+  <!-- Chat settings drawer -->
+  <section class="options" id="options" hidden role="dialog" aria-labelledby="optionsTitle">
+    <div class="opt-head">
+      <strong id="optionsTitle">Chat settings</strong>
+      <span class="muted small">Saved as you change them</span>
+      <button class="icon" id="closeOptions" title="Close (Esc)" aria-label="Close settings"></button>
+    </div>
+    <div class="opt-tabs" role="tablist" aria-label="Settings sections">
+      <button type="button" role="tab" data-tab="model" aria-selected="true">Model</button>
+      <button type="button" role="tab" data-tab="context" aria-selected="false">Context</button>
+      <button type="button" role="tab" data-tab="tools" aria-selected="false">Tools</button>
+      <button type="button" role="tab" data-tab="voice" aria-selected="false">Voice</button>
+    </div>
+    <div class="opt-body">
+      <div class="opt-grid">
+        <fieldset data-tab="model">
+          <legend>Model</legend>
+          <label title="Where this chat's messages go. Routings are made on the Routing page">Routing <select id="routeSel"></select></label>
+          <label id="directRow" hidden>Model <input type="text" id="model" list="models" placeholder="e.g. fast-openrouter" autocomplete="off"></label>
+          <div class="muted small" id="routeNote"></div>
+          <label>Max tokens <input type="number" id="maxTokens" min="1" value="2048"></label>
+          <label>Temperature <input type="number" id="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
+          <label class="check"><input type="checkbox" id="stream" checked> Stream</label>
+          <label class="check" title="After the first reply, ask the model for a short name for the chat"><input type="checkbox" id="autoName" checked> Auto-name chats</label>
+          <label class="check" title="Keep the newest text in view while a reply arrives. Off, the chat stays where you scrolled; it still jumps to the end when you send or open a chat."><input type="checkbox" id="autoScroll" checked> Follow the reply</label>
+          <div class="pair">
+            <label title="Give up when no reply has started after this long. 0 waits forever.">Start limit (s) <input type="number" id="timeoutFirst" min="0" step="10" value="310"></label>
+            <label title="Give up when a reply stops arriving for this long. 0 waits forever.">Stall limit (s) <input type="number" id="timeoutStall" min="0" step="10" value="130"></label>
+          </div>
+        </fieldset>
+        <fieldset data-tab="context">
+          <legend>Context</legend>
+          <label>Project <select id="chatProject"></select></label>
+          <label>System prompt
+            <textarea id="system" rows="3" placeholder="Optional" title="Optional. The Interceptor still adds its caveman line unless it's off in Settings."></textarea>
+          </label>
+          <label title="Background, requirements, pasted docs. Sent with every message in this chat.">Notes
+            <textarea id="notes" rows="3" placeholder="Always sent to the model"></textarea>
+          </label>
+          <div class="muted small" id="contextSize"></div>
+        </fieldset>
+        <fieldset data-tab="tools">
+          <legend>Tools</legend>
+          <label title="Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).">Git repo
+            <span class="repo-row">
+              <input type="text" id="repoPath" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false">
+              <button type="button" id="repoLink" class="mini">Link</button>
+            </span>
+          </label>
+          <div class="muted small" id="repoInfo">Read-only for the model.</div>
+          <label class="check" title="Let the model run commands in the linked repo with run_command. Every command goes past the command guard first, and a risky one waits in the chat for you to Allow or Decline. Commands run in your own working copy, so uncommitted work is not protected."><input type="checkbox" id="shellInRepo" checked> Shell in the linked repo</label>
+          <div class="tools-head"><span>MCP servers</span><span><a href="tools.html" class="mini" title="Add, test and edit MCP servers">Manage</a> <button type="button" id="mcpReload" class="mini" title="Read mcp-servers.json again and reconnect">Reload</button></span></div>
+          <ul class="mcp-list" id="mcpList"><li class="muted small">Loading…</li></ul>
+          <label title="Stop a reply after this many rounds of tool calls. 0 means no limit: the reply keeps going until the model stops calling tools or you press Stop (the stall and no-reply timeouts still apply).">Max tool rounds <input type="number" id="maxToolRounds" min="0" max="500" value="0" placeholder="0 = no limit"></label>
+          <div class="muted small">0 or empty: no limit.</div>
+        </fieldset>
+        <fieldset data-tab="voice">
+          <legend>Voice</legend>
+          <label title="Auto uses this browser's speech service and falls back to the harness's speech model if the browser has none (Brave does not)">Dictation
+            <select id="sttEngine">
+              <option value="auto">Auto (browser, else server)</option>
+              <option value="browser">This browser</option>
+              <option value="server">Speech model</option>
+            </select>
+          </label>
+          <label>Dictation language <input type="text" id="sttLang" placeholder="en-US"></label>
+          <label class="check"><input type="checkbox" id="autoSend"> Send on pause</label>
+          <label>Read aloud
+            <select id="ttsEngine">
+              <option value="browser">Browser voices</option>
+              <option value="server">Speech model</option>
+            </select>
+          </label>
+          <label id="serverModelRow" hidden>Speech model <select id="serverModel"></select></label>
+          <div class="voice-row">
+            <label>Voice <select id="voice"></select><select id="serverVoice" hidden></select></label>
+            <button type="button" id="testVoice" class="mini" title="Hear this voice">Test</button>
+          </div>
+          <div class="sliders">
+            <label>Speed <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1"> <span id="rateOut">1.0×</span></label>
+            <label data-engine="browser">Pitch <input type="range" id="pitch" min="0" max="2" step="0.1" value="1"> <span id="pitchOut">1.0</span></label>
+            <label>Volume <input type="range" id="volume" min="0" max="1" step="0.05" value="1"> <span id="volumeOut">100%</span></label>
+          </div>
+          <label class="check" title="Says symbols, abbreviations, numbers like 10k and names like max_tokens as words"><input type="checkbox" id="speakClear" checked> Read clearly</label>
+          <label class="check"><input type="checkbox" id="autoSpeak"> Read replies aloud</label>
+          <label class="check" title="Listen again after each reply"><input type="checkbox" id="handsFree"> Hands-free</label>
+          <div class="muted small" id="voiceNote"></div>
+        </fieldset>
+      </div>
+    </div>
+  </section>
+  <div class="opt-scrim" id="optScrim" hidden></div>
 
   <!-- Live activity -->
   <aside class="activity" id="activity" hidden>

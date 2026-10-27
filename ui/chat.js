@@ -33,7 +33,7 @@ const ICONS = {
 const setIcon = (id, name) => { $(id).innerHTML = ICONS[name]; };
 setIcon('copyChat', 'copy'); setIcon('exportChat', 'download'); setIcon('toggleOptions', 'sliders');
 setIcon('toggleActivity', 'pulse'); setIcon('attach', 'clip'); setIcon('mic', 'mic'); setIcon('handsFreeBtn', 'headset');
-setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('deleteChat', 'trash'); setIcon('exportAll', 'download'); setIcon('deleteAll', 'trash'); setIcon('kitBtn', 'kit');
+setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('closeOptions', 'close'); setIcon('deleteChat', 'trash'); setIcon('exportAll', 'download'); setIcon('deleteAll', 'trash'); setIcon('kitBtn', 'kit');
 
 // ---------------------------------------------------------------------------
 // Storage: an index of chats plus one key per chat, so streaming a reply only
@@ -770,7 +770,7 @@ function messageHtml(m, i, list) {
   const lastAssistant = m.role === 'assistant' && i === list.length - 1;
   const speaking = speech.current === m.id;
   if (m.role === 'user') {
-    return `<div class="msg user${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who">You<span class="actions">
+    return `<div class="msg user${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who"><span class="name">You</span><span class="actions">
         <button data-act="copy" title="Copy">${ICONS.copy}</button>
         <button data-act="edit" title="Edit and resend">${ICONS.edit}</button>
         <button data-act="resend" title="Send this again (replies after it are replaced)">${ICONS.retry}</button></span></div>
@@ -782,7 +782,7 @@ function messageHtml(m, i, list) {
         <button data-act="copy" title="Copy">${ICONS.copy}</button></span></div>
       <div class="bubble">${esc(m.content)}</div>${m.hint ? `<div class="hint">${esc(m.hint)}</div>` : ''}${m.trace ? `<div class="meta"><details open><summary>What happened</summary>${traceHtml(m)}</details></div>` : ''}</div>`;
   }
-  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who">Assistant<span class="actions">
+  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who"><span class="name">Assistant</span><span class="actions">
       ${m.streaming ? `<button data-act="stop" class="stop" title="Stop this reply (Esc)">${ICONS.stop} Stop</button>` : ''}
       <button data-act="copy" title="Copy as Markdown">${ICONS.copy}</button>
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>
@@ -3136,6 +3136,7 @@ async function loadHealth() {
 setInterval(loadHealth, 10000);
 
 function setActivity(open) {
+  if (open && narrow() && !$('options').hidden) setOptions(false);
   $('activity').hidden = !open;
   $('toggleActivity').classList.toggle('on', open);
   prefs.activity = open; store.set(PREF_KEY, prefs);
@@ -3143,10 +3144,38 @@ function setActivity(open) {
 }
 $('toggleActivity').addEventListener('click', () => setActivity($('activity').hidden));
 $('closeActivity').addEventListener('click', () => setActivity(false));
-$('toggleOptions').addEventListener('click', () => {
-  const open = $('options').hidden;
+// The settings drawer: one section at a time, the last one remembered. It slides
+// over the chat's right edge; on a phone it covers the page and the dim area closes it.
+const OPT_TAB_KEY = 'harness-chat-options-tab';
+function setOptionsTab(name) {
+  if (!$('options').querySelector(`.opt-tabs [data-tab="${name}"]`)) name = 'model';
+  $('options').dataset.tab = name;
+  for (const b of $('options').querySelectorAll('.opt-tabs [role=tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
+  try { localStorage.setItem(OPT_TAB_KEY, name); } catch {}
+}
+function setOptions(open) {
   $('options').hidden = !open;
+  $('optScrim').hidden = !open;
   $('toggleOptions').classList.toggle('on', open);
+  $('toggleOptions').setAttribute('aria-expanded', String(open));
+  if (open) { if (!$('activity').hidden && narrow()) setActivity(false); $('options').querySelector('.opt-tabs [aria-selected=true]')?.focus({ preventScroll: true }); }
+}
+let savedTab = 'model';
+try { savedTab = localStorage.getItem(OPT_TAB_KEY) || 'model'; } catch {}
+setOptionsTab(savedTab);
+$('toggleOptions').addEventListener('click', () => setOptions($('options').hidden));
+$('closeOptions').addEventListener('click', () => { setOptions(false); $('toggleOptions').focus(); });
+$('optScrim').addEventListener('click', () => setOptions(false));
+$('options').querySelector('.opt-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) setOptionsTab(b.dataset.tab); });
+$('options').querySelector('.opt-tabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const tabs = [...$('options').querySelectorAll('.opt-tabs [data-tab]')];
+  const next = tabs[(tabs.indexOf(document.activeElement) + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
+  e.preventDefault(); next.focus(); setOptionsTab(next.dataset.tab);
+});
+// before the keyboard handler below, so Esc closes the drawer and doesn't stop a reply
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('options').hidden && $('options').contains(document.activeElement)) { setOptions(false); $('toggleOptions').focus(); e.stopImmediatePropagation(); }
 });
 
 // ---------------------------------------------------------------------------

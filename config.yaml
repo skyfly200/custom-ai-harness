@@ -3,9 +3,30 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
 
 model_list:
+
+  - model_name: or-deepseek-flash-latest
+    litellm_params:
+      model: openrouter/deepseek/deepseek-flash-latest
+      api_key: os.environ/OPENROUTER_API_KEY
+
   - model_name: or-deepseek-v4.1-flash-1017
     litellm_params:
-      model: openrouter/deepseek/deepseek-v4.1-flash-1017
+      model: openrouter/deepseek/deepseek-v4.1-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: or-claude-haiku-5.5
+    litellm_params:
+      model: openrouter/anthropic/claude-haiku-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: or-claude-opus-latest
+    litellm_params:
+      model: openrouter/anthropic/claude-opus-5.5
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: or-claude-sonnet-latest
+    litellm_params:
+      model: openrouter/anthropic/claude-sonnet-5.5
       api_key: os.environ/OPENROUTER_API_KEY
 
   # Concurrency: max_parallel_requests caps in-flight calls per deployment;
@@ -33,14 +54,10 @@ litellm_settings:
   # leaves unanswered (gatewayTimeoutMs in the dashboard, 5 minutes).
   request_timeout: 120
   fallbacks:
+    - {"or-claude-haiku-5.5": ["or-deepseek-flash-latest"]}
     # Tool-capable first: strong requests are mostly Claude Code, which needs tool calls.
     # A rate-limited free model must not end the chain: LiteLLM answers "No fallback
     # model group found" for a group with no entry here. Paid fast-openrouter is the last resort.
-    - {"local-engine":              ["fast-openrouter", "fallback-openrouter-tools", "fallback-openrouter"]}
-    - {"fallback-groq":             ["fallback-openrouter"]}
-    - {"fallback-openrouter-tools": ["fallback-ollama", "fallback-openrouter"]}
-    - {"fallback-ollama":           ["fallback-openrouter-tools", "fallback-openrouter"]}
-    - {"fallback-openrouter":       ["fallback-ollama", "fallback-groq", "fast-openrouter"]}
 
 router_settings:
   # Go straight to the next fallback instead of retrying the same model: a 429

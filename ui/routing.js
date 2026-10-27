@@ -286,6 +286,21 @@ function removeWire(id) {
 
 // Called once × in the title has been held down; Discard changes brings it back
 function removeModel(name) {
+  const routing = R();
+  if (routing !== graph) {
+    const uses = routeOuts(routing).filter(o => o.model === name).map(o => `“${o.label}”`);
+    const fallbacks = ownFb(routing);
+    for (const o of routeOuts(routing)) if (o.model === name) setOut(routing, o.port, null);
+    delete fallbacks[name];
+    for (const [src, targets] of Object.entries(fallbacks)) {
+      const kept = targets.filter(t => t !== name);
+      if (kept.length) fallbacks[src] = kept; else delete fallbacks[src];
+    }
+    selected = null;
+    changed();
+    note(`Removed ${name} from ${routingName(routing)}. The Gateway model and other strategies are unchanged.${uses.length ? ` Connect ${uses.join(', ')} to another model before saving.` : ''}`);
+    return;
+  }
   const uses = strategies().flatMap(r => routeOuts(r).filter(o => o.model === name)
     .map(o => `“${o.label}”${r === graph ? '' : ` in ${r.name}`}`));
   const others = strategies().filter(r => r !== R() && routeOuts(r).some(o => o.model === name));
@@ -664,7 +679,10 @@ function modelNode(name) {
     : '';
   const outs = `<div class="out"><span class="label"><b>If it fails</b>${chain.length ? ', try in order' : ' · no fallbacks'}</span>
     <span class="port out-port fallback${editable ? '' : ' fixed'}" data-port="fail:${esc(name)}" data-hint="Drag to another model to try it when ${esc(name)} fails"></span></div>`;
-  const close = editable ? `<button class="close hold" data-act="unmodel" data-name="${esc(name)}" aria-label="Remove ${esc(name)} (press and hold)" data-hint="Press and hold to remove ${esc(name)} from the Gateway, with its provider models and fallback lines">×</button>` : '';
+  const removeHint = view
+    ? `Press and hold to remove ${esc(name)} from this strategy only. The Gateway model and other strategies stay unchanged.`
+    : `Press and hold to remove ${esc(name)} from the Gateway, with its provider models and fallback lines`;
+  const close = editable ? `<button class="close hold" data-act="unmodel" data-name="${esc(name)}" aria-label="Remove ${esc(name)}${view ? ' from this strategy' : ''} (press and hold)" data-hint="${removeHint}">×</button>` : '';
   const lost = routerUp() && !reachable().has(name);
   const why = lost ? '<div class="unreach" data-hint="No route in any strategy leads here, directly or through fallbacks. Clear unconnected models removes it">No route reaches it.</div>' : '';
   return nodeHTML(`m:${name}`, lost ? 'model unreached' : 'model', name, 'Model', why + statBlock(name) + servedBy + list, outs, true, close);

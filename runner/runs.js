@@ -326,23 +326,23 @@ class RunManager {
         return Object.fromEntries(Object.entries(args).map(([k, v]) => [k, short(v, 600)]));
     }
 
-    headers(run, n) {
+    headers(run, n, stageModel = null) {
         const h = { 'content-type': 'application/json', 'x-harness-request-id': `run-${run.id}-${n}` };
         if (this.password) h['x-harness-password'] = this.password;
-        if (run.model) h['x-harness-model'] = run.model;
+        if (run.model || stageModel) h['x-harness-model'] = run.model || stageModel;
         if (run.profile) h['x-harness-profile'] = run.profile;
         if (run.effort) h['x-harness-effort'] = run.effort;
         return h;
     }
 
-    async chat(run, messages, tools, n) {
+    async chat(run, messages, tools, n, stageModel = null) {
         let lastError;
         await this.pricer.refresh();
         for (let attempt = 0; attempt < 3; attempt++) {
             if (attempt) await sleep(this.retryDelayMs * attempt * attempt);
             try {
                 const res = await fetch(`${this.harnessUrl}/v1/chat/completions`, {
-                    method: 'POST', headers: this.headers(run, n), signal: AbortSignal.timeout(6 * 60 * 1000),
+                    method: 'POST', headers: this.headers(run, n, stageModel), signal: AbortSignal.timeout(6 * 60 * 1000),
                     body: JSON.stringify({ model: 'auto', messages, tools, tool_choice: 'auto', stream: false }),
                 });
                 const body = await res.json().catch(() => ({}));
@@ -632,7 +632,7 @@ class RunManager {
                 run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
-                chat: (messages, defs) => this.chat(stageRun, messages, defs, nextN()),
+                chat: (messages, defs) => this.chat(stageRun, messages, defs, nextN(), stage.model),
             });
             if (outcome.status === 'out_of_steps') run.partialSummary = outcome.summary;
             notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
@@ -640,11 +640,11 @@ class RunManager {
             if (stage.verdict && /^\W*FAIL/i.test(outcome.summary)) {
                 retries[stage.id] = (retries[stage.id] || 0) + 1;
                 if (retries[stage.id] <= stage.maxRetries) {
-                    this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo}.` });
+                    this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo} (round ${retries[stage.id] + 1} of ${stage.maxRetries + 1}).` });
                     i = workflow.stages.findIndex((s) => s.id === stage.retryTo) - 1;
                     continue;
                 }
-                this.event(run, { type: 'note', text: `${stage.role} still says FAIL; stopping here for a person to look.` });
+                this.event(run, { type: 'note', text: `${stage.role} still says FAIL after ${stage.maxRetries + 1} round${stage.maxRetries ? 's' : ''}; stopping here for a person to look.` });
                 outcome = { status: 'incomplete', summary: outcome.summary };
                 break;
             }

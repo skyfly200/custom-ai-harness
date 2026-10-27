@@ -6,37 +6,44 @@ ChatDev is a separate multi-agent platform: YAML workflows of agent, human and P
 
 ## Why a sandbox
 
-ChatDev's agents write files and run commands on their own, outside the [command guard](claude-code.md#command-guard-jev-checks-commands-before-they-run). The Sprite is the boundary: it has none of your files, and the only credential in it is `CHATDEV_API_KEY`. Everything they produce comes back as a normal `harness/<id>` branch in your repo to review.
+ChatDev's agents write files and run commands on their own, outside the [command guard](claude-code.md#command-guard-jev-checks-commands-before-they-run). The Sprite is the boundary: it has none of your files, and the only credential in it is a run key (below). Everything they produce comes back as a normal `harness/<id>` branch in your repo to review.
 
 ## Set it up
 
 1. Make the Sprite driver work first (`SPRITES_TOKEN`, see the task runner page).
 2. The sandbox must reach the harness, so it needs a public address: a [Cloudflare tunnel](phone-and-app.md) or your [server](server-docker.md), with `HARNESS_PASSWORD` set. `localhost` is refused.
-3. Create an API key for ChatDev under **Users** ([Named logins and API keys](logins.md)) rather than using your password.
-4. In `.env`:
+3. In `.env`:
 
    ```
    CHATDEV_HARNESS_URL=https://your-harness.example.com
-   CHATDEV_API_KEY=hk_...
    ```
 
-   Optional: `CHATDEV_MODEL` (the model name the workflow sends, default `claude-sonnet-5-5`; the routing still picks the real model), `CHATDEV_WORKFLOW` (path to your own ChatDev YAML), `CHATDEV_REPO` and `CHATDEV_REF` (install a fork, branch or tag).
-5. On the Agents page choose Workflow **ChatDev (in a cloud sandbox)**, describe what to build, and start. The sandbox defaults to a Sprite.
+   Optional: `CHATDEV_MAX_USD` (the most one run's models may cost, default 2; the run's `maxUsd` in the API overrides it), `CHATDEV_MODEL` (the model name the workflow sends, default `claude-sonnet-5-5`; the routing still picks the real model), `CHATDEV_WORKFLOW` (path to your own ChatDev YAML), `CHATDEV_REPO` and `CHATDEV_REF` (install a fork, branch or tag).
+4. On the Agents page choose Workflow **ChatDev (in a cloud sandbox)**, describe what to build, and start. The sandbox defaults to a Sprite.
 
 ## What happens
 
 1. The sandbox starts with your repo on branch `harness/<id>`.
 2. ChatDev is cloned and installed next to it (`uv sync`; a few minutes each run, no snapshot yet).
-3. A `.env` is written in the sandbox with `BASE_URL=<harness>/v1`, `API_KEY` and `MODEL_NAME`, which `chatdev/dev-team.yaml` uses as `${BASE_URL}`, `${API_KEY}` and `${MODEL_NAME}`. Calls show in your routing log, Usage page and Langfuse like any other client.
+3. The harness makes a **run key** for this run (see below). A `.env` is written in the sandbox with `BASE_URL=<harness>/v1`, `API_KEY` (the run key) and `MODEL_NAME`, which `chatdev/dev-team.yaml` uses as `${BASE_URL}`, `${API_KEY}` and `${MODEL_NAME}`. Calls show in your routing log, Usage page and Langfuse like any other client.
 4. ChatDev's server starts and the run posts your goal and the YAML to `POST /api/workflow/execute`.
 5. ChatDev's response, its `WareHouse` output and the end of its server log are saved under `chatdev-output/<id>/` and committed. The sandbox is deleted.
 
 The default workflow is a Planner, Programmer and Reviewer with a review loop (the reviewer replies ACCEPT to finish). Copy `chatdev/dev-team.yaml` and set `CHATDEV_WORKFLOW` to use your own, or build one in ChatDev's own web editor and export its YAML.
 
+## The run key and the cost cap
+
+Each ChatDev run gets its own key from the harness (`utils/runKeys.js`), never your password or a named login's key:
+
+- It works for model calls only (`POST /v1/chat/completions`); on any other address it is refused, so it can't open the dashboard, change settings or reach the runner.
+- It has a dollar cap, `maxUsd` (default 2). Each reply is charged from its token counts and the Gateway's prices; a model with no known price is charged at $15 per million tokens in and $75 out, so an unlisted model can't get around the cap. Free models cost nothing. When the cap is used up, further calls get HTTP 402 and the ChatDev run fails with that message. Requests already running when the cap is reached finish, so the total can go a little over.
+- It expires after the run's minutes plus 15, is revoked when the run ends (even if it fails), and lives only in the harness's memory: restarting the harness revokes every run key.
+- The run's record notes how much it spent and how many requests it made.
+
 ## Limits
 
 - **Not tried against a real ChatDev yet.** The YAML and the API call follow ChatDev's authoring guide; the tests use a stand-in sandbox. If ChatDev rejects the file, the run fails with its answer, and the fix is in the YAML.
 - The run is one call: no live progress and no Stop in the middle of ChatDev's work (Stop ends the run at the next step).
-- No cost cap per run yet. Cap the key's spending in the harness, and keep `maxMinutes` low.
+- The cap is checked per request, so a single very large reply can pass it.
 - Only the default workflow's nodes are checked. Python nodes in your own YAML run in the sandbox.
 - The ChatDev run can't be continued, only started again.

@@ -270,6 +270,8 @@ class RunManager {
             maxSteps: num0(cfg.maxSteps, 0, 10000, 0), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
             autoDebug: num(cfg.autoDebug, 0, 1, this.autoDebugDefault ? 1 : 0) === 1,
             sandbox, sandboxId: null,
+            // ChatDev runs: the most the sandbox's model key may spend, in dollars
+            maxUsd: isChatDev ? Math.min(1000, Math.max(0.01, Number(cfg.maxUsd) || Number(process.env.CHATDEV_MAX_USD) || 2)) : null,
             debugOf: cfg.debugOf ? String(cfg.debugOf) : null, debugDepth: num(cfg.debugDepth, 0, 9, 0), debugRun: null,
             // a run carried on after it ran out of steps or time: the same run and branch,
             // not a new one. continues counts the carries-on, legs the parts done so far and
@@ -349,6 +351,24 @@ class RunManager {
             }
         }
         throw lastError;
+    }
+
+    /** A capped, short-lived model key for one run's sandbox (utils/runKeys.js on the harness). */
+    async mintRunKey({ label, maxUsd, ttlMinutes }) {
+        const headers = { 'content-type': 'application/json', ...(this.password ? { 'x-harness-password': this.password } : {}) };
+        const res = await fetch(`${this.harnessUrl}/v1/run-keys`, { method: 'POST', headers, body: JSON.stringify({ label, maxUsd, ttlMinutes }), signal: AbortSignal.timeout(15000) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(`the harness would not make a run key (HTTP ${res.status}: ${body.error || 'no reason given'})`);
+        return body;
+    }
+
+    /** Revoke it; resolves { spent, requests } or null when that failed. Never throws. */
+    async revokeRunKey(id) {
+        try {
+            const headers = this.password ? { 'x-harness-password': this.password } : {};
+            const res = await fetch(`${this.harnessUrl}/v1/run-keys/${encodeURIComponent(id)}`, { method: 'DELETE', headers, signal: AbortSignal.timeout(15000) });
+            return res.ok ? await res.json() : null;
+        } catch { return null; }
     }
 
     async guard(kind, text) {
@@ -641,7 +661,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, sandbox: from.sandbox, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };

@@ -6,7 +6,8 @@
 //
 // The sandbox is the safety boundary: ChatDev's own agents run files and commands
 // inside it, out of reach of the command guard. It never gets the harness's keys,
-// only CHATDEV_API_KEY (an API key made for it under Users, see docs/logins.md).
+// a run key the harness makes for this run: it works for model calls only, has a
+// dollar cap (the run's maxUsd) and is revoked when the run ends (utils/runKeys.js).
 'use strict';
 
 const fs = require('fs');
@@ -39,8 +40,20 @@ async function executeChatDev(manager, run, live) {
     const kind = run.sandbox && sandboxes.isCloud(run.sandbox) ? run.sandbox : 'sprites';
     const graphFile = process.env.CHATDEV_WORKFLOW || DEFAULT_WORKFLOW;
     const graph = fs.readFileSync(graphFile, 'utf8');
-    const env = envFile({ harnessUrl: process.env.CHATDEV_HARNESS_URL, apiKey: process.env.CHATDEV_API_KEY, model: run.model || process.env.CHATDEV_MODEL || DEFAULT_MODEL });
+    const model = run.model || process.env.CHATDEV_MODEL || DEFAULT_MODEL;
+    envFile({ harnessUrl: process.env.CHATDEV_HARNESS_URL, apiKey: 'x', model }); // refuses an unusable address before anything is started
 
+    const runKey = await manager.mintRunKey({ label: `run ${run.id}`, maxUsd: run.maxUsd, ttlMinutes: run.maxMinutes + 15 });
+    try {
+        return await work(manager, run, live, { kind, graph, runKey, model });
+    } finally {
+        const used = await manager.revokeRunKey(runKey.id);
+        manager.event(run, { type: 'note', text: used ? `Model spend by ChatDev: about $${used.spent.toFixed(4)} of the $${run.maxUsd} cap, in ${used.requests} requests.` : 'The run key could not be revoked; it expires on its own.' });
+    }
+}
+
+async function work(manager, run, live, { kind, graph, runKey, model }) {
+    const env = envFile({ harnessUrl: process.env.CHATDEV_HARNESS_URL, apiKey: runKey.key, model });
     const sandbox = await sandboxes.createSandbox({ kind, repo: run.repo, dir: path.join(manager.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
     live.sandbox = sandbox;
     run.base = sandbox.base;

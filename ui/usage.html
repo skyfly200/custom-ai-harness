@@ -37,19 +37,42 @@
 
   <div class="grid" id="tiles"></div>
 
-  <h2 data-hint="What the same requests would have cost sent straight to Claude Sonnet 5.5, and how much each part of the harness took off">Savings vs Claude Sonnet 5.5</h2>
+  <h2 data-hint="What the same work would have cost sent straight to a Claude model, and what each part of the harness took off">Savings vs Claude</h2>
   <div class="card chart-card savings">
+    <div class="controls">
+      <span class="muted">Compared with</span>
+      <div class="seg" id="baseline" role="group" aria-label="Baseline model">
+        <button data-b="opus" data-hint="Claude Opus 5.5: $4 in, $20 out per million tokens">Opus 5.5</button><button data-b="sonnet" data-hint="Claude Sonnet 5.5: $2 in, $10 out per million tokens">Sonnet 5.5</button><button data-b="haiku" data-hint="Claude Haiku 5.5: $0.10 in, $0.50 out per million tokens">Haiku 5.5</button>
+      </div>
+      <span class="muted" id="baseNote"></span>
+    </div>
     <div class="save-head" id="saveHead"></div>
-    <div class="chart-scroll"><svg id="waterfall" class="chart" role="img" aria-label="Cost with Sonnet 5.5, minus each part of the harness, down to the actual cost"></svg></div>
+    <div class="save-groups" id="saveGroups"></div>
+    <div class="chart-scroll"><svg id="waterfall" class="chart" role="img" aria-label="Cost with the baseline model, minus each part of the harness, down to the actual cost"></svg></div>
+    <h3>All three baselines</h3>
+    <div class="table-wrap">
+      <table class="save-table">
+        <thead><tr><th>Sent straight to</th><th class="r">Would cost</th><th class="r">Paid</th><th class="r">Saved</th><th class="r">Model choice</th><th class="r">Routing</th><th class="r">Techniques</th><th class="r" data-hint="Modeled, not measured: the extra or fewer tokens other models need for the same work (your assumptions below)">Tokens needed</th></tr></thead>
+        <tbody id="saveCompare"></tbody>
+      </table>
+    </div>
     <h3>Adding up over time</h3>
     <div class="legend" id="saveLegend"></div>
     <div class="chart-scroll"><svg id="saveTime" class="chart" role="img" aria-label="Savings adding up per day, by part of the harness"></svg></div>
     <div class="table-wrap">
-      <table class="save-table">
-        <thead><tr><th>Part</th><th>What it does</th><th class="r">Requests</th><th class="r" data-hint="Compression: input tokens it took out. Model parts: tokens answered by free or local models. Caching: input read from the provider's cache">Tokens</th><th class="r" data-hint="What this part took off the Sonnet 5.5 price">Saved</th><th class="r">Share</th></tr></thead>
+      <table class="save-table layer-table">
+        <thead><tr><th>Part</th><th>What it does</th><th data-hint="Measured: counted from real requests and prices. Estimated: counted, but from a rough character count. Assumed: comes from the assumptions below, not from anything measured">How sure</th><th class="r">Requests</th><th class="r" data-hint="Compression: input tokens it took out. Tokens needed: tokens the answering model used beyond the baseline's. Model parts: tokens answered by free or local models. Caching: input read from the provider's cache">Tokens</th><th class="r" data-hint="What this part took off the baseline price">Saved</th><th class="r">Share</th></tr></thead>
         <tbody id="saveRows"></tbody>
       </table>
     </div>
+    <details class="assume" id="assume">
+      <summary>Assumptions behind the modeled numbers</summary>
+      <p class="sub muted fine">Cheaper models often need more turns, retries or longer answers to get the same work done. Nothing here measures that, so it is a guess you can change. Each number is how many tokens a model needs for the same work, with Claude Sonnet 5.5 as 1. A model on 1.3 uses 30% more tokens than Sonnet would, and the comparison charges the baseline for fewer. Set everything to 1 to compare token for token.</p>
+      <div class="assume-grid" id="assumeGrid"></div>
+      <h3>Per model</h3>
+      <div class="table-wrap"><table class="save-table"><thead><tr><th>Model that answered</th><th class="r">Requests</th><th class="r">Assumed</th><th class="r">Your number</th></tr></thead><tbody id="assumeModels"></tbody></table></div>
+      <button id="assumeReset" data-hint="Back to the starting guesses">Reset to starting guesses</button>
+    </details>
     <div class="sub muted fine" id="saveNote"></div>
   </div>
 

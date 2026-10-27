@@ -46,6 +46,7 @@ const fakeHarness = http.createServer((req, res) => {
     req.on('end', async () => {
         const body = JSON.parse(data || '{}');
         res.setHeader('content-type', 'application/json');
+        if (req.url === '/ui/api/model-info') return res.end(JSON.stringify({ models: { 'fake-model': { inputCost: 1e-5, outputCost: 3e-5 } } }));
         if (req.url === '/v1/guard') return res.end(JSON.stringify(await guard.check(body, { jev: false })));
         modelCalls.push({ body, headers: req.headers });
         const next = script.shift();
@@ -105,6 +106,9 @@ test('an agent fixes the code on its own branch and the working copy is untouche
     assert.equal(run.result.tests.passed, true);
     assert.match(run.result.diffStat, /app\.js/);
     assert.deepEqual([run.steps, run.tokens], [5, { in: 500, out: 100 }]);
+    // priced from the harness's model list: 5 calls of 100 in and 20 out
+    assert.ok(Math.abs(run.cost - 0.008) < 1e-9, `cost ${run.cost}`);
+    assert.equal(run.unpricedCalls, 0);
     // the branch holds the fix; the checked-out files do not change
     assert.equal(git(repo, 'show', `${run.branch}:app.js`).trim(), 'module.exports = (a, b) => a + b; // add');
     assert.match(fs.readFileSync(path.join(repo, 'app.js'), 'utf8'), /a - b/);

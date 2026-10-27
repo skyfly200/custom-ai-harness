@@ -40,3 +40,17 @@ test('recent is capped', () => {
     const runs = Array.from({ length: 10 }, (_, i) => run({ id: String(i) }));
     assert.equal(board(runs, [], { recent: 4 }).recent.length, 4);
 });
+
+test('a swarm and its workers are one job: their cost and tokens add up, per agent too', () => {
+    const runs = [
+        run({ id: 'p', kind: 'swarm', agent: 'ag', cost: 0.5, unpricedCalls: 1 }),
+        run({ id: 'c1', parent: 'p', cost: 1.25 }),
+        run({ id: 'c2', parent: 'p', cost: 0.25, unpricedCalls: 2 }),
+        run({ id: 'x', agent: 'ag', cost: 2 }),
+    ];
+    const b = board(runs, [{ id: 'ag', name: 'A', active: 0, lastTask: null }]);
+    const swarm = b.recent.find((r) => r.id === 'p');
+    assert.deepEqual([swarm.spent.cost, swarm.spent.tokens, swarm.spent.unpriced], [2, 45, 3]);
+    assert.deepEqual([b.agents[0].cost, b.agents[0].unpriced], [4, 3]);
+    assert.deepEqual([b.totals.cost, b.totals.unpriced], [4, 3]);
+});

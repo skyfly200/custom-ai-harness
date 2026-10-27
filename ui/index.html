@@ -275,6 +275,8 @@ const RUN_TAGS = { done: 'ok', waiting: 'warn', incomplete: 'warn', failed: 'bad
 const RUN_WORD = { done: 'finished', waiting: 'needs you' };
 const STATE_DOT = { waiting: 'warn', working: 'ok', queued: 'ok', idle: 'off' };
 const STATE_WORD = { waiting: 'Needs you', working: 'Working', queued: 'Queued', idle: 'Idle' };
+// $ for what was priced; "+" when some calls had no known price
+const spendText = (cost, unpriced) => (cost || !unpriced ? usd(cost || 0) : '$?') + (unpriced ? '+' : '');
 const since = (iso) => ago(new Date(iso).getTime());
 const repoName = (r) => String(r || '').split(/[\\/]/).pop();
 const firstLine = (s, n) => String(s || '').split('\n')[0].slice(0, n);
@@ -301,14 +303,14 @@ function renderAgentCards(b) {
       <div class="name"><span class="dot ${STATE_DOT[a.state]}"></span>${esc(a.name)}<span class="tag ${a.state === 'waiting' ? 'warn' : a.state === 'idle' ? '' : 'ok'}">${STATE_WORD[a.state]}</span></div>
       <div class="sub"><code>${esc(repoName(a.repo))}</code>${a.project?.name ? ` · ${esc(a.project.name)}` : ''}</div>
       <div class="sub agent-last">${last ? `${esc(firstLine(last.goal, 80))}<br><span class="tag ${RUN_TAGS[last.status] || ''}" style="margin-left:0">${esc(RUN_WORD[last.status] || last.status)}</span> ${since(last.created)}` : 'No tasks yet'}</div>
-      <div class="sub">${a.taskCount || 0} task${a.taskCount === 1 ? '' : 's'}${a.done ? ` · ${a.done} done` : ''}${a.failed ? ` · ${a.failed} failed` : ''} · ${short(a.tokens)} tokens</div></a>`;
+      <div class="sub">${a.taskCount || 0} task${a.taskCount === 1 ? '' : 's'}${a.done ? ` · ${a.done} done` : ''}${a.failed ? ` · ${a.failed} failed` : ''} · ${short(a.tokens)} tokens · <b title="${a.unpriced ? `${a.unpriced} call(s) had no known price, so the real cost is higher` : 'What its tasks cost'}">${spendText(a.cost, a.unpriced)}</b></div></a>`;
   }).join('');
 }
 
 function runRow(r) {
   return `<a class="row" href="agents.html#${esc(r.id)}"><span class="title">${esc(firstLine(r.goal, 200))}</span>
     <span class="meta"><span class="tag ${RUN_TAGS[r.status] || ''}" style="margin-left:0">${esc(RUN_WORD[r.status] || r.status)}</span> ${since(r.created)}</span>
-    <span class="proj">${r.agentName ? `${esc(r.agentName)} · ` : ''}${r.kind === 'swarm' ? 'swarm · ' : ''}<code>${esc(repoName(r.repo))}</code>${r.plan ? ' · plan only' : r.branch && r.status !== 'queued' ? ` · <code>${esc(r.branch)}</code>` : ''} · ${short(AgentBoard.tokensOf(r))} tokens${r.steps ? ` · ${r.steps} steps` : ''}</span></a>`;
+    <span class="proj">${r.agentName ? `${esc(r.agentName)} · ` : ''}${r.kind === 'swarm' ? 'swarm · ' : ''}<code>${esc(repoName(r.repo))}</code>${r.plan ? ' · plan only' : r.branch && r.status !== 'queued' ? ` · <code>${esc(r.branch)}</code>` : ''} · ${short(r.spent.tokens)} tokens · ${spendText(r.spent.cost, r.spent.unpriced)}${r.steps ? ` · ${r.steps} steps` : ''}</span></a>`;
 }
 
 function renderAgentRuns(b) {
@@ -336,7 +338,7 @@ async function loadAgents() {
     renderAgentCards(b);
     renderAgentRuns(b);
     renderQuick(a.agents);
-    $('agentSummary').textContent = `${b.totals.active ? `${b.totals.active} running` : 'none running'}${b.needs.length ? ` · ${b.needs.length} need${b.needs.length === 1 ? 's' : ''} you` : ''}`;
+    $('agentSummary').textContent = `${b.totals.active ? `${b.totals.active} running` : 'none running'} · ${spendText(b.totals.cost, b.totals.unpriced)} spent on runs${b.needs.length ? ` · ${b.needs.length} need${b.needs.length === 1 ? 's' : ''} you` : ''}`;
   } catch (err) {
     $('agentDown').hidden = false;
     $('agentDown').textContent = `Task runner unreachable: ${err.message}`;

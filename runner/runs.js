@@ -13,6 +13,7 @@ const { runAgent, systemFor } = require('./agent');
 const workflows = require('../utils/workflows');
 const swarm = require('./swarm');
 const { parseTickets } = require('./tickets');
+const { createPricer } = require('../utils/runCost');
 const { AgentStore } = require('./agents');
 
 const MAX_EVENTS = 2000;
@@ -117,6 +118,7 @@ class RunManager {
         this.harnessUrl = harnessUrl.replace(/\/$/, '');
         this.password = password;
         this.maxRuns = maxRuns;
+        this.pricer = createPricer({ url: this.harnessUrl, headers: this.password ? { 'x-harness-password': this.password } : {} });
         this.retryDelayMs = retryDelayMs;
         this.autoDebugDefault = Boolean(autoDebug); // for new runs (RUNNER_AUTO_DEBUG)
         this.sandboxKind = normalizeKind(sandbox) || sandbox; // the default driver: local (a worktree here), e2b or sprites (cloud sandboxes); a run can pick its own
@@ -274,7 +276,7 @@ class RunManager {
             continues: num(cfg.continues, 0, MAX_CONTINUES, 0), carriesOn: cfg.carriesOn ? String(cfg.carriesOn) : null, legs: 0, resumeNote: null,
             outOfSteps: null, partialText: null, partialSummary: null,
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
-            steps: 0, tokens: { in: 0, out: 0 }, pending: null, events: [], result: null, error: null,
+            steps: 0, tokens: { in: 0, out: 0 }, cost: 0, unpricedCalls: 0, pending: null, events: [], result: null, error: null,
         };
         this.runs.set(id, run);
         this.save(run);
@@ -305,7 +307,12 @@ class RunManager {
         run.events.push({ t: new Date().toISOString(), ...e, ...(e.text !== undefined ? { text: short(e.text) } : {}), ...(e.args !== undefined ? { args: this.shortArgs(e.args) } : {}) });
         if (run.events.length > MAX_EVENTS) run.events.splice(0, run.events.length - MAX_EVENTS);
         if (e.type === 'step') run.steps += 1;
-        if (e.type === 'model' && e.usage) { run.tokens.in += e.usage.prompt_tokens || 0; run.tokens.out += e.usage.completion_tokens || 0; }
+        if (e.type === 'model' && e.usage) {
+            run.tokens.in += e.usage.prompt_tokens || 0; run.tokens.out += e.usage.completion_tokens || 0;
+            const c = this.pricer.cost(e.usage, e.model);
+            run.cost = (run.cost || 0) + c.cost;
+            if (c.unpriced) run.unpricedCalls = (run.unpricedCalls || 0) + 1;
+        }
         this.save(run);
     }
 
@@ -325,6 +332,7 @@ class RunManager {
 
     async chat(run, messages, tools, n) {
         let lastError;
+        await this.pricer.refresh();
         for (let attempt = 0; attempt < 3; attempt++) {
             if (attempt) await sleep(this.retryDelayMs * attempt * attempt);
             try {
@@ -666,7 +674,7 @@ class RunManager {
         const leg = {
             ...run, continues, carriesOn: run.id, briefGiven: false, resumeNote,
             result: null, error: null, pending: null, events: [], steps: 0,
-            tokens: { in: run.tokens.in, out: run.tokens.out },
+            tokens: { in: run.tokens.in, out: run.tokens.out }, cost: run.cost || 0, unpricedCalls: run.unpricedCalls || 0,
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
             outOfSteps: null, partialText: null, partialSummary: run.partialSummary || null,
         };

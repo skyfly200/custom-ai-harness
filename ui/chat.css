@@ -15,8 +15,8 @@ button.mini { padding: 2px 6px; font-size: 12px; border-radius: 5px; }
 .app.side-open { grid-template-columns: 260px minmax(0, 1fr) auto; }
 .app { transition: grid-template-columns .18s ease; }
 .app > .top { grid-column: 1 / -1; grid-row: 1; }
-.app > .chatbar { grid-column: 2 / -1; grid-row: 2; }
-.app > .side { grid-column: 1; grid-row: 2 / -1; }
+.app > .chatbar { grid-column: 1 / -1; grid-row: 2; }
+.app > .side { grid-column: 1; grid-row: 3; }
 .app > .convo { grid-column: 2; grid-row: 3; }
 
 /* folded away, the chats panel takes no room and clips its contents */
@@ -103,6 +103,7 @@ input[type=range] { width: 100%; }
   display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: 1px solid var(--border);
   border-radius: 999px; background: var(--panel); color: var(--text); box-shadow: var(--shadow);
   font-size: 13px; font-weight: 500; cursor: pointer; }
+.jump-down[hidden] { display: none; }
 .jump-down:hover { border-color: var(--accent); color: var(--accent); }
 .jump-down::before { content: '↓'; font-size: 14px; line-height: 1; }
 .jump-down.new::after { content: 'new'; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }

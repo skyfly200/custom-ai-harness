@@ -74,6 +74,19 @@
     </div>
   </section>
 
+  <section id="fedSection" hidden>
+    <h2>Or use federation (no key stored)</h2>
+    <div class="card">
+      <p class="muted" style="margin-top:0">For an OpenRouter Business or Enterprise organisation. In OpenRouter, Settings, Workload identity: trust this server as an issuer, then make a policy whose subject is <code id="fedSub"></code> and whose audience is <code id="fedAud"></code>. Paste the policy's id here.</p>
+      <p class="muted" id="fedIss"></p>
+      <form id="setFed" class="form" autocomplete="off">
+        <label class="field"><span>Policy id</span><input name="policyId" required></label>
+        <label class="field"><span>Audience</span><input name="audience" placeholder="(the default above)"></label>
+        <div class="field"><span>&nbsp;</span><button class="primary">Use federation</button></div>
+      </form>
+    </div>
+  </section>
+
   <section id="guestSection" hidden>
     <h2>Guest credit</h2>
     <div class="card"><p id="guestState" style="margin:0"></p></div>

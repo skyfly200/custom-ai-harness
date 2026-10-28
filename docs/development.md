@@ -74,6 +74,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `e2bSandbox`, `spritesSandbox` |
 | MCP tools | `mcp`, `mcpAdmin`, `toolsApi` |
 | Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `chatCommands` |
+| OIDC issuer, per-person federation | `oidc` |
 | Guests, credit, own keys, proxy tickets | `guests` (in-process Postgres) |
 | Per-user tools, routings, settings | `userTools` (secrets, address checks, member MCP, routings; in-process Postgres) |
 | Router (Python) | `test_router.py`, `test_router_backends.py`, `test_gateway_start.py` |

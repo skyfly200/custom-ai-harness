@@ -48,6 +48,7 @@ const credit = require('./utils/credit');
 const userCredentials = require('./utils/userCredentials');
 const credentialTicket = require('./utils/credentialTicket');
 const secrets = require('./utils/secrets');
+const oidcIssuer = require('./utils/oidcIssuer');
 const claudeKit = require('./utils/claudeKit');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
@@ -87,6 +88,9 @@ const USER_CREDENTIALS = /^(1|true|yes|on)$/i.test(process.env.HARNESS_USER_CRED
 if (openrouterAuth.federated() || USER_CREDENTIALS) {
     app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth, { resolveUser: USER_CREDENTIALS ? userCredentials.resolve : null }));
 }
+// The harness as an OpenID Connect issuer for OpenRouter workload identity federation (utils/oidcIssuer.js):
+// two public documents, so before any login. Off unless HARNESS_USER_CREDENTIALS or OIDC_ISSUER is set.
+if (USER_CREDENTIALS || process.env.OIDC_ISSUER) app.use(oidcIssuer.routes(express));
 // Run keys: capped, short-lived keys for one agent run's model calls (utils/runKeys.js).
 // Checked before the password gate, which they replace for POST /v1/chat/completions only.
 const runKeys = new RunKeys();
@@ -542,7 +546,10 @@ app.get('/ui/api/me/credential', async (req, res) => {
     const out = { admin: user.role === 'admin', guest: Boolean(user.guest), required: USER_CREDENTIALS && user.role !== 'admin' && !user.guest };
     try {
         if (user.guest) out.credit = await credit.get(user.name);
-        else if (db.enabled() && user.role !== 'admin') out.credential = await userCredentials.status(user.name);
+        else if (db.enabled() && user.role !== 'admin') {
+            out.credential = await userCredentials.status(user.name);
+            out.federation = userCredentials.federationFacts(user.name);
+        }
         res.json(out);
     } catch (err) {
         res.status(503).json({ ...out, error: 'the database did not answer' });
@@ -556,7 +563,8 @@ app.put('/ui/api/me/credential', async (req, res) => {
     if (user.guest) return res.status(403).json({ error: 'guest accounts use the owner\'s credit; ask for a full account to use your own key' });
     if (!db.enabled()) return res.status(503).json({ error: 'storing a key needs the hosted database' });
     try {
-        await userCredentials.setKey(user.name, req.body?.key);
+        if (req.body?.policyId) await userCredentials.setFederation(user.name, req.body.policyId, req.body.audience);
+        else await userCredentials.setKey(user.name, req.body?.key);
         res.json({ credential: await userCredentials.status(user.name) });
     } catch (err) {
         res.status(err.status || 500).json({ error: err.message });
@@ -1438,6 +1446,7 @@ async function ownKeyGate(req, res, user) {
         return true;
     } catch (err) {
         console.error(`[credit] credential check for ${user.name} failed: ${err.message}`);
+        if (/^OpenRouter refused/.test(err.message)) { refuse(res, 402, 'billing_error', `OpenRouter did not accept your federation policy: ${err.message}`); return false; }
         refuse(res, 503, 'overloaded_error', 'Your credential could not be checked right now, so the request was not sent. Try again in a moment.');
         return false;
     }

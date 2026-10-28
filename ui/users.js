@@ -132,13 +132,23 @@
   async function drawCredential() {
     const c = await api('GET', '/ui/api/me/credential');
     $('keySection').hidden = !(c.required || (c.credential && c.credential.set));
-    if (c.credential) $('keyState').textContent = c.credential.set ? `A key ending …${c.credential.last4 || '????'} is saved.` : 'No key saved yet: you cannot use models until you add one.';
+    if (c.credential) $('keyState').textContent = !c.credential.set ? 'No key saved yet: you cannot use models until you add one.'
+      : c.credential.kind === 'federation' ? `Federation is on (policy ${c.credential.policyId}).` : `A key ending …${c.credential.last4 || '????'} is saved.`;
+    $('fedSection').hidden = $('keySection').hidden || !c.federation;
+    if (c.federation) {
+      $('fedSub').textContent = c.federation.subject; $('fedAud').textContent = c.federation.audience;
+      $('fedIss').textContent = c.federation.problem ? `Federation is not available yet: ${c.federation.problem}.` : `Issuer address: ${c.federation.issuer}`;
+    }
     $('guestSection').hidden = !c.guest;
     if (c.guest) $('guestState').textContent = c.credit ? `You are a guest. $${c.credit.leftUsd.toFixed(2)} left of $${c.credit.capUsd.toFixed(2)}, in all (not monthly). Only models with a known price are available.` : 'You are a guest.';
   }
   $('setKey').addEventListener('submit', async (e) => {
     e.preventDefault();
     try { await api('PUT', '/ui/api/me/credential', { key: new FormData(e.target).get('key') }); e.target.reset(); say('Key saved.'); drawCredential(); } catch (err) { say(err.message, true); }
+  });
+  $('setFed').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await api('PUT', '/ui/api/me/credential', Object.fromEntries(new FormData(e.target))); e.target.reset(); say('Federation saved.'); drawCredential(); } catch (err) { say(err.message, true); }
   });
   $('clearKey').addEventListener('click', async () => {
     try { await api('DELETE', '/ui/api/me/credential'); say('Key removed.'); drawCredential(); } catch (err) { say(err.message, true); }

@@ -379,7 +379,10 @@ const toGateway = createProxyMiddleware({
 });
 
 // Control UI: monitor the stack and switch the Router's classifier.
+// The same pages answer at the site root (https://host/ = dashboard, /chat.html, ...) and under /ui, so old links
+// and the installed app keep working. Static files only: an unknown path falls through to the API routes and Gateway.
 app.use('/ui', express.static(path.join(__dirname, 'ui')));
+app.use(express.static(path.join(__dirname, 'ui')));
 
 // Langfuse logging (utils/langfuse.js): are keys set, can we reach it, are prompts logged
 app.get('/ui/api/langfuse', async (req, res) => res.json(await langfuse.status(settings.get())));
@@ -567,7 +570,7 @@ app.put('/ui/api/me/credential', async (req, res) => {
 });
 // "Connect OpenRouter": OAuth PKCE (utils/openrouterOAuth.js). The key OpenRouter returns is stored like a pasted one.
 // Both routes are behind the login gate: OpenRouter sends the browser back with its session cookie.
-const oauthBack = (res, result) => res.redirect(`/ui/users.html?openrouter=${encodeURIComponent(result)}`);
+const oauthBack = (res, result) => res.redirect(`/users.html?openrouter=${encodeURIComponent(result)}`);
 const oauthCallbackUrl = (req) => `${process.env.HARNESS_PUBLIC_URL
     ? String(process.env.HARNESS_PUBLIC_URL).replace(/\/+$/, '')
     : `${(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim()}://${req.headers['x-forwarded-host'] || req.headers.host}`}/ui/api/me/credential/callback`;

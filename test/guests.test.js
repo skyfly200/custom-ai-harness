@@ -277,7 +277,7 @@ test('Connect OpenRouter sends a full user to OpenRouter and stores the key they
         ? Promise.resolve(new Response('{"key":"sk-or-v1-oauth1oauth2oauth3oauth4"}')) : realFetch(url, init);
     try {
         const done = await fetch(`${base}${back.pathname}?code=C1&state=${back.searchParams.get('state')}`, { ...as(fay), redirect: 'manual' });
-        assert.equal(done.headers.get('location'), '/ui/users.html?openrouter=connected');
+        assert.equal(done.headers.get('location'), '/users.html?openrouter=connected');
     } finally { globalThis.fetch = realFetch; }
     const me = await (await fetch(`${base}/ui/api/me/credential`, as(fay))).json();
     assert.equal(me.credential.kind, 'oauth');

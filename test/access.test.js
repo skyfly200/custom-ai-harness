@@ -74,3 +74,14 @@ test("a client's own provider key still reaches the Gateway alongside the passwo
     assert.equal(r.status, 200);
     assert.equal(seen['x-api-key'], 'sk-ant-their-own');
 });
+
+test('the pages are served at the site root as well as under /ui, behind the same password', async () => {
+    for (const url of ['/', '/chat.html', '/sw.js']) assert.equal((await fetch(base + url)).status, 401, url);
+    const auth = { headers: { authorization: basic('me', 'open sesame') } };
+    const root = await fetch(`${base}/`, auth);
+    assert.equal(root.status, 200);
+    assert.match(await root.text(), /<html/);
+    assert.equal((await fetch(`${base}/chat.html`, auth)).status, 200);
+    assert.equal((await fetch(`${base}/ui/chat.html`, auth)).status, 200);
+    assert.equal((await fetch(`${base}/manifest.webmanifest`, auth)).status, 200);
+});

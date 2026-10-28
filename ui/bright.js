@@ -281,7 +281,7 @@
     const a = document.createElement('a');
     a.id = 'accountChip';
     a.className = 'account-chip';
-    a.href = '/ui/users.html';
+    a.href = 'users.html';
     a.textContent = me.name;
     a.dataset.hint = a.title = me.role === 'admin' ? 'Your account, other users and API keys' : 'Your password and API keys';
     const out = document.createElement('button');

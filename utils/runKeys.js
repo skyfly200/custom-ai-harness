@@ -41,12 +41,12 @@ class RunKeys {
     }
 
     /** A new key. Resolves { id, key, maxUsd, expires }; the key is shown only here. */
-    create({ label = 'run', maxUsd, ttlMinutes = 60 } = {}) {
+    create({ label = 'run', maxUsd, ttlMinutes = 60, owner = null } = {}) {
         const cap = Number(maxUsd);
         if (!(cap > 0) || !Number.isFinite(cap)) throw new Error('maxUsd must be a number above 0');
         const ttl = Math.min(24 * 60, Math.max(1, Math.floor(Number(ttlMinutes)) || 60));
         const key = `${PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
-        const entry = { id: crypto.randomBytes(6).toString('hex'), label: String(label).slice(0, 60), maxUsd: cap, spent: 0, requests: 0, expires: this.now() + ttl * 60000, hash: hash(key) };
+        const entry = { id: crypto.randomBytes(6).toString('hex'), label: String(label).slice(0, 60), maxUsd: cap, spent: 0, requests: 0, expires: this.now() + ttl * 60000, hash: hash(key), owner: owner ? String(owner).slice(0, 120) : null };
         this.byHash.set(entry.hash, entry);
         this.byId.set(entry.id, entry);
         return { id: entry.id, key, maxUsd: cap, expires: new Date(entry.expires).toISOString() };
@@ -81,13 +81,16 @@ class RunKeys {
      * completions request sets req.harnessRunKey and takes the gate's place for that
      * request. On any other path a run key falls through and the gate refuses it.
      */
-    middleware() {
+    middleware(findUser = null) {
         return (req, res, next) => {
             const token = String(tokenOf(req));
             if (!token.startsWith(PREFIX) || req.method !== 'POST' || !PATHS.has(req.path)) return next();
             const found = this.lookup(token);
             if (!found.entry) return res.status(found.status).json({ error: found.error });
             req.harnessRunKey = found.entry;
+            // a hosted run's calls count as its owner: their credit or own credential pays
+            const user = found.entry.owner && findUser && findUser(found.entry.owner);
+            if (user) { req.harnessUser = user; req.harnessLogin = true; }
             // the key is the harness's own; the Gateway gets the Gateway's
             delete req.headers.authorization;
             delete req.headers['x-api-key'];
@@ -100,7 +103,7 @@ class RunKeys {
 // `gate` is one middleware, or a list of them (the login gate is a list)
 const unlessRunKey = (gate) => {
     const handler = Array.isArray(gate) ? require('express').Router().use(...gate) : gate;
-    return (req, res, next) => (req.harnessRunKey || req.harnessInternal ? next() : handler(req, res, next));
+    return (req, res, next) => (req.harnessRunKey || req.harnessInternal || req.harnessRunner ? next() : handler(req, res, next));
 };
 
 module.exports = { RunKeys, costOf, unlessRunKey, PREFIX, UNKNOWN_PRICE };

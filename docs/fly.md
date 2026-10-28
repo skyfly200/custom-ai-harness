@@ -103,3 +103,15 @@ With `DATABASE_URL` set, scheduled messages are sent by the server (`utils/serve
 - **Off:** `HARNESS_SERVER_SCHEDULES=0` returns to the page sending them. With no database nothing changes.
 - A run that fails (out of credit, model error) writes the error into the reply. A schedule missed while the server was down runs once when it is back.
 - Cache keep-alive pings still run in the page; they only matter while someone is there.
+
+## Runs on Fly
+
+The Agents page (Runs, agents, swarms) works on a hosted server when you set `HARNESS_RUNS=1`. The launcher then starts the task runner as a fourth process in the same Machine, on loopback only, in **hosted mode** (`RUNNER_HOSTED=1`):
+
+- **Cloud sandboxes only.** Agents run commands in [E2B](https://e2b.dev) or a Fly Sprite, never on the Machine itself. Set `E2B_API_KEY` or `SPRITES_TOKEN` as a Fly secret (the runner picks Sprites when its token is set, else E2B). The local worktree sandbox, previews, Apps, ticket files and the folder browser are off.
+- **Whose runs.** Each run and agent belongs to the person who made it; nobody else can list, read, stop, approve or delete it. By default only admins may use Runs; `HARNESS_RUNS_FOR=users` lets every signed-in, non-guest person (guests never can).
+- **Whose money.** The runner calls the harness as the run's owner (`utils/runnerAuth.js`, a token shared only between the two processes for that boot), and a run's key carries its owner, so the model calls are billed like that person's chat: an admin's on the server's key, other people's on their own OpenRouter credential when `HARNESS_USER_CREDENTIALS=1`.
+- **Repos come from GitHub.** A repo is named `owner/name`. On **Agents > GitHub** a person pastes a fine-grained token (Contents: read and write on the repos they use); it is checked once, stored encrypted (`ENCRYPTION_KEY`, table `user_github`) and handed to the runner for one request at a time as a git header. It is never in a remote URL, on disk or in a sandbox. The runner keeps a clone per person under `HARNESS_DATA_DIR/repos`; the run's work comes back to that clone as `harness/<id>`. **Push branch to GitHub** on a finished run pushes only that branch, using the person's token; nothing is pushed on its own.
+- **Limits per person** (env on the runner): `RUNNER_USER_MAX_RUNS` runs at once (2), `RUNNER_USER_MAX_MINUTES` per run (30), `RUNNER_USER_MAX_COST` dollars a run when none is set (2; a higher one is lowered to it), `RUNNER_USER_MONTHLY_MINUTES` of run time a month (0 = no limit). Sandbox minutes are billed to the E2B or Fly account, so set these before inviting people.
+- **Where it is kept.** Run records, agents and clones are on the volume (`HARNESS_DATA_DIR/runs` and `/repos`), not in Postgres: with one Machine the volume survives restarts and deploys. The plan's Postgres run records are not built; a second Machine would need them.
+- **Sleep.** A run's model calls count as use, so the server doesn't sleep in the middle of one. If the Machine does stop, the run is marked failed when it starts again and its sandbox is destroyed.

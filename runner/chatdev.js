@@ -43,11 +43,11 @@ async function executeChatDev(manager, run, live) {
     const model = run.model || process.env.CHATDEV_MODEL || DEFAULT_MODEL;
     envFile({ harnessUrl: process.env.CHATDEV_HARNESS_URL, apiKey: 'x', model }); // refuses an unusable address before anything is started
 
-    const runKey = await manager.mintRunKey({ label: `run ${run.id}`, maxUsd: run.maxUsd, ttlMinutes: run.maxMinutes + 15 });
+    const runKey = await manager.mintRunKey({ label: `run ${run.id}`, maxUsd: run.maxUsd, ttlMinutes: run.maxMinutes + 15, ...(run.owner ? { owner: run.owner } : {}) });
     try {
         return await work(manager, run, live, { kind, graph, runKey, model });
     } finally {
-        const used = await manager.revokeRunKey(runKey.id);
+        const used = await manager.revokeRunKey(runKey.id, run.owner);
         manager.event(run, { type: 'note', text: used ? `Model spend by ChatDev: about $${used.spent.toFixed(4)} of the $${run.maxUsd} cap, in ${used.requests} requests.` : 'The run key could not be revoked; it expires on its own.' });
     }
 }

@@ -9,12 +9,14 @@
 // Interceptor), and (3) are JSON for anything that changes something.
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { RunManager } = require('./runs');
 const { listDrivers } = require('./sandbox');
 const ticketFiles = require('./ticketFiles');
+const github = require('./github');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -23,7 +25,10 @@ function defaultRoots(env) {
     return extra.length ? extra : [path.join(ROOT, 'repos'), '/repos'];
 }
 
-function createApp(manager, { token = '', port = 3100 } = {}) {
+// hosted: a runner shared by several people (RUNNER_HOSTED=1). Every request names its owner (x-runner-owner, set by the
+// Interceptor after its own login check), a person only sees their own runs and agents, repos are GitHub repos cloned per
+// person under reposBase (never a path on this machine), and the person's GitHub token arrives per request and is not kept.
+function createApp(manager, { token = '', port = 3100, hosted = false, reposBase = '', git = github } = {}) {
     const app = express();
     const hosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`, ...(process.env.RUNNER_ALLOWED_HOSTS || '').split(',').filter(Boolean)]);
     const want = token && crypto.createHash('sha256').update(token).digest();
@@ -39,17 +44,54 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
     app.use(express.json({ limit: '1mb' }));
 
     const fail = (res, err, status = 400) => res.status(status).json({ error: err.message });
+    const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((err) => fail(res, err, err.status || (/no such/.test(err.message) ? 404 : 400)));
 
-    app.get('/runs', (req, res) => res.json({ runs: manager.list() }));
-    app.get('/runs/repos', (req, res) => res.json({ repos: manager.repos(), roots: manager.roots }));
+    if (hosted) {
+        app.use((req, res, next) => {
+            req.owner = String(req.headers['x-runner-owner'] || '');
+            req.githubToken = String(req.headers['x-runner-github-token'] || '');
+            if (!req.owner) return res.status(400).json({ error: 'x-runner-owner is required on a hosted runner' });
+            next();
+        });
+        // these work on paths of this machine or on the local sandbox, which a shared server doesn't offer
+        app.use(['/runs/browse', '/tickets', '/apps'], (req, res) => res.status(404).json({ error: 'not available on a shared server' }));
+        app.use('/runs/:id/preview', (req, res) => res.status(404).json({ error: 'previews are not available on a shared server' }));
+        // a run or agent that is not yours does not exist
+        app.param('id', (req, res, next, id) => {
+            const rec = req.path.startsWith('/agents') ? manager.agents.get(id) : manager.get(id);
+            return rec && rec.owner === req.owner ? next() : res.status(404).json({ error: req.path.startsWith('/agents') ? 'no such agent' : 'no such run' });
+        });
+    }
+    // The body a person may send: in a hosted runner the owner is who is asking, and the repo is a GitHub repo, cloned for them
+    const prepare = async (req, { repo = true } = {}) => {
+        const body = { ...(req.body || {}) };
+        delete body.owner;
+        if (hosted) {
+            body.owner = req.owner;
+            if (repo && body.repo !== undefined && body.repo !== null && body.repo !== '') body.repo = await git.ensureClone({ base: reposBase, person: req.owner, spec: body.repo, token: req.githubToken });
+            else if (repo && body.repo !== undefined) delete body.repo;
+        }
+        return body;
+    };
+
+    app.get('/runs', (req, res) => res.json({ runs: manager.list(hosted ? req.owner : undefined) }));
+    app.get('/runs/repos', (req, res) => res.json(hosted ? { repos: git.listClones(reposBase, req.owner), roots: [], hosted: true } : { repos: manager.repos(), roots: manager.roots, hosted: false }));
     // the sandbox drivers a run can pick, and whether each one's key is set
     app.get('/runs/sandboxes', (req, res) => res.json({ default: manager.sandboxKind, drivers: listDrivers() }));
     app.get('/runs/browse', (req, res) => {
         try { res.json(manager.browse(req.query.path)); } catch (err) { fail(res, err); }
     });
-    app.post('/runs', (req, res) => {
-        try { res.status(201).json(manager.create(req.body)); } catch (err) { fail(res, err); }
-    });
+    app.post('/runs', wrap(async (req, res) => { res.status(201).json(manager.create(await prepare(req))); }));
+    // Push a finished run's branch to the person's GitHub repo (hosted only: a local run's branch is yours to push)
+    app.post('/runs/:id/push', wrap(async (req, res) => {
+        if (!hosted) return fail(res, new Error('push the branch from your own checkout'), 404);
+        const run = manager.get(req.params.id);
+        if (!run.result?.commit || ['queued', 'running', 'waiting'].includes(run.status)) return fail(res, new Error('this run has no finished changes to push'), 409);
+        const out = await git.pushBranch({ dir: run.repo, branch: run.branch, token: req.githubToken });
+        run.pushed = { ...out, at: new Date().toISOString() };
+        manager.save(run);
+        res.json(out);
+    }));
     // Write a ticket draft as wayfinder markdown files in the repo. Without confirm: true it
     // only says what would be written, so a page can show it and ask first.
     app.post('/tickets/files', (req, res) => {
@@ -71,17 +113,13 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
         } catch (err) { fail(res, err); }
     });
     // Agents: named, long-lived; their tasks are runs
-    app.get('/agents', (req, res) => res.json({ agents: manager.listAgents() }));
-    app.post('/agents', (req, res) => {
-        try { res.status(201).json(manager.createAgent(req.body)); } catch (err) { fail(res, err); }
-    });
+    app.get('/agents', (req, res) => res.json({ agents: manager.listAgents(hosted ? req.owner : undefined) }));
+    app.post('/agents', wrap(async (req, res) => { res.status(201).json(manager.createAgent(await prepare(req))); }));
     app.get('/agents/:id', (req, res) => {
         const agent = manager.getAgent(req.params.id);
         return agent ? res.json(agent) : fail(res, new Error('no such agent'), 404);
     });
-    app.patch('/agents/:id', (req, res) => {
-        try { res.json(manager.updateAgent(req.params.id, req.body)); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 400); }
-    });
+    app.patch('/agents/:id', wrap(async (req, res) => { res.json(manager.updateAgent(req.params.id, await prepare(req))); }));
     app.delete('/agents/:id', (req, res) => {
         try { manager.removeAgent(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 409); }
     });
@@ -164,19 +202,31 @@ function createApp(manager, { token = '', port = 3100 } = {}) {
 if (require.main === module) {
     require('dotenv').config({ path: path.join(ROOT, '.env'), quiet: true });
     const port = Number(process.env.RUNNER_PORT) || 3100;
+    const hosted = /^(1|true|yes|on)$/i.test(process.env.RUNNER_HOSTED || '');
+    if (hosted && !process.env.RUNNER_TOKEN) throw new Error('RUNNER_HOSTED needs RUNNER_TOKEN: the runner trusts the Interceptor\'s word about whose request it is. Refusing to start.');
+    const reposBase = process.env.RUNNER_REPOS_DIR || path.join(process.env.HARNESS_DATA_DIR || ROOT, 'repos');
+    if (hosted) fs.mkdirSync(reposBase, { recursive: true });
     const manager = new RunManager({
         dir: process.env.RUNNER_DIR || path.join(ROOT, 'runs'),
-        roots: defaultRoots(process.env),
+        roots: hosted ? [reposBase] : defaultRoots(process.env),
+        hosted,
+        token: process.env.RUNNER_TOKEN || '',
+        limits: {
+            perUser: Number(process.env.RUNNER_USER_MAX_RUNS) || 2,
+            monthlyMinutes: Number(process.env.RUNNER_USER_MONTHLY_MINUTES) || 0,
+            maxMinutes: Number(process.env.RUNNER_USER_MAX_MINUTES) || 30,
+            defaultCost: Number(process.env.RUNNER_USER_MAX_COST) || 2,
+        },
         harnessUrl: process.env.HARNESS_URL || 'http://localhost:3000',
         password: process.env.HARNESS_PASSWORD || '',
         maxRuns: Number(process.env.RUNNER_MAX_RUNS) || 2,
         autoDebug: /^(1|true|yes|on)$/i.test(process.env.RUNNER_AUTO_DEBUG || ''),
         // The default for runs that pick none. local: a git worktree on this machine. e2b: an E2B
         // cloud sandbox (E2B_API_KEY). sprites: a Fly Sprite (SPRITES_TOKEN).
-        sandbox: process.env.RUNNER_SANDBOX || 'local',
+        sandbox: process.env.RUNNER_SANDBOX || (hosted ? (process.env.SPRITES_TOKEN ? 'sprites' : 'e2b') : 'local'),
     });
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { manager.previews.stopAll(); process.exit(0); });
-    createApp(manager, { token: process.env.RUNNER_TOKEN || '', port }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {
+    createApp(manager, { token: process.env.RUNNER_TOKEN || '', port, hosted, reposBase }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {
         console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}; sandbox: ${manager.sandboxKind}`);
     });
 }

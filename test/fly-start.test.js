@@ -45,3 +45,16 @@ test('the Gateway and Router listen on loopback and everything points at the vol
     assert.strictEqual(interceptor.env.HARNESS_USERS_FILE, path.join('/vol', 'users.json'));
     assert.strictEqual(interceptor.env.SECRET, 's');
 });
+
+test('HARNESS_RUNS=1 adds the task runner, hosted, sharing a token with the Interceptor', () => {
+    assert.deepStrictEqual(commands('/vol', { PATH: 'x' }).map((c) => c.name), ['gateway', 'router', 'interceptor']);
+    const list = commands('/vol', { PATH: 'x', HARNESS_RUNS: '1' });
+    assert.deepStrictEqual(list.map((c) => c.name), ['gateway', 'router', 'interceptor', 'runner']);
+    const interceptor = list[2], runner = list[3];
+    assert.strictEqual(interceptor.env.HARNESS_HOSTED_RUNS, '1');
+    assert.ok(runner.env.RUNNER_TOKEN.length >= 32);
+    assert.strictEqual(runner.env.RUNNER_TOKEN, interceptor.env.RUNNER_TOKEN);
+    assert.strictEqual(runner.env.RUNNER_HOSTED, '1');
+    assert.strictEqual(runner.env.RUNNER_DIR, path.join('/vol', 'runs'));
+    assert.strictEqual(runner.env.RUNNER_REPOS_DIR, path.join('/vol', 'repos'));
+});

@@ -92,6 +92,7 @@ async function executeSwarm(manager, run, live) {
         for (const i of ready) {
             const p = plan.parts[i];
             run.children[i] = manager.create({
+                owner: run.owner,
                 goal: `${p.task}\n\nThis is one part of a larger task that several engineers do at once, each on their own branch: "${run.goal}". Do only your part and leave files that belong to other parts alone.`,
                 repo: run.repo, base: from, workflow: run.auditParts && p.workflow === 'general' ? 'build-audit' : p.workflow, profile: run.profile, model: run.model, effort: run.effort, escalate: run.escalate, maxTier: run.maxTier, sandbox: run.sandbox,
                 maxSteps: run.maxSteps, maxMinutes: run.maxMinutes, maxCost: run.maxCost, parent: run.id, autoDebug: run.autoDebug,

@@ -27,16 +27,30 @@
 
   <div id="down" class="card notice" hidden></div>
 
+  <section id="githubBox" hidden>
+    <h2 data-hint="Agents work on your GitHub repos. Paste a fine-grained personal access token with Contents: read and write on the repos you want to use. It is kept encrypted and only used to clone, fetch and push your run branches">GitHub</h2>
+    <div class="card" id="githubCard">
+      <p class="muted" id="githubNote">Connect GitHub so agents can work in your repos.</p>
+      <form id="githubForm" class="repo-input" autocomplete="off">
+        <input type="password" id="githubToken" placeholder="github_pat_…" autocomplete="off" spellcheck="false" aria-label="GitHub token">
+        <button type="submit" class="primary">Connect</button>
+        <button type="button" id="githubOff" hidden>Disconnect</button>
+      </form>
+    </div>
+  </section>
+
   <h2 data-hint="An agent has a name, a repo and standing instructions. Each task you give it starts from what its last task committed, and it is told what the earlier ones did">Your agents</h2>
   <div class="card" id="agentBar">
     <div class="chips" id="agentChips"></div>
     <div id="agentInfo" class="agent-info" hidden></div>
   </div>
 
+  <div id="appsBox">
   <h2 data-hint="An app is a repo you can ask for changes. The agent may edit only the paths you list, runs the app's tests, and the result is a branch with a live preview, like any run">Apps</h2>
   <div class="card" id="appBar">
     <div id="appList"></div>
     <div class="actions"><button type="button" id="appAdd">Register an app</button></div>
+  </div>
   </div>
   <dialog id="appDialog" class="picker agentdlg" aria-label="App">
     <form id="appForm" autocomplete="off">

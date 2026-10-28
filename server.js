@@ -62,6 +62,8 @@ const { PgStore } = require('./utils/pgStore');
 const { createChatSync } = require('./utils/chatSync');
 const serverSchedules = require('./utils/serverSchedules');
 const internalAuth = require('./utils/internalAuth');
+const runnerAuth = require('./utils/runnerAuth');
+const userGithub = require('./utils/userGithub');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -95,10 +97,12 @@ if (openrouterAuth.federated() || USER_CREDENTIALS) {
 // Run keys: capped, short-lived keys for one agent run's model calls (utils/runKeys.js).
 // Checked before the password gate, which they replace for POST /v1/chat/completions only.
 const runKeys = new RunKeys();
-app.use(runKeys.middleware());
-// The server's own scheduled messages call /v1/chat/completions as the person they belong to (utils/internalAuth.js)
 let findLoginUser = () => null;
+app.use(runKeys.middleware((name) => findLoginUser(name)));
+// The server's own scheduled messages call /v1/chat/completions as the person they belong to (utils/internalAuth.js)
 app.use(internalAuth.middleware((name) => findLoginUser(name)));
+// A hosted task runner calls a few /v1 paths on behalf of a run's owner (utils/runnerAuth.js)
+app.use(runnerAuth.middleware((name) => findLoginUser(name)));
 // HARNESS_PASSWORD locks every page and API (see utils/access.js); unset, all stay open
 const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || '';
 // HARNESS_REQUIRE_LOGIN=1 puts named logins in front instead (utils/login.js)
@@ -464,6 +468,7 @@ function localJsonOnly(req, res, next) {
 
 // Who may use the controls: admins when logins are on, otherwise this machine or a HARNESS_PASSWORD login
 function localOnly(req, res, next) {
+    if (req.harnessRunner) return next(); // the hosted runner, with its token, from this machine
     // With logins on, controls are for admins, wherever they sit
     if (req.harnessLogin && req.harnessUser.role !== 'admin') return res.status(403).json({ error: 'admins only' });
     // A request through a tunnel or proxy on this machine looks like loopback, but isn't "this machine"
@@ -505,12 +510,31 @@ async function forwardToRouter(req, res, routerPath) {
 // and deleting runs are controls, so they get the same local-or-password check.
 const RUNNER_URL = (process.env.RUNNER_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
 // /ui/api/runs, /agents, /tickets and /apps are the runner's /runs, /agents, /tickets and /apps
+// Hosted Runs (HARNESS_HOSTED_RUNS=1, set by the Fly launcher with HARNESS_RUNS=1): any signed-in, non-guest person may use
+// them (HARNESS_RUNS_FOR=users; the default admins keeps them to admins), each only on their own runs. The runner is told
+// whose request it is, and gets that person's GitHub token for the one request (clone, fetch, push) and never keeps it.
+const HOSTED_RUNS = /^(1|true|yes|on)$/i.test(process.env.HARNESS_HOSTED_RUNS || '');
+function hostedRunsGate(req, res, next) {
+    const user = req.harnessLogin && req.harnessUser;
+    if (!user) return res.status(403).json({ error: 'Runs need a signed-in account' });
+    if (user.guest) return res.status(403).json({ error: 'guest accounts cannot start runs' });
+    if (user.role !== 'admin' && !/^users$/i.test(process.env.HARNESS_RUNS_FOR || '')) return res.status(403).json({ error: 'Runs are for admins on this server' });
+    if (req.method !== 'GET' && !req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+    next();
+}
 for (const part of ['runs', 'agents', 'tickets', 'apps']) {
-    app.use(`/ui/api/${part}`, (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
+    app.use(`/ui/api/${part}`, HOSTED_RUNS ? hostedRunsGate : (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
         const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
+        if (HOSTED_RUNS) {
+            headers['x-runner-owner'] = req.harnessUser.name;
+            if (req.method !== 'GET' && db.enabled()) {
+                const token = await userGithub.resolve(req.harnessUser.name).catch(() => null);
+                if (token) headers['x-runner-github-token'] = token;
+            }
+        }
         try {
             const upstream = await fetch(`${RUNNER_URL}/${part}${req.url === '/' ? '' : req.url}`, {
-                method: req.method, headers, signal: AbortSignal.timeout(60000),
+                method: req.method, headers, signal: AbortSignal.timeout(HOSTED_RUNS ? 180000 : 60000), // a first clone can take a while
                 ...(req.method === 'GET' ? {} : { body: JSON.stringify(req.body ?? {}) }),
             });
             res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(await upstream.text());
@@ -519,6 +543,25 @@ for (const part of ['runs', 'agents', 'tickets', 'apps']) {
         }
     });
 }
+// The person's GitHub token for hosted Runs (utils/userGithub.js)
+const githubGate = (req, res, next) => {
+    if (!req.harnessLogin || !db.enabled()) return res.status(404).json({ error: 'needs the hosted database and logins' });
+    if (req.harnessUser.guest) return res.status(403).json({ error: 'guest accounts cannot connect GitHub' });
+    next();
+};
+app.get('/ui/api/me/github', githubGate, async (req, res) => {
+    try { res.json({ hosted: HOSTED_RUNS, github: await userGithub.status(req.harnessUser.name) }); } catch { res.status(503).json({ error: 'the database did not answer' }); }
+});
+app.put('/ui/api/me/github', githubGate, async (req, res) => {
+    if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+    try {
+        await userGithub.setToken(req.harnessUser.name, req.body?.token);
+        res.json({ hosted: HOSTED_RUNS, github: await userGithub.status(req.harnessUser.name) });
+    } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+app.delete('/ui/api/me/github', githubGate, async (req, res) => {
+    try { await userGithub.remove(req.harnessUser.name); res.json({ github: { set: false } }); } catch { res.status(503).json({ error: 'the database did not answer' }); }
+});
 app.post('/ui/api/router/backend', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/backend'));
 app.post('/ui/api/router/reload', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/reload'));
 app.post('/ui/api/router/config', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/config'));
@@ -755,7 +798,7 @@ app.post('/ui/api/workflows/pick', async (req, res) => {
 });
 // The task runner makes a run key for an agent run's model calls and revokes it when the run ends
 app.post('/v1/run-keys', localJsonOnly, (req, res) => {
-    try { res.json(runKeys.create(req.body || {})); } catch (err) { res.status(400).json({ error: err.message }); }
+    try { res.json(runKeys.create({ ...(req.body || {}), owner: req.harnessRunner ? req.body?.owner : null })); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 app.delete('/v1/run-keys/:id', localOnly, (req, res) => {
     const spent = runKeys.revoke(req.params.id);

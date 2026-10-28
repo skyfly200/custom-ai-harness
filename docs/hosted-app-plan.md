@@ -4,6 +4,8 @@ Written 2026-10-27 for Skyler. Updated the same day with Skyler's answers: invit
 
 ## Status (2026-10-27)
 
+**Update 2026-10-28: Runs on Fly (PR 11) are built as a process in the same Machine** (not a second Machine), with cloud sandboxes only, per-person ownership and limits, GitHub clone and push with each person's own token, and run records on the volume instead of Postgres. See [Runs on Fly](fly.md#runs-on-fly).
+
 **Update 2026-10-28: server-side schedules (PR 10) are built** (`utils/serverSchedules.js`, see [Fly](fly.md#scheduled-messages-on-the-server)). The server stays awake while schedules exist. Keep-alive pings are still page-side.
 
 **Update 2026-10-28: attachments (PR 9) are built, in Postgres rather than a bucket.** Table `attachments` (migration 008): images and text files are uploaded once per chat, the synced message holds only a stub `{kind, name, size, aid}`, and another device fetches the bytes when it shows an image or sends a file. Limits `HARNESS_ATTACH_MAX_MB` (6 per file) and `HARNESS_ATTACH_QUOTA_MB` (200 per person). Moving to Tigris/S3 later only changes `utils/attachments.js`. Deleting a chat deletes its attachments.

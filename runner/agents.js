@@ -83,13 +83,13 @@ class AgentStore {
         return { ...current, ...out };
     }
 
-    create(cfg, repo) {
+    create(cfg, repo, owner = null) {
         const base = AgentStore.fields({ workflow: workflows.FALLBACK, ...cfg });
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
             instructions: '', profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, project: null,
-            ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo,
+            ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on
             created: now, updated: now,

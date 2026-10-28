@@ -20,6 +20,7 @@ let runs = [];
 let agents = [];
 let agentSel = null;   // the agent whose tasks are shown, or null for every run
 let busy = false;
+let hosted = false;    // a shared server: GitHub repos, your own runs only, push to GitHub
 let openDetails = new Set(); // which <details> are open, kept across redraws
 
 async function api(path, options) {
@@ -118,10 +119,10 @@ function renderDetail(run) {
     ${r ? `<div class="result">${run.plan ? '<p class="muted">Plan only: nothing was changed, so there is no branch to review.</p>' : ''}<p class="summary">${esc(r.summary)}</p>
       ${run.plan ? '' : r.diffStat ? `<pre>${esc(r.diffStat)}</pre>` : '<p class="muted">No files changed.</p>'}
       ${r.tests ? `<p>${r.tests.passed ? '<span class="tag ok">tests pass</span>' : `<span class="tag bad">tests fail${r.tests.timedOut ? ' (timed out)' : ''}</span>`} <code>${esc(r.tests.command)}</code></p><details data-k="tests"${openDetails.has('tests') ? ' open' : ''}><summary>Test output</summary><pre>${esc(r.tests.output)}</pre></details>` : ''}
-      ${r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
+      ${r.commit && hosted ? `<p class="muted">${run.pushed ? `Pushed to GitHub: <a href="${esc(run.pushed.url)}" target="_blank" rel="noopener">${esc(run.branch)}</a> · <a href="${esc(run.pushed.compare)}" target="_blank" rel="noopener">open a pull request</a>` : 'The branch is only on this server so far. Push it to your GitHub repo to review it there.'}</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
     <div class="actions">${active
       ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
-      : `<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
+      : `${hosted && r?.commit && !run.parent ? `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button>` : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
     <div class="timeline">${run.events.map(eventHtml).join('')}</div>`;
   if (r?.commit && diffOpen) loadDiff(run.id);
 }
@@ -279,6 +280,7 @@ $('detail').addEventListener('click', async (e) => {
     if (act === 'allow') await post(`/${selected}/approve`, { allow: true });
     if (act === 'decline') await post(`/${selected}/approve`, { allow: false });
     if (act === 'stop') await post(`/${selected}/stop`);
+    if (act === 'push') await post(`/${selected}/push`);
     if (act === 'retry' || act === 'debug') {
       const made = await post(`/${selected}/retry`, { debug: act === 'debug' });
       selected = made.id; location.hash = made.id; openDetails = new Set();
@@ -394,6 +396,39 @@ async function initWorkflows() {
   $('workflow').addEventListener('change', () => { applyMode(); $('pickNote').textContent = ''; if ($('workflow').value === 'auto') schedulePick(); });
 }
 
+// On a shared server: repos are GitHub repos named owner/name, there is no folder to browse and no local apps
+function hostedMode() {
+  $('appsBox').hidden = true;
+  for (const id of ['browse', 'agentBrowse', 'fileTickets', 'loadTickets']) if ($(id)) $(id).hidden = true;
+  for (const id of ['repo', 'agentRepo']) $(id).placeholder = 'owner/name on GitHub, for example skyfly200/my-app';
+  $('githubBox').hidden = false;
+  loadGithub();
+}
+async function githubApi(method, body) {
+  const res = await fetch('api/me/github', { method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+  return j;
+}
+function showGithub(g) {
+  $('githubNote').textContent = g.set ? `Connected as ${g.login}. Agents can clone and push the repos that token can reach.` : 'Not connected. Public repos can be cloned without it; private repos and pushing need a token.';
+  $('githubOff').hidden = !g.set;
+  $('githubToken').placeholder = g.set ? 'Paste a new token to replace it' : 'github_pat_…';
+}
+async function loadGithub() {
+  try { showGithub((await githubApi('GET')).github); } catch (err) { $('githubNote').textContent = err.message; }
+}
+$('githubForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const token = $('githubToken').value.trim();
+  if (!token) return $('githubToken').focus();
+  try { showGithub((await githubApi('PUT', { token })).github); $('githubToken').value = ''; } catch (err) { $('githubNote').textContent = err.message; }
+});
+$('githubOff').addEventListener('click', async () => {
+  if (!confirm('Disconnect GitHub? Agents can no longer reach your private repos.')) return;
+  try { showGithub((await githubApi('DELETE')).github); } catch (err) { $('githubNote').textContent = err.message; }
+});
+
 // Repo picker: type or paste a path, pick a recent one, or browse the allowed folders
 const RECENT_KEY = 'harness-runs-recent-repos';
 let pickData = null;   // the folder listing shown in the dialog
@@ -447,8 +482,10 @@ async function initRepoPicker() {
   let repos = [];
   try {
     const r = await api('/repos');
-    repos = r.repos;
-    if (!repos.length) $('repo').placeholder = `Paste a path inside ${r.roots.join(' or ') || 'RUNNER_ROOTS'}`;
+    hosted = Boolean(r.hosted);
+    repos = hosted ? r.repos.map((p) => p.split(/[\\/]/).pop().replace('__', '/')) : r.repos;
+    if (hosted) hostedMode();
+    if (!repos.length && !hosted) $('repo').placeholder = `Paste a path inside ${r.roots.join(' or ') || 'RUNNER_ROOTS'}`;
     if (repos.length === 1) $('repo').value = repos[0];
   } catch { /* the notice shows it */ }
   const last = recentRepos()[0];

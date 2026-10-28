@@ -2,6 +2,7 @@
 /**
  * Fly launcher: Gateway, Router and Interceptor in one Machine (see Dockerfile.fly, docs/fly.md).
  *
+ * With HARNESS_RUNS=1 a fourth process, the task runner, is started for the Runs page (hosted mode, loopback only, cloud sandboxes only).
  * The Gateway and Router listen on 127.0.0.1 only; the Interceptor on :3000 is the one Fly publishes.
  * The files an admin edits in the app (config.yaml, routellm-config.yaml) live on the volume at
  * HARNESS_DATA_DIR (default /app/data) so a deploy doesn't undo the Routing page. They are copied
@@ -12,6 +13,7 @@
  * The Interceptor stops the Machine on purpose (the Stop button, or HARNESS_IDLE_STOP_MIN idle minutes) by sending
  * this process SIGTERM: everything is stopped and this exits 0, which the Machine's "on-failure" restart policy leaves stopped.
  */
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -39,8 +41,12 @@ function seed(appDir = APP, dataDir = DATA) {
     return notes;
 }
 
-/** The three processes. */
+/** The processes: Gateway, Router, Interceptor, and (HARNESS_RUNS=1) the task runner for Runs. */
 function commands(dataDir = DATA, env = process.env) {
+    const runs = /^(1|true|yes|on)$/i.test(env.HARNESS_RUNS || '');
+    // Shared by the Interceptor and the runner for this boot only: the runner trusts the Interceptor's word about
+    // whose request it is, and the Interceptor trusts the runner's calls on a run owner's behalf.
+    const runnerToken = env.RUNNER_TOKEN || crypto.randomBytes(24).toString('hex');
     const config = path.join(dataDir, 'config.yaml');
     const shared = {
         PYTHONUTF8: '1',
@@ -60,7 +66,11 @@ function commands(dataDir = DATA, env = process.env) {
           env: { GATEWAY_URL: 'http://127.0.0.1:4000', ROUTER_URL: 'http://127.0.0.1:6060', OPENROUTER_PROXY_URL: 'http://127.0.0.1:3000',
                  HARNESS_STOP_VIA_PARENT: '1',
                  // the first request after a wake waits for LiteLLM to load
-                 HARNESS_GATEWAY_WAIT_S: env.HARNESS_GATEWAY_WAIT_S || '240' } },
+                 HARNESS_GATEWAY_WAIT_S: env.HARNESS_GATEWAY_WAIT_S || '240',
+                 ...(runs ? { HARNESS_HOSTED_RUNS: '1', RUNNER_TOKEN: runnerToken, RUNNER_URL: 'http://127.0.0.1:3100' } : {}) } },
+        ...(runs ? [{ name: 'runner', cmd: 'node', args: ['runner/server.js'],
+          env: { RUNNER_HOSTED: '1', RUNNER_TOKEN: runnerToken, RUNNER_PORT: '3100', HARNESS_URL: 'http://127.0.0.1:3000',
+                 RUNNER_DIR: path.join(dataDir, 'runs'), RUNNER_REPOS_DIR: path.join(dataDir, 'repos') } }] : []),
     ];
     // DATABASE_URL is the app's Neon database; LiteLLM would take it for its own and try to run prisma, and exit
     return list.map((c) => {

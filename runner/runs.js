@@ -117,15 +117,20 @@ class RunManager {
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoDebug = false, sandbox = 'local', shipper = null }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoDebug = false, sandbox = 'local', shipper = null, hosted = false, token = '', limits = {} }) {
         this.pollMs = pollMs;
         this.batchPollMs = batchPollMs; // how often a waiting batch stage asks whether its batch is done
         this.dir = dir;
         this.roots = roots.map((r) => { try { return fs.realpathSync(r); } catch { return path.resolve(r); } });
         this.harnessUrl = harnessUrl.replace(/\/$/, '');
         this.password = password;
+        // hosted: several people share this runner. Runs, agents and repos belong to an owner, every call to the
+        // Interceptor says whose run it is (utils/runnerAuth.js), and only cloud sandboxes are allowed.
+        this.hosted = Boolean(hosted);
+        this.token = token;
+        this.limits = { perUser: 2, monthlyMinutes: 0, maxMinutes: 30, defaultCost: 2, ...limits };
         this.maxRuns = maxRuns;
-        this.pricer = createPricer({ url: this.harnessUrl, headers: this.password ? { 'x-harness-password': this.password } : {} });
+        this.pricer = createPricer({ url: this.harnessUrl, headers: this.authHeaders(null) });
         this.retryDelayMs = retryDelayMs;
         this.autoDebugDefault = Boolean(autoDebug); // for new runs (RUNNER_AUTO_DEBUG)
         this.sandboxKind = normalizeKind(sandbox) || sandbox; // the default driver: local (a worktree here), e2b or sprites (cloud sandboxes); a run can pick its own
@@ -174,6 +179,12 @@ class RunManager {
         }
     }
 
+    /** How a call to the Interceptor proves itself and says whose run it is. */
+    authHeaders(owner) {
+        if (this.hosted) return { 'x-runner-token': this.token, ...(owner ? { 'x-harness-run-owner': owner } : {}) };
+        return this.password ? { 'x-harness-password': this.password } : {};
+    }
+
     save(run) {
         // the record of a part of a continued run sits beside the run's own, so the run
         // itself keeps its id, goal and branch, and nothing is lost if the runner stops
@@ -187,8 +198,8 @@ class RunManager {
         return { ...rest, eventCount: events.length };
     }
 
-    list() {
-        return [...this.runs.values()].map((r) => this.active.get(r.id) || r)
+    list(owner) {
+        return [...this.runs.values()].filter((r) => owner === undefined || r.owner === owner).map((r) => this.active.get(r.id) || r)
             .sort((a, b) => b.created.localeCompare(a.created)).map((r) => this.summary(r));
     }
 
@@ -240,6 +251,31 @@ class RunManager {
         return real;
     }
 
+    /** Minutes of run time this owner has used this calendar month (UTC), from the run records. */
+    minutesThisMonth(owner, now = new Date()) {
+        const from = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+        let ms = 0;
+        for (const r of this.runs.values()) {
+            if (r.owner !== owner || !r.started) continue;
+            const began = Date.parse(r.started);
+            if (began >= from) ms += Math.max(0, (r.ended ? Date.parse(r.ended) : now.getTime()) - began);
+        }
+        return ms / 60000;
+    }
+
+    /** The rules of a shared runner for one new run, applied to its settings. Throws when it may not start. */
+    hostedLimits(cfg, owner) {
+        if (!owner) throw new Error('a hosted run needs an owner');
+        const mine = [...this.runs.values()].filter((r) => r.owner === owner && !r.parent && ['queued', 'running', 'waiting'].includes(r.status));
+        if (mine.length >= this.limits.perUser) throw Object.assign(new Error(`you already have ${mine.length} runs going; at most ${this.limits.perUser} at once`), { status: 429 });
+        const cap = this.limits.monthlyMinutes;
+        if (cap && this.minutesThisMonth(owner) >= cap) throw Object.assign(new Error(`you have used your ${cap} run minutes for this month`), { status: 429 });
+        const minutes = Math.min(this.limits.maxMinutes, Math.max(1, Math.floor(Number(cfg.maxMinutes)) || this.limits.maxMinutes));
+        // a run with no cost limit gets the default one; a cost limit above the default is lowered to it
+        const cost = Math.min(this.limits.defaultCost, Number(cfg.maxCost) > 0 ? Number(cfg.maxCost) : this.limits.defaultCost);
+        return { maxMinutes: minutes, maxCost: cost };
+    }
+
     create(cfg) {
         const goal = String(cfg?.goal || '').trim();
         if (!goal) throw new Error('goal is required');
@@ -257,6 +293,7 @@ class RunManager {
         // which sandbox driver this run works in; blank is the runner's default
         const sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : cfg.workflow === 'chatdev' && !isCloud(this.sandboxKind) ? 'sprites' : this.sandboxKind;
         if (!sandbox) throw new Error(`unknown sandbox ${cfg.sandbox}`);
+        if (this.hosted && !isCloud(sandbox)) throw new Error('this server runs agents in cloud sandboxes only: pick Fly Sprite or E2B');
         driverFor(sandbox); // an unknown driver, or one whose key is not set, fails now rather than when the run starts
         const isSwarm = cfg.workflow === 'swarm';
         const isChatDev = cfg.workflow === 'chatdev';
@@ -268,9 +305,13 @@ class RunManager {
             if (!isSwarm) throw new Error('a ticket draft needs the Swarm workflow');
             tickets = parseTickets(cfg.tickets).tickets;
         }
+        const owner = cfg.owner ? String(cfg.owner) : null;
+        // a swarm's workers belong to the swarm, which has already been counted
+        const hosted = this.hosted ? (cfg.parent ? { maxMinutes: cfg.maxMinutes, maxCost: cfg.maxCost } : this.hostedLimits(cfg, owner)) : null;
+        if (hosted) cfg = { ...cfg, ...hosted };
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
-            id, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, app: cfg.app ? String(cfg.app) : null, proposal: cfg.proposal && typeof cfg.proposal === 'object' ? { kind: String(cfg.proposal.kind || 'feedback').slice(0, 20), fingerprint: String(cfg.proposal.fingerprint || '').slice(0, 64), pr: null } : null, editable: Array.isArray(cfg.editable) ? cfg.editable.map(String).slice(0, 50) : null, source: cfg.source || null, auditParts: isSwarm && (cfg.auditParts === true || cfg.auditParts === 1 || cfg.auditParts === '1' || cfg.auditParts === 'true'), kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
+            id, owner, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, app: cfg.app ? String(cfg.app) : null, proposal: cfg.proposal && typeof cfg.proposal === 'object' ? { kind: String(cfg.proposal.kind || 'feedback').slice(0, 20), fingerprint: String(cfg.proposal.fingerprint || '').slice(0, 64), pr: null } : null, editable: Array.isArray(cfg.editable) ? cfg.editable.map(String).slice(0, 50) : null, source: cfg.source || null, auditParts: isSwarm && (cfg.auditParts === true || cfg.auditParts === 1 || cfg.auditParts === '1' || cfg.auditParts === 'true'), kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             // escalate: on a failure, ask for more effort (up to two rungs); maxTier caps the tier it can reach
             escalate: !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false'), bumps: 0, maxTier: cfg.maxTier ? String(cfg.maxTier).trim().slice(0, 40) : null,
@@ -340,8 +381,7 @@ class RunManager {
     }
 
     headers(run, n, baseEffort = run.effort, stageModel = null) {
-        const h = { 'content-type': 'application/json', 'x-harness-request-id': `run-${run.id}-${n}` };
-        if (this.password) h['x-harness-password'] = this.password;
+        const h = { 'content-type': 'application/json', 'x-harness-request-id': `run-${run.id}-${n}`, ...this.authHeaders(run.owner) };
         if (run.model || stageModel) h['x-harness-model'] = run.model || stageModel;
         if (run.profile) h['x-harness-profile'] = run.profile;
         // a run that has escalated asks for more effort than the person set
@@ -401,26 +441,26 @@ class RunManager {
     }
 
     /** A capped, short-lived model key for one run's sandbox (utils/runKeys.js on the harness). */
-    async mintRunKey({ label, maxUsd, ttlMinutes }) {
-        const headers = { 'content-type': 'application/json', ...(this.password ? { 'x-harness-password': this.password } : {}) };
-        const res = await fetch(`${this.harnessUrl}/v1/run-keys`, { method: 'POST', headers, body: JSON.stringify({ label, maxUsd, ttlMinutes }), signal: AbortSignal.timeout(15000) });
+    async mintRunKey({ label, maxUsd, ttlMinutes, owner = null }) {
+        const headers = { 'content-type': 'application/json', ...this.authHeaders(owner) };
+        const res = await fetch(`${this.harnessUrl}/v1/run-keys`, { method: 'POST', headers, body: JSON.stringify({ label, maxUsd, ttlMinutes, owner }), signal: AbortSignal.timeout(15000) });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(`the harness would not make a run key (HTTP ${res.status}: ${body.error || 'no reason given'})`);
         return body;
     }
 
     /** Revoke it; resolves { spent, requests } or null when that failed. Never throws. */
-    async revokeRunKey(id) {
+    async revokeRunKey(id, owner = null) {
         try {
-            const headers = this.password ? { 'x-harness-password': this.password } : {};
+            const headers = this.authHeaders(owner);
             const res = await fetch(`${this.harnessUrl}/v1/run-keys/${encodeURIComponent(id)}`, { method: 'DELETE', headers, signal: AbortSignal.timeout(15000) });
             return res.ok ? await res.json() : null;
         } catch { return null; }
     }
 
-    async guard(kind, text) {
+    async guard(kind, text, owner = null) {
         const body = kind === 'write' ? { tool: 'Write', path: text } : { tool: 'Bash', command: text };
-        const headers = { 'content-type': 'application/json', ...(this.password ? { 'x-harness-password': this.password } : {}) };
+        const headers = { 'content-type': 'application/json', ...this.authHeaders(owner) };
         const res = await fetch(`${this.harnessUrl}/v1/guard`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -660,7 +700,7 @@ class RunManager {
         return { ...agent, taskCount: tasks.length, active: active.length, waiting: active.some((t) => t.status === 'waiting'), lastTask: tasks[0] ? this.summary(tasks[0]) : null };
     }
 
-    listAgents() { return this.agents.list().map((a) => this.agentView(a)); }
+    listAgents(owner) { return this.agents.list().filter((a) => owner === undefined || a.owner === owner).map((a) => this.agentView(a)); }
 
     getAgent(id) {
         const agent = this.agents.get(id);
@@ -670,7 +710,7 @@ class RunManager {
 
     createAgent(cfg) {
         const repo = this.checkRepo(cfg?.repo);
-        return this.agentView(this.agents.create(cfg || {}, repo));
+        return this.agentView(this.agents.create(cfg || {}, repo, cfg?.owner ? String(cfg.owner) : null));
     }
 
     updateAgent(id, cfg) {
@@ -697,7 +737,7 @@ class RunManager {
         const source = cfg?.source && typeof cfg.source === 'object'
             ? { chat: cfg.source.chat ? { id: String(cfg.source.chat.id || '').slice(0, 80), title: String(cfg.source.chat.title || '').slice(0, 120) } : null } : null;
         return this.create({
-            goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
+            owner: agent.owner, goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
         });
@@ -849,7 +889,7 @@ class RunManager {
             this.event(run, { type: 'stage', stage: stage.id, role: stage.role, text: `Stage ${i + 1} of ${workflow.stages.length}: ${stage.role}` });
             const tools = makeTools({
                 sandbox, toolset: run.plan ? 'read' : stage.tools,
-                check: (kind, text) => this.guard(kind, text),
+                check: (kind, text) => this.guard(kind, text, run.owner),
                 approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
                 editable: run.editable ? editableMatcher(run.editable) : null,
             });
@@ -898,7 +938,7 @@ class RunManager {
         if (OUT_OF_LIMIT.has(from.status)) throw new Error('that run only ran out of steps, time or budget, so nothing went wrong: use Continue');
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
-            goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
+            owner: from.owner, goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
             model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
@@ -1014,7 +1054,7 @@ class RunManager {
         if (!fs.existsSync(dir)) throw new Error('this run has no workspace to preview');
         const app = run.app && this.apps.get(run.app);
         if (!command && app?.devCommand) { command = app.devCommand; port = port || app.previewPort || undefined; }
-        const verdict = await this.guard('bash', String(command || '').replaceAll('{port}', '0'));
+        const verdict = await this.guard('bash', String(command || '').replaceAll('{port}', '0'), run.owner);
         if (verdict.decision === 'deny') throw new Error(`the command guard blocked it: ${verdict.reason || 'not allowed'}`);
         if (verdict.decision === 'ask' && approved !== true) throw Object.assign(new Error(`the command guard asks for your OK: ${verdict.reason || 'risky'}`), { needsApproval: true });
         return this.previews.start(id, dir, command, { port });

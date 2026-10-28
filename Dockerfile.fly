@@ -21,6 +21,9 @@ COPY config.yaml routellm-config.yaml guard-rules.json batch-models.json ./
 COPY utils ./utils
 COPY migrations ./migrations
 COPY workflows ./workflows
+# the task runner: only started when HARNESS_RUNS=1 (docs/fly.md)
+COPY runner ./runner
+COPY chatdev ./chatdev
 COPY ui ./ui
 COPY scripts/migrate.js ./scripts/migrate.js
 COPY docker/gateway-start.py docker/fly-start.js ./docker/

@@ -64,6 +64,8 @@ const serverSchedules = require('./utils/serverSchedules');
 const internalAuth = require('./utils/internalAuth');
 const runnerAuth = require('./utils/runnerAuth');
 const userGithub = require('./utils/userGithub');
+const githubOAuth = require('./utils/githubOAuth');
+const githubApi = require('./utils/githubApi');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -550,7 +552,7 @@ const githubGate = (req, res, next) => {
     next();
 };
 app.get('/ui/api/me/github', githubGate, async (req, res) => {
-    try { res.json({ hosted: HOSTED_RUNS, github: await userGithub.status(req.harnessUser.name) }); } catch { res.status(503).json({ error: 'the database did not answer' }); }
+    try { res.json({ hosted: HOSTED_RUNS, oauth: githubOAuth.configured(), github: await userGithub.status(req.harnessUser.name) }); } catch { res.status(503).json({ error: 'the database did not answer' }); }
 });
 app.put('/ui/api/me/github', githubGate, async (req, res) => {
     if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
@@ -561,6 +563,75 @@ app.put('/ui/api/me/github', githubGate, async (req, res) => {
 });
 app.delete('/ui/api/me/github', githubGate, async (req, res) => {
     try { await userGithub.remove(req.harnessUser.name); res.json({ github: { set: false } }); } catch { res.status(503).json({ error: 'the database did not answer' }); }
+});
+// "Connect GitHub" (utils/githubOAuth.js): any signed-in, non-guest person links their own GitHub account, once, for
+// Runs and for chats linked to a repo. Both routes sit behind the login gate: GitHub sends the browser back with its cookie.
+const GITHUB_BACK = new Set(['chat.html', 'agents.html', 'users.html']);
+const githubBack = (res, back, result) => res.redirect(`/${GITHUB_BACK.has(back) ? back : 'chat.html'}?github=${encodeURIComponent(result)}`);
+app.get('/ui/api/me/github/connect', (req, res) => {
+    const back = String(req.query.back || '');
+    if (!req.harnessLogin || !db.enabled() || req.harnessUser.guest) return githubBack(res, back, 'unavailable');
+    try {
+        res.redirect(githubOAuth.begin({ owner: req.harnessUser.name, callback: oauthCallbackUrl(req, '/ui/api/me/github/callback'), back }));
+    } catch (err) { githubBack(res, back, err.message); }
+});
+app.get('/ui/api/me/github/callback', async (req, res) => {
+    let back = '';
+    if (!req.harnessLogin || !db.enabled() || req.harnessUser.guest) return githubBack(res, back, 'unavailable');
+    try {
+        const got = await githubOAuth.finish({ owner: req.harnessUser.name, state: req.query.state, code: req.query.code });
+        back = got.back || '';
+        await userGithub.setOAuth(req.harnessUser.name, got);
+        githubBack(res, back, 'connected');
+    } catch (err) { githubBack(res, back, err.message); }
+});
+// What the chat page needs to know: is GitHub reachable for this person, as whom, and can they connect it
+const envGithubLogin = { token: '', login: '' };
+async function githubTokenFor(req) {
+    if (req.harnessLogin) {
+        if (req.harnessUser.guest || !db.enabled()) return null;
+        return userGithub.resolve(req.harnessUser.name).catch(() => null);
+    }
+    return process.env.GITHUB_TOKEN || null; // one person on their own computer: the token in .env
+}
+app.get('/ui/api/github/status', async (req, res) => {
+    const hosted = Boolean(req.harnessLogin && db.enabled());
+    const out = { hosted, canConnect: hosted && !req.harnessUser.guest && githubOAuth.configured(), app: githubOAuth.isApp(), installUrl: githubOAuth.installUrl(), connected: false };
+    if (req.harnessLogin && req.harnessUser.guest) return res.json({ ...out, note: 'guest accounts cannot connect GitHub' });
+    try {
+        if (hosted) {
+            const st = await userGithub.status(req.harnessUser.name);
+            Object.assign(out, st.set ? { connected: true, login: st.login, via: st.via } : {});
+        } else if (!req.harnessLogin && process.env.GITHUB_TOKEN) {
+            if (envGithubLogin.token !== process.env.GITHUB_TOKEN) {
+                const r = await fetch(`${process.env.GITHUB_API_URL || 'https://api.github.com'}/user`, { headers: { authorization: `Bearer ${process.env.GITHUB_TOKEN}`, 'user-agent': 'custom-ai-harness' }, signal: AbortSignal.timeout(15000) });
+                envGithubLogin.token = process.env.GITHUB_TOKEN;
+                envGithubLogin.login = r.ok ? (await r.json()).login : '';
+            }
+            Object.assign(out, { connected: true, login: envGithubLogin.login, via: 'env' });
+        }
+    } catch (err) { out.note = `could not check GitHub: ${err.message}`; }
+    res.json(out);
+});
+app.get('/ui/api/github/repos', async (req, res) => {
+    try {
+        const token = await githubTokenFor(req);
+        if (!token) return res.status(401).json({ error: 'GitHub is not connected' });
+        const st = req.harnessLogin && db.enabled() ? await userGithub.status(req.harnessUser.name).catch(() => ({})) : {};
+        res.json({ repos: await githubApi.listRepos(token, { appMode: st.via === 'oauth' && githubOAuth.isApp() }) });
+    } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+// Check "owner/name" can be read before a chat is linked to it
+app.post('/ui/api/github/repo', (req, res, next) => (req.is('application/json') ? next() : res.status(415).json({ error: 'send application/json' })), async (req, res) => {
+    try {
+        const token = await githubTokenFor(req);
+        if (!token) return res.status(401).json({ error: 'GitHub is not connected' });
+        const { full } = githubApi.parseRepo(req.body?.repo);
+        const r = await fetch(`${process.env.GITHUB_API_URL || 'https://api.github.com'}/repos/${full}`, { headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'custom-ai-harness' }, signal: AbortSignal.timeout(15000) });
+        if (!r.ok) return res.status(r.status === 404 ? 404 : 502).json({ error: r.status === 404 ? `GitHub cannot find ${full}, or your connection does not reach it` : `GitHub answered HTTP ${r.status}` });
+        const j = await r.json();
+        res.json({ full: j.full_name, private: !!j.private, branch: j.default_branch, description: j.description || '', url: j.html_url });
+    } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 app.post('/ui/api/router/backend', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/backend'));
 app.post('/ui/api/router/reload', localJsonOnly, (req, res) => forwardToRouter(req, res, '/admin/reload'));
@@ -640,9 +711,9 @@ app.put('/ui/api/me/credential', async (req, res) => {
 // "Connect OpenRouter": OAuth PKCE (utils/openrouterOAuth.js). The key OpenRouter returns is stored like a pasted one.
 // Both routes are behind the login gate: OpenRouter sends the browser back with its session cookie.
 const oauthBack = (res, result) => res.redirect(`/users.html?openrouter=${encodeURIComponent(result)}`);
-const oauthCallbackUrl = (req) => `${process.env.HARNESS_PUBLIC_URL
+const oauthCallbackUrl = (req, path = '/ui/api/me/credential/callback') => `${process.env.HARNESS_PUBLIC_URL
     ? String(process.env.HARNESS_PUBLIC_URL).replace(/\/+$/, '')
-    : `${(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim()}://${req.headers['x-forwarded-host'] || req.headers.host}`}/ui/api/me/credential/callback`;
+    : `${(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim()}://${req.headers['x-forwarded-host'] || req.headers.host}`}${path}`;
 app.get('/ui/api/me/credential/connect', (req, res) => {
     const user = req.harnessUser;
     if (!req.harnessLogin || !db.enabled() || !user || user.role === 'admin' || user.guest) return oauthBack(res, 'unavailable');
@@ -1147,14 +1218,14 @@ const noOwnTools = { error: 'Your own tools need the hosted database and ENCRYPT
 app.get('/ui/api/tools', async (req, res) => {
     if (isMember(req)) {
         // Only the member's own servers: shell and repo tools run on this machine, and the shared servers are the admins'
-        if (!userMcpMod.available()) return res.json({ servers: [], definitions: {}, repoDefinitions: [], shellDefinitions: [], note: noOwnTools.error });
+        if (!userMcpMod.available()) return res.json({ servers: [], definitions: {}, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions(), note: noOwnTools.error });
         try {
             const mgr = userMcp.manager(ownerOf(req));
             await mgr.start();
             const status = mgr.status();
             const definitions = {};
             for (const s of status.servers) definitions[s.name] = mgr.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
-            return res.json({ ...status, file: 'your account', definitions, repoDefinitions: [], shellDefinitions: [] });
+            return res.json({ ...status, file: 'your account', definitions, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions() });
         } catch (err) {
             return res.status(500).json({ error: err.message });
         }
@@ -1163,7 +1234,7 @@ app.get('/ui/api/tools', async (req, res) => {
     const status = mcp.status();
     const definitions = {};
     for (const s of status.servers) definitions[s.name] = mcp.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
-    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions(), shellDefinitions: settings.get().shellInRepo ? chatShell.definitions() : [] });
+    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions(), shellDefinitions: settings.get().shellInRepo ? chatShell.definitions() : [], githubDefinitions: githubApi.definitions() });
 });
 
 app.post('/ui/api/tools/reload', memberOrLocalJson, async (req, res) => {
@@ -1342,10 +1413,16 @@ app.post('/ui/api/tools/shell/check', localJsonOnly, async (req, res) => {
 
 // Run one tool call. A failing tool is an answer for the model, not an HTTP error.
 app.post('/ui/api/tools/call', memberOrLocalJson, async (req, res) => {
-    const { name, arguments: args, repo, chatId, confirmed } = req.body || {};
+    const { name, arguments: args, repo, chatId, confirmed, githubRepo } = req.body || {};
     if (typeof name !== 'string' || !name) return res.status(400).json({ error: 'name is required' });
     const started = Date.now();
     try {
+        // A chat linked to a GitHub repo: the person's own token, for them and for admins alike
+        if (githubApi.isGithubTool(name)) {
+            const token = await githubTokenFor(req);
+            const text = await githubApi.call({ token, repo: githubRepo, name, args: args || {}, confirmed: confirmed === true });
+            return res.json({ text, isError: false, ms: Date.now() - started });
+        }
         if (isMember(req)) {
             // A member's calls reach only their own servers; the shell and repo tools run on this machine
             if (chatShell.isShellTool(name) || repoTools.isRepoTool(name)) throw new Error('the shell and repo tools are for admins');

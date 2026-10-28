@@ -91,7 +91,8 @@ function readSubjectToken(s, { fetchFn = fetch, run = execFile } = {}) {
 /**
  * Make a key source. key() resolves to the string to send as "Bearer <key>"
  * ('' when nothing is configured), exchanging and renewing tokens as needed.
- * opts: env, fetchFn, run, now (for tests).
+ * opts: env, fetchFn, run, now (for tests). `policyId` and `subject` (async, returns the JWT) make a
+ * federation of their own, apart from the environment: the harness's own issuer, for one person.
  */
 function createAuth(opts = {}) {
     const env = opts.env || process.env;
@@ -101,9 +102,13 @@ function createAuth(opts = {}) {
     let pending = null;    // exchange in flight, shared by concurrent callers
     let failedAt = 0, failure = null;
 
+    const own = Boolean(opts.policyId && opts.subject);
+    const isFederated = () => own || federated(env);
+
     async function exchange() {
         const s = settings(env);
-        const subject = await readSubjectToken(s, { fetchFn, run: opts.run });
+        if (own) s.policyId = opts.policyId;
+        const subject = own ? await opts.subject() : await readSubjectToken(s, { fetchFn, run: opts.run });
         if (!subject) throw new Error('the identity provider\'s JWT is empty');
         const body = new URLSearchParams({
             grant_type: GRANT,
@@ -136,8 +141,8 @@ function createAuth(opts = {}) {
     }
 
     async function key() {
-        if (!federated(env)) return trim(env.OPENROUTER_API_KEY);
-        const bad = problems(env);
+        if (!isFederated()) return trim(env.OPENROUTER_API_KEY);
+        const bad = own ? [] : problems(env);
         if (bad.length) throw new Error(bad[0]);
         if (cached && now() < cached.expiresAt - SKEW_MS) return cached.token;
         // After a failure don't hammer the identity provider or OpenRouter (429s): wait 5 s
@@ -153,8 +158,8 @@ function createAuth(opts = {}) {
 
     /** { mode: 'federation'|'key'|'none', ok, expiresInSec?, error? }, for the dashboard and logs. Never the token. */
     function status() {
-        if (!federated(env)) return { mode: trim(env.OPENROUTER_API_KEY) ? 'key' : 'none', ok: Boolean(trim(env.OPENROUTER_API_KEY)) };
-        const bad = problems(env);
+        if (!isFederated()) return { mode: trim(env.OPENROUTER_API_KEY) ? 'key' : 'none', ok: Boolean(trim(env.OPENROUTER_API_KEY)) };
+        const bad = own ? [] : problems(env);
         if (bad.length) return { mode: 'federation', ok: false, error: bad[0] };
         const live = cached && now() < cached.expiresAt;
         return {
@@ -165,7 +170,7 @@ function createAuth(opts = {}) {
         };
     }
 
-    const configured = () => federated(env) || Boolean(trim(env.OPENROUTER_API_KEY));
+    const configured = () => isFederated() || Boolean(trim(env.OPENROUTER_API_KEY));
     return { key, status, configured };
 }
 

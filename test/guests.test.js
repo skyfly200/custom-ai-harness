@@ -122,6 +122,56 @@ test('the proxy sends a person\'s own credential for their ticket, the owner\'s 
     } finally { server.close(); }
 });
 
+test('a 401 for a person\'s key flags it and answers with a reconnect message; a 401 for the install\'s token drops the cached token', async () => {
+    await userCredentials.setKey('bob', 'sk-or-v1-bobkeybobkeybobkey1234');
+    const env = { OPENROUTER_PROXY_KEY: PROXY_KEY, OPENROUTER_URL: 'https://or.test/api/v1', OPENROUTER_API_KEY: 'sk-or-owner' };
+    let invalidated = 0;
+    const auth = { key: async () => 'sk-or-owner', invalidate: () => { invalidated++; } };
+    const fetchFn = async () => new Response('{"error":{"message":"User not found."}}', { status: 401, headers: { 'content-type': 'application/json' } });
+    const express = require('express');
+    const app = express();
+    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(auth, { env, fetchFn, resolveUser: userCredentials.resolve, onBadCredential: (n) => userCredentials.markBad(n) }));
+    const server = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+    const call = (headers) => fetch(`http://127.0.0.1:${server.address().port}/openrouter-proxy/v1/chat/completions`, {
+        method: 'POST', headers: { authorization: `Bearer ${PROXY_KEY}`, 'content-type': 'application/json', ...headers }, body: '{}',
+    });
+    try {
+        const r = await call({ [ticket.HEADER]: ticket.mint(PROXY_KEY, { user: 'bob' }) });
+        assert.equal(r.status, 401);
+        const body = await r.json();
+        assert.equal(body.error.code, 'openrouter_reconnect');
+        assert.match(body.error.message, /Reconnect OpenRouter/);
+        assert.equal((await userCredentials.check('bob', { fetchFn: async () => { throw new Error('should not ask'); } })).state, 'invalid');
+        assert.equal(invalidated, 0);
+        await call({});
+        assert.equal(invalidated, 1);
+        await userCredentials.setKey('bob', 'sk-or-v1-newkeynewkeynewkey1234');
+        assert.equal((await userCredentials.check('bob', { fetchFn: async () => Response.json({ data: {} }) })).state, 'ok', 'saving a new key clears the flag');
+    } finally { server.close(); }
+});
+
+test('check() reads GET /key: ok, expiring, expired, exhausted, invalid, and unknown when OpenRouter does not answer', async () => {
+    const env = { OPENROUTER_URL: 'https://or.test/api/v1' };
+    const day = 24 * 3600 * 1000;
+    const state = async (owner, answer) => {
+        await userCredentials.setKey(owner, `sk-or-v1-${owner}keys${owner}keys1234`);
+        const urls = [];
+        const v = await userCredentials.check(owner, { env, fetchFn: async (u, init) => { urls.push([u, init.headers.authorization]); if (answer instanceof Error) throw answer; return answer; } });
+        assert.equal(urls[0][0], 'https://or.test/api/v1/key');
+        assert.equal(urls[0][1], `Bearer sk-or-v1-${owner}keys${owner}keys1234`);
+        return v;
+    };
+    assert.equal((await state('c1', Response.json({ data: { limit: 10, limit_remaining: 4 } }))).state, 'ok');
+    const soon = await state('c2', Response.json({ data: { expires_at: new Date(Date.now() + 2 * day).toISOString() } }));
+    assert.equal(soon.state, 'expiring');
+    assert.ok(soon.expiresAt > Date.now());
+    assert.equal((await state('c3', Response.json({ data: { expires_at: new Date(Date.now() - day).toISOString() } }))).state, 'expired');
+    assert.equal((await state('c4', Response.json({ data: { limit: 5, limit_remaining: 0 } }))).state, 'exhausted');
+    assert.equal((await state('c5', new Response('{}', { status: 401 }))).state, 'invalid');
+    assert.equal((await state('c6', new Error('offline'))).state, 'unknown');
+    assert.equal((await userCredentials.check('nobody')).state, 'unknown');
+});
+
 // ---- through the server ----
 
 const priced = (name, up, inCost, outCost, api_base) => ({ model_name: name, model_info: { input_cost_per_token: inCost, output_cost_per_token: outCost, max_input_tokens: 100000, max_output_tokens: 8000 }, litellm_params: { model: up, api_base } });

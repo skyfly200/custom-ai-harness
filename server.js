@@ -92,7 +92,7 @@ for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federa
 // carries a signed ticket saying whose credential to use (utils/credentialTicket.js).
 const USER_CREDENTIALS = /^(1|true|yes|on)$/i.test(process.env.HARNESS_USER_CREDENTIALS || '');
 if (openrouterAuth.federated() || USER_CREDENTIALS) {
-    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth, { resolveUser: USER_CREDENTIALS ? userCredentials.resolve : null }));
+    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth, { resolveUser: USER_CREDENTIALS ? userCredentials.resolve : null, onBadCredential: USER_CREDENTIALS ? (name) => userCredentials.markBad(name) : null }));
 }
 // Run keys: capped, short-lived keys for one agent run's model calls (utils/runKeys.js).
 // Checked before the password gate, which they replace for POST /v1/chat/completions only.
@@ -617,6 +617,7 @@ app.get('/ui/api/me/credential', async (req, res) => {
         if (user.guest) out.credit = await credit.get(user.name);
         else if (db.enabled() && user.role !== 'admin') {
             out.credential = await userCredentials.status(user.name);
+            if (out.credential.set) out.credential.health = await userCredentials.check(user.name);
         }
         res.json(out);
     } catch (err) {

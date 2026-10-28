@@ -134,6 +134,14 @@
     $('keySection').hidden = !(c.required || (c.credential && c.credential.set));
     if (c.credential) $('keyState').textContent = !c.credential.set ? 'Not connected yet: you cannot use models until you connect OpenRouter.'
       : `${c.credential.kind === 'oauth' ? 'Connected through OpenRouter' : 'A pasted key'} (key ending …${c.credential.last4 || '????'}).`;
+    const h = c.credential && c.credential.set && c.credential.health;
+    const WHY = {
+      invalid: 'OpenRouter no longer accepts this key. Press Reconnect OpenRouter.',
+      expired: 'This key has expired. Press Reconnect OpenRouter.',
+      expiring: `This key expires ${h && h.expiresAt ? new Date(h.expiresAt).toLocaleDateString() : 'soon'}. Press Reconnect OpenRouter before then.`,
+      exhausted: 'This key has used up its OpenRouter limit. Raise the limit at openrouter.ai/settings/keys, or press Reconnect OpenRouter for a fresh key.',
+    };
+    if (h && WHY[h.state]) { $('keyState').textContent += ' ' + WHY[h.state]; say(WHY[h.state], true); }
     $('guestSection').hidden = !c.guest;
     if (c.guest) $('guestState').textContent = c.credit ? `You are a guest. $${c.credit.leftUsd.toFixed(2)} left of $${c.credit.capUsd.toFixed(2)}, in all (not monthly). Only models with a known price are available.` : 'You are a guest.';
   }

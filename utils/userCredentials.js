@@ -5,10 +5,15 @@
 
 const db = require('./db');
 const secrets = require('./secrets');
+const openrouterAuth = require('./openrouterAuth');
 
 const KEY_RE = /^sk-or-[A-Za-z0-9_-]{16,200}$/;
 const TTL_MS = 60000;
 const cache = new Map(); // owner -> { at, value }
+const bad = new Map();   // owner -> reason: OpenRouter answered 401 for their key since it was last saved
+const health = new Map(); // owner -> { at, value }: the last GET /key check
+const HEALTH_TTL_MS = 5 * 60000;
+const EXPIRY_WARN_MS = 7 * 24 * 3600 * 1000;
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 
@@ -22,11 +27,57 @@ async function setKey(owner, key, kind = 'key') {
          ON CONFLICT (owner) DO UPDATE SET kind = EXCLUDED.kind, secret_enc = EXCLUDED.secret_enc, updated = EXCLUDED.updated`,
         [owner, kind === 'oauth' ? 'oauth' : 'key', secrets.encrypt(k), Date.now()]);
     cache.delete(owner);
+    bad.delete(owner);
+    health.delete(owner);
 }
 
 async function remove(owner) {
     await db.query('DELETE FROM user_credentials WHERE owner = $1', [owner]);
     cache.delete(owner);
+    bad.delete(owner);
+    health.delete(owner);
+}
+
+/** The proxy saw OpenRouter refuse this person's key (401): remember it so the Users page asks them to reconnect. */
+function markBad(owner, reason = 'OpenRouter no longer accepts this key') {
+    bad.set(owner, reason);
+    health.delete(owner);
+}
+
+/**
+ * Is the stored key still good? Asks OpenRouter (GET /key, which answers for the key it is given) and says one of:
+ * ok, expiring (expires_at within a week), expired, exhausted (limit_remaining 0), invalid (401/403), unknown (no
+ * answer, or no key). Cached five minutes. OpenRouter has no way to renew a person's key, so anything but ok/unknown
+ * means they press Reconnect.
+ */
+async function check(owner, { env = process.env, fetchFn = fetch, now = Date.now } = {}) {
+    const hit = health.get(owner);
+    if (hit && now() - hit.at < HEALTH_TTL_MS) return hit.value;
+    const cred = await resolve(owner);
+    let value = { state: 'unknown' };
+    if (bad.has(owner)) value = { state: 'invalid', reason: bad.get(owner) };
+    else if (cred) {
+        try {
+            const res = await fetchFn(`${openrouterAuth.apiRoot(env)}/v1/key`, {
+                headers: { authorization: `Bearer ${cred.key}`, accept: 'application/json' },
+                signal: AbortSignal.timeout(10000),
+            });
+            if (res.status === 401 || res.status === 403) {
+                value = { state: 'invalid', reason: 'OpenRouter no longer accepts this key (revoked, deleted or expired)' };
+                bad.set(owner, value.reason);
+            } else if (res.ok) {
+                const d = (await res.json().catch(() => ({}))).data || {};
+                const expires = d.expires_at ? Date.parse(d.expires_at) : NaN;
+                const left = typeof d.limit_remaining === 'number' ? d.limit_remaining : null;
+                value = { state: 'ok', ...(Number.isFinite(expires) ? { expiresAt: expires } : {}), ...(left !== null ? { limitRemaining: left } : {}) };
+                if (Number.isFinite(expires) && expires <= now()) value.state = 'expired';
+                else if (Number.isFinite(expires) && expires - now() < EXPIRY_WARN_MS) value.state = 'expiring';
+                else if (left !== null && left <= 0) value.state = 'exhausted';
+            }
+        } catch { /* unreachable: stay unknown, do not alarm anyone */ }
+    }
+    health.set(owner, { at: now(), value });
+    return value;
 }
 
 /** { kind: 'key', key } for the proxy, or null. Cached a minute. */
@@ -50,4 +101,4 @@ async function status(owner) {
     return { set: true, kind: rows[0].kind, last4, updated: Number(rows[0].updated) };
 }
 
-module.exports = { setKey, remove, resolve, status };
+module.exports = { setKey, remove, resolve, status, check, markBad };

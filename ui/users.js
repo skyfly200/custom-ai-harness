@@ -13,6 +13,21 @@
   }
   // the second password box must match the first; says so inline (no alert)
   const mismatch = (f) => (f.password !== f.confirm ? 'The two passwords do not match.' : '');
+  // shows the mismatch under the Confirm box of `form` ('' clears it); returns true if it is showing
+  function confirmError(form, text) {
+    const input = form.elements.confirm;
+    let small = input.parentElement.querySelector('.fieldErr');
+    if (!small) {
+      small = document.createElement('small'); small.className = 'fieldErr'; small.setAttribute('role', 'alert');
+      small.style.cssText = 'position:static;width:auto;max-width:none;padding:0;border:0;background:none;box-shadow:none;color:var(--bad, #c4264a)'; // in the flow, not calm.css's hover bubble
+      input.parentElement.append(small);
+    }
+    small.textContent = text; small.style.display = text ? 'block' : 'none'; input.setAttribute('aria-invalid', text ? 'true' : 'false');
+    if (text && document.activeElement !== input) input.focus();
+    return Boolean(text);
+  }
+  // typing in either password box clears the message
+  document.addEventListener('input', (e) => { if (e.target.form && e.target.form.elements.confirm && /^(password|confirm)$/.test(e.target.name)) confirmError(e.target.form, ''); });
   const cell = (text) => { const td = document.createElement('td'); td.style.padding = '6px 8px'; td.textContent = text; return td; };
   const btn = (text, fn, hint) => {
     const b = document.createElement('button');
@@ -32,16 +47,14 @@
     form.innerHTML = `<label class="field"><span>New password</span><input name="password" type="password" required autocomplete="new-password"></label>
       <label class="field"><span>Confirm password</span><input name="confirm" type="password" required autocomplete="new-password"></label>
       <div class="field"><span>&nbsp;</span><span><button class="primary">Set password</button> <button type="button" class="cancel">Cancel</button></span></div>
-      <p class="muted err" role="alert" style="margin:0;color:var(--bad, #c4264a)"></p>`;
+`;
     form.querySelector('span').textContent = `New password for ${name}`;
     form.querySelector('.cancel').addEventListener('click', () => row.remove());
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = Object.fromEntries(new FormData(form));
-      const err = form.querySelector('.err');
-      err.textContent = mismatch(f);
-      if (err.textContent) return;
-      try { await api('POST', `/ui/api/users/${encodeURIComponent(name)}`, f); row.remove(); say(`Password changed for ${name}.`); } catch (x) { err.textContent = x.message; }
+      if (confirmError(form, mismatch(f))) return;
+      try { await api('POST', `/ui/api/users/${encodeURIComponent(name)}`, f); row.remove(); say(`Password changed for ${name}.`); } catch (x) { confirmError(form, x.message); }
     });
     td.append(form); row.append(td); after.after(row);
     form.password.focus();
@@ -147,9 +160,9 @@
     e.preventDefault();
     try {
       const f = Object.fromEntries(new FormData(e.target));
-      if (mismatch(f)) return say(mismatch(f), true);
+      if (confirmError(e.target, mismatch(f))) return;
       drawUsers((await api('POST', '/ui/api/users', f)).users);
-      e.target.reset(); say(`Added ${f.name}.`); fillOwners();
+      e.target.reset(); confirmError(e.target, ''); say(`Added ${f.name}.`); fillOwners();
     } catch (err) { say(err.message, true); }
   });
   async function drawCredential() {
@@ -190,9 +203,9 @@
     e.preventDefault();
     try {
       const f = Object.fromEntries(new FormData(e.target));
-      if (mismatch(f)) return say(mismatch(f), true);
+      if (confirmError(e.target, mismatch(f))) return;
       await api('POST', '/ui/api/me/password', f);
-      e.target.reset(); say('Password changed.');
+      e.target.reset(); confirmError(e.target, ''); say('Password changed.');
     } catch (err) { say(err.message, true); }
   });
 

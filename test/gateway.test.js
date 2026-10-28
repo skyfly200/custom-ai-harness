@@ -97,6 +97,22 @@ test('a down Gateway gets an error, not a hang', async () => {
     await new Promise((r) => gateway.listen(Number(new URL(saved).port), '127.0.0.1', r));
 });
 
+test('with HARNESS_GATEWAY_WAIT_S a Gateway still loading is waited for, then answers', async () => {
+    mode = 'ok';
+    const saved = process.env.GATEWAY_URL;
+    process.env.HARNESS_GATEWAY_WAIT_S = '5';
+    gateway.close();
+    await new Promise((r) => setTimeout(r, 50));
+    setTimeout(() => gateway.listen(Number(new URL(saved).port), '127.0.0.1'), 700);
+    try {
+        const res = await send('/v1/chat/completions', chat);
+        assert.equal(res.status, 200);
+        assert.equal((await res.json()).choices[0].message.content, 'hi');
+    } finally {
+        delete process.env.HARNESS_GATEWAY_WAIT_S;
+    }
+});
+
 test('a connection the Gateway resets is retried once, and the retry answers', async () => {
     mode = 'reset-once';
     calls = 0;

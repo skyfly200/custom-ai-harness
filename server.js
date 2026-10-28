@@ -674,6 +674,30 @@ app.delete('/ui/api/me/credential', async (req, res) => {
     }
 });
 
+// Admin: issue (or replace) a person's key through OpenRouter's Management API, or take it back. These keys bill the
+// owner's account, each capped at OPENROUTER_USER_KEY_LIMIT. /ui/api/users/* is admin-only at the login gate. The
+// hourly sweep replaces the ones that lapse; the management key itself never leaves the server.
+app.post('/ui/api/users/:name/managed-key', async (req, res) => {
+    if (!db.enabled()) return res.status(503).json({ error: 'issuing keys needs the hosted database' });
+    try {
+        const u = findLoginUser ? findLoginUser(req.params.name) : null;
+        if (!u || u.role === 'admin' || u.guest) return res.status(400).json({ error: 'only full, non-admin accounts hold their own key' });
+        const made = await userCredentials.issue(u.name);
+        res.json({ credential: await userCredentials.status(u.name), expires: made.expires });
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.message });
+    }
+});
+app.delete('/ui/api/users/:name/managed-key', async (req, res) => {
+    if (!db.enabled()) return res.status(503).json({ error: 'needs the hosted database' });
+    try { await userCredentials.remove(req.params.name); res.json({ credential: { set: false } }); } catch (err) { res.status(500).json({ error: err.message }); }
+});
+if (db.enabled() && require('./utils/openrouterKeys').configured()) {
+    setInterval(() => {
+        userCredentials.managedOwners().then((names) => names.reduce((p, n) => p.then(() => userCredentials.check(n)), Promise.resolve())).catch(() => {});
+    }, 3600000).unref();
+}
+
 // The Interceptor settings a member may change for their own requests (the rest are admin-only)
 app.get('/ui/api/my/settings', async (req, res) => {
     if (!req.harnessLogin || !db.enabled()) return res.status(404).json({ error: 'per-user settings need logins and the hosted database' });

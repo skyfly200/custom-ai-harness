@@ -256,7 +256,7 @@ function createLogin({ users, legacyPassword = '', sessionStore = null, guests =
         if (!Number.isFinite(cap) || cap < 0 || cap > 1000) throw new Error('the guest cap must be a dollar amount from 0 to 1000');
         return cap;
     };
-    api.get('/ui/api/users', admin, aguarded(async (req, res) => res.json({ users: await withCredit(), minPassword: MIN_PASSWORD, guests: Boolean(guests) })));
+    api.get('/ui/api/users', admin, aguarded(async (req, res) => res.json({ users: await withCredit(), minPassword: MIN_PASSWORD, guests: Boolean(guests), managedKeys: Boolean(guests && String(process.env.OPENROUTER_MANAGEMENT_KEY || '').trim()) })));
     api.post('/ui/api/users', admin, aguarded(async (req, res) => {
         const guest = req.body?.guest === true || req.body?.guest === 'on' || req.body?.guest === 'true';
         if (guest && !guests) throw new Error('guest accounts need the hosted database (DATABASE_URL)');

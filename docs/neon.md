@@ -49,3 +49,7 @@ Two kinds of non-admin, both set up by an admin on the Users page (or by invitin
 Before relying on this, check against a real LiteLLM that `extra_headers` in the request body reach the proxy: if the Gateway dropped them, a full user's request would run on the owner's key. The Router's Jev calls send no ticket, so they always use the owner's key.
 
 Not tried against a real OpenRouter account: the flow is checked against a stand-in for `/auth/keys`. The pending sign-in (verifier) is held in memory for 10 minutes, so it needs one server machine, which is how the Fly app runs. Per-person workload identity federation (the harness as an OIDC issuer) was replaced by this; the owner's own install-wide federation (#90, `OPENROUTER_FEDERATION_POLICY_ID`) is unchanged.
+
+## Attachments
+
+Images and text files attached in chat are stored in the `attachments` table, apart from the chat text. The synced message keeps a stub (name, kind, size, id); the page uploads each file once (`POST /ui/api/sync/chats/:chat/attachments`) and a second device fetches the bytes only when it shows an image or sends the file to a model. A file over `HARNESS_ATTACH_MAX_MB` (default 6) or past `HARNESS_ATTACH_QUOTA_MB` (default 200 per person) stays on that device only, with a note. Deleting a chat deletes its attachments. Neon Free has 1 GB in all, so lower the quota if several people attach images.

@@ -4,6 +4,7 @@
 // 'local' when logins are off), and every query filters on it.
 const express = require('express');
 const db = require('./db');
+const attachments = require('./attachments');
 
 // Keys the page may store (projects, skills and so on); anything else is refused
 const DATA_KEYS = new Set(['harness-projects', 'harness-skills', 'harness-commands', 'harness-schedules', 'harness-chat-prefs']);
@@ -49,6 +50,8 @@ function createChatSync() {
         console.error(`[sync] ${req.method} ${req.path}: ${err.message}`);
         res.status(500).json({ error: 'the chat database did not answer' });
     });
+
+    router.use(attachments.routes(ownerOf, wrap));
 
     router.get('/ui/api/sync', wrap(async (req, res) => {
         const owner = ownerOf(req);
@@ -98,6 +101,7 @@ function createChatSync() {
     router.delete('/ui/api/sync/chats/:id', wrap(async (req, res) => {
         if (!ID.test(req.params.id)) return res.status(400).json({ error: 'bad chat id' });
         await db.query('DELETE FROM chat_messages WHERE owner = $1 AND chat_id = $2', [ownerOf(req), req.params.id]);
+        await attachments.dropChat(ownerOf(req), req.params.id);
         await db.query(`UPDATE chats SET deleted_at = now(), data = '{}'::jsonb, msg_order = '[]'::jsonb WHERE owner = $1 AND id = $2`, [ownerOf(req), req.params.id]);
         res.json({ ok: true });
     }));

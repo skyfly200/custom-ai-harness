@@ -72,6 +72,30 @@ const sync = {
       try { const r = await fn(); if (r && r.status >= 500) throw new Error(r.status); this.failed = false; } catch { this.failed = true; }
     }, 1500));
   },
+  // Attachments are kept apart from the chat text: each is uploaded once and the synced message carries only
+  // a stub {kind, name, size, aid}. This page keeps the bytes; another device fetches them when it needs them.
+  bytesOf(a) { return a.kind === 'image' ? a.dataUrl : a.text; },
+  stub(a) { return { kind: a.kind, name: a.name, size: a.size ?? (this.bytesOf(a) || '').length, ...(a.aid ? { aid: a.aid } : {}) }; },
+  async uploadAttachments(c) {
+    for (const m of c.messages || []) {
+      for (const a of m.attachments || []) {
+        const body = this.bytesOf(a);
+        if (a.aid || !body || a.syncFailed === body.length) continue;
+        try {
+          const r = await this.api(`/chats/${c.id}/attachments`, { method: 'POST', body: { kind: a.kind, name: a.name, body } });
+          if (r.ok) { const j = await r.json(); a.aid = j.id; a.size = j.size; delete a.syncFailed; }
+          else {
+            a.syncFailed = body.length; // not retried until it changes
+            const j = await r.json().catch(() => ({}));
+            if (!this.warned) { this.warned = true; toast(`${a.name} stays on this device only: ${j.error || 'the server refused it'}.`); }
+          }
+        } catch { /* try again on the next save */ }
+      }
+    }
+  },
+  wire(messages) {
+    return (messages || []).map(m => (m.attachments?.length ? { ...m, attachments: m.attachments.map(a => this.stub(a)) } : m));
+  },
   snaps: new Map(), // chat id -> { version the server is at, known: Map(message id -> fingerprint of the copy it has) }
   pushChat(c) { this.queue(`c:${c.id}`, () => this.saveChat(c.id)); },
   flushNow(id) { clearTimeout(this.timers.get(`c:${id}`)); this.timers.delete(`c:${id}`); this.saveChat(id).catch(() => { this.failed = true; }); },
@@ -81,7 +105,8 @@ const sync = {
     const c = cache.get(id) || store.get(CHAT_KEY(id), null);
     if (!c || c.deleted) return;
     const snap = this.snaps.get(id) || { version: Number(c.syncVersion) || 0, known: new Map() };
-    const { upserts, order, fingerprints } = ChatMerge.delta(c.messages || [], snap.known);
+    await this.uploadAttachments(c);
+    const { upserts, order, fingerprints } = ChatMerge.delta(this.wire(c.messages), snap.known);
     const { messages, syncVersion, ...chatMeta } = c;
     const r = await this.api(`/chats/${id}/delta`, { method: 'PUT', body: { chat: chatMeta, order, upserts, base: snap.version } });
     if (r.status === 409 && attempt < 2) {
@@ -170,6 +195,20 @@ const sync = {
     else sessionStorage.removeItem('harness-sync-reloaded');
   },
 };
+// Fill in the bytes of attachments this device only has a stub for (a chat made on another device)
+async function hydrateAttachments(c, only) {
+  if (!sync.on || !c) return;
+  const list = (only ? [only] : c.messages).flatMap(m => m.attachments || []);
+  await Promise.all(list.filter(a => a.aid && !sync.bytesOf(a)).map(async (a) => {
+    try {
+      const r = await sync.api(`/chats/${c.id}/attachments/${a.aid}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (a.kind === 'image') a.dataUrl = j.body; else a.text = j.body;
+    } catch { /* shown as a name only */ }
+  }));
+}
+const attachmentSrc = (a) => a.dataUrl || (a.aid && chat ? `api/sync/chats/${chat.id}/attachments/${a.aid}/raw` : '');
 // store.set and remove tell sync what changed
 const rawSet = store.set.bind(store), rawRemove = store.remove.bind(store);
 store.set = (key, value) => {
@@ -671,7 +710,7 @@ function thinkingHtml(m) {
 function attachmentsHtml(list) {
   if (!list?.length) return '';
   return `<div class="attach-list">${list.map(a => a.kind === 'image'
-    ? `<img src="${esc(a.dataUrl)}" alt="${esc(a.name)}" title="${esc(a.name)}">`
+    ? `<img src="${esc(attachmentSrc(a))}" alt="${esc(a.name)}" title="${esc(a.name)}">`
     : `<span class="chip"><span>📄 ${esc(a.name)}</span></span>`).join('')}</div>`;
 }
 
@@ -1159,6 +1198,7 @@ $('log').addEventListener('click', async (e) => {
       if (i < chat.messages.length - 1 && !confirm('Edit this message? The replies after it will be removed.')) return;
       // editing a command's message puts the command back in the box
       $('input').value = m.turn?.command ? `/${m.turn.command}${m.content ? ` ${m.content}` : ' '}` : m.content;
+      await hydrateAttachments(chat, m);
       pending = m.attachments || [];
       chat.messages.splice(i);
       saveChat(chat); drawLog(); drawChips(); autoGrow(); drawList();
@@ -1290,6 +1330,7 @@ const looksLikeQuota = (text) => /\b429\b|rate.?limit|quota|too many requests|ex
 const seconds = (id) => Math.max(0, Number($(id).value) || 0);
 
 async function runReply(c, turn) {
+  await hydrateAttachments(c);
   const reply = { id: uid(), role: 'assistant', content: '', streaming: true, time: Date.now(), trace: { start: Date.now(), chunks: 0 }, ...(turn ? { turn } : {}) };
   c.messages.push(reply);
   saveChat(c);
@@ -2531,17 +2572,20 @@ function chatMarkdown(c) {
 }
 const fileName = (c) => `${chatTitle(c).replace(/[\\/:*?"<>|\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'chat'}.md`;
 
-$('exportChat').addEventListener('click', () => {
+$('exportChat').addEventListener('click', async () => {
   if (!chat.messages.length) return toast('Nothing to export yet.');
+  await hydrateAttachments(chat);
   download(fileName(chat), chatMarkdown(chat));
 });
 $('copyChat').addEventListener('click', async () => {
   if (!chat.messages.length) return toast('Nothing to copy yet.');
+  await hydrateAttachments(chat);
   await copyText(chatMarkdown(chat));
   toast('Chat copied as Markdown.');
 });
-$('exportAll').addEventListener('click', () => {
+$('exportAll').addEventListener('click', async () => {
   const chats = index.map(e => loadChat(e.id)).filter(Boolean);
+  for (const c of chats) await hydrateAttachments(c);
   if (!chats.length) return toast('No saved chats yet.');
   download(`bright-chats-${new Date().toISOString().slice(0, 10)}.md`, chats.map(chatMarkdown).join('\n\n---\n\n'));
 });

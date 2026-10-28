@@ -411,12 +411,12 @@ async function githubApi(method, body) {
   return j;
 }
 function showGithub(g) {
-  $('githubNote').textContent = g.set ? `Connected as ${g.login}. Agents can clone and push the repos that token can reach.` : 'Not connected. Public repos can be cloned without it; private repos and pushing need a token.';
+  $('githubNote').textContent = g.set ? `Connected as ${g.login}${g.via === 'oauth' ? ' with GitHub' : ''}. Agents can clone and push the repos that connection can reach. Chats can read them too (chat Options > Tools).` : 'Not connected. Public repos can be cloned without it; private repos and pushing need a token.';
   $('githubOff').hidden = !g.set;
   $('githubToken').placeholder = g.set ? 'Paste a new token to replace it' : 'github_pat_…';
 }
 async function loadGithub() {
-  try { showGithub((await githubApi('GET')).github); } catch (err) { $('githubNote').textContent = err.message; }
+  try { const j = await githubApi('GET'); $('githubConnect').hidden = !j.oauth; showGithub(j.github); } catch (err) { $('githubNote').textContent = err.message; }
 }
 $('githubForm').addEventListener('submit', async (e) => {
   e.preventDefault();

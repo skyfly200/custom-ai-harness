@@ -636,3 +636,8 @@ button.icon.on { color: var(--accent); }
   #actScrim { display: block; position: fixed; inset: 0; z-index: 13; background: rgba(10, 6, 30, .4); }
   #actScrim[hidden] { display: none; }
 }
+
+.gh-box { margin-top: 8px; }
+.gh-box .small a { color: inherit; text-decoration: underline; }
+.approve span { white-space: pre-wrap; }
+.gh-box .muted { margin: 4px 0 6px; }

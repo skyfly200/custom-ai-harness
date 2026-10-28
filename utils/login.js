@@ -26,14 +26,14 @@ const safeNext = (next) => (typeof next === 'string' && /^\/(?!\/|\\)/.test(next
 function loginPage({ next, error, providers = [] }) {
     const buttons = providers.map((p) => `<a class="oauth" href="/auth/${p}?next=${encodeURIComponent(next)}">Continue with ${p === 'github' ? 'GitHub' : 'Google'}</a>`).join('');
     return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Sign in · Bright Chat</title>
 <meta name="theme-color" content="#0d0b18">
 <link rel="icon" href="/login/favicon.svg" type="image/svg+xml">
 <style>
 :root{color-scheme:light dark;--bg:#f6f4fb;--card:#fff;--ink:#1d1830;--muted:#6b6485;--line:#ddd8ec;--accent:#6d4aff;--bad:#c4264a}
 @media(prefers-color-scheme:dark){:root{--bg:#0d0b18;--card:#171428;--ink:#ece9f8;--muted:#9a93b8;--line:#2b2644;--accent:#8f74ff;--bad:#ff6b8b}}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:16px;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,sans-serif}
 form{width:100%;max-width:340px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px;display:grid;gap:14px}
 h1{margin:0;font-size:20px}p{margin:0;color:var(--muted);font-size:14px}label{display:grid;gap:4px;font-size:14px;color:var(--muted)}
 input{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}

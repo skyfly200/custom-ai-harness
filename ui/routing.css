@@ -36,7 +36,7 @@ main.wide { max-width: none; }
 .node .body:empty { display: none; }
 .node .body label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; }
 .node .body small { color: var(--muted); font-weight: 400; }
-.node select, .node input { font: inherit; font-size: 12.5px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border);
+.node select, .node input { font: inherit; font-size: 12.5px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--field-border);
   background: var(--panel); color: var(--text); width: 100%; min-width: 0; }
 .node .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .node .warn { color: var(--warn); font-size: 12px; }
@@ -138,7 +138,7 @@ dialog#addDialog [hidden], dialog#statsDialog [hidden] { display: none; }
 
 .profiles { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; }
 .profile-pick { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-.profile-pick select { font: inherit; font-weight: 500; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); min-width: 200px; }
+.profile-pick select { font: inherit; font-weight: 500; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--field-border); background: var(--panel); color: var(--text); min-width: 200px; }
 .profiles .small { font-size: 12.5px; flex: 1 1 320px; }
 .node.compress .head { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); }
 .node.tools .head { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }

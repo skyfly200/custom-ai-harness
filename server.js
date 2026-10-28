@@ -59,6 +59,8 @@ const { parseAdmins, Users, FileStore } = require('./utils/users');
 const db = require('./utils/db');
 const { PgStore } = require('./utils/pgStore');
 const { createChatSync } = require('./utils/chatSync');
+const serverSchedules = require('./utils/serverSchedules');
+const internalAuth = require('./utils/internalAuth');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -69,9 +71,10 @@ const app = express();
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 // Sleep after HARNESS_IDLE_STOP_MIN idle minutes, and the Dashboard's Stop button. Only where something can act on
 // a stop: the Fly launcher (HARNESS_STOP_VIA_PARENT) asks its parent to stop everything and exit cleanly.
+const schedules = serverSchedules.enabled() ? serverSchedules.create() : null;
 const idle = idleStop.create({
     minutes: process.env.HARNESS_IDLE_STOP_MIN,
-    busy: [chatReplies.busy],
+    busy: [chatReplies.busy, ...(schedules ? [schedules.busy] : [])],
     poll: Number(process.env.HARNESS_IDLE_CHECK_MS) || undefined,
     stop: process.env.HARNESS_STOP_VIA_PARENT === '1' ? () => setTimeout(() => process.kill(process.ppid, 'SIGTERM'), 300) : null,
 });
@@ -92,6 +95,9 @@ if (openrouterAuth.federated() || USER_CREDENTIALS) {
 // Checked before the password gate, which they replace for POST /v1/chat/completions only.
 const runKeys = new RunKeys();
 app.use(runKeys.middleware());
+// The server's own scheduled messages call /v1/chat/completions as the person they belong to (utils/internalAuth.js)
+let findLoginUser = () => null;
+app.use(internalAuth.middleware((name) => findLoginUser(name)));
 // HARNESS_PASSWORD locks every page and API (see utils/access.js); unset, all stay open
 const HARNESS_PASSWORD = process.env.HARNESS_PASSWORD || '';
 // HARNESS_REQUIRE_LOGIN=1 puts named logins in front instead (utils/login.js)
@@ -109,6 +115,7 @@ if (LOGIN_ON) {
         app.use((req, res, next) => loaded.then(() => next(), next));
     }
     const users = new Users({ admins, store });
+    findLoginUser = (name) => users.find(name);
     const guests = db.enabled() ? {
         ensure: credit.ensure, setCap: credit.setCap, all: credit.all,
         forget: async (name) => { await credit.forget(name); await userCredentials.remove(name); },
@@ -131,7 +138,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 if (db.enabled()) {
     const ready = db.init();
     app.use((req, res, next) => (req.path.startsWith('/ui/api/sync') ? ready.then(() => next(), next) : next()));
-    app.use(createChatSync());
+    app.use(createChatSync({ serverSchedules: Boolean(schedules) }));
 } else {
     app.get('/ui/api/sync', (req, res) => res.json({ db: false }));
 }
@@ -1564,7 +1571,10 @@ app.use((err, req, res, next) => {
 
 if (require.main === module) {
     idle.start();
-    app.listen(3000, () => console.log('Harness interceptor active on port 3000'));
+    app.listen(3000, () => {
+        console.log('Harness interceptor active on port 3000');
+        if (schedules) { schedules.start(); console.log('Scheduled messages run on the server'); }
+    });
     mcp.start().then(() => {
         for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);
     });

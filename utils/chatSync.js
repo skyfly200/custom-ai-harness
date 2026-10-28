@@ -44,7 +44,7 @@ async function saveDelta(owner, chat, order, upserts, base) {
     return { ok: false, version: cur.rows[0] ? Number(cur.rows[0].version) : 0 };
 }
 
-function createChatSync() {
+function createChatSync({ serverSchedules = false } = {}) {
     const router = express.Router();
     const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((err) => {
         console.error(`[sync] ${req.method} ${req.path}: ${err.message}`);
@@ -59,7 +59,7 @@ function createChatSync() {
             .map((r) => ({ ...r, updated: Number(r.updated) }));
         const data = {};
         for (const r of (await db.query('SELECT key, value, updated FROM user_data WHERE owner = $1 AND key = ANY($2::text[])', [owner, [...DATA_KEYS]])).rows) data[r.key] = { value: r.value, updated: Number(r.updated) };
-        res.set('cache-control', 'no-store').json({ db: true, owner, chats, data });
+        res.set('cache-control', 'no-store').json({ db: true, owner, chats, data, serverSchedules });
     }));
 
     router.get('/ui/api/sync/chats/:id', wrap(async (req, res) => {
@@ -120,4 +120,4 @@ function createChatSync() {
     return router;
 }
 
-module.exports = { createChatSync, DATA_KEYS };
+module.exports = { createChatSync, saveDelta, DATA_KEYS };

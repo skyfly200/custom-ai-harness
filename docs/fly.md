@@ -71,7 +71,7 @@ The Machine bills only while it runs, so the app stops itself:
 
 How it works: the app asks the launcher to stop, which stops all three parts and exits with code 0. `fly.toml` sets the Machine's restart policy to `on-failure`, so a clean exit leaves it stopped and only a crash restarts it. If your Machine restarts itself after a stop, check `fly machine status MACHINE-ID` for its restart policy. To stop it from your own computer instead: `fly machine stop MACHINE-ID --app YOUR-APP-NAME`.
 
-While it sleeps, anything that must happen with no one there (schedules, cache keep-alive pings) does not run. Chats are safe: they are in Neon. If you were halfway through a reply when it stopped, the server keeps what it had (see below). The volume is billed even while the Machine is stopped, and Neon sleeps on its own after 5 idle minutes.
+While it sleeps, anything that must happen with no one there (cache keep-alive pings) does not run; scheduled messages keep the server awake instead, see below. Chats are safe: they are in Neon. If you were halfway through a reply when it stopped, the server keeps what it had (see below). The volume is billed even while the Machine is stopped, and Neon sleeps on its own after 5 idle minutes.
 
 ## Replies survive a closed tab
 
@@ -92,3 +92,14 @@ With a database set, the chat page tells the server which chat and message a rep
 **What stays on the volume and what goes to Neon.** Users, sessions and chats are in Neon. The volume holds `config.yaml`, `routellm-config.yaml`, the Settings and routing files, usage totals and `mcp-servers.json`.
 
 **Limits to know about.** One Machine means no failover: a deploy or restart interrupts any reply in progress. Chat repo linking, the PC shell and stdio MCP servers run inside the Machine, so keep them to people you trust (a limit for other users comes with the per-user settings PR).
+
+## Scheduled messages on the server
+
+With `DATABASE_URL` set, scheduled messages are sent by the server (`utils/serverSchedules.js`), not by an open page. Every 30 seconds it looks at each person's schedules, claims one that is due by moving its next time forward in the same database row (so a stale page or a second server can't send it twice), adds the message to the target chat, asks the model through its own `/v1/chat/completions` as that person (so routing, guest credit and the person's own OpenRouter credential all apply) and saves the reply. The page notices the new chat within a minute.
+
+- **It stays awake.** Fly can't wake a stopped Machine for a schedule, so while any schedule has a next run the idle sleep (`HARNESS_IDLE_STOP_MIN`) holds off. Set `HARNESS_SCHEDULES_KEEP_AWAKE=0` to let it sleep anyway (schedules then run late, when something wakes it). That makes the Machine cost the full month (about $6 to $7 on shared-cpu-1x 1 GB).
+- **What a run has:** the chat's history (text attachments included, images are noted but not sent), the project's instructions, the chat's system prompt and notes, switched-on skills, and the chat's or project's routing. It has **no tools** (MCP, repo, shell).
+- **Time zones.** The page saves its time zone with each schedule; daily, weekday and weekly runs keep the same wall-clock time through daylight saving.
+- **Off:** `HARNESS_SERVER_SCHEDULES=0` returns to the page sending them. With no database nothing changes.
+- A run that fails (out of credit, model error) writes the error into the reply. A schedule missed while the server was down runs once when it is back.
+- Cache keep-alive pings still run in the page; they only matter while someone is there.

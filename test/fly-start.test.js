@@ -45,3 +45,9 @@ test('the Gateway and Router listen on loopback and everything points at the vol
     assert.strictEqual(interceptor.env.HARNESS_USERS_FILE, path.join('/vol', 'users.json'));
     assert.strictEqual(interceptor.env.SECRET, 's');
 });
+
+test("the Gateway doesn't see the app's DATABASE_URL, LiteLLM would try to use it", () => {
+    const [gateway, , interceptor] = commands('/vol', { DATABASE_URL: 'postgres://neon' });
+    assert.strictEqual(gateway.env.DATABASE_URL, undefined);
+    assert.strictEqual(interceptor.env.DATABASE_URL, 'postgres://neon');
+});

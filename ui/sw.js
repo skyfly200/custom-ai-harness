@@ -5,7 +5,7 @@
 // that isn't a plain GET: chats, answers and keys are never stored here.
 'use strict';
 
-const CACHE = 'bright-chat-v2';
+const CACHE = 'bright-chat-v3';
 
 function keepable(request) {
   if (request.method !== 'GET') return false;
@@ -22,7 +22,7 @@ function keepable(request) {
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   // Fetched with the page's credentials, so a harness behind HARNESS_PASSWORD still works
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'bright.js', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'bright.js', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
 });
 
 self.addEventListener('activate', (event) => {
@@ -47,5 +47,17 @@ self.addEventListener('fetch', (event) => {
       if (kept) return kept;
       throw err;
     }
+  })());
+});
+
+// Tapping a "waiting for you" notification brings the app forward (or opens it)
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || './chat.html', self.location).href;
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const mine = all.find((c) => c.url.split('#')[0] === target.split('#')[0]) || all[0];
+    if (mine) { await mine.focus(); return; }
+    await self.clients.openWindow(target);
   })());
 });

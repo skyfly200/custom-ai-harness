@@ -1560,6 +1560,7 @@ async function runReply(c, turn) {
     drawList();
     if (reply.content && !reply.timedOut) nameChat(c);
     speech.endReply(reply);
+    if (reply.content && !reply.timedOut && !controller.signal.aborted && c.messages.includes(reply)) window.Notify?.show('reply', `chat.html#chat=${c.id}`);
     finish();
     // a message typed while this reply was arriving goes next, as if you had just sent it
     if (queues.get(c.id)?.length) setTimeout(() => drainQueue(c.id), 0);
@@ -1614,6 +1615,7 @@ function askApproval(call, reason, onChange, signal) {
   const key = call.id || (call.id = `call_${++approvalCount}`);
   call.approval = { state: 'ask', reason: reason || '' };
   onChange();
+  window.Notify?.show('approval', `chat.html#chat=${chat?.id || ''}`);
   return new Promise((resolve) => {
     const settle = (allow) => {
       pendingApprovals.delete(key);

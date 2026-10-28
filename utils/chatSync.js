@@ -55,7 +55,7 @@ function createChatSync() {
         const chats = (await db.query('SELECT id, title, project, updated, (deleted_at IS NOT NULL) AS deleted FROM chats WHERE owner = $1 ORDER BY updated DESC', [owner])).rows
             .map((r) => ({ ...r, updated: Number(r.updated) }));
         const data = {};
-        for (const r of (await db.query('SELECT key, value, updated FROM user_data WHERE owner = $1', [owner])).rows) data[r.key] = { value: r.value, updated: Number(r.updated) };
+        for (const r of (await db.query('SELECT key, value, updated FROM user_data WHERE owner = $1 AND key = ANY($2::text[])', [owner, [...DATA_KEYS]])).rows) data[r.key] = { value: r.value, updated: Number(r.updated) };
         res.set('cache-control', 'no-store').json({ db: true, owner, chats, data });
     }));
 

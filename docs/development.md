@@ -74,6 +74,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `e2bSandbox`, `spritesSandbox` |
 | MCP tools | `mcp`, `mcpAdmin`, `toolsApi` |
 | Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `chatCommands` |
+| Per-user tools, routings, settings | `userTools` (secrets, address checks, member MCP, routings; in-process Postgres) |
 | Router (Python) | `test_router.py`, `test_router_backends.py`, `test_gateway_start.py` |
 
 Shared fake servers live in `test/helpers/stubs.js` (`fakeGateway(onRequest)` answers like an OpenAI-style Gateway); use them instead of writing another `http.createServer` stub. When a test file isn't listed here, `npm run test:for -- path/to/file.js` finds the tests that mention it.

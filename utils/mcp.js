@@ -182,8 +182,14 @@ function describeFailure(err, spec, { timeoutMs, tries = 1 } = {}) {
 }
 
 class McpManager {
-    constructor({ file = CONFIG_FILE } = {}) {
+    // `specs` (async, returns the {name: entry} object) replaces the file for a source that is not mcp-servers.json
+    // (a user's servers in the database). `plain` turns off ${VAR} expansion, so an entry can't read this process's
+    // environment; `vet` (async, throws) checks an entry before each connection.
+    constructor({ file = CONFIG_FILE, specs = null, plain = false, vet = null } = {}) {
         this.file = file;
+        this.specsFn = specs;
+        this.plain = plain;
+        this.vet = vet;
         this.servers = new Map(); // name -> { name, spec, status, error, client, tools }
         this.byTool = new Map();  // exposed tool name -> { server, tool }
         this.loading = null;
@@ -204,7 +210,7 @@ class McpManager {
     async load() {
         let specs;
         try {
-            specs = readConfig(this.file);
+            specs = await this.readSpecs();
             this.configError = null;
         } catch (err) {
             this.configError = `${path.basename(this.file)}: ${err.message}`;
@@ -213,6 +219,10 @@ class McpManager {
         for (const [name, spec] of Object.entries(specs)) this.servers.set(name, this.entry(name, spec));
         await Promise.all([...this.servers.values()].filter(s => s.status === 'connecting').map(s => this.connect(s)));
         this.indexTools();
+    }
+
+    async readSpecs() {
+        return this.specsFn ? this.specsFn() : readConfig(this.file);
     }
 
     entry(name, spec) {
@@ -229,7 +239,7 @@ class McpManager {
         await this.start();
         let specs = {};
         try {
-            specs = readConfig(this.file);
+            specs = await this.readSpecs();
             this.configError = null;
         } catch (err) {
             this.configError = `${path.basename(this.file)}: ${err.message}`;
@@ -274,10 +284,11 @@ class McpManager {
 
     async connect(server) {
         const missing = [];
-        const spec = expand(server.spec, missing);
+        const spec = this.plain ? server.spec : expand(server.spec, missing);
         const { timeoutMs, retries } = connectPolicy(spec);
         let tries = 0;
         try {
+            if (this.vet) await this.vet(spec);
             if (missing.length) throw new Error(`${[...new Set(missing)].map(n => '${' + n + '}').join(', ')} ${new Set(missing).size > 1 ? 'are' : 'is'} not set: add ${new Set(missing).size > 1 ? 'them' : 'it'} to .env, then restart the Interceptor and press Reload`);
             if (transportType(spec) === 'stdio' && spec.command && !onPath(spec.command)) throw Object.assign(new Error('not found'), { code: 'ENOENT' });
             for (;;) {
@@ -418,7 +429,7 @@ class McpManager {
         if (!entry) throw new Error(`no MCP tool named ${name}`);
         const { server, tool } = entry;
         if (!server.client) throw new Error(`MCP server ${server.name} is not connected`);
-        const result = await server.client.callTool({ name: tool.name, arguments: args || {} }, undefined, { timeout: positive(expand(server.spec).callTimeoutMs) ?? CALL_TIMEOUT_MS });
+        const result = await server.client.callTool({ name: tool.name, arguments: args || {} }, undefined, { timeout: positive((this.plain ? server.spec : expand(server.spec)).callTimeoutMs) ?? CALL_TIMEOUT_MS });
         return { text: resultText(result), isError: !!result.isError, server: server.name, tool: tool.name };
     }
 

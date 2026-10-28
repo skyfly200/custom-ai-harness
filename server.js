@@ -42,6 +42,8 @@ const gatewayGuard = require('./utils/gatewayGuard');
 const { McpManager, readConfig, writeConfig } = require('./utils/mcp');
 const mcpAdmin = require('./utils/mcpAdmin');
 const mcpCatalog = require('./utils/mcpCatalog');
+const userMcpMod = require('./utils/userMcp');
+const userPrefs = require('./utils/userPrefs');
 const claudeKit = require('./utils/claudeKit');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
@@ -412,6 +414,19 @@ function localOnly(req, res, next) {
     next();
 }
 
+// A signed-in person who isn't an admin. Their own tools, routings and settings live in the database
+// (user_mcp, user_data); the controls that change the whole install stay admin-only.
+const isMember = (req) => Boolean(req.harnessLogin && req.harnessUser.role !== 'admin');
+const ownerOf = (req) => req.harnessUser.name;
+function memberOrLocal(req, res, next) {
+    return isMember(req) ? next() : localOnly(req, res, next);
+}
+function memberOrLocalJson(req, res, next) {
+    if (!isMember(req)) return localJsonOnly(req, res, next);
+    if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+    next();
+}
+
 async function forwardToRouter(req, res, routerPath) {
     try {
         const upstream = await fetch(`${ROUTER_URL}${routerPath}`, {
@@ -462,13 +477,45 @@ app.post('/ui/api/settings/reset', localJsonOnly, (req, res) => res.json({ setti
 
 // Named strategies (utils/profiles.js): the routing editor saves them, the chat
 // page picks one per chat or project, any client can name one in x-harness-profile.
-app.get('/ui/api/profiles', (req, res) => res.json(profiles.state()));
-// {version, profiles: [...]} replaces the whole list
-app.post('/ui/api/profiles', localJsonOnly, (req, res) => {
+// A member sees the shared routings (the admins') marked `shared`, then their own.
+app.get('/ui/api/profiles', async (req, res) => {
+    if (!isMember(req) || !db.enabled()) return res.json(profiles.state());
     try {
-        res.json(profiles.replace(req.body?.profiles, req.body?.version));
+        const own = await userPrefs.ownRoutings(ownerOf(req));
+        res.json({ profiles: [...profiles.list().map((p) => ({ ...p, shared: true })), ...own.profiles], version: own.version, file: 'your account', own: true });
+    } catch (err) {
+        res.status(500).json({ error: 'your routings could not be read: the database did not answer' });
+    }
+});
+// {version, profiles: [...]} replaces the whole list; for a member, their own routings only
+app.post('/ui/api/profiles', memberOrLocalJson, async (req, res) => {
+    try {
+        if (!isMember(req)) return res.json(profiles.replace(req.body?.profiles, req.body?.version));
+        if (!db.enabled()) return res.status(503).json({ error: 'your own routings need the hosted database' });
+        const shared = profiles.list();
+        const sharedJson = new Map(shared.map((p) => [p.id, JSON.stringify(p)]));
+        // the shared routings come back with the page's copy of the list: leave them out, they aren't the member's to save
+        const mine = (Array.isArray(req.body?.profiles) ? req.body.profiles : [])
+            .filter((p) => !(p && (p.shared === true || (sharedJson.has(p.id) && sharedJson.get(p.id) === JSON.stringify(profiles.clean(p))))));
+        const allowed = gatewayConfig.modelNames(fs.readFileSync(GATEWAY_CONFIG, 'utf8'));
+        const own = await userPrefs.saveRoutings(ownerOf(req), mine, { expected: req.body?.version, shared, allowed });
+        res.json({ profiles: [...shared.map((p) => ({ ...p, shared: true })), ...own.profiles], version: own.version, file: 'your account', own: true });
     } catch (err) {
         res.status(err.status || 400).json({ error: err.message });
+    }
+});
+
+// The Interceptor settings a member may change for their own requests (the rest are admin-only)
+app.get('/ui/api/my/settings', async (req, res) => {
+    if (!req.harnessLogin || !db.enabled()) return res.status(404).json({ error: 'per-user settings need logins and the hosted database' });
+    res.json({ settings: await userPrefs.ownSettings(ownerOf(req)), global: settings.get(), editable: userPrefs.OWN_SETTINGS });
+});
+app.post('/ui/api/my/settings', (req, res, next) => (req.is('application/json') ? next() : res.status(415).json({ error: 'send application/json' })), async (req, res) => {
+    if (!req.harnessLogin || !db.enabled()) return res.status(404).json({ error: 'per-user settings need logins and the hosted database' });
+    try {
+        res.json({ settings: await userPrefs.saveSettings(ownerOf(req), req.body), global: settings.get(), editable: userPrefs.OWN_SETTINGS });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
     }
 });
 
@@ -925,8 +972,25 @@ app.post('/ui/api/stt', async (req, res) => {
 // tools over a git repo a chat is linked to. The page runs the tool loop: it
 // sends the definitions with each request and calls back here to run a call.
 const mcp = new McpManager();
+// A member's own remote servers, one manager each (utils/userMcp.js); admins use mcp-servers.json
+const userMcp = new userMcpMod.UserMcp();
+const noOwnTools = { error: 'Your own tools need the hosted database and ENCRYPTION_KEY, which this server does not have.' };
 
 app.get('/ui/api/tools', async (req, res) => {
+    if (isMember(req)) {
+        // Only the member's own servers: shell and repo tools run on this machine, and the shared servers are the admins'
+        if (!userMcpMod.available()) return res.json({ servers: [], definitions: {}, repoDefinitions: [], shellDefinitions: [], note: noOwnTools.error });
+        try {
+            const mgr = userMcp.manager(ownerOf(req));
+            await mgr.start();
+            const status = mgr.status();
+            const definitions = {};
+            for (const s of status.servers) definitions[s.name] = mgr.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
+            return res.json({ ...status, file: 'your account', definitions, repoDefinitions: [], shellDefinitions: [] });
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    }
     await mcp.start();
     const status = mcp.status();
     const definitions = {};
@@ -934,60 +998,85 @@ app.get('/ui/api/tools', async (req, res) => {
     res.json({ ...status, definitions, repoDefinitions: repoTools.definitions(), shellDefinitions: settings.get().shellInRepo ? chatShell.definitions() : [] });
 });
 
-app.post('/ui/api/tools/reload', localJsonOnly, async (req, res) => {
+app.post('/ui/api/tools/reload', memberOrLocalJson, async (req, res) => {
+    if (isMember(req)) {
+        if (!userMcpMod.available()) return res.status(503).json(noOwnTools);
+        const mgr = userMcp.manager(ownerOf(req));
+        await mgr.reload();
+        return res.json(mgr.status());
+    }
     await mcp.reload();
     res.json(mcp.status());
 });
 
-// The Tools page: add, edit, test, switch off and remove MCP servers. Admin-only
-// (a stdio server is a program this machine runs); literal env and header
-// values are never sent back, only that they are set.
-function mcpList() {
-    const status = new Map(mcp.status().servers.map(s => [s.name, s]));
-    const tools = mcp.allTools();
+// The Tools page: add, edit, test, switch off and remove MCP servers. An admin edits mcp-servers.json
+// (a stdio server is a program this machine runs); a member edits their own remote servers.
+// Literal env and header values are never sent back, only that they are set.
+async function mcpList(req) {
+    const member = isMember(req);
+    const mgr = member ? userMcp.manager(ownerOf(req)) : mcp;
+    const status = new Map(mgr.status().servers.map(s => [s.name, s]));
+    const tools = mgr.allTools();
+    const specs = member ? await userMcp.read(ownerOf(req)) : readConfig(mcp.file);
     return {
-        file: mcp.file,
-        error: mcp.configError || null,
-        servers: Object.entries(readConfig(mcp.file)).map(([name, spec]) => ({
+        file: member ? 'your account' : mcp.file,
+        own: member,
+        error: mgr.configError || null,
+        servers: Object.entries(specs).map(([name, spec]) => ({
             name,
             spec: mcpAdmin.describeSpec(spec),
             status: status.get(name)?.status || (spec.disabled ? 'disabled' : 'connecting'),
             error: status.get(name)?.error || null,
             tools: tools.get(name) || [],
         })),
-        catalog: mcpCatalog,
+        catalog: member ? userMcpMod.remoteCatalog() : mcpCatalog,
     };
 }
 
-async function mcpEdit(res, change) {
+// Runs `change` on the stored servers, saves them, and brings the running servers in line
+async function mcpEdit(req, res, change) {
     try {
-        await mcp.start();
-        const servers = readConfig(mcp.file);
-        change(servers);
-        writeConfig(servers, mcp.file);
-        await mcp.sync();
-        res.json(mcpList());
+        const member = isMember(req);
+        if (member && !userMcpMod.available()) return res.status(503).json(noOwnTools);
+        const mgr = member ? userMcp.manager(ownerOf(req)) : mcp;
+        await mgr.start();
+        const servers = member ? await userMcp.read(ownerOf(req)) : readConfig(mcp.file);
+        const before = structuredClone(servers);
+        await change(servers, member);
+        if (member) await userMcp.write(ownerOf(req), servers, before);
+        else writeConfig(servers, mcp.file);
+        await mgr.sync();
+        res.json(await mcpList(req));
     } catch (err) {
         res.status(err.status || 500).json({ error: err.message });
     }
 }
 
-app.get('/ui/api/mcp', localOnly, async (req, res) => {
+app.get('/ui/api/mcp', memberOrLocal, async (req, res) => {
     try {
-        await mcp.start();
-        res.json(mcpList());
+        if (isMember(req)) {
+            if (!userMcpMod.available()) return res.status(503).json(noOwnTools);
+            await userMcp.manager(ownerOf(req)).start();
+        } else {
+            await mcp.start();
+        }
+        res.json(await mcpList(req));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
 // Add a server, or edit one (`from` is the name it had; a new name renames it)
-app.post('/ui/api/mcp/save', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+app.post('/ui/api/mcp/save', memberOrLocalJson, (req, res) => mcpEdit(req, res, async (servers, member) => {
     const { from, name, spec } = req.body || {};
     mcpAdmin.checkName(name);
     if (from && servers[from] === undefined) throw Object.assign(new Error(`no server named ${from}`), { status: 404 });
     if ((!from || from !== name) && servers[name] !== undefined) throw Object.assign(new Error(`a server named ${name} already exists`), { status: 409 });
-    const built = mcpAdmin.buildSpec(spec, from ? servers[from] : {});
+    const built = member ? userMcpMod.buildUserSpec(spec, from ? servers[from] : {}) : mcpAdmin.buildSpec(spec, from ? servers[from] : {});
+    if (member) {
+        await userMcpMod.checkRemoteUrl(built.url);
+        if (!from && Object.keys(servers).length >= userMcpMod.MAX_SERVERS) throw Object.assign(new Error(`at most ${userMcpMod.MAX_SERVERS} servers each`), { status: 400 });
+    }
     if (from && from !== name) {
         // keep the file's order when renaming
         const entries = Object.entries(servers).map(([k, v]) => (k === from ? [name, built] : [k, v]));
@@ -999,7 +1088,7 @@ app.post('/ui/api/mcp/save', localJsonOnly, (req, res) => mcpEdit(res, (servers)
 }));
 
 // Switch a server on or off, or choose which of its tools the model is offered
-app.post('/ui/api/mcp/patch', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+app.post('/ui/api/mcp/patch', memberOrLocalJson, (req, res) => mcpEdit(req, res, (servers) => {
     const { name, disabled, disabledTools } = req.body || {};
     const spec = servers[name];
     if (!spec) throw Object.assign(new Error(`no server named ${name}`), { status: 404 });
@@ -1014,16 +1103,23 @@ app.post('/ui/api/mcp/patch', localJsonOnly, (req, res) => mcpEdit(res, (servers
     }
 }));
 
-app.post('/ui/api/mcp/remove', localJsonOnly, (req, res) => mcpEdit(res, (servers) => {
+app.post('/ui/api/mcp/remove', memberOrLocalJson, (req, res) => mcpEdit(req, res, (servers) => {
     const { name } = req.body || {};
     if (servers[name] === undefined) throw Object.assign(new Error(`no server named ${name}`), { status: 404 });
     delete servers[name];
 }));
 
 // Try an entry without saving it: connect, list the tools, disconnect
-app.post('/ui/api/mcp/test', localJsonOnly, async (req, res) => {
+app.post('/ui/api/mcp/test', memberOrLocalJson, async (req, res) => {
     try {
         const { from, spec } = req.body || {};
+        if (isMember(req)) {
+            if (!userMcpMod.available()) return res.status(503).json(noOwnTools);
+            const stored = from ? (await userMcp.read(ownerOf(req)))[from] : undefined;
+            const built = userMcpMod.buildUserSpec(spec, stored || {});
+            await userMcpMod.checkRemoteUrl(built.url);
+            return res.json(await userMcp.manager(ownerOf(req)).probe(built));
+        }
         const stored = from ? readConfig(mcp.file)[from] : undefined;
         const built = mcpAdmin.buildSpec(spec, stored || {});
         res.json(await mcp.probe(built));
@@ -1077,11 +1173,19 @@ app.post('/ui/api/tools/shell/check', localJsonOnly, async (req, res) => {
 });
 
 // Run one tool call. A failing tool is an answer for the model, not an HTTP error.
-app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
+app.post('/ui/api/tools/call', memberOrLocalJson, async (req, res) => {
     const { name, arguments: args, repo, chatId, confirmed } = req.body || {};
     if (typeof name !== 'string' || !name) return res.status(400).json({ error: 'name is required' });
     const started = Date.now();
     try {
+        if (isMember(req)) {
+            // A member's calls reach only their own servers; the shell and repo tools run on this machine
+            if (chatShell.isShellTool(name) || repoTools.isRepoTool(name)) throw new Error('the shell and repo tools are for admins');
+            if (!userMcpMod.available()) throw new Error(noOwnTools.error);
+            const mgr = userMcp.manager(ownerOf(req));
+            await mgr.start();
+            return res.json({ ...(await mgr.call(name, args || {})), ms: Date.now() - started });
+        }
         const needsRepo = chatShell.isShellTool(name) || repoTools.isRepoTool(name);
         const workspace = needsRepo && repo && chatId ? await chatWorktrees.create(repo, chatId) : null;
         const toolRepo = workspace?.path || repo;
@@ -1105,11 +1209,22 @@ app.post('/ui/api/tools/call', localJsonOnly, async (req, res) => {
 // default). "auto" lets the harness choose per request (utils/autoStrategy.js);
 // req.harnessAuto then says how, for the routing log.
 async function profileOf(req) {
+    // A member also has their own routings and compression settings (utils/userPrefs.js). If the database
+    // doesn't answer, they fall back to the shared routings and the global settings rather than fail.
+    let list = profiles.list();
+    if (isMember(req) && db.enabled()) {
+        try {
+            list = [...list, ...(await userPrefs.ownRoutings(ownerOf(req))).profiles];
+            req.harnessUserSettings = await userPrefs.ownSettings(ownerOf(req));
+        } catch (err) {
+            console.warn(`per-user routing skipped: ${err.message}`);
+        }
+    }
     // x-harness-strategy is the same header under its current name
     const id = req.get('x-harness-strategy') || req.get('x-harness-profile');
     if (id && id.trim().toLowerCase() === autoStrategy.AUTO) {
         const { autoJev, autoAskAt, autoFirst } = settings.get();
-        const picked = await autoStrategy.pick(profiles.list(), {
+        const picked = await autoStrategy.pick(list, {
             text: latestUserText(req.body.messages || []),
             tools: Array.isArray(req.body.tools) && req.body.tools.length > 0,
             client: usage.clientOf(req),
@@ -1120,14 +1235,15 @@ async function profileOf(req) {
         console.log(`Auto strategy: ${picked.profile ? picked.profile.name : 'the default strategy'} (${picked.how}: ${picked.why})`);
         return picked.profile;
     }
-    const p = profiles.get(id);
+    const want = id ? String(id).trim().toLowerCase() : null;
+    const p = want ? list.find((x) => x.id === want) || null : null;
     if (id && !p) console.warn(`Unknown strategy "${id}"; using the default`);
     return p;
 }
 
 // Which transforms run: the request's routing decides, else the Interceptor settings
 function transformsFor(req) {
-    const { caveman, headroom, contextAnchor } = req.harnessProfile || settings.get();
+    const { caveman, headroom, contextAnchor } = req.harnessProfile || { ...settings.get(), ...req.harnessUserSettings };
     return { caveman, headroom, contextAnchor };
 }
 
@@ -1239,7 +1355,7 @@ if (require.main === module) {
         for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);
     });
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
-        Promise.all([chatShell.closePowerShellSessions(), mcp.close()]).finally(() => process.exit(0));
+        Promise.all([chatShell.closePowerShellSessions(), mcp.close(), userMcp.closeAll()]).finally(() => process.exit(0));
     });
 }
 

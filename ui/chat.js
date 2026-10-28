@@ -740,11 +740,18 @@ function replyUsageHtml(m) {
   return `<span title="${k.exact ? 'Counted by the provider' : 'Estimated: the provider sent no counts, so this is about 4 characters a token'}">${tilde}${k.input.toLocaleString()} in · ${tilde}${k.output.toLocaleString()} out</span>`;
 }
 
+// Which model wrote a reply, always visible under it (the reason is in the tooltip)
+function modelLabelHtml(m) {
+  const model = replyModel(m);
+  if (!model) return '<span class="name">Assistant</span>';
+  const why = routeWhy(m.trace?.routed) || m.meta?.route;
+  const asked = m.trace?.routed?.model;
+  return `<span class="name model" title="${esc(`Written by ${model}${asked && asked !== model ? ` (routed to ${asked})` : ''}${why ? ` · ${why}` : ''}`)}"><code>${esc(model)}</code></span>`;
+}
+
 function metaHtml(m) {
   const tr = m.trace, meta = m.meta || {};
-  const model = tr?.answered?.servedBy || tr?.routed?.model || meta.model;
   const bits = [
-    model && `<code>${esc(model)}</code>`,
     (routeWhy(tr?.routed) || meta.route) && esc(routeWhy(tr?.routed) || meta.route),
     m.turn?.command && `<span class="tag" title="Sent by the command /${esc(m.turn.command)}${turnNote(m.turn) ? `: ${esc(turnNote(m.turn))}` : ''}">/${esc(m.turn.command)}</span>`,
     tr?.answered?.fallbacks > 0 && `<span class="warn">${tr.answered.fallbacks} fallback${tr.answered.fallbacks > 1 ? 's' : ''}</span>`,
@@ -909,7 +916,7 @@ function messageHtml(m, i, list) {
         <button data-act="copy" title="Copy">${ICONS.copy}</button></span></div>
       <div class="bubble">${esc(m.content)}</div>${m.hint ? `<div class="hint">${esc(m.hint)}</div>` : ''}${m.trace ? `<div class="meta"><details open><summary>What happened</summary>${traceHtml(m)}</details></div>` : ''}</div>`;
   }
-  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who"><span class="name">Assistant</span><span class="actions">
+  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who">${modelLabelHtml(m)}<span class="actions">
       ${m.streaming ? `<button data-act="stop" class="stop" title="Stop this reply (Esc)">${ICONS.stop} Stop</button>` : ''}
       <button data-act="copy" title="Copy as Markdown">${ICONS.copy}</button>
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>

@@ -610,3 +610,9 @@ button.icon.on { color: var(--accent); }
 .import { margin-top: 10px; font-size: 13px; }
 .import summary { cursor: pointer; color: var(--muted); }
 .import li { white-space: normal; overflow: visible; text-overflow: clip; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+
+/* The model that wrote a reply, under it beside the buttons */
+.msg.assistant .who .name.model { display: inline-flex; min-width: 0; font-weight: 500; }
+.msg.assistant .who .name.model code { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.msg.assistant .who .name:not(.model) { display: none; }

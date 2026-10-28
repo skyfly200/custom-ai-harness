@@ -2,9 +2,9 @@
   "name": "Bright Chat",
   "short_name": "Bright Chat",
   "description": "Chat with your models through the harness, and watch where each request goes.",
-  "id": "/ui/chat.html",
-  "start_url": "/ui/chat.html",
-  "scope": "/ui/",
+  "id": "chat.html",
+  "start_url": "chat.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#0d0b18",
   "theme_color": "#0d0b18",
@@ -14,8 +14,8 @@
     { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "Dashboard", "url": "/ui/" },
-    { "name": "Usage", "url": "/ui/usage.html" },
-    { "name": "Routing", "url": "/ui/routing.html" }
+    { "name": "Dashboard", "url": "./" },
+    { "name": "Usage", "url": "usage.html" },
+    { "name": "Routing", "url": "routing.html" }
   ]
 }

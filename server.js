@@ -39,6 +39,7 @@ const batchModels = require('./utils/batchModels');
 const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
+const gatewayWait = require('./utils/gatewayWait');
 const { McpManager, readConfig, writeConfig } = require('./utils/mcp');
 const mcpAdmin = require('./utils/mcpAdmin');
 const mcpCatalog = require('./utils/mcpCatalog');
@@ -377,6 +378,7 @@ const toGateway = createProxyMiddleware({
                 toGateway(req, res, () => {});
                 return;
             }
+            if (waitForGateway(err, req, res)) return;
             req.harnessFailed = true;
             const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
             console.warn(`${req.path}: ${message}`);
@@ -385,8 +387,28 @@ const toGateway = createProxyMiddleware({
     }
 });
 
+// A Gateway still loading after a wake from sleep (HARNESS_GATEWAY_WAIT_S): hold the request until its port opens, then send it once more
+function waitForGateway(err, req, res) {
+    const seconds = gatewayWait.waitSeconds();
+    if (!seconds || req.harnessWaited || res.headersSent || !/ECONNREFUSED/.test(err?.code || '')) return false;
+    req.harnessWaited = true;
+    console.warn(`${req.path}: the Gateway is not up yet; waiting up to ${seconds} s for it`);
+    gatewayWait.waitUntilUp(GATEWAY_URL, { timeoutMs: seconds * 1000 }).then((up) => {
+        if (res.writableEnded || res.destroyed) return;
+        if (up) return toGateway(req, res, () => {});
+        req.harnessFailed = true;
+        const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
+        console.warn(`${req.path}: ${message} (still down after ${seconds} s)`);
+        monitor.recordError(req.harnessEvent, new Error(message), kind);
+    });
+    return true;
+}
+
 // Control UI: monitor the stack and switch the Router's classifier.
+// The same pages answer at the site root (https://host/ = dashboard, /chat.html, ...) and under /ui, so old links
+// and the installed app keep working. Static files only: an unknown path falls through to the API routes and Gateway.
 app.use('/ui', express.static(path.join(__dirname, 'ui')));
+app.use(express.static(path.join(__dirname, 'ui')));
 
 // Langfuse logging (utils/langfuse.js): are keys set, can we reach it, are prompts logged
 app.get('/ui/api/langfuse', async (req, res) => res.json(await langfuse.status(settings.get())));
@@ -574,7 +596,7 @@ app.put('/ui/api/me/credential', async (req, res) => {
 });
 // "Connect OpenRouter": OAuth PKCE (utils/openrouterOAuth.js). The key OpenRouter returns is stored like a pasted one.
 // Both routes are behind the login gate: OpenRouter sends the browser back with its session cookie.
-const oauthBack = (res, result) => res.redirect(`/ui/users.html?openrouter=${encodeURIComponent(result)}`);
+const oauthBack = (res, result) => res.redirect(`/users.html?openrouter=${encodeURIComponent(result)}`);
 const oauthCallbackUrl = (req) => `${process.env.HARNESS_PUBLIC_URL
     ? String(process.env.HARNESS_PUBLIC_URL).replace(/\/+$/, '')
     : `${(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim()}://${req.headers['x-forwarded-host'] || req.headers.host}`}/ui/api/me/credential/callback`;
@@ -1563,6 +1585,7 @@ app.use((err, req, res, next) => {
         return toGateway(req, res, next);
     }
     if (res.headersSent || res.writableEnded) return;
+    if (waitForGateway(err, req, res)) return;
     req.harnessFailed = true;
     const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
     console.warn(`${req.path}: ${message}`);

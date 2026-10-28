@@ -6,7 +6,7 @@ The Bright Chat dashboard, the Settings page and the Usage page. Back to the [RE
 
 The web app is called **Bright Chat**. Its pages draw a slowly turning "embedding space" in the background: words with similar meanings sit in clusters, and the mouse acts as a query that lights up its nearest neighbours. The dots-and-lines button at the end of the page links turns it off (your choice is kept in the browser). On the Chat page it starts off so chats stay fast; the same button turns it on there, and it stays still when Windows or your browser asks for reduced motion (Windows: Settings → Accessibility → Visual effects → Animation effects).
 
-With the Interceptor running, open <http://localhost:3000/ui>. The dashboard refreshes every 3 seconds and shows:
+With the Interceptor running, open <http://localhost:3000/> (the pages are also at `/ui/…`, so older links keep working; on a server, use its site root, e.g. `https://agents.example.com/`). The dashboard refreshes every 3 seconds and shows:
 
 - **Components**: whether the Router, Gateway, local engine (port 8000), Ollama (11434) and a local Laya (8001) answer, and which classifier the Router is using. The last three are optional and show as "not running" rather than down.
 - **Counters** since the Interceptor started: requests, times the Router couldn't be reached, Gateway fallbacks, errors, rate-limited requests and timeouts.

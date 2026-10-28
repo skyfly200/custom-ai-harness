@@ -92,6 +92,7 @@
 <script src="hints.js"></script>
 <script src="costs.js"></script>
 <script src="agentBoard.js"></script>
+<script src="notify.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -358,6 +359,7 @@ async function loadAgents() {
     $('agentDown').hidden = true;
     const b = AgentBoard.board(r.runs, a.agents);
     renderNeeds(b.needs);
+    window.Notify?.watchRuns(r.runs);
     renderAgentCards(b);
     renderAgentRuns(b);
     renderQuick(a.agents);

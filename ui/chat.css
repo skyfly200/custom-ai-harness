@@ -374,7 +374,7 @@ input[type=range] { width: 100%; }
 kbd { font: 12px ui-monospace, Consolas, monospace; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 
 /* composer */
-.compose-row { position: relative; border: 1px solid var(--border); border-radius: 14px; padding: 6px; background: var(--panel); align-items: flex-end; }
+.compose-row { position: relative; border: 1px solid var(--field-border); border-radius: 14px; padding: 6px; background: var(--panel); align-items: flex-end; }
 .compose-row:focus-within { border-color: transparent; box-shadow: 0 0 0 1.5px var(--accent), 0 0 26px -6px var(--glow-c), 0 0 46px -18px var(--glow-b); }
 .compose-row textarea { border: 0; background: transparent; padding: 7px 4px; }
 .compose-row textarea:focus-visible { box-shadow: none; }

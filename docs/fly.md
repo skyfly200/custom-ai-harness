@@ -112,7 +112,7 @@ With `DATABASE_URL` set, scheduled messages are sent by the server (`utils/serve
 Set it up once (you, as owner):
 
 1. **Make a GitHub App** (recommended: each person grants only the repos they choose, and the token expires after 8 hours and renews itself) at GitHub > Settings > Developer settings > GitHub Apps > New.
-   - **Callback URL:** `https://agents.skylerfly.com/ui/api/me/github/callback` (your `HARNESS_PUBLIC_URL` + `/ui/api/me/github/callback`; add `http://localhost:3000/ui/api/me/github/callback` too if you test locally).
+   - **Redirect URI:** `https://agents.skylerfly.com/ui/api/me/github/callback` (your `HARNESS_PUBLIC_URL` + `/ui/api/me/github/callback`; add `http://localhost:3000/ui/api/me/github/callback` too if you test locally). GitHub's App settings page labels this field **Callback URL**; it is the same address as the `redirect_uri` in GitHub's OAuth docs, and the two must match exactly (a trailing slash or http versus https is enough to make GitHub refuse the sign-in).
    - Leave **Expire user authorization tokens** on. Turn **Webhook** off.
    - **Repository permissions:** Contents: Read and write (Runs push; chats only read), Issues: Read and write, Pull requests: Read and write, Metadata: Read. Drop the write levels if you only want chats to read.
    - Install it on your account, and let others install it ("Any account") if you invite people who are not you.
@@ -124,10 +124,10 @@ Set it up once (you, as owner):
      GITHUB_CLIENT_SECRET="..." `
      GITHUB_APP_SLUG="your-app-slug"
    ```
-   Without `GITHUB_APP_SLUG` the harness treats the app as a plain **OAuth App** instead (GitHub > Developer settings > OAuth Apps, same callback URL): it asks for the `repo` scope, which reaches every repo the person can, public and private, and the token does not expire. Set `GITHUB_OAUTH_SCOPE=public_repo` for public repos only.
+   Without `GITHUB_APP_SLUG` the harness treats the app as a plain **OAuth App** instead (GitHub > Developer settings > OAuth Apps, same redirect URI; an OAuth App's field is also labelled "Authorization callback URL"): it asks for the `repo` scope, which reaches every repo the person can, public and private, and the token does not expire. Set `GITHUB_OAUTH_SCOPE=public_repo` for public repos only.
 3. Each person presses **Connect GitHub**. With a GitHub App they then use **Choose which repos it can reach** (a link next to the repo box) to install it on the repos they want; the repo list shows only those.
 
-Notes: `HARNESS_PUBLIC_URL` must be set to the address people use, so GitHub is sent a callback it accepts. Guests cannot connect GitHub. A person's token is only ever sent to GitHub, and to the task runner for one request at a time; the model never sees it. Opening an issue, comment or pull request from a chat always waits for that person's Allow.
+Notes: `HARNESS_PUBLIC_URL` must be set to the address people use, so the redirect URI the harness sends is one GitHub accepts. Guests cannot connect GitHub. A person's token is only ever sent to GitHub, and to the task runner for one request at a time; the model never sees it. Opening an issue, comment or pull request from a chat always waits for that person's Allow.
 
 ## Runs on Fly
 

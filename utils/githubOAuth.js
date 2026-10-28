@@ -25,12 +25,12 @@ function sweep(now) {
     while (pending.size > MAX_PENDING) pending.delete(pending.keys().next().value);
 }
 
-/** The github.com address to send `owner` to. `callback` is our own address GitHub returns them to. */
+/** The github.com address to send `owner` to. `callback` is our own redirect URI, where GitHub returns them. */
 function begin({ owner, callback, back, env = process.env, now = Date.now }) {
     if (!owner) throw fail('no one is signed in');
     if (!configured(env)) throw fail('GitHub sign-in is not set up on this server: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET', 503);
     let u;
-    try { u = new URL(callback); } catch { throw fail('the callback address is not a web address'); }
+    try { u = new URL(callback); } catch { throw fail('the redirect URI is not a web address'); }
     sweep(now());
     const state = crypto.randomBytes(24).toString('base64url');
     pending.set(state, { owner, callback: u.href, back: back || null, expires: now() + TTL_MS });

@@ -140,3 +140,47 @@ test('the migration splits whole-chat rows into messages, keeping order and givi
     await legacy.exec(fs.readFileSync(path.join(dir, files.find((x) => x.startsWith('003'))), 'utf8'));
     assert.equal((await legacy.query('SELECT count(*)::int AS n FROM chat_messages')).rows[0].n, 3);
 });
+
+test('attachments: stored apart from the chat, per owner, with limits, deleted with the chat', async () => {
+    const img = 'data:image/png;base64,' + Buffer.from('not really a png').toString('base64');
+    let aid;
+    await withApp('alice', async (call) => {
+        const r = await call('POST', '/ui/api/sync/chats/c9/attachments', { kind: 'image', name: 'a.png', body: img });
+        assert.equal(r.status, 200);
+        ({ id: aid } = await r.json());
+        // the same bytes in the same chat are stored once
+        assert.equal((await (await call('POST', '/ui/api/sync/chats/c9/attachments', { kind: 'image', name: 'a.png', body: img })).json()).id, aid);
+        assert.equal((await (await call('GET', '/ui/api/sync/attachments')).json()).used, Buffer.byteLength(img));
+        const got = await (await call('GET', `/ui/api/sync/chats/c9/attachments/${aid}`)).json();
+        assert.deepEqual([got.kind, got.name, got.body], ['image', 'a.png', img]);
+        const raw = await call('GET', `/ui/api/sync/chats/c9/attachments/${aid}/raw`);
+        assert.equal(raw.headers.get('content-type'), 'image/png');
+        assert.equal(Buffer.from(await raw.arrayBuffer()).toString(), 'not really a png');
+        // refused: a bad kind, an image that is not a data URL
+        assert.equal((await call('POST', '/ui/api/sync/chats/c9/attachments', { kind: 'video', name: 'x', body: 'y' })).status, 400);
+        assert.equal((await call('POST', '/ui/api/sync/chats/c9/attachments', { kind: 'image', name: 'x', body: 'hello' })).status, 400);
+    });
+    await withApp('bob', async (call) => {
+        assert.equal((await call('GET', `/ui/api/sync/chats/c9/attachments/${aid}`)).status, 404);
+        assert.equal((await (await call('GET', '/ui/api/sync/attachments')).json()).used, 0);
+    });
+    await withApp('alice', async (call) => {
+        await call('PUT', '/ui/api/sync/chats/c9', { id: 'c9', title: 't', updated: 1, messages: [] });
+        await call('DELETE', '/ui/api/sync/chats/c9');
+        assert.equal((await call('GET', `/ui/api/sync/chats/c9/attachments/${aid}`)).status, 404);
+    });
+});
+
+test('attachments: per-file and per-person limits', async () => {
+    process.env.HARNESS_ATTACH_MAX_MB = '0.001'; // about 1 KB a file
+    process.env.HARNESS_ATTACH_QUOTA_MB = '0.002'; // about 2 KB in all
+    try {
+        await withApp('carol', async (call) => {
+            const post = (text) => call('POST', '/ui/api/sync/chats/q1/attachments', { kind: 'text', name: 'f.txt', body: text });
+            assert.equal((await post('x'.repeat(2000))).status, 413);
+            assert.equal((await post('a'.repeat(1000))).status, 200);
+            assert.equal((await post('b'.repeat(1000))).status, 200);
+            assert.equal((await post('c'.repeat(1000))).status, 413);
+        });
+    } finally { delete process.env.HARNESS_ATTACH_MAX_MB; delete process.env.HARNESS_ATTACH_QUOTA_MB; }
+});

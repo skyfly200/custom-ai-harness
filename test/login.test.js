@@ -113,7 +113,7 @@ test('signing in sets an HttpOnly SameSite cookie and opens the app', async () =
 
 test('the open redirect after login stays on this site', async () => {
     const r = await fetch(`${base}/login`, json({ username: 'bob', password: 'bob-password', next: '//evil.example' }));
-    assert.equal((await r.json()).next, '/ui/');
+    assert.equal((await r.json()).next, '/');
 });
 
 test('admins manage users; plain users get chat and API but not Settings or controls', async () => {

@@ -18,10 +18,10 @@ const SESSION_MS = 7 * 24 * 3600 * 1000;
 const MAX_SESSIONS = 500;
 const MAX_FAILS = 5;
 const WINDOW_MS = 15 * 60 * 1000;
-const ADMIN_ONLY_PAGES = new Set(['/ui/settings.html']);
+const ADMIN_ONLY_PAGES = new Set(['/ui/settings.html', '/settings.html']);
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const safeNext = (next) => (typeof next === 'string' && /^\/(?!\/|\\)/.test(next) ? next : '/ui/');
+const safeNext = (next) => (typeof next === 'string' && /^\/(?!\/|\\)/.test(next) ? next : '/');
 
 function loginPage({ next, error, providers = [] }) {
     const buttons = providers.map((p) => `<a class="oauth" href="/auth/${p}?next=${encodeURIComponent(next)}">Continue with ${p === 'github' ? 'GitHub' : 'Google'}</a>`).join('');
@@ -54,7 +54,7 @@ ${buttons}${buttons ? '<div class="or">or with a user name</div>' : ''}
 const f=document.getElementById('f'),err=document.getElementById('err');
 f.addEventListener('submit',async(e)=>{e.preventDefault();const b=f.querySelector('button');b.disabled=true;err.textContent='';
 try{const r=await fetch('/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(f)))});
-const j=await r.json().catch(()=>({}));if(r.ok){location.href=j.next||'/ui/';return}err.textContent=j.error||'Sign in failed';}
+const j=await r.json().catch(()=>({}));if(r.ok){location.href=j.next||'/';return}err.textContent=j.error||'Sign in failed';}
 catch{err.textContent='Could not reach the harness'}b.disabled=false});
 </script></body></html>`;
 }
@@ -215,7 +215,7 @@ function createLogin({ users, legacyPassword = '', sessionStore = null, guests =
         req.harnessAuthenticated = found.user.role === 'admin';
         const admin = found.user.role === 'admin';
         if (!admin && (ADMIN_ONLY_PAGES.has(pathOf(req)) || pathOf(req).startsWith('/ui/api/users'))) {
-            if (wantsHtml(req)) return res.status(403).type('html').send('<p style="font:16px system-ui;padding:24px">Only admins can open this page. <a href="/ui/">Back to the dashboard</a></p>');
+            if (wantsHtml(req)) return res.status(403).type('html').send('<p style="font:16px system-ui;padding:24px">Only admins can open this page. <a href="/">Back to the dashboard</a></p>');
             return res.status(403).json({ error: 'admins only' });
         }
         stripCredentials(req, found);

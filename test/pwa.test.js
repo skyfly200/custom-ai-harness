@@ -17,7 +17,9 @@ function pngSize(file) {
 test('the manifest names an app that starts inside its scope', () => {
     assert.equal(manifest.display, 'standalone');
     assert.ok(manifest.name && manifest.short_name);
-    for (const url of [manifest.start_url, ...manifest.shortcuts.map((s) => s.url)]) assert.ok(url.startsWith(manifest.scope), `${url} is inside ${manifest.scope}`);
+    // Relative, so the same file installs the app from /ui/ and from the site root
+    const at = (u) => new URL(u, 'https://harness.example/manifest.webmanifest').pathname;
+    for (const url of [manifest.start_url, manifest.id, ...manifest.shortcuts.map((s) => s.url)]) assert.ok(at(url).startsWith(at(manifest.scope)), `${url} is inside ${manifest.scope}`);
     assert.ok(fs.existsSync(path.join(ui, path.basename(manifest.start_url))));
 });
 
@@ -43,7 +45,7 @@ test('every page links the manifest with credentials, so a password-protected ha
 });
 
 // Run sw.js against a stand-in for the worker's globals and replay fetches through it
-function worker({ network }) {
+function worker({ network, at = 'https://harness.example/ui/sw.js' }) {
     const listeners = {};
     const store = new Map();
     const cache = {
@@ -52,7 +54,7 @@ function worker({ network }) {
         match: async (req) => store.get(req.url),
     };
     const self = {
-        location: new URL('https://harness.example/ui/sw.js'),
+        location: new URL(at),
         addEventListener: (type, fn) => { listeners[type] = fn; },
         skipWaiting: () => {}, clients: { claim: async () => {} },
     };
@@ -88,4 +90,13 @@ test('a login prompt or an error never replaces a kept page', async () => {
     const res = await w.request('https://harness.example/ui/chat.html');
     assert.equal(res.status, 401);
     assert.equal(w.store.size, 0);
+});
+
+test('served from the site root, the worker keeps pages and assets but not the API, login or Gateway paths', async () => {
+    const ok = (body) => ({ ok: true, type: 'basic', body, clone() { return this; } });
+    const w = worker({ at: 'https://harness.example/sw.js', network: async (req) => ok(req.url) });
+    for (const p of ['/ui/api/usage', '/api/x', '/v1/messages', '/login', '/auth/github', '/admin/config', '/healthz', '/openrouter-proxy/x']) {
+        assert.equal(await w.request(`https://harness.example${p}`), undefined, p);
+    }
+    for (const p of ['/', '/chat.html', '/chat.js', '/vendor/x.js', '/ui/chat.html']) assert.ok(await w.request(`https://harness.example${p}`), p);
 });

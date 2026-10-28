@@ -39,6 +39,7 @@ const batchModels = require('./utils/batchModels');
 const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
+const gatewayWait = require('./utils/gatewayWait');
 const { McpManager, readConfig, writeConfig } = require('./utils/mcp');
 const mcpAdmin = require('./utils/mcpAdmin');
 const mcpCatalog = require('./utils/mcpCatalog');
@@ -370,6 +371,7 @@ const toGateway = createProxyMiddleware({
                 toGateway(req, res, () => {});
                 return;
             }
+            if (waitForGateway(err, req, res)) return;
             req.harnessFailed = true;
             const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
             console.warn(`${req.path}: ${message}`);
@@ -377,6 +379,23 @@ const toGateway = createProxyMiddleware({
         },
     }
 });
+
+// A Gateway still loading after a wake from sleep (HARNESS_GATEWAY_WAIT_S): hold the request until its port opens, then send it once more
+function waitForGateway(err, req, res) {
+    const seconds = gatewayWait.waitSeconds();
+    if (!seconds || req.harnessWaited || res.headersSent || !/ECONNREFUSED/.test(err?.code || '')) return false;
+    req.harnessWaited = true;
+    console.warn(`${req.path}: the Gateway is not up yet; waiting up to ${seconds} s for it`);
+    gatewayWait.waitUntilUp(GATEWAY_URL, { timeoutMs: seconds * 1000 }).then((up) => {
+        if (res.writableEnded || res.destroyed) return;
+        if (up) return toGateway(req, res, () => {});
+        req.harnessFailed = true;
+        const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
+        console.warn(`${req.path}: ${message} (still down after ${seconds} s)`);
+        monitor.recordError(req.harnessEvent, new Error(message), kind);
+    });
+    return true;
+}
 
 // Control UI: monitor the stack and switch the Router's classifier.
 // The same pages answer at the site root (https://host/ = dashboard, /chat.html, ...) and under /ui, so old links
@@ -1559,6 +1578,7 @@ app.use((err, req, res, next) => {
         return toGateway(req, res, next);
     }
     if (res.headersSent || res.writableEnded) return;
+    if (waitForGateway(err, req, res)) return;
     req.harnessFailed = true;
     const { kind, message } = gatewayGuard.answerProxyError(err, req, res);
     console.warn(`${req.path}: ${message}`);

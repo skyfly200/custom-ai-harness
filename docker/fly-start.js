@@ -58,7 +58,9 @@ function commands(dataDir = DATA, env = process.env) {
         { name: 'router', cmd: 'python', args: ['router.py', '--config', path.join(dataDir, 'routellm-config.yaml'), '--host', '127.0.0.1', '--port', '6060'], env: {} },
         { name: 'interceptor', cmd: 'node', args: ['server.js'],
           env: { GATEWAY_URL: 'http://127.0.0.1:4000', ROUTER_URL: 'http://127.0.0.1:6060', OPENROUTER_PROXY_URL: 'http://127.0.0.1:3000',
-                 HARNESS_STOP_VIA_PARENT: '1' } },
+                 HARNESS_STOP_VIA_PARENT: '1',
+                 // the first request after a wake waits for LiteLLM to load
+                 HARNESS_GATEWAY_WAIT_S: env.HARNESS_GATEWAY_WAIT_S || '240' } },
     ];
     // DATABASE_URL is the app's Neon database; LiteLLM would take it for its own and try to run prisma, and exit
     return list.map((c) => {

@@ -66,6 +66,7 @@ Other tools use `https://agents.skylerfly.com/v1` with the key as their API key.
 The Machine bills only while it runs, so the app stops itself:
 
 - **It sleeps after 30 idle minutes** (`HARNESS_IDLE_STOP_MIN` in `fly.toml`; `0` turns it off). Opening a page, a request to `/v1` (Claude Code, other tools) or any save counts as use. The Dashboard polling for status or holding the live feed open does not, or an open tab would keep it awake. A reply still being answered or saved keeps it awake whatever the clock says.
+- **The first message after a sleep waits for the Gateway.** LiteLLM takes a minute or more to load after the Machine wakes, so the Interceptor holds a request until the Gateway's port opens (up to `HARNESS_GATEWAY_WAIT_S`, 240 seconds on Fly) instead of answering 502. The chat shows it as a slow first reply.
 - **The Dashboard has a Stop server button** (admins only) for stopping it right now. It asks first.
 - **Opening the address wakes it.** Fly starts a stopped Machine when a request arrives. The first request waits while the Machine boots and LiteLLM starts (a minute, not measured); Claude Code may need to retry its first call.
 

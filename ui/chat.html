@@ -16,18 +16,19 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="chat.css">
 <link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
 </head>
 <body class="chat-page" data-bg="off">
 <div class="app side-open" id="app">
 
-  <!-- Top bar: the brand, the pages, and the button that folds the chats panel away -->
+  <!-- Top bar: the brand and the pages -->
   <header class="top">
-    <button class="icon" id="toggleSide" title="Hide chats" aria-label="Chats" aria-expanded="true"></button>
     <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span></h1><a href="./">Dashboard</a><a href="chat.html" class="here" aria-current="page">Chat</a><a href="usage.html">Usage</a><a href="routing.html">Routing</a><a href="agents.html">Agents</a><a href="settings.html">Settings</a></nav>
   </header>
 
-  <!-- Chat bar, over the conversation: this chat's name, context and controls -->
+  <!-- Chat bar, over the conversation: the button that folds the chats panel away, this chat's name, context and controls -->
   <div class="chatbar">
+    <button class="icon" id="toggleSide" title="Hide chats" aria-label="Chats" aria-expanded="true"></button>
     <button type="button" class="proj-badge" id="projectBadge" hidden></button>
     <input type="text" id="title" class="title" aria-label="Chat title" placeholder="New chat">
     <button type="button" class="stats" id="chatStats" title=""></button>
@@ -162,6 +163,16 @@
             </span>
           </label>
           <div class="muted small" id="repoInfo">Read-only for the model.</div>
+          <div class="gh-box" id="ghBox" hidden>
+            <label title="Attach a repo from your own GitHub account. The model reads its files, history, issues and pull requests through GitHub, with nothing copied to this server.">GitHub repo
+              <span class="repo-row">
+                <input type="text" id="ghRepo" list="ghRepos" placeholder="owner/name" autocomplete="off" spellcheck="false">
+                <datalist id="ghRepos"></datalist>
+                <button type="button" id="ghAttach" class="mini">Attach</button>
+              </span>
+            </label>
+            <div class="muted small" id="ghInfo"></div>
+          </div>
           <label class="check" title="Let the model run commands in the linked repo with run_command. Every command goes past the command guard first, and a risky one waits in the chat for you to Allow or Decline. Commands run in your own working copy, so uncommitted work is not protected."><input type="checkbox" id="shellInRepo" checked> Shell in the linked repo</label>
           <div class="tools-head"><span>MCP servers</span><span><a href="tools.html" class="mini" title="Add, test and edit MCP servers">Manage</a> <button type="button" id="mcpReload" class="mini" title="Read mcp-servers.json again and reconnect">Reload</button></span></div>
           <ul class="mcp-list" id="mcpList"><li class="muted small">Loading…</li></ul>
@@ -325,6 +336,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <datalist id="models"></datalist>
 
+<script src="dialogs.js"></script>
 <script src="markdown.js"></script>
 <script src="cachetimer.js"></script>
 <script src="tokens.js"></script>

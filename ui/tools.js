@@ -55,7 +55,7 @@
     edit.addEventListener('click', () => open(s));
     const remove = el('button', { type: 'button', className: 'quiet' }, 'Remove');
     remove.addEventListener('click', act(async () => {
-      if (!confirm(`Remove "${s.name}"? Its entry is deleted from the file.`)) return;
+      if (!await ui.confirm(`Remove "${s.name}"? Its entry is deleted from the file.`)) return;
       data = await api('POST', '/ui/api/mcp/remove', { name: s.name });
       say(`Removed ${s.name}.`);
       draw();

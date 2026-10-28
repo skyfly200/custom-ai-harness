@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bright Chat · Agents</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="agents.css">
 <link rel="stylesheet" href="vendor/xterm/xterm.css">
 <link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
 </head>
 <body>
 <main>
@@ -31,6 +32,7 @@
     <h2 data-hint="Agents work on your GitHub repos. Paste a fine-grained personal access token with Contents: read and write on the repos you want to use. It is kept encrypted and only used to clone, fetch and push your run branches">GitHub</h2>
     <div class="card" id="githubCard">
       <p class="muted" id="githubNote">Connect GitHub so agents can work in your repos.</p>
+      <p><a id="githubConnect" href="api/me/github/connect?back=agents.html" hidden>Connect with GitHub</a></p>
       <form id="githubForm" class="repo-input" autocomplete="off">
         <input type="password" id="githubToken" placeholder="github_pat_…" autocomplete="off" spellcheck="false" aria-label="GitHub token">
         <button type="submit" class="primary">Connect</button>
@@ -175,6 +177,7 @@
     <div id="previewInfo"></div>
   </details>
 </main>
+<script src="dialogs.js"></script>
 <script src="hints.js"></script>
 <script src="bright.js"></script>
 <script src="agent-widget.js" data-app-name="Harness UI" defer></script>

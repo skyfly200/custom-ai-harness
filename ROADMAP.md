@@ -86,6 +86,16 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
 
 * ✅ **Redesign: settings drawer and chat view (2026-10-27).** The Options panel is now a right-hand drawer with Model, Context, Tools and Voice tabs instead of a four-column strip that pushed the chat down; replies are plain text with a small orb beside them (your messages stay bubbles), actions sit under each reply, and the composer floats over a soft fade. All element ids are unchanged. **Still to do in the redesign:** the same drawer treatment for the activity panel, a per-message model label under each reply, and the Settings page.
 
+* **GitHub in chats (full development from a chat).** ✅ Done (PR #136): Connect GitHub (GitHub App or OAuth App, one token per person shared with Runs), attach a repo to a chat, read tools (files, search, commits, branches, issues, PRs), GitHub Actions tools (workflows, runs, logs), and changes that wait for Allow (issue, comment, PR from an existing branch, run/re-run/cancel a workflow). **To do**, each as an Allow-gated tool plus the App permission it needs:
+  * **Create repositories.** Organizations work with a GitHub App (org Administration write); a personal account needs an OAuth App token (scope `repo`) because App user tokens can't create user repos, so this means running an OAuth App beside the GitHub App.
+  * **Packages and container images.** Publishing needs a classic or OAuth token with `write:packages`; GitHub App tokens are not accepted by the registries. Listing and deleting package versions may work with the App's Packages permission.
+  * **Deploys.** Fly deploys use a Fly token, not GitHub. Start with Actions-driven deploys (already possible through `github_run_workflow`), then Deployments and Environments permissions to read and approve them, and a repo-secrets tool (Secrets and Variables permission).
+  * **Projects (v2) and project management.** Apps can't reach personal Projects v2; org Projects work with the org Projects permission. Issues, labels, milestones and sub-issues are reachable today with the Issues permission and just need tools.
+  * **Repo settings and branch protection** (Administration write; high risk, keep behind its own Allow wording).
+  * **Pushing code from a chat.** Today code changes go through Runs; a chat tool that commits files to a new branch (Contents write) would let a chat open a PR with real changes.
+  * **A Disconnect button** for the connected token in chat Options and on Agents, and a project-level GitHub repo (shared by all chats in a project).
+  * **Verify against real GitHub:** App install flow, token refresh, code search, job-log download redirect, callback on Fly.
+
 # Bugs
 * **Allow Tool Call messages should surface and show a clear indicator of user input being needed
 

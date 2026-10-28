@@ -41,6 +41,10 @@ The interceptor scores the text typed in the latest user turn for complexity sig
 The threshold is encoded as `router-bert-<threshold>` — the strict three-part format required to prevent RouteLLM `ValueError` parser crashes.
 
 
+## Dialogs in the web UI
+
+Never use the browser's `alert()`, `confirm()` or `prompt()` in `ui/`. `ui/dialogs.js` (loaded first on every page) gives `ui.toast(text, { kind: 'error' })`, `await ui.confirm(text, { ok, danger })` (true/false) and `await ui.prompt(text, { value, type, ok })` (string, or null when cancelled). They are keyboard accessible (Enter, Esc, Tab stays inside) and follow light/dark and phone width. `test/dialogs.test.js` fails when a native call appears. A new page must load `dialogs.js` before its other scripts.
+
 ## Tests
 
 ```bash
@@ -64,6 +68,8 @@ python -m pytest test/                     # Router: contract tests and every ba
 | `ROUTER_LIVE_LLM_URL` + `ROUTER_LIVE_LLM_MODEL` (+ `ROUTER_LIVE_LLM_KEY`) | a real OpenAI-compatible reasoning model |
 
 ### Which tests cover what
+
+- `test/dialogs.test.js`: no native alert/confirm/prompt in `ui/`, dialogs.js loaded first on every page.
 
 | Area | Test files |
 |---|---|

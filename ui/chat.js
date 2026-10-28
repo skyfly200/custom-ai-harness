@@ -574,12 +574,12 @@ function drawSide() {
   drawProjectBits();
 }
 
-$('chatList').addEventListener('click', (e) => {
+$('chatList').addEventListener('click', async (e) => {
   const del = e.target.closest('[data-del]');
   if (del) {
     e.stopPropagation();
     const entry = index.find(x => x.id === del.dataset.del);
-    if (confirm(`Delete “${entry?.title || 'this chat'}”?`)) deleteChat(del.dataset.del);
+    if (await ui.confirm(`Delete “${entry?.title || 'this chat'}”?`)) deleteChat(del.dataset.del);
     return;
   }
   const li = e.target.closest('li[data-id]');
@@ -647,18 +647,18 @@ function stepChat(dir) {
 }
 
 $('newChat').addEventListener('click', () => { openChat(null); if (narrow()) setSide(false); });
-$('deleteChat').addEventListener('click', () => {
+$('deleteChat').addEventListener('click', async () => {
   if (!index.some(e => e.id === chat.id)) {
     // nothing saved yet: just clear what's typed
     if (!$('input').value && !pending.length) return toast('Nothing to delete yet.');
     $('input').value = ''; pending = []; drawChips(); autoGrow();
     return;
   }
-  if (confirm(`Delete “${chatTitle(chat)}”? This can't be undone.`)) deleteChat(chat.id);
+  if (await ui.confirm(`Delete “${chatTitle(chat)}”? This can't be undone.`)) deleteChat(chat.id);
 });
-$('deleteAll').addEventListener('click', () => {
+$('deleteAll').addEventListener('click', async () => {
   if (!index.length) return toast('No saved chats to delete.');
-  if (confirm(`Delete all ${index.length} saved chat${index.length === 1 ? '' : 's'} in this browser? This can't be undone. (Export all chats first to keep a copy.)`)) deleteAllChats();
+  if (await ui.confirm(`Delete all ${index.length} saved chat${index.length === 1 ? '' : 's'} in this browser? This can't be undone. (Export all chats first to keep a copy.)`)) deleteAllChats();
 });
 $('toggleSide').addEventListener('click', () => setSide(!$('app').classList.contains('side-open')));
 $('title').addEventListener('change', () => { chat.title = $('title').value.trim(); saveChat(chat, { touch: false }); drawList(); });
@@ -1241,7 +1241,7 @@ $('log').addEventListener('click', async (e) => {
     case 'resend': resendFrom(chat, m); break;
     case 'edit':
       if (running.has(chat.id)) return toast('Stop the current reply first.');
-      if (i < chat.messages.length - 1 && !confirm('Edit this message? The replies after it will be removed.')) return;
+      if (i < chat.messages.length - 1 && !await ui.confirm('Edit this message? The replies after it will be removed.')) return;
       // editing a command's message puts the command back in the box
       $('input').value = m.turn?.command ? `/${m.turn.command}${m.content ? ` ${m.content}` : ' '}` : m.content;
       await hydrateAttachments(chat, m);
@@ -1370,7 +1370,7 @@ async function resendFrom(c, m) {
   const i = c.messages.indexOf(m);
   if (i < 0) return;
   if (i < c.messages.length - 1 && c.messages.slice(i + 1).some(x => x.role === 'user')
-    && !confirm('Send this message again? The messages after it will be removed.')) return;
+    && !await ui.confirm('Send this message again? The messages after it will be removed.')) return;
   c.messages.splice(i + 1);
   saveChat(c);
   if (chat === c) drawLog();
@@ -3826,11 +3826,11 @@ $('projectForm').addEventListener('submit', async (e) => {
   }
   drawSide(); drawRepo(); drawGithub(); drawRoute(); drawTools(); drawHint(); drawKit(); drawEffort();
 });
-$('pDelete').addEventListener('click', () => {
+$('pDelete').addEventListener('click', async () => {
   const p = editingProject;
   if (!p) return;
   const n = index.filter(e => e.project === p.id).length;
-  if (!confirm(`Delete the project “${p.name}”?${n ? ` Its ${n} chat${n === 1 ? '' : 's'} stay, with no project.` : ''}`)) return;
+  if (!await ui.confirm(`Delete the project “${p.name}”?${n ? ` Its ${n} chat${n === 1 ? '' : 's'} stay, with no project.` : ''}`)) return;
   for (const e of index.filter(x => x.project === p.id)) {
     const c = loadChat(e.id);
     if (c) { delete c.project; saveChat(c, { touch: false }); }
@@ -3935,8 +3935,8 @@ for (const [id, key] of [['kName', 'name'], ['kDesc', 'description'], ['kBody', 
     if (key === 'name') for (const li of $('skillIndex').querySelectorAll('li.on')) li.textContent = editingSkill.name || '(no name)';
   });
 }
-$('skillDelete').addEventListener('click', () => {
-  if (!editingSkill || !confirm(`Delete the skill “${editingSkill.name}”?`)) return;
+$('skillDelete').addEventListener('click', async () => {
+  if (!editingSkill || !await ui.confirm(`Delete the skill “${editingSkill.name}”?`)) return;
   const id = editingSkill.id;
   skills = skills.filter(k => k.id !== id);
   for (const p of projects) if (p.skills) p.skills = p.skills.filter(x => x !== id);
@@ -4011,8 +4011,8 @@ for (const [id, key] of [['cName', 'name'], ['cDesc', 'description'], ['cModel',
     if (key === 'name') drawCommandIndex();
   });
 }
-$('commandDelete').addEventListener('click', () => {
-  if (!editingCommand || !confirm(`Delete the command “/${editingCommand.name}”?`)) return;
+$('commandDelete').addEventListener('click', async () => {
+  if (!editingCommand || !await ui.confirm(`Delete the command “/${editingCommand.name}”?`)) return;
   commands = commands.filter(c => c !== editingCommand);
   saveCommands();
   editingCommand = commands[0] || null;
@@ -4105,8 +4105,8 @@ $('schedForm').addEventListener('submit', (e) => {
   drawSchedules();
   toast(`Scheduled for ${new Date(s.next).toLocaleString()}.`);
 });
-$('sDelete').addEventListener('click', () => {
-  if (!editingSchedule || !confirm('Delete this scheduled message?')) return;
+$('sDelete').addEventListener('click', async () => {
+  if (!editingSchedule || !await ui.confirm('Delete this scheduled message?')) return;
   schedules = schedules.filter(s => s !== editingSchedule);
   saveSchedules(); $('schedDialog').close(); drawSchedules();
 });

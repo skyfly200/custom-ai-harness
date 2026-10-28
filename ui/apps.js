@@ -51,8 +51,8 @@
     if (!app) return;
     if (btn.dataset.act === 'edit') return openForm(app);
     if (btn.dataset.act === 'remove') {
-      if (!confirm(`Remove ${app.name}? Its past change runs stay.`)) return;
-      try { await call('DELETE', `/${app.id}`); load(); } catch (err) { alert(err.message); }
+      if (!await ui.confirm(`Remove ${app.name}? Its past change runs stay.`)) return;
+      try { await call('DELETE', `/${app.id}`); load(); } catch (err) { ui.toast(err.message, { kind: 'error' }); }
       return;
     }
     $('changeTitle').textContent = `Ask ${app.name} for a change`;

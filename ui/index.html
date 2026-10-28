@@ -90,6 +90,7 @@
   </div>
 </main>
 
+<script src="dialogs.js"></script>
 <script src="hints.js"></script>
 <script src="costs.js"></script>
 <script src="agentBoard.js"></script>
@@ -380,7 +381,7 @@ $('needs').addEventListener('click', async (e) => {
   b.disabled = true;
   try {
     await getJSON(`api/runs/${b.closest('.need').dataset.run}/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ allow: b.dataset.allow === '1' }) });
-  } catch (err) { alert(err.message); }
+  } catch (err) { ui.toast(err.message, { kind: 'error' }); }
   loadAgents();
 });
 
@@ -414,7 +415,7 @@ async function loadServer() {
   $('serverStop').disabled = st.stopping;
 }
 $('serverStop').addEventListener('click', async () => {
-  if (!confirm('Stop the server? It starts again when you open its address (this takes about a minute), and replies in progress are cut off.')) return;
+  if (!await ui.confirm('Stop the server? It starts again when you open its address (this takes about a minute), and replies in progress are cut off.')) return;
   try { await getJSON('api/server/stop', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); $('serverNote').textContent = 'Stopping…'; $('serverStop').disabled = true; }
   catch (err) { $('serverNote').textContent = `Could not stop: ${err.message}`; }
 });

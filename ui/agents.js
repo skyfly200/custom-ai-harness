@@ -187,7 +187,7 @@ async function drawShip(run) {
   $('undoBtn').hidden = !v.shipped || Boolean(v.undone);
 }
 async function shipAction(path, ask) {
-  if (!selected || !confirm(ask)) return;
+  if (!selected || !await ui.confirm(ask)) return;
   $('shipMsg').textContent = 'Working…';
   try {
     const res = await fetch(`api/runs/${selected}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
@@ -212,7 +212,7 @@ $('previewForm').addEventListener('submit', async (e) => {
     let res = await start(false);
     let body = await res.json().catch(() => ({}));
     if (res.status === 409 && body.needsApproval) {
-      if (!confirm(`${body.error}\n\nRun this command in the workspace?\n${command}`)) { $('previewMsg').textContent = ''; return; }
+      if (!await ui.confirm(`${body.error}\n\nRun this command in the workspace?\n${command}`)) { $('previewMsg').textContent = ''; return; }
       res = await start(true);
       body = await res.json().catch(() => ({}));
     }
@@ -288,12 +288,12 @@ $('detail').addEventListener('click', async (e) => {
     // a continue is the same run, so the page stays on it
     if (act === 'continue') await post(`/${selected}/continue`);
     if (act === 'remove') {
-      if (!confirm('Delete this run? Its branch stays in your repo.')) return;
+      if (!await ui.confirm('Delete this run? Its branch stays in your repo.')) return;
       await api(`/${selected}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
       selected = null; location.hash = '';
       renderDetail(null);
     }
-  } catch (err) { alert(err.message); }
+  } catch (err) { ui.toast(err.message, { kind: 'error' }); }
   refresh();
 });
 
@@ -318,14 +318,14 @@ $('fileTickets').addEventListener('click', async () => {
   try {
     msg.textContent = 'Checking…';
     const plan = await ticketCall('files', { ...body, confirm: false });
-    if (!confirm(`Write ${plan.files.length} files into ${plan.repo}/${plan.folder}?\n\n${plan.files.map((x) => `· ${x.name}`).join('\n')}`)) { msg.textContent = ''; return; }
+    if (!await ui.confirm(`Write ${plan.files.length} files into ${plan.repo}/${plan.folder}?\n\n${plan.files.map((x) => `· ${x.name}`).join('\n')}`)) { msg.textContent = ''; return; }
     const made = await ticketCall('files', { ...body, confirm: true });
     msg.textContent = `Wrote ${made.files.length} files to ${made.relative}. Commit them when you are happy.`;
   } catch (err) { msg.textContent = err.message; }
 });
 $('loadTickets').addEventListener('click', async () => {
   const f = $('newRun'), msg = $('ticketsMsg');
-  const folder = prompt('Folder inside the repo, for example wayfinder/add-export');
+  const folder = await ui.prompt('Folder inside the repo, for example wayfinder/add-export');
   if (!folder) return;
   try {
     const draft = await ticketCall('read', { repo: f.elements.repo.value.trim(), folder });
@@ -425,7 +425,7 @@ $('githubForm').addEventListener('submit', async (e) => {
   try { showGithub((await githubApi('PUT', { token })).github); $('githubToken').value = ''; } catch (err) { $('githubNote').textContent = err.message; }
 });
 $('githubOff').addEventListener('click', async () => {
-  if (!confirm('Disconnect GitHub? Agents can no longer reach your private repos.')) return;
+  if (!await ui.confirm('Disconnect GitHub? Agents can no longer reach your private repos.')) return;
   try { showGithub((await githubApi('DELETE')).github); } catch (err) { $('githubNote').textContent = err.message; }
 });
 
@@ -585,8 +585,8 @@ $('agentInfo').addEventListener('click', async (e) => {
   if (!act || !a) return;
   if (act === 'edit') return openAgentDialog(a);
   if (act === 'delete') {
-    if (!confirm(`Delete the agent “${a.name}”? Its tasks stay in the list as ordinary runs, and their branches stay in your repo.`)) return;
-    try { await sendAgent('DELETE', `/${a.id}`); chooseAgent(null); refresh(); } catch (err) { alert(err.message); }
+    if (!await ui.confirm(`Delete the agent “${a.name}”? Its tasks stay in the list as ordinary runs, and their branches stay in your repo.`)) return;
+    try { await sendAgent('DELETE', `/${a.id}`); chooseAgent(null); refresh(); } catch (err) { ui.toast(err.message, { kind: 'error' }); }
   }
 });
 

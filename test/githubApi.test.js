@@ -125,3 +125,39 @@ test('listRepos: an OAuth/token connection lists /user/repos; a GitHub App lists
     });
     assert.deepEqual((await gh.listRepos('t', { fetchFn: b.fetchFn, appMode: true })).map((r) => r.full), ['o/x']);
 });
+
+test('Actions: workflows, runs, one run with its failing step, and the tail of a job log', async () => {
+    const f = fake({
+        'GET /repos/skyfly200/custom-ai-harness/actions/workflows?': json({ workflows: [{ id: 5, name: 'CI', path: '.github/workflows/ci.yml', state: 'active' }] }),
+        'GET /repos/skyfly200/custom-ai-harness/actions/workflows/ci.yml/runs?': json({ workflow_runs: [{ id: 9, name: 'CI', status: 'completed', conclusion: 'failure', head_branch: 'main', created_at: '2026-10-28T10:00:00Z' }] }),
+        'GET /repos/skyfly200/custom-ai-harness/actions/runs/9/jobs': json({ jobs: [{ id: 42, name: 'test', status: 'completed', conclusion: 'failure', steps: [{ number: 1, name: 'Run tests', conclusion: 'failure' }] }] }),
+        'GET /repos/skyfly200/custom-ai-harness/actions/runs/9': json({ id: 9, name: 'CI', status: 'completed', conclusion: 'failure', head_branch: 'main', head_sha: 'abcdef123', html_url: 'https://github.com/x/actions/runs/9' }),
+        'GET /repos/skyfly200/custom-ai-harness/actions/jobs/42/logs': new Response(Array.from({ length: 300 }, (_, i) => `line ${i + 1}`).join('\n')),
+    });
+    assert.equal(await run(f, 'github_list_workflows', {}), 'ci.yml (id 5, active): CI');
+    assert.match(await run(f, 'github_list_runs', { workflow: 'ci.yml' }), /^#9 CI \[failure\] main 2026-10-28 10:00$/);
+    const one = await run(f, 'github_get_run', { run_id: 9 });
+    assert.ok(one.includes('job 42 test [failure]') && one.includes('1. Run tests [failure]'));
+    const log = await run(f, 'github_job_logs', { job_id: 42, tail_lines: 5 });
+    assert.match(log, /^\[last 5 of 300 lines\]\nline 296\n.*line 300$/s);
+});
+
+test('Actions changes need the confirmation and send what was approved', async () => {
+    const f = fake({
+        'POST /repos/skyfly200/custom-ai-harness/actions/workflows/deploy.yml/dispatches': new Response(null, { status: 204 }),
+        'POST /repos/skyfly200/custom-ai-harness/actions/runs/9/rerun-failed-jobs': new Response('{}', { status: 201 }),
+        'POST /repos/skyfly200/custom-ai-harness/actions/runs/9/cancel': new Response('{}', { status: 202 }),
+        'GET /repos/skyfly200/custom-ai-harness': json({ default_branch: 'main' }),
+    });
+    for (const [name, args] of [['github_run_workflow', { workflow: 'deploy.yml' }], ['github_rerun', { run_id: 9 }], ['github_cancel_run', { run_id: 9 }]]) {
+        assert.equal(gh.isWrite(name), true);
+        await assert.rejects(run(f, name, args), /needs the person's approval/);
+    }
+    assert.equal(f.seen.length, 0);
+    assert.match(await run(f, 'github_run_workflow', { workflow: 'deploy.yml', inputs: { env: 'prod', n: 2 } }, { confirmed: true }), /started deploy\.yml on main/);
+    assert.deepEqual(f.seen.at(-1).body, { ref: 'main', inputs: { env: 'prod', n: '2' } });
+    assert.match(await run(f, 'github_rerun', { run_id: 9, failed_only: true }, { confirmed: true }), /run #9 started again/);
+    assert.match(await run(f, 'github_cancel_run', { run_id: 9 }, { confirmed: true }), /cancel requested/);
+    assert.match(gh.describe('github_run_workflow', { workflow: 'deploy.yml', ref: 'dev', inputs: { a: '1' } }, 'a/b'), /Run workflow deploy\.yml in a\/b on dev\n\nInputs: \{"a":"1"\}/);
+    await assert.rejects(run(f, 'github_run_workflow', { workflow: '' }, { confirmed: true }), /workflow is required/);
+});

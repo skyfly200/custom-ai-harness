@@ -113,6 +113,20 @@ const READ = [
         state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Default open' },
         limit: { type: 'integer', description: 'Most to return (default 20)' },
     }),
+    fn('github_list_workflows', 'List the GitHub Actions workflows of the linked GitHub repository.'),
+    fn('github_list_runs', 'List recent GitHub Actions runs of the linked repository, newest first.', {
+        workflow: { type: 'string', description: 'Only this workflow: its file name (ci.yml) or id' },
+        branch: { type: 'string' },
+        status: { type: 'string', description: 'completed, in_progress, queued, success, failure, cancelled…' },
+        limit: { type: 'integer', description: 'Default 10' },
+    }),
+    fn('github_get_run', 'One GitHub Actions run: its result and each job with its steps and which one failed.', {
+        run_id: { type: 'integer' },
+    }, ['run_id']),
+    fn('github_job_logs', 'The log of one GitHub Actions job (from github_get_run), the last lines of it.', {
+        job_id: { type: 'integer' },
+        tail_lines: { type: 'integer', description: 'How many lines from the end (default 200, at most 2000)' },
+    }, ['job_id']),
     fn('github_get_issue', 'Read one issue or pull request of the linked GitHub repository: its text, labels and comments (a pull request also lists its changed files).', {
         number: { type: 'integer', description: 'The issue or pull request number' },
     }, ['number']),
@@ -120,6 +134,17 @@ const READ = [
 
 // These change GitHub, so the page asks the person first and sends confirmed: true
 const WRITE = [
+    fn('github_run_workflow', 'Start a GitHub Actions workflow that has a workflow_dispatch trigger, on a branch. The person is asked to approve it first.', {
+        workflow: { type: 'string', description: 'File name (deploy.yml) or id' },
+        ref: { type: 'string', description: 'Branch or tag to run on (default the default branch)' },
+        inputs: { type: 'object', description: 'The workflow\'s inputs, name to string value' },
+    }, ['workflow']),
+    fn('github_rerun', 'Run a finished GitHub Actions run again. The person is asked to approve it first.', {
+        run_id: { type: 'integer' }, failed_only: { type: 'boolean', description: 'Only the jobs that failed' },
+    }, ['run_id']),
+    fn('github_cancel_run', 'Cancel a GitHub Actions run that is in progress. The person is asked to approve it first.', {
+        run_id: { type: 'integer' },
+    }, ['run_id']),
     fn('github_create_issue', 'Open an issue in the linked GitHub repository. The person is asked to approve it first.', {
         title: { type: 'string' }, body: { type: 'string', description: 'Markdown' },
         labels: { type: 'array', items: { type: 'string' } },
@@ -144,6 +169,9 @@ function describe(name, args = {}, repo = '') {
         case 'github_create_issue': return `Open an issue in ${repo}: “${clip(args.title, 120)}”${args.body ? `\n\n${clip(args.body)}` : ''}`;
         case 'github_comment': return `Comment on #${args.number} in ${repo}:\n\n${clip(args.body)}`;
         case 'github_create_pull_request': return `Open a ${args.draft ? 'draft ' : ''}pull request in ${repo}: “${clip(args.title, 120)}” (${args.head} → ${args.base || 'default branch'})${args.body ? `\n\n${clip(args.body)}` : ''}`;
+        case 'github_run_workflow': return `Run workflow ${args.workflow} in ${repo} on ${args.ref || 'the default branch'}${args.inputs && Object.keys(args.inputs).length ? `\n\nInputs: ${JSON.stringify(args.inputs)}` : ''}`;
+        case 'github_rerun': return `Run #${args.run_id} again in ${repo}${args.failed_only ? ' (failed jobs only)' : ''}`;
+        case 'github_cancel_run': return `Cancel run #${args.run_id} in ${repo}`;
         default: return name;
     }
 }
@@ -213,6 +241,51 @@ async function call({ token, repo, name, args = {}, confirmed = false, fetchFn =
             const list = await get(`/repos/${full}/${pulls ? 'pulls' : 'issues'}?state=${state}&per_page=${clampInt(args.limit, 20, 1, 100)}`);
             const rows = (pulls ? list : list.filter((i) => !i.pull_request));
             return cap(rows.map((i) => `#${i.number} [${i.state}] ${i.title}${i.user ? ` (${i.user.login})` : ''}`).join('\n') || `(no ${state} ${pulls ? 'pull requests' : 'issues'})`);
+        }
+        case 'github_list_workflows': {
+            const r = await get(`/repos/${full}/actions/workflows?per_page=100`);
+            return r.workflows?.length ? r.workflows.map((w) => `${w.path.split('/').pop()} (id ${w.id}, ${w.state}): ${w.name}`).join('\n') : '(no workflows)';
+        }
+        case 'github_list_runs': {
+            const q = new URLSearchParams({ per_page: String(clampInt(args.limit, 10, 1, 50)) });
+            if (args.branch) q.set('branch', checkRef(args.branch));
+            if (args.status) q.set('status', checkRef(args.status));
+            const base = args.workflow ? `/repos/${full}/actions/workflows/${encodeURIComponent(str(args.workflow, 'workflow', 100))}/runs` : `/repos/${full}/actions/runs`;
+            const r = await get(`${base}?${q}`);
+            return r.workflow_runs?.length ? cap(r.workflow_runs.map((x) => `#${x.id} ${x.name} [${x.status === 'completed' ? x.conclusion : x.status}] ${x.head_branch} ${String(x.created_at).slice(0, 16).replace('T', ' ')}`).join('\n')) : '(no runs)';
+        }
+        case 'github_get_run': {
+            const id = num(args.run_id);
+            const run = await get(`/repos/${full}/actions/runs/${id}`);
+            const jobs = await get(`/repos/${full}/actions/runs/${id}/jobs?per_page=100`);
+            let out = `#${run.id} ${run.name} [${run.status === 'completed' ? run.conclusion : run.status}] on ${run.head_branch} (${String(run.head_sha).slice(0, 7)})\n${run.html_url}`;
+            for (const j of jobs.jobs || []) {
+                out += `\n\njob ${j.id} ${j.name} [${j.status === 'completed' ? j.conclusion : j.status}]`;
+                for (const st of j.steps || []) out += `\n  ${st.number}. ${st.name} [${st.conclusion || st.status}]`;
+            }
+            return cap(out);
+        }
+        case 'github_job_logs': {
+            const text = await get(`/repos/${full}/actions/jobs/${num(args.job_id)}/logs`);
+            const lines = String(typeof text === 'string' ? text : JSON.stringify(text)).split(/\r?\n/);
+            const n = clampInt(args.tail_lines, 200, 1, 2000);
+            return cap(`${lines.length > n ? `[last ${n} of ${lines.length} lines]\n` : ''}${lines.slice(-n).join('\n')}`);
+        }
+        case 'github_run_workflow': {
+            const meta = args.ref ? null : await get(`/repos/${full}`);
+            const body = { ref: args.ref ? checkRef(args.ref) : meta.default_branch, ...(args.inputs && typeof args.inputs === 'object' && !Array.isArray(args.inputs) ? { inputs: Object.fromEntries(Object.entries(args.inputs).map(([k, v]) => [k, String(v)])) } : {}) };
+            await get(`/repos/${full}/actions/workflows/${encodeURIComponent(str(args.workflow, 'workflow', 100))}/dispatches`, { method: 'POST', body });
+            return `started ${args.workflow} on ${body.ref}; list its runs with github_list_runs in a few seconds`;
+        }
+        case 'github_rerun': {
+            const id = num(args.run_id);
+            await get(`/repos/${full}/actions/runs/${id}/${args.failed_only ? 'rerun-failed-jobs' : 'rerun'}`, { method: 'POST', body: {} });
+            return `run #${id} started again`;
+        }
+        case 'github_cancel_run': {
+            const id = num(args.run_id);
+            await get(`/repos/${full}/actions/runs/${id}/cancel`, { method: 'POST', body: {} });
+            return `cancel requested for run #${id}`;
         }
         case 'github_get_issue': {
             const n = num(args.number);

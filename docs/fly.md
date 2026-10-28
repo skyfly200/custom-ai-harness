@@ -114,7 +114,7 @@ Set it up once (you, as owner):
 1. **Make a GitHub App** (recommended: each person grants only the repos they choose, and the token expires after 8 hours and renews itself) at GitHub > Settings > Developer settings > GitHub Apps > New.
    - **Redirect URI:** `https://agents.skylerfly.com/ui/api/me/github/callback` (your `HARNESS_PUBLIC_URL` + `/ui/api/me/github/callback`; add `http://localhost:3000/ui/api/me/github/callback` too if you test locally). GitHub's App settings page labels this field **Callback URL**; it is the same address as the `redirect_uri` in GitHub's OAuth docs, and the two must match exactly (a trailing slash or http versus https is enough to make GitHub refuse the sign-in).
    - Leave **Expire user authorization tokens** on. Turn **Webhook** off.
-   - **Repository permissions:** Contents: Read and write (Runs push; chats only read), Issues: Read and write, Pull requests: Read and write, Metadata: Read. Drop the write levels if you only want chats to read.
+   - **Repository permissions:** Contents: Read and write (Runs push; chats only read), Issues: Read and write, Pull requests: Read and write, **Actions: Read and write** (chats read runs and logs, and start, re-run or cancel workflows), Metadata: Read. Add **Workflows: Read and write** only if agents should be able to push changes to `.github/workflows` files (Runs); chats never edit files. Drop the write levels if you only want chats to read.
    - Install it on your account, and let others install it ("Any account") if you invite people who are not you.
    - Copy the **Client ID**, make a **Client secret**, and note the app's URL slug (`github.com/apps/<slug>`).
 2. **Set the secrets** (the Machine restarts):

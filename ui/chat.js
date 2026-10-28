@@ -1290,8 +1290,8 @@ function contextText(c) {
   const gh = ghOf(c);
   if (gh) {
     parts.push(`This chat is linked to the GitHub repository ${gh.full}${gh.branch ? ` (default branch ${gh.branch})` : ''}${gh.private ? ', which is private' : ''}. `
-      + 'Use the github_ tools to list, read and search its files, look at its commits, branches, issues and pull requests before answering questions about it. Paths are relative to the repository root. '
-      + 'github_create_issue, github_comment and github_create_pull_request change GitHub: the user is asked to approve each one first, so say what you intend to post and why. You cannot push code or edit files in this repository.');
+      + 'Use the github_ tools to list, read and search its files, look at its commits, branches, issues, pull requests and GitHub Actions runs and logs before answering questions about it. Paths are relative to the repository root. '
+      + 'github_create_issue, github_comment, github_create_pull_request, github_run_workflow, github_rerun and github_cancel_run change GitHub: the user is asked to approve each one first, so say what you intend to post and why. You cannot push code or edit files in this repository.');
   }
   return parts.join('\n\n');
 }
@@ -1719,11 +1719,14 @@ async function askAdvisor(advisor, args, signal, c) {
 }
 
 // The GitHub tools that change something (mirrors utils/githubApi.js describe())
-const GITHUB_WRITES = new Set(['github_create_issue', 'github_comment', 'github_create_pull_request']);
+const GITHUB_WRITES = new Set(['github_create_issue', 'github_comment', 'github_create_pull_request', 'github_run_workflow', 'github_rerun', 'github_cancel_run']);
 function githubChange(name, a, repo) {
   const clip = (t, n = 400) => (String(t ?? '').length > n ? `${String(t).slice(0, n)}…` : String(t ?? ''));
   if (name === 'github_create_issue') return `Open an issue in ${repo}: “${clip(a.title, 120)}”${a.body ? `\n\n${clip(a.body)}` : ''}`;
   if (name === 'github_comment') return `Comment on #${a.number} in ${repo}:\n\n${clip(a.body)}`;
+  if (name === 'github_run_workflow') return `Run workflow ${a.workflow} in ${repo} on ${a.ref || 'the default branch'}${a.inputs && Object.keys(a.inputs).length ? `\n\nInputs: ${JSON.stringify(a.inputs)}` : ''}`;
+  if (name === 'github_rerun') return `Run #${a.run_id} again in ${repo}${a.failed_only ? ' (failed jobs only)' : ''}`;
+  if (name === 'github_cancel_run') return `Cancel run #${a.run_id} in ${repo}`;
   return `Open a ${a.draft ? 'draft ' : ''}pull request in ${repo}: “${clip(a.title, 120)}” (${a.head} → ${a.base || 'default branch'})${a.body ? `\n\n${clip(a.body)}` : ''}`;
 }
 

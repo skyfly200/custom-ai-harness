@@ -246,7 +246,7 @@ test('a full user is refused until they add a key, and then their ticket rides w
     bodies = [];
     const refused = await ask(fay);
     assert.equal(refused.status, 402);
-    assert.match((await refused.json()).error.message, /OpenRouter credential/);
+    assert.match((await refused.json()).error.message, /Connect your OpenRouter/);
     assert.equal(bodies.length, 0, 'nothing reached the Gateway');
     assert.equal((await fetch(`${base}/ui/api/me/credential`, send('PUT', fay, { key: 'nope' }))).status, 400);
     const saved = await (await fetch(`${base}/ui/api/me/credential`, send('PUT', fay, { key: 'sk-or-v1-fay1fay2fay3fay4fay5' }))).json();
@@ -261,6 +261,34 @@ test('a full user is refused until they add a key, and then their ticket rides w
     // removing the key stops them again
     await fetch(`${base}/ui/api/me/credential`, { method: 'DELETE', ...as(fay) });
     assert.equal((await ask(fay)).status, 402);
+});
+
+test('Connect OpenRouter sends a full user to OpenRouter and stores the key they bring back', async () => {
+    const go = await fetch(`${base}/ui/api/me/credential/connect`, { ...as(fay), redirect: 'manual' });
+    assert.equal(go.status, 302);
+    const to = new URL(go.headers.get('location'));
+    assert.equal(to.origin + to.pathname, 'https://openrouter.ai/auth');
+    assert.equal(to.searchParams.get('code_challenge_method'), 'S256');
+    const back = new URL(to.searchParams.get('callback_url'));
+    assert.equal(back.pathname, '/ui/api/me/credential/callback');
+    // OpenRouter would redirect the browser here with ?code=; the exchange itself is stubbed
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (url, init) => /\/or\/auth\/keys$/.test(String(url))
+        ? Promise.resolve(new Response('{"key":"sk-or-v1-oauth1oauth2oauth3oauth4"}')) : realFetch(url, init);
+    try {
+        const done = await fetch(`${base}${back.pathname}?code=C1&state=${back.searchParams.get('state')}`, { ...as(fay), redirect: 'manual' });
+        assert.equal(done.headers.get('location'), '/ui/users.html?openrouter=connected');
+    } finally { globalThis.fetch = realFetch; }
+    const me = await (await fetch(`${base}/ui/api/me/credential`, as(fay))).json();
+    assert.equal(me.credential.kind, 'oauth');
+    assert.equal(me.credential.last4, 'uth4');
+    assert.equal((await userCredentials.resolve('fay')).key, 'sk-or-v1-oauth1oauth2oauth3oauth4');
+    // admins and guests have their own way to pay; a stale or foreign state is refused
+    const adminGo = await fetch(`${base}/ui/api/me/credential/connect`, { ...as(admin), redirect: 'manual' });
+    assert.match(adminGo.headers.get('location'), /openrouter=unavailable/);
+    const stale = await fetch(`${base}/ui/api/me/credential/callback?code=C&state=nope`, { ...as(fay), redirect: 'manual' });
+    assert.match(decodeURIComponent(stale.headers.get('location')), /expired/);
+    await fetch(`${base}/ui/api/me/credential`, { method: 'DELETE', ...as(fay) });
 });
 
 test('admins use the owner\'s key with no ticket and no cap', async () => {

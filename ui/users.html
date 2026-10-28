@@ -65,24 +65,13 @@
   <section id="keySection" hidden>
     <h2>Your OpenRouter key</h2>
     <div class="card">
-      <p class="muted" style="margin-top:0" id="keyNote">Your requests are billed to your own OpenRouter account. Paste a key from openrouter.ai/keys; it is stored encrypted and never shown again.</p>
+      <p class="muted" style="margin-top:0" id="keyNote">Your requests are billed to your own OpenRouter account. Connect it and OpenRouter makes a key for this server; it is stored encrypted and never shown again. You can revoke it any time at openrouter.ai/settings/keys.</p>
       <p id="keyState"></p>
+      <p><button type="button" class="primary" id="connectOr">Connect OpenRouter</button></p>
+      <p class="muted">Or paste a key from openrouter.ai/keys:</p>
       <form id="setKey" class="form" autocomplete="off">
         <label class="field"><span>OpenRouter key</span><input name="key" type="password" placeholder="sk-or-…" autocomplete="off" required></label>
         <div class="field"><span>&nbsp;</span><button class="primary">Save key</button> <button type="button" id="clearKey">Remove</button></div>
-      </form>
-    </div>
-  </section>
-
-  <section id="fedSection" hidden>
-    <h2>Or use federation (no key stored)</h2>
-    <div class="card">
-      <p class="muted" style="margin-top:0">For an OpenRouter Business or Enterprise organisation. In OpenRouter, Settings, Workload identity: trust this server as an issuer, then make a policy whose subject is <code id="fedSub"></code> and whose audience is <code id="fedAud"></code>. Paste the policy's id here.</p>
-      <p class="muted" id="fedIss"></p>
-      <form id="setFed" class="form" autocomplete="off">
-        <label class="field"><span>Policy id</span><input name="policyId" required></label>
-        <label class="field"><span>Audience</span><input name="audience" placeholder="(the default above)"></label>
-        <div class="field"><span>&nbsp;</span><button class="primary">Use federation</button></div>
       </form>
     </div>
   </section>

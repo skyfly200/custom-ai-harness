@@ -11,6 +11,8 @@
     if (!r.ok) throw new Error(j.error || `${r.status}`);
     return j;
   }
+  // the second password box must match the first; says so inline (no alert)
+  const mismatch = (f) => (f.password !== f.confirm ? 'The two passwords do not match.' : '');
   const cell = (text) => { const td = document.createElement('td'); td.style.padding = '6px 8px'; td.textContent = text; return td; };
   const btn = (text, fn, hint) => {
     const b = document.createElement('button');
@@ -19,6 +21,31 @@
     return b;
   };
   const when = (iso) => (iso ? new Date(iso).toLocaleDateString() : '');
+
+  // inline row under the user: new password + confirm
+  function resetForm(name, after) {
+    const open = after.nextElementSibling;
+    if (open && open.className === 'resetRow') { open.remove(); return; }
+    const row = document.createElement('tr'); row.className = 'resetRow';
+    const td = document.createElement('td'); td.colSpan = 5; td.style.padding = '6px 8px';
+    const form = document.createElement('form'); form.className = 'form'; form.autocomplete = 'off';
+    form.innerHTML = `<label class="field"><span>New password</span><input name="password" type="password" required autocomplete="new-password"></label>
+      <label class="field"><span>Confirm password</span><input name="confirm" type="password" required autocomplete="new-password"></label>
+      <div class="field"><span>&nbsp;</span><span><button class="primary">Set password</button> <button type="button" class="cancel">Cancel</button></span></div>
+      <p class="muted err" role="alert" style="margin:0;color:var(--bad, #c4264a)"></p>`;
+    form.querySelector('span').textContent = `New password for ${name}`;
+    form.querySelector('.cancel').addEventListener('click', () => row.remove());
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(form));
+      const err = form.querySelector('.err');
+      err.textContent = mismatch(f);
+      if (err.textContent) return;
+      try { await api('POST', `/ui/api/users/${encodeURIComponent(name)}`, f); row.remove(); say(`Password changed for ${name}.`); } catch (x) { err.textContent = x.message; }
+    });
+    td.append(form); row.append(td); after.after(row);
+    form.password.focus();
+  }
 
   function drawUsers(users) {
     const t = $('userTable');
@@ -31,12 +58,7 @@
       td.style.cssText = 'padding:6px 8px;text-align:right;white-space:nowrap';
       if (!u.core) {
         td.append(
-          btn('Reset password', async () => {
-            const password = prompt(`New password for ${u.name} (at least ${me.minPassword} characters):`);
-            if (!password) return;
-            await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { password });
-            say(`Password changed for ${u.name}.`);
-          }),
+          btn('Reset password', () => resetForm(u.name, tr)),
           ' ',
         );
         if (guestsOn && u.role !== 'admin') {
@@ -125,6 +147,7 @@
     e.preventDefault();
     try {
       const f = Object.fromEntries(new FormData(e.target));
+      if (mismatch(f)) return say(mismatch(f), true);
       drawUsers((await api('POST', '/ui/api/users', f)).users);
       e.target.reset(); say(`Added ${f.name}.`); fillOwners();
     } catch (err) { say(err.message, true); }
@@ -166,7 +189,9 @@
   $('pw').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api('POST', '/ui/api/me/password', Object.fromEntries(new FormData(e.target)));
+      const f = Object.fromEntries(new FormData(e.target));
+      if (mismatch(f)) return say(mismatch(f), true);
+      await api('POST', '/ui/api/me/password', f);
       e.target.reset(); say('Password changed.');
     } catch (err) { say(err.message, true); }
   });

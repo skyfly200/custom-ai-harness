@@ -206,6 +206,11 @@ class Users {
     }
 }
 
+// API callers may send `confirm` beside a new password; when they do it must match.
+function checkConfirm(password, confirm) {
+    if (confirm !== undefined && confirm !== null && String(confirm) !== String(password ?? '')) throw new Error('the two passwords do not match');
+}
+
 const DUMMY = hashPassword('not a real password');
 
-module.exports = { hashPassword, verifyPassword, validHash, parseAdmins, FileStore, Users, MIN_PASSWORD, sha };
+module.exports = { hashPassword, verifyPassword, validHash, parseAdmins, FileStore, Users, MIN_PASSWORD, sha, checkConfirm };

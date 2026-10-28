@@ -16,6 +16,10 @@ function ask(question) {
 
 (async () => {
     const password = process.argv[2] ?? await ask('Password: ');
+    if (process.argv[2] === undefined && await ask('Confirm password: ') !== password) {
+        console.error('The two passwords do not match.');
+        process.exit(1);
+    }
     if (password.length < MIN_PASSWORD) {
         console.error(`Use at least ${MIN_PASSWORD} characters.`);
         process.exit(1);

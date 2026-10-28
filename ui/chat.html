@@ -205,18 +205,20 @@
   </section>
   <div class="opt-scrim" id="optScrim" hidden></div>
 
+</div>
+
   <!-- Live activity -->
-  <aside class="activity" id="activity" hidden>
+  <div class="opt-scrim" id="actScrim" hidden></div>
+  <aside class="activity" id="activity" hidden role="dialog" aria-labelledby="activityTitle">
     <div class="act-head">
-      <strong>Activity</strong>
+      <strong id="activityTitle">Activity</strong>
       <span class="live" id="liveState" title="Live feed from the Interceptor: every request through the harness, from this page and other clients such as Claude Code"><span class="dot"></span><span>connecting</span></span>
-      <button class="icon" id="closeActivity" title="Close" aria-label="Close activity"></button>
+      <button class="icon" id="closeActivity" title="Close (Esc)" aria-label="Close activity"></button>
     </div>
     <div class="health" id="health"></div>
     
     <ul class="feed" id="feed"><li class="muted small">Waiting for requests…</li></ul>
   </aside>
-</div>
 
 <!-- This chat's tokens and costs -->
 <div class="usage-pop" id="usagePop" hidden></div>

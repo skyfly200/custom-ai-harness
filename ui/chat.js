@@ -3266,14 +3266,16 @@ async function loadHealth() {
 setInterval(loadHealth, 10000);
 
 function setActivity(open) {
-  if (open && narrow() && !$('options').hidden) setOptions(false);
+  if (open && !$('options').hidden) setOptions(false);
   $('activity').hidden = !open;
+  $('actScrim').hidden = !open;
+  $('toggleActivity').setAttribute('aria-expanded', String(open));
   $('toggleActivity').classList.toggle('on', open);
-  prefs.activity = open; store.set(PREF_KEY, prefs);
   if (open) { drawFeed(); loadHealth(); }
 }
 $('toggleActivity').addEventListener('click', () => setActivity($('activity').hidden));
-$('closeActivity').addEventListener('click', () => setActivity(false));
+$('closeActivity').addEventListener('click', () => { setActivity(false); $('toggleActivity').focus(); });
+$('actScrim').addEventListener('click', () => setActivity(false));
 // The settings drawer: one section at a time, the last one remembered. It slides
 // over the chat's right edge; on a phone it covers the page and the dim area closes it.
 const OPT_TAB_KEY = 'harness-chat-options-tab';
@@ -3288,7 +3290,7 @@ function setOptions(open) {
   $('optScrim').hidden = !open;
   $('toggleOptions').classList.toggle('on', open);
   $('toggleOptions').setAttribute('aria-expanded', String(open));
-  if (open) { if (!$('activity').hidden && narrow()) setActivity(false); $('options').querySelector('.opt-tabs [aria-selected=true]')?.focus({ preventScroll: true }); }
+  if (open) { if (!$('activity').hidden) setActivity(false); $('options').querySelector('.opt-tabs [aria-selected=true]')?.focus({ preventScroll: true }); }
 }
 let savedTab = 'model';
 try { savedTab = localStorage.getItem(OPT_TAB_KEY) || 'model'; } catch {}
@@ -3305,6 +3307,7 @@ $('options').querySelector('.opt-tabs').addEventListener('keydown', (e) => {
 });
 // before the keyboard handler below, so Esc closes the drawer and doesn't stop a reply
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('activity').hidden) { setActivity(false); $('toggleActivity').focus(); e.stopImmediatePropagation(); return; }
   if (e.key === 'Escape' && !$('options').hidden && $('options').contains(document.activeElement)) { setOptions(false); $('toggleOptions').focus(); e.stopImmediatePropagation(); }
 });
 
@@ -4257,6 +4260,7 @@ setTimeout(checkSchedules, 1500);
 connectLive();
 loadRecent();
 sync.start();
-setActivity(!!prefs.activity);
+// Activity is a drawer now: it stays closed on load instead of covering the chat
+setActivity(false);
 setSide(narrow() ? false : panelOpen);
 setInterval(() => { drawList(); drawSchedules(); }, 60000);

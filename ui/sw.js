@@ -5,20 +5,24 @@
 // that isn't a plain GET: chats, answers and keys are never stored here.
 'use strict';
 
-const CACHE = 'bright-chat-v1';
+const CACHE = 'bright-chat-v3';
 
 function keepable(request) {
   if (request.method !== 'GET') return false;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return false;
-  if (!url.pathname.startsWith('/ui/')) return false;
-  return !url.pathname.startsWith('/ui/api/');
+  // Only the app's own pages and assets, wherever it is served: /ui/ or the site root
+  const base = new URL('./', self.location).pathname;
+  if (!url.pathname.startsWith(base)) return false;
+  const rel = url.pathname.slice(base.length);
+  if (/(^|\/)api\//.test(rel) || /^(v1|openrouter-proxy|auth|login|logout|admin|healthz)(\/|$)/.test(rel)) return false;
+  return rel === '' || rel === 'ui/' || /\.(html|js|css|svg|png|webmanifest)$/.test(rel);
 }
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   // Fetched with the page's credentials, so a harness behind HARNESS_PASSWORD still works
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'bright.js', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'bright.js', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
 });
 
 self.addEventListener('activate', (event) => {
@@ -43,5 +47,17 @@ self.addEventListener('fetch', (event) => {
       if (kept) return kept;
       throw err;
     }
+  })());
+});
+
+// Tapping a "waiting for you" notification brings the app forward (or opens it)
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || './chat.html', self.location).href;
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const mine = all.find((c) => c.url.split('#')[0] === target.split('#')[0]) || all[0];
+    if (mine) { await mine.focus(); return; }
+    await self.clients.openWindow(target);
   })());
 });

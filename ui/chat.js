@@ -817,11 +817,18 @@ function replyUsageHtml(m) {
   return `<span title="${k.exact ? 'Counted by the provider' : 'Estimated: the provider sent no counts, so this is about 4 characters a token'}">${tilde}${k.input.toLocaleString()} in · ${tilde}${k.output.toLocaleString()} out</span>`;
 }
 
+// Which model wrote a reply, always visible under it (the reason is in the tooltip)
+function modelLabelHtml(m) {
+  const model = replyModel(m);
+  if (!model) return '<span class="name">Assistant</span>';
+  const why = routeWhy(m.trace?.routed) || m.meta?.route;
+  const asked = m.trace?.routed?.model;
+  return `<span class="name model" title="${esc(`Written by ${model}${asked && asked !== model ? ` (routed to ${asked})` : ''}${why ? ` · ${why}` : ''}`)}"><code>${esc(model)}</code></span>`;
+}
+
 function metaHtml(m) {
   const tr = m.trace, meta = m.meta || {};
-  const model = tr?.answered?.servedBy || tr?.routed?.model || meta.model;
   const bits = [
-    model && `<code>${esc(model)}</code>`,
     (routeWhy(tr?.routed) || meta.route) && esc(routeWhy(tr?.routed) || meta.route),
     m.turn?.command && `<span class="tag" title="Sent by the command /${esc(m.turn.command)}${turnNote(m.turn) ? `: ${esc(turnNote(m.turn))}` : ''}">/${esc(m.turn.command)}</span>`,
     tr?.answered?.fallbacks > 0 && `<span class="warn">${tr.answered.fallbacks} fallback${tr.answered.fallbacks > 1 ? 's' : ''}</span>`,
@@ -986,7 +993,7 @@ function messageHtml(m, i, list) {
         <button data-act="copy" title="Copy">${ICONS.copy}</button></span></div>
       <div class="bubble">${esc(m.content)}</div>${m.hint ? `<div class="hint">${esc(m.hint)}</div>` : ''}${m.trace ? `<div class="meta"><details open><summary>What happened</summary>${traceHtml(m)}</details></div>` : ''}</div>`;
   }
-  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who"><span class="name">Assistant</span><span class="actions">
+  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who">${modelLabelHtml(m)}<span class="actions">
       ${m.streaming ? `<button data-act="stop" class="stop" title="Stop this reply (Esc)">${ICONS.stop} Stop</button>` : ''}
       <button data-act="copy" title="Copy as Markdown">${ICONS.copy}</button>
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>
@@ -1591,6 +1598,7 @@ async function runReply(c, turn) {
     drawList();
     if (reply.content && !reply.timedOut) nameChat(c);
     speech.endReply(reply);
+    if (reply.content && !reply.timedOut && !controller.signal.aborted && c.messages.includes(reply)) window.Notify?.show('reply', `chat.html#chat=${c.id}`);
     finish();
     // a message typed while this reply was arriving goes next, as if you had just sent it
     if (queues.get(c.id)?.length) setTimeout(() => drainQueue(c.id), 0);
@@ -1645,6 +1653,7 @@ function askApproval(call, reason, onChange, signal) {
   const key = call.id || (call.id = `call_${++approvalCount}`);
   call.approval = { state: 'ask', reason: reason || '' };
   onChange();
+  window.Notify?.show('approval', `chat.html#chat=${chat?.id || ''}`);
   return new Promise((resolve) => {
     const settle = (allow) => {
       pendingApprovals.delete(key);
@@ -3348,14 +3357,16 @@ async function loadHealth() {
 setInterval(loadHealth, 10000);
 
 function setActivity(open) {
-  if (open && narrow() && !$('options').hidden) setOptions(false);
+  if (open && !$('options').hidden) setOptions(false);
   $('activity').hidden = !open;
+  $('actScrim').hidden = !open;
+  $('toggleActivity').setAttribute('aria-expanded', String(open));
   $('toggleActivity').classList.toggle('on', open);
-  prefs.activity = open; store.set(PREF_KEY, prefs);
   if (open) { drawFeed(); loadHealth(); }
 }
 $('toggleActivity').addEventListener('click', () => setActivity($('activity').hidden));
-$('closeActivity').addEventListener('click', () => setActivity(false));
+$('closeActivity').addEventListener('click', () => { setActivity(false); $('toggleActivity').focus(); });
+$('actScrim').addEventListener('click', () => setActivity(false));
 // The settings drawer: one section at a time, the last one remembered. It slides
 // over the chat's right edge; on a phone it covers the page and the dim area closes it.
 const OPT_TAB_KEY = 'harness-chat-options-tab';
@@ -3370,7 +3381,7 @@ function setOptions(open) {
   $('optScrim').hidden = !open;
   $('toggleOptions').classList.toggle('on', open);
   $('toggleOptions').setAttribute('aria-expanded', String(open));
-  if (open) { if (!$('activity').hidden && narrow()) setActivity(false); $('options').querySelector('.opt-tabs [aria-selected=true]')?.focus({ preventScroll: true }); }
+  if (open) { if (!$('activity').hidden) setActivity(false); $('options').querySelector('.opt-tabs [aria-selected=true]')?.focus({ preventScroll: true }); }
 }
 let savedTab = 'model';
 try { savedTab = localStorage.getItem(OPT_TAB_KEY) || 'model'; } catch {}
@@ -3387,6 +3398,7 @@ $('options').querySelector('.opt-tabs').addEventListener('keydown', (e) => {
 });
 // before the keyboard handler below, so Esc closes the drawer and doesn't stop a reply
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('activity').hidden) { setActivity(false); $('toggleActivity').focus(); e.stopImmediatePropagation(); return; }
   if (e.key === 'Escape' && !$('options').hidden && $('options').contains(document.activeElement)) { setOptions(false); $('toggleOptions').focus(); e.stopImmediatePropagation(); }
 });
 
@@ -4330,6 +4342,7 @@ setTimeout(checkSchedules, 1500);
 connectLive();
 loadRecent();
 sync.start();
-setActivity(!!prefs.activity);
+// Activity is a drawer now: it stays closed on load instead of covering the chat
+setActivity(false);
 setSide(narrow() ? false : panelOpen);
 setInterval(() => { drawList(); drawSchedules(); }, 60000);

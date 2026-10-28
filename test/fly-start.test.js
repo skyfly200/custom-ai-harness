@@ -58,3 +58,9 @@ test('HARNESS_RUNS=1 adds the task runner, hosted, sharing a token with the Inte
     assert.strictEqual(runner.env.RUNNER_DIR, path.join('/vol', 'runs'));
     assert.strictEqual(runner.env.RUNNER_REPOS_DIR, path.join('/vol', 'repos'));
 });
+
+test("the Gateway doesn't see the app's DATABASE_URL, LiteLLM would try to use it", () => {
+    const [gateway, , interceptor] = commands('/vol', { DATABASE_URL: 'postgres://neon' });
+    assert.strictEqual(gateway.env.DATABASE_URL, undefined);
+    assert.strictEqual(interceptor.env.DATABASE_URL, 'postgres://neon');
+});

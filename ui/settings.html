@@ -35,6 +35,10 @@
     <div class="sub muted fine" id="lfNote"></div>
   </div>
 
+  <nav class="jump" aria-label="Sections">
+    <a href="#iPanel">Interceptor</a><a href="#rPanel">Router</a><a href="#cPanel">Chat on this device</a>
+  </nav>
+
   <section class="card panel" id="iPanel">
     <div class="panel-head">
       <h2 data-hint="How the Interceptor treats each request before routing it">Interceptor settings</h2>
@@ -188,10 +192,51 @@
     </div>
     <div class="sub" id="routerError"></div>
   </section>
+
+  <section class="card panel" id="cPanel">
+    <div class="panel-head">
+      <h2 data-hint="Defaults for the chat page, kept in this browser">Chat on this device</h2>
+      <span class="panel-note muted fine">Saved as you change them, in this browser only. The chat page's settings drawer shows the same values, plus voice, context and tools.</span>
+    </div>
+    <form id="csettings" class="form grouped" autocomplete="off" onsubmit="return false">
+      <div class="group" role="group" aria-labelledby="gChat">
+        <h3 class="group-title" id="gChat">Replies</h3>
+        <div class="group-grid">
+          <label class="field"><span data-hint="The most a reply may run to">Max tokens</span>
+            <input type="number" name="maxTokens" min="1" placeholder="2048"></label>
+          <label class="field"><span data-hint="Higher is more varied; empty uses the model's default">Temperature</span>
+            <input type="number" name="temperature" min="0" max="2" step="0.1" placeholder="default"></label>
+          <label class="field"><span data-hint="Give up when no reply has started after this long">Start limit (s)</span>
+            <input type="number" name="timeoutFirst" min="0" step="10" placeholder="310">
+            <small>0 waits forever.</small></label>
+          <label class="field"><span data-hint="Give up when a reply stops arriving for this long">Stall limit (s)</span>
+            <input type="number" name="timeoutStall" min="0" step="10" placeholder="130">
+            <small>0 waits forever.</small></label>
+        </div>
+        <div class="group-grid switches">
+          <label class="field check"><input type="checkbox" name="stream" checked>
+            <span>Stream replies<br><small>Show text as it arrives.</small></span></label>
+          <label class="field check"><input type="checkbox" name="autoName" checked>
+            <span>Auto-name chats<br><small>After the first reply, ask the model for a short title.</small></span></label>
+          <label class="field check"><input type="checkbox" name="autoScroll" checked>
+            <span>Follow the reply<br><small>Keep the newest text in view while it arrives.</small></span></label>
+        </div>
+      </div>
+    </form>
+    <div class="actions bar"><button type="button" id="cclear" data-hint="Put these chat settings back to their defaults">Reset to defaults</button><span class="note" id="cmsg" role="status" aria-live="polite"></span></div>
+  </section>
+  <section class="card panel" id="nPanel">
+    <div class="panel-head">
+      <h2 data-hint="Browser notifications from this page, kept on this device">Notifications</h2>
+      <span class="panel-note muted fine">Shown while another tab or window is in front. They never include commands or message text.</span>
+    </div>
+    <div data-notify-settings></div>
+  </section>
   <datalist id="models"></datalist>
 </main>
 
 <script src="hints.js"></script>
+<script src="notify.js"></script>
 <script>
 // Settings page: the Interceptor's settings (harness-settings.json) and the
 // Router's (its admin endpoints, saved to routellm-config.yaml).
@@ -235,7 +280,7 @@ const markRouter = () => showDirty('rdirty', 'rPanel', routerFormDirty);
 // buttons that keep it.
 function filterSettings() {
   const q = $('setFilter').value.trim().toLowerCase();
-  for (const form of [$('isettings'), $('rsettings')]) {
+  for (const form of [$('isettings'), $('rsettings'), $('csettings')]) {
     for (const field of form.querySelectorAll('.field')) {
       const text = field.textContent.toLowerCase() + ' ' + (field.dataset.hint || '').toLowerCase();
       field.classList.toggle('filtered-out', !!q && !text.includes(q));
@@ -245,7 +290,7 @@ function filterSettings() {
       group.hidden = !!q && fields.every(f => f.classList.contains('filtered-out'));
     }
   }
-  for (const panel of [$('iPanel'), $('rPanel')]) {
+  for (const panel of [$('iPanel'), $('rPanel'), $('cPanel')]) {
     const shown = [...panel.querySelectorAll('.group')].some(g => !g.hidden);
     panel.hidden = !!q && !shown;
   }
@@ -442,6 +487,33 @@ async function loadLangfuse() {
 }
 loadLangfuse();
 $('isave').addEventListener('click', () => setTimeout(loadLangfuse, 500));
+
+// Chat defaults live in the same browser key the chat page's settings drawer uses
+// (harness-chat-prefs), so the two always agree.
+const CHAT_PREF_KEY = 'harness-chat-prefs';
+const chatPrefs = () => { try { return JSON.parse(localStorage.getItem(CHAT_PREF_KEY)) || {}; } catch { return {}; } };
+function drawChatPrefs() {
+  const prefs = chatPrefs();
+  for (const el of $('csettings').elements) {
+    if (!el.name) continue;
+    const v = prefs[el.name];
+    if (el.type === 'checkbox') el.checked = v === undefined ? el.defaultChecked : !!v; else el.value = v ?? '';
+  }
+}
+$('csettings').addEventListener('change', (e) => {
+  const el = e.target; if (!el.name) return;
+  const prefs = chatPrefs();
+  prefs[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+  try { localStorage.setItem(CHAT_PREF_KEY, JSON.stringify(prefs)); $('cmsg').textContent = 'Saved'; $('cmsg').className = 'note ok'; }
+  catch { $('cmsg').textContent = 'This browser would not save it'; $('cmsg').className = 'note err'; }
+});
+$('cclear').addEventListener('click', () => {
+  const prefs = chatPrefs();
+  for (const el of $('csettings').elements) if (el.name) delete prefs[el.name];
+  try { localStorage.setItem(CHAT_PREF_KEY, JSON.stringify(prefs)); } catch {}
+  drawChatPrefs(); $('cmsg').textContent = 'Back to defaults'; $('cmsg').className = 'note ok';
+});
+drawChatPrefs();
 </script>
 <script>fetch('/ui/api/me').then((r) => r.ok && (document.getElementById('usersLink').hidden = false)).catch(() => {});</script>
 <script src="bright.js"></script>

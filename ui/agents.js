@@ -237,6 +237,7 @@ async function refresh() {
     const [list, ag] = await Promise.all([api(''), agentApi('')]);
     $('down').hidden = true;
     runs = list.runs;
+    window.Notify?.watchRuns(runs);
     agents = ag.agents;
     if (agentSel && !agentOf(agentSel)) agentSel = null;
     renderAgents();

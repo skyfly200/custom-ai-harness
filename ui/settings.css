@@ -87,3 +87,10 @@ main.settings { max-width: 1040px; }
 .jq-row input { min-width: 0; }
 .jq-del { align-self: end; }
 @media (max-width: 900px) { .jq-row { grid-template-columns: 1fr 1fr; } .jq-row .jq-ask { grid-column: 1 / -1; } }
+
+/* jump links to each settings panel */
+.jump { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+.jump a { font-size: 13px; font-weight: 600; text-decoration: none; color: var(--muted); padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); }
+.jump a:hover { color: var(--accent); border-color: var(--accent); }
+.panel { scroll-margin-top: 70px; }
+.group-grid + .group-grid { margin-top: 10px; }

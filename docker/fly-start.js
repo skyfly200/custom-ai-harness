@@ -65,12 +65,19 @@ function commands(dataDir = DATA, env = process.env) {
         { name: 'interceptor', cmd: 'node', args: ['server.js'],
           env: { GATEWAY_URL: 'http://127.0.0.1:4000', ROUTER_URL: 'http://127.0.0.1:6060', OPENROUTER_PROXY_URL: 'http://127.0.0.1:3000',
                  HARNESS_STOP_VIA_PARENT: '1',
+                 // the first request after a wake waits for LiteLLM to load
+                 HARNESS_GATEWAY_WAIT_S: env.HARNESS_GATEWAY_WAIT_S || '240',
                  ...(runs ? { HARNESS_HOSTED_RUNS: '1', RUNNER_TOKEN: runnerToken, RUNNER_URL: 'http://127.0.0.1:3100' } : {}) } },
         ...(runs ? [{ name: 'runner', cmd: 'node', args: ['runner/server.js'],
           env: { RUNNER_HOSTED: '1', RUNNER_TOKEN: runnerToken, RUNNER_PORT: '3100', HARNESS_URL: 'http://127.0.0.1:3000',
                  RUNNER_DIR: path.join(dataDir, 'runs'), RUNNER_REPOS_DIR: path.join(dataDir, 'repos') } }] : []),
     ];
-    return list.map((c) => ({ ...c, env: { ...env, ...shared, ...c.env } }));
+    // DATABASE_URL is the app's Neon database; LiteLLM would take it for its own and try to run prisma, and exit
+    return list.map((c) => {
+        const merged = { ...env, ...shared, ...c.env };
+        if (c.name === 'gateway') delete merged.DATABASE_URL;
+        return { ...c, env: merged };
+    });
 }
 
 function main() {

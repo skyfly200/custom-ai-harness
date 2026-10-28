@@ -1,6 +1,7 @@
 // Runs only the Node tests that mention a changed file: `npm run test:for` (changes vs origin/master
 // plus uncommitted ones), or `npm run test:for -- utils/guard.js ui/chat.js` for named files.
 // A test counts when its source contains the file's path or its name without the extension.
+require('./check-deps');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');

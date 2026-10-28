@@ -1,5 +1,6 @@
 // `npm run test:fast` runs every Node test except the slow ones; `npm run test:slow` runs only those.
 // `npm test` still runs everything. Re-measure and edit SLOW when a file crosses about 3 s alone.
+require('./check-deps');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');

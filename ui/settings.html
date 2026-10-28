@@ -225,10 +225,18 @@
     </form>
     <div class="actions bar"><button type="button" id="cclear" data-hint="Put these chat settings back to their defaults">Reset to defaults</button><span class="note" id="cmsg" role="status" aria-live="polite"></span></div>
   </section>
+  <section class="card panel" id="nPanel">
+    <div class="panel-head">
+      <h2 data-hint="Browser notifications from this page, kept on this device">Notifications</h2>
+      <span class="panel-note muted fine">Shown while another tab or window is in front. They never include commands or message text.</span>
+    </div>
+    <div data-notify-settings></div>
+  </section>
   <datalist id="models"></datalist>
 </main>
 
 <script src="hints.js"></script>
+<script src="notify.js"></script>
 <script>
 // Settings page: the Interceptor's settings (harness-settings.json) and the
 // Router's (its admin endpoints, saved to routellm-config.yaml).

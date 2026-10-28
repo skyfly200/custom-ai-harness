@@ -9,6 +9,7 @@
     "migrate": "node scripts/migrate.js",
     "validate": "node validate-config.js",
     "validate:fix": "node validate-config.js --fix",
+    "pretest": "node scripts/check-deps.js",
     "test": "node --test \"test/*.test.js\"",
     "test:for": "node scripts/test-for.js",
     "test:fast": "node scripts/test-tier.js --fast",

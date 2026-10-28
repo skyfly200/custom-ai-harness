@@ -91,7 +91,7 @@ class Users {
     list() {
         return [
             ...this.admins.map((a) => ({ name: a.name, role: 'admin', core: true })),
-            ...this.data.users.map((u) => ({ name: u.name, role: u.role, core: false, created: u.created })),
+            ...this.data.users.map((u) => ({ name: u.name, role: u.role, core: false, created: u.created, ...(u.guest ? { guest: true } : {}) })),
         ].map((u) => ({ ...u, keys: this.keys(u.name).length }));
     }
     // Always runs one scrypt, so a wrong user name takes as long as a wrong password
@@ -100,11 +100,20 @@ class Users {
         const ok = verifyPassword(password, user ? user.hash : DUMMY);
         return user && ok ? user : null;
     }
-    add(name, password, role = 'user') {
+    // A guest is a plain user whose requests are paid from a capped credit on the owner's key (utils/credit.js).
+    // Only an admin makes one: here, or by inviting an email as a guest.
+    add(name, password, role = 'user', { guest = false } = {}) {
         if (!NAME.test(name || '')) throw new Error('user name: letters, digits, . _ - only, up to 40');
         if (String(password || '').length < MIN_PASSWORD) throw new Error(`password: at least ${MIN_PASSWORD} characters`);
         if (this.find(name)) throw new Error('that user already exists');
-        this.data.users.push({ name, hash: hashPassword(password), role: role === 'admin' ? 'admin' : 'user', created: new Date().toISOString() });
+        if (guest && role === 'admin') throw new Error('an admin can\'t be a guest');
+        this.data.users.push({ name, hash: hashPassword(password), role: role === 'admin' ? 'admin' : 'user', created: new Date().toISOString(), ...(guest ? { guest: true } : {}) });
+        this.store.save();
+    }
+    setGuest(name, guest) {
+        const user = this.mutable(name);
+        if (guest && user.role === 'admin') throw new Error('an admin can\'t be a guest');
+        if (guest) user.guest = true; else delete user.guest;
         this.store.save();
     }
     // --- sign-in with Google or GitHub (utils/oauth.js): invite-only ---
@@ -115,7 +124,7 @@ class Users {
         const e = normEmail(email);
         if (!EMAIL.test(e)) throw new Error('that is not an email address');
         if (this.invites.some((i) => i.email === e)) throw new Error('already invited');
-        this.invites.push({ email: e, role: role === 'admin' ? 'admin' : 'user', added: new Date().toISOString() });
+        this.invites.push({ email: e, role: role === 'admin' ? 'admin' : role === 'guest' ? 'guest' : 'user', added: new Date().toISOString() });
         this.store.save();
     }
     removeInvite(email) {
@@ -132,6 +141,7 @@ class Users {
         const admin = adminEmails.map(normEmail).includes(e);
         if (!invite && !admin) return null;
         const role = admin || invite.role === 'admin' ? 'admin' : 'user';
+        const guest = !admin && invite && invite.role === 'guest';
         let user = this.data.users.find((u) => u.email === e);
         if (user) {
             if (user.role !== role && admin) { user.role = role; this.store.save(); }
@@ -139,7 +149,7 @@ class Users {
         }
         let name = e.split('@')[0].replace(/[^A-Za-z0-9._-]/g, '').slice(0, 36) || 'user';
         for (let n = 2; this.find(name); n++) name = `${name.slice(0, 34)}${n}`;
-        this.data.users.push({ name, email: e, hash: '', role, created: new Date().toISOString() });
+        this.data.users.push({ name, email: e, hash: '', role, created: new Date().toISOString(), ...(guest ? { guest: true } : {}) });
         this.store.save();
         return this.find(name);
     }
@@ -155,7 +165,9 @@ class Users {
         this.store.save();
     }
     setRole(name, role) {
-        this.mutable(name).role = role === 'admin' ? 'admin' : 'user';
+        const user = this.mutable(name);
+        user.role = role === 'admin' ? 'admin' : 'user';
+        if (user.role === 'admin') delete user.guest; // an admin is never a guest
         this.store.save();
     }
     remove(name) {

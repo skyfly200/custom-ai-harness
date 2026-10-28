@@ -44,6 +44,10 @@ const mcpAdmin = require('./utils/mcpAdmin');
 const mcpCatalog = require('./utils/mcpCatalog');
 const userMcpMod = require('./utils/userMcp');
 const userPrefs = require('./utils/userPrefs');
+const credit = require('./utils/credit');
+const userCredentials = require('./utils/userCredentials');
+const credentialTicket = require('./utils/credentialTicket');
+const secrets = require('./utils/secrets');
 const claudeKit = require('./utils/claudeKit');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
@@ -76,7 +80,13 @@ const orAuth = openrouterAuth.createAuth();
 for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federation: ${problem}`);
 // The Gateway and Router call OpenRouter through here when federation is on, so they never hold a token that expires.
 // Before the password gate: they prove themselves with OPENROUTER_PROXY_KEY (or LITELLM_MASTER_KEY).
-if (openrouterAuth.federated()) app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth));
+// HARNESS_USER_CREDENTIALS=1: people who aren't admins or guests pay with their own OpenRouter credential
+// (utils/userCredentials.js). The Gateway then reaches OpenRouter through this proxy too, and each request
+// carries a signed ticket saying whose credential to use (utils/credentialTicket.js).
+const USER_CREDENTIALS = /^(1|true|yes|on)$/i.test(process.env.HARNESS_USER_CREDENTIALS || '');
+if (openrouterAuth.federated() || USER_CREDENTIALS) {
+    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth, { resolveUser: USER_CREDENTIALS ? userCredentials.resolve : null }));
+}
 // Run keys: capped, short-lived keys for one agent run's model calls (utils/runKeys.js).
 // Checked before the password gate, which they replace for POST /v1/chat/completions only.
 const runKeys = new RunKeys();
@@ -98,7 +108,17 @@ if (LOGIN_ON) {
         app.use((req, res, next) => loaded.then(() => next(), next));
     }
     const users = new Users({ admins, store });
-    app.use(unlessRunKey(createLogin({ users, legacyPassword: HARNESS_PASSWORD, sessionStore: db.enabled() ? require('./utils/pgSessions').pgSessions() : null }).gate));
+    const guests = db.enabled() ? {
+        ensure: credit.ensure, setCap: credit.setCap, all: credit.all,
+        forget: async (name) => { await credit.forget(name); await userCredentials.remove(name); },
+    } : null;
+    app.use(unlessRunKey(createLogin({ users, legacyPassword: HARNESS_PASSWORD, sessionStore: db.enabled() ? require('./utils/pgSessions').pgSessions() : null, guests }).gate));
+    if (db.enabled()) credit.startSweeper();
+    if (USER_CREDENTIALS && !(db.enabled() && secrets.available() && openrouterAuth.proxyKey())) {
+        throw new Error('HARNESS_USER_CREDENTIALS needs DATABASE_URL, ENCRYPTION_KEY and OPENROUTER_PROXY_KEY (or LITELLM_MASTER_KEY). Refusing to start where people could use the owner\'s key.');
+    }
+} else if (USER_CREDENTIALS) {
+    throw new Error('HARNESS_USER_CREDENTIALS needs HARNESS_REQUIRE_LOGIN=1: without logins there is nobody to charge. Refusing to start.');
 } else if (process.env.HARNESS_SERVER === '1' && !HARNESS_PASSWORD) {
     throw new Error('Running as a server (Docker) needs HARNESS_PASSWORD, or HARNESS_REQUIRE_LOGIN=1 with HARNESS_ADMINS, in .env');
 } else {
@@ -229,7 +249,8 @@ function logRoute(path, { model, threshold, winRate, reason, tier, effort }) {
 // calls carry no usage and aren't counted.
 function recordUsage(req, proxyRes) {
     const event = req.harnessEvent;
-    if (!event || proxyRes.statusCode >= 400) return;
+    if (req.harnessCredit) req.harnessCredit.status = proxyRes.statusCode;
+    if (!event || proxyRes.statusCode >= 400) { settleCredit(req, 0); return; } // a failed call is not billed
     usage.tap(proxyRes, ({ usage: counts, outputChars, model: upstream, text, aborted }) => {
         chatReplies.afterReply(req, { text, model: event.model, aborted });
         const row = usage.record({
@@ -244,6 +265,14 @@ function recordUsage(req, proxyRes) {
             saved: req.harnessSaved,
         });
         monitor.recordUsage(event, row);
+        // a guest's reservation becomes the real cost; with no counts in the reply, the worst case stands
+        if (req.harnessCredit) {
+            if (row.estimated) settleCredit(req, req.harnessCredit.reservedMicro);
+            else {
+                pricedModels().then((models) => costOf(models[event.servedBy] || models[event.model], row), () => null)
+                    .then((usd) => settleCredit(req, usd === null ? req.harnessCredit.reservedMicro : credit.ceilMicro(usd)));
+            }
+        }
         // a run key pays for its own replies (utils/runKeys.js)
         if (req.harnessRunKey) {
             getModelInfo().then((info) => info.models[event.servedBy] || info.models[event.model], () => null)
@@ -502,6 +531,44 @@ app.post('/ui/api/profiles', memberOrLocalJson, async (req, res) => {
         res.json({ profiles: [...shared.map((p) => ({ ...p, shared: true })), ...own.profiles], version: own.version, file: 'your account', own: true });
     } catch (err) {
         res.status(err.status || 400).json({ error: err.message });
+    }
+});
+
+// Who pays for the signed-in person's requests: the owner's key (admins), the owner's key under a hard cap
+// (guests, with what is left), or their own OpenRouter credential (everyone else, when it is required).
+app.get('/ui/api/me/credential', async (req, res) => {
+    if (!req.harnessLogin) return res.status(404).json({ error: 'logins are off' });
+    const user = req.harnessUser;
+    const out = { admin: user.role === 'admin', guest: Boolean(user.guest), required: USER_CREDENTIALS && user.role !== 'admin' && !user.guest };
+    try {
+        if (user.guest) out.credit = await credit.get(user.name);
+        else if (db.enabled() && user.role !== 'admin') out.credential = await userCredentials.status(user.name);
+        res.json(out);
+    } catch (err) {
+        res.status(503).json({ ...out, error: 'the database did not answer' });
+    }
+});
+app.put('/ui/api/me/credential', async (req, res) => {
+    if (!req.harnessLogin) return res.status(404).json({ error: 'logins are off' });
+    if (!req.is('application/json')) return res.status(415).json({ error: 'send application/json' });
+    const user = req.harnessUser;
+    if (user.role === 'admin') return res.status(400).json({ error: 'admins use the owner\'s key' });
+    if (user.guest) return res.status(403).json({ error: 'guest accounts use the owner\'s credit; ask for a full account to use your own key' });
+    if (!db.enabled()) return res.status(503).json({ error: 'storing a key needs the hosted database' });
+    try {
+        await userCredentials.setKey(user.name, req.body?.key);
+        res.json({ credential: await userCredentials.status(user.name) });
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.message });
+    }
+});
+app.delete('/ui/api/me/credential', async (req, res) => {
+    if (!req.harnessLogin || !db.enabled()) return res.status(404).json({ error: 'nothing stored' });
+    try {
+        await userCredentials.remove(req.harnessUser.name);
+        res.json({ credential: { set: false } });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -1271,6 +1338,122 @@ function activeTransforms(req) {
     return [caveman && 'caveman', headroom && 'headroom', contextAnchor && 'context anchor'].filter(Boolean);
 }
 
+// ---- Who pays for a signed-in person's request ----
+// Admins use the owner's key. A guest (utils/credit.js) uses it too, but with a hard dollar cap: the worst
+// the request could cost is reserved first and swapped for the real cost afterward. With
+// HARNESS_USER_CREDENTIALS everyone else uses their own OpenRouter credential and is refused until they add one.
+const GUEST_MAX_OUTPUT = Math.max(16, Number(process.env.HARNESS_GUEST_MAX_OUTPUT) || 4096);
+const GUEST_DEFAULT_CAP = Number(process.env.HARNESS_GUEST_CAP_USD || 1);
+const refuse = (res, status, type, message) => res.status(status).json({ type: 'error', error: { type, message } });
+
+// Prices the way the pages see them: OpenRouter's own replace the Gateway's for its models
+async function pricedModels() {
+    const info = await getModelInfo();
+    const catalog = await getOpenrouterCatalog({ waitMs: 3000 });
+    return modelInfo.withOpenrouterPrices(usageModels(info.models, catalog), catalog);
+}
+const isPriced = (m) => Boolean(m && (m.free || (m.inputCost != null && m.outputCost != null)));
+const viaOpenrouter = (m) => Boolean(m && /^openrouter\//.test(m.upstream || ''));
+
+// The models the Gateway may try after `model` fails: the request's own list, else config.yaml's
+function fallbackTargets(req, model) {
+    const own = Array.isArray(req.body.fallbacks) ? req.body.fallbacks : null;
+    if (own) return own.flatMap((e) => (e && e[model]) || []);
+    try { return gatewayConfig.parse(fs.readFileSync(GATEWAY_CONFIG, 'utf8')).fallbacks[model] || []; } catch { return []; }
+}
+
+function settleCredit(req, micro) {
+    const c = req.harnessCredit;
+    if (!c || c.settled) return;
+    c.settled = true;
+    if (c.id) credit.settle(c.id, micro).catch((err) => console.error(`[credit] settling ${c.owner}'s hold failed (it will be charged in full when it expires): ${err.message}`));
+}
+
+async function guestGate(req, res, user) {
+    if (!db.enabled()) { refuse(res, 503, 'overloaded_error', 'Guest accounts need the database, which this server does not have.'); return false; }
+    try {
+        await credit.ensure(user.name, GUEST_DEFAULT_CAP);
+        const models = await pricedModels();
+        const model = req.body.model;
+        if (!isPriced(models[model])) {
+            refuse(res, 403, 'permission_error', `Guest accounts can only use models with a known price, and ${model} has none.`);
+            return false;
+        }
+        // chain: the chosen model, then only fallbacks with a known price
+        const targets = fallbackTargets(req, model).filter((t) => isPriced(models[t]));
+        req.body.fallbacks = [{ [model]: targets }];
+        const maxOut = Math.min(Number(req.body.max_tokens) || GUEST_MAX_OUTPUT, Number(req.body.max_completion_tokens) || Infinity, GUEST_MAX_OUTPUT);
+        req.body.max_tokens = maxOut;
+        if (req.body.max_completion_tokens) req.body.max_completion_tokens = maxOut;
+        if (req.body.stream && !req.path.includes('messages')) req.body.stream_options = { ...req.body.stream_options, include_usage: true };
+        // worst case: a pessimistic token estimate (2 characters each) in, the whole output allowance out
+        const chars = JSON.stringify(req.body.messages || []).length + JSON.stringify(req.body.system || '').length + JSON.stringify(req.body.tools || []).length;
+        let worst = 0;
+        for (const name of [model, ...targets]) {
+            const m = models[name];
+            if (m.free) continue;
+            const inTokens = Math.min(Math.ceil(chars / 2), m.maxInput || Infinity);
+            const out = Math.min(maxOut, m.maxOutput || Infinity);
+            worst = Math.max(worst, inTokens * Math.max(m.inputCost, m.cacheWriteCost || 0) + out * m.outputCost);
+        }
+        const micro = worst > 0 ? credit.ceilMicro(worst) : 0;
+        let id = null;
+        if (micro > 0) {
+            id = await credit.reserve(user.name, micro);
+            if (!id) {
+                const left = await credit.get(user.name);
+                refuse(res, 429, 'rate_limit_error', `Your guest credit is used up (${left ? `$${left.leftUsd.toFixed(2)} left of $${left.capUsd.toFixed(2)}` : 'no credit'}). Ask the owner to raise it or make you a full account.`);
+                return false;
+            }
+        }
+        req.harnessCredit = { owner: user.name, id, reservedMicro: micro, settled: false };
+        // if nothing settled it (the Gateway never answered, the client left), settle shortly after the connection closes
+        res.on('close', () => setTimeout(() => {
+            const c = req.harnessCredit;
+            if (c.settled) return;
+            settleCredit(req, c.status === undefined || c.status >= 400 ? 0 : c.reservedMicro);
+        }, 5000).unref());
+        return true;
+    } catch (err) {
+        console.error(`[credit] guest check for ${user.name} failed: ${err.message}`);
+        refuse(res, 503, 'overloaded_error', 'Guest credit could not be checked right now, so the request was not sent. Try again in a moment.');
+        return false;
+    }
+}
+
+async function ownKeyGate(req, res, user) {
+    try {
+        if (!(await userCredentials.resolve(user.name))) {
+            refuse(res, 402, 'billing_error', 'Add your own OpenRouter credential on the Users page before using models.');
+            return false;
+        }
+        const models = await pricedModels();
+        const model = req.body.model;
+        if (!viaOpenrouter(models[model])) {
+            refuse(res, 403, 'permission_error', `${model} is not an OpenRouter model, so it is not available on your own key.`);
+            return false;
+        }
+        req.body.fallbacks = [{ [model]: fallbackTargets(req, model).filter((t) => viaOpenrouter(models[t])) }];
+        req.body.extra_headers = { [credentialTicket.HEADER]: credentialTicket.mint(openrouterAuth.proxyKey(), { user: user.name, kind: 'user' }) };
+        return true;
+    } catch (err) {
+        console.error(`[credit] credential check for ${user.name} failed: ${err.message}`);
+        refuse(res, 503, 'overloaded_error', 'Your credential could not be checked right now, so the request was not sent. Try again in a moment.');
+        return false;
+    }
+}
+
+// false: the request was refused and answered
+async function chargeGate(req, res) {
+    const user = req.harnessUser;
+    if (!req.harnessLogin || !user || user.role === 'admin') return true; // the owner's own key
+    // a person's request can't choose its own provider credentials or headers
+    for (const k of ['api_key', 'api_base', 'base_url', 'extra_headers', 'extra_body']) delete req.body[k];
+    if (user.guest) return guestGate(req, res, user);
+    if (USER_CREDENTIALS) return ownKeyGate(req, res, user);
+    return true;
+}
+
 async function routeAndRecord(req, res) {
     const clientId = req.get('x-harness-request-id');
     const prompt = latestUserText(req.body.messages);
@@ -1282,6 +1465,7 @@ async function routeAndRecord(req, res) {
     // A strategy's own fallback chains replace the Gateway's for this request
     const own = profiles.gatewayFallbacks(req.harnessProfile);
     if (own) req.body.fallbacks = own;
+    if (!(await chargeGate(req, res))) return false;
     logRoute(req.path, route);
     req.harnessClient = usage.clientOf(req);
     req.harnessInputEstimate = Math.ceil(JSON.stringify(req.body.messages || []).length / 4)
@@ -1300,6 +1484,7 @@ async function routeAndRecord(req, res) {
     if (route.profile) res.set('x-harness-profile', encodeURIComponent(route.profile));
     if (req.harnessAuto) res.set('x-harness-auto', encodeURIComponent(`${req.harnessAuto.how}: ${req.harnessAuto.why}`));
     req.harnessLangfuse = langfuse.headersFor(req, route, { content: settings.get().langfuseContent });
+    return true;
 }
 
 // OpenAI-compatible agents (Cursor, Aider, Continue, ...) and the chat page
@@ -1309,7 +1494,7 @@ app.post(['/chat/completions', '/v1/chat/completions'], async (req, res, next) =
     req.body.messages = compressToolResults(req, transformsFor(req).caveman ? withCavemanOpenAI(messages) : messages);
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);
     req.body.max_completion_tokens = capMaxTokens(req.body.max_completion_tokens);
-    await routeAndRecord(req, res);
+    if (!(await routeAndRecord(req, res))) return;
     // the chat page asks for cache markers; only Claude needs them
     if (req.get('x-harness-cache') && cacheMarkers.isAnthropic((await getModelInfo()).models[req.body.model])) {
         req.body.messages = cacheMarkers.addCacheMarkers(req.body.messages);
@@ -1323,7 +1508,7 @@ app.post('/v1/messages', async (req, res, next) => {
     req.body.messages = compressToolResults(req, dropUnsignedThinking(req.body.messages || []));
     if (transformsFor(req).caveman) req.body.system = withCavemanAnthropic(req.body.system);
     req.body.max_tokens = capMaxTokens(req.body.max_tokens);
-    await routeAndRecord(req, res);
+    if (!(await routeAndRecord(req, res))) return;
     next();
 }, toGateway);
 

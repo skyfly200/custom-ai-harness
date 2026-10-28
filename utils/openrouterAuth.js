@@ -178,14 +178,18 @@ const proxyKey = (env = process.env) => trim(env.OPENROUTER_PROXY_KEY) || trim(e
 const apiRoot = (env = process.env) => settings(env).base.replace(/\/v1$/, '');
 
 const crypto = require('crypto');
+const ticket = require('./credentialTicket');
 const digest = (v) => crypto.createHash('sha256').update(String(v)).digest();
 
 /**
  * Express handler for /openrouter-proxy/<path>: forwards to OpenRouter with a
  * fresh token in place of the caller's key. Mount it before the harness
  * password gate; the callers (Gateway, Router) prove themselves with proxyKey().
+ * A call may carry a credential ticket (utils/credentialTicket.js): 'user' tickets get that person's own
+ * credential from `resolveUser(name)` (null: they have none, answered 402); 'shared' tickets and calls
+ * with no ticket (the Router) use the owner's.
  */
-function proxyHandler(auth, { env = process.env, fetchFn = fetch } = {}) {
+function proxyHandler(auth, { env = process.env, fetchFn = fetch, resolveUser = null } = {}) {
     const { Readable } = require('stream');
     return async function openrouterProxy(req, res) {
         const want = proxyKey(env);
@@ -193,8 +197,21 @@ function proxyHandler(auth, { env = process.env, fetchFn = fetch } = {}) {
         if (!want) return res.status(503).json({ error: 'set OPENROUTER_PROXY_KEY (or LITELLM_MASTER_KEY) in .env to use federation' });
         if (!given || !crypto.timingSafeEqual(digest(given), digest(want))) return res.status(401).json({ error: 'wrong key for the OpenRouter proxy' });
         let token;
+        const sentTicket = req.headers[ticket.HEADER];
+        if (sentTicket !== undefined) {
+            const t = ticket.verify(want, sentTicket);
+            if (!t) return res.status(401).json({ error: { message: 'bad or expired credential ticket' } });
+            if (t.kind === 'user') {
+                let cred = null;
+                try { cred = resolveUser ? await resolveUser(t.user) : null; } catch (err) {
+                    return res.status(502).json({ error: { message: `your OpenRouter credential could not be read: ${err.message}` } });
+                }
+                if (!cred || !cred.key) return res.status(402).json({ error: { message: 'You have not added your own OpenRouter credential. Add it on the Users page, then try again.' } });
+                token = cred.key;
+            }
+        }
         try {
-            token = await auth.key();
+            if (!token) token = await auth.key();
         } catch (err) {
             return res.status(502).json({ error: { message: `OpenRouter sign-in failed: ${err.message}` } });
         }

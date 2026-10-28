@@ -2,6 +2,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   let me = null;
+  let guestsOn = false; // guest accounts need the database
 
   const say = (text, bad) => { $('msg').textContent = text || ''; $('msg').style.color = bad ? 'var(--bad, #c4264a)' : ''; };
   async function api(method, url, body) {
@@ -24,7 +25,8 @@
     t.replaceChildren();
     for (const u of users) {
       const tr = document.createElement('tr');
-      tr.append(cell(u.name), cell(u.core ? 'admin (env)' : u.role), cell(`${u.keys} key${u.keys === 1 ? '' : 's'}`), cell(when(u.created)));
+      const credit = u.credit ? ` · $${u.credit.spentUsd.toFixed(2)} of $${u.credit.capUsd.toFixed(2)} used` : '';
+      tr.append(cell(u.name), cell(u.core ? 'admin (env)' : u.guest ? `guest${credit}` : u.role), cell(`${u.keys} key${u.keys === 1 ? '' : 's'}`), cell(when(u.created)));
       const td = document.createElement('td');
       td.style.cssText = 'padding:6px 8px;text-align:right;white-space:nowrap';
       if (!u.core) {
@@ -37,6 +39,19 @@
           }),
           ' ',
         );
+        if (guestsOn && u.role !== 'admin') {
+          td.append(
+            btn(u.guest ? 'Make full user' : 'Make guest', async () => { drawUsers((await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { guest: !u.guest })).users); }),
+            ' ',
+          );
+          if (u.guest) {
+            td.append(btn('Set cap', async () => {
+              const v = prompt(`Total dollars ${u.name} may spend (now $${u.credit ? u.credit.capUsd.toFixed(2) : '?'}):`);
+              if (v === null || v === '') return;
+              drawUsers((await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { capUsd: v })).users);
+            }), ' ');
+          }
+        }
         if (u.name.toLowerCase() !== me.name.toLowerCase()) {
           td.append(
             btn(u.role === 'admin' ? 'Make user' : 'Make admin', async () => { drawUsers((await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { role: u.role === 'admin' ? 'user' : 'admin' })).users); }),
@@ -77,7 +92,10 @@
   const owner = () => (me.role === 'admin' ? $('owner').value || me.name : me.name);
   async function fillOwners() {
     if (me.role !== 'admin') return;
-    const { users } = await api('GET', '/ui/api/users');
+    const { users, guests } = await api('GET', '/ui/api/users');
+    guestsOn = Boolean(guests);
+    $('guestRow').hidden = !guestsOn;
+    document.querySelectorAll('.guestOpt').forEach((o) => { o.hidden = !guestsOn; });
     const current = $('owner').value || me.name;
     $('owner').replaceChildren(...users.map((u) => new Option(u.name, u.name)));
     $('owner').value = users.some((u) => u.name === current) ? current : me.name;
@@ -110,6 +128,20 @@
       drawUsers((await api('POST', '/ui/api/users', f)).users);
       e.target.reset(); say(`Added ${f.name}.`); fillOwners();
     } catch (err) { say(err.message, true); }
+  });
+  async function drawCredential() {
+    const c = await api('GET', '/ui/api/me/credential');
+    $('keySection').hidden = !(c.required || (c.credential && c.credential.set));
+    if (c.credential) $('keyState').textContent = c.credential.set ? `A key ending …${c.credential.last4 || '????'} is saved.` : 'No key saved yet: you cannot use models until you add one.';
+    $('guestSection').hidden = !c.guest;
+    if (c.guest) $('guestState').textContent = c.credit ? `You are a guest. $${c.credit.leftUsd.toFixed(2)} left of $${c.credit.capUsd.toFixed(2)}, in all (not monthly). Only models with a known price are available.` : 'You are a guest.';
+  }
+  $('setKey').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await api('PUT', '/ui/api/me/credential', { key: new FormData(e.target).get('key') }); e.target.reset(); say('Key saved.'); drawCredential(); } catch (err) { say(err.message, true); }
+  });
+  $('clearKey').addEventListener('click', async () => {
+    try { await api('DELETE', '/ui/api/me/credential'); say('Key removed.'); drawCredential(); } catch (err) { say(err.message, true); }
   });
   $('addInvite').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -144,5 +176,6 @@
     $('pwSection').hidden = me.core;
     if (me.role === 'admin') { $('admin').hidden = false; $('ownerRow').hidden = false; await fillOwners(); drawInvites(await api('GET', '/ui/api/invites')); }
     loadKeys();
+    drawCredential().catch(() => {});
   })();
 })();

@@ -65,7 +65,7 @@ function buildCommands(opts = {}) {
     ];
 
     // Federation: the Gateway calls OpenRouter through the Interceptor, which holds the short-lived tokens
-    if (env.OPENROUTER_FEDERATION_POLICY_ID && env.OPENROUTER_FEDERATION_POLICY_ID.trim()) {
+    if ((env.OPENROUTER_FEDERATION_POLICY_ID && env.OPENROUTER_FEDERATION_POLICY_ID.trim()) || /^(1|true|yes|on)$/i.test(env.HARNESS_USER_CREDENTIALS || '')) {
         const key = env.OPENROUTER_PROXY_KEY || env.LITELLM_MASTER_KEY;
         const gateway = commands[0];
         gateway.env = {
@@ -101,7 +101,7 @@ async function main() {
     // The Interceptor and the task runner share this, so nothing else on this machine can drive the runner
     if (!process.env.RUNNER_TOKEN) process.env.RUNNER_TOKEN = require('crypto').randomBytes(16).toString('hex');
     // Only the Interceptor, Gateway and Router know it
-    if (process.env.OPENROUTER_FEDERATION_POLICY_ID && !process.env.OPENROUTER_PROXY_KEY && !process.env.LITELLM_MASTER_KEY) {
+    if ((process.env.OPENROUTER_FEDERATION_POLICY_ID || /^(1|true|yes|on)$/i.test(process.env.HARNESS_USER_CREDENTIALS || '')) && !process.env.OPENROUTER_PROXY_KEY && !process.env.LITELLM_MASTER_KEY) {
         process.env.OPENROUTER_PROXY_KEY = require('crypto').randomBytes(16).toString('hex');
     }
     const running = wantsOllama(argv, process.env) && await ollamaRunning(process.env);

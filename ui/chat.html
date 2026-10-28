@@ -162,6 +162,16 @@
             </span>
           </label>
           <div class="muted small" id="repoInfo">Read-only for the model.</div>
+          <div class="gh-box" id="ghBox" hidden>
+            <label title="Attach a repo from your own GitHub account. The model reads its files, history, issues and pull requests through GitHub, with nothing copied to this server.">GitHub repo
+              <span class="repo-row">
+                <input type="text" id="ghRepo" list="ghRepos" placeholder="owner/name" autocomplete="off" spellcheck="false">
+                <datalist id="ghRepos"></datalist>
+                <button type="button" id="ghAttach" class="mini">Attach</button>
+              </span>
+            </label>
+            <div class="muted small" id="ghInfo"></div>
+          </div>
           <label class="check" title="Let the model run commands in the linked repo with run_command. Every command goes past the command guard first, and a risky one waits in the chat for you to Allow or Decline. Commands run in your own working copy, so uncommitted work is not protected."><input type="checkbox" id="shellInRepo" checked> Shell in the linked repo</label>
           <div class="tools-head"><span>MCP servers</span><span><a href="tools.html" class="mini" title="Add, test and edit MCP servers">Manage</a> <button type="button" id="mcpReload" class="mini" title="Read mcp-servers.json again and reconnect">Reload</button></span></div>
           <ul class="mcp-list" id="mcpList"><li class="muted small">Loading…</li></ul>

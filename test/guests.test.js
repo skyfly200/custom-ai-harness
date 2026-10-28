@@ -291,6 +291,58 @@ test('Connect OpenRouter sends a full user to OpenRouter and stores the key they
     await fetch(`${base}/ui/api/me/credential`, { method: 'DELETE', ...as(fay) });
 });
 
+test('Connect GitHub stores the person\'s token, lists their repos, and lets a chat read (and, once approved, change) one', async () => {
+    Object.assign(process.env, { GITHUB_CLIENT_ID: 'Iv1.test', GITHUB_CLIENT_SECRET: 'shh' });
+    const go = await fetch(`${base}/ui/api/me/github/connect?back=chat.html`, { ...as(fay), redirect: 'manual' });
+    assert.equal(go.status, 302);
+    const to = new URL(go.headers.get('location'));
+    assert.equal(to.origin + to.pathname, 'https://github.com/login/oauth/authorize');
+    assert.equal(new URL(to.searchParams.get('redirect_uri')).pathname, '/ui/api/me/github/callback');
+    const gh = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (url, init = {}) => {
+        const u = String(url);
+        if (u === 'https://github.com/login/oauth/access_token') return Promise.resolve(new Response('{"access_token":"ghu_fay_token_abcdefghij"}'));
+        if (!u.startsWith('https://api.github.com/')) return realFetch(url, init);
+        gh.push(`${init.method || 'GET'} ${u.slice(23)} ${init.headers?.authorization}`);
+        if (u.endsWith('/user')) return Promise.resolve(new Response('{"login":"faycat"}'));
+        if (u.includes('/user/repos')) return Promise.resolve(new Response('[{"full_name":"faycat/app","private":true,"default_branch":"main","pushed_at":"2026-10-01T00:00:00Z"}]'));
+        if (u.endsWith('/repos/faycat/app')) return Promise.resolve(new Response('{"full_name":"faycat/app","private":true,"default_branch":"main","html_url":"https://github.com/faycat/app"}'));
+        if (u.endsWith('/repos/faycat/app/branches?per_page=100')) return Promise.resolve(new Response('[{"name":"main"}]'));
+        if (u.endsWith('/repos/faycat/app/issues') && init.method === 'POST') return Promise.resolve(new Response('{"number":4,"html_url":"https://github.com/faycat/app/issues/4"}'));
+        return Promise.resolve(new Response('{"message":"Not Found"}', { status: 404 }));
+    };
+    try {
+        assert.equal((await (await fetch(`${base}/ui/api/github/status`, as(fay))).json()).connected, false);
+        const done = await fetch(`${base}/ui/api/me/github/callback?code=C1&state=${to.searchParams.get('state')}`, { ...as(fay), redirect: 'manual' });
+        assert.equal(done.headers.get('location'), '/chat.html?github=connected');
+        const st = await (await fetch(`${base}/ui/api/github/status`, as(fay))).json();
+        assert.deepEqual([st.connected, st.login, st.via, st.canConnect], [true, 'faycat', 'oauth', true]);
+        assert.ok(!JSON.stringify(st).includes('ghu_fay'));
+        const repos = await (await fetch(`${base}/ui/api/github/repos`, as(fay))).json();
+        assert.deepEqual(repos.repos.map((r) => r.full), ['faycat/app']);
+        assert.equal((await fetch(`${base}/ui/api/github/repo`, send('POST', fay, { repo: 'faycat/app' }))).status, 200);
+        assert.equal((await fetch(`${base}/ui/api/github/repo`, send('POST', fay, { repo: 'faycat/nope' }))).status, 404);
+        const call = async (cookie, name, args, extra = {}) => (await (await fetch(`${base}/ui/api/tools/call`, send('POST', cookie, { name, arguments: args, githubRepo: 'faycat/app', ...extra }))).json());
+        assert.match((await call(fay, 'github_branches', {})).text, /^main$/);
+        // a change without the page's confirmation is refused before it reaches GitHub
+        const refused = await call(fay, 'github_create_issue', { title: 'Bug' });
+        assert.equal(refused.isError, true);
+        assert.match(refused.text, /approval/);
+        assert.ok(!gh.some((l) => l.startsWith('POST')));
+        const made = await call(fay, 'github_create_issue', { title: 'Bug' }, { confirmed: true });
+        assert.match(made.text, /issue #4/);
+        assert.ok(gh.every((l) => l.endsWith('Bearer ghu_fay_token_abcdefghij')), 'GitHub only ever sees fay\'s own token');
+        // someone who has not connected has nothing to read with; a guest cannot connect
+        assert.match((await call(gus, 'github_branches', {})).text, /not connected/);
+        const guestGo = await fetch(`${base}/ui/api/me/github/connect`, { ...as(gus), redirect: 'manual' });
+        assert.match(guestGo.headers.get('location'), /github=unavailable/);
+        const tools = await (await fetch(`${base}/ui/api/tools`, as(fay))).json();
+        assert.ok(tools.githubDefinitions.some((d) => d.function.name === 'github_search'));
+    } finally { globalThis.fetch = realFetch; await userGithubRemove(); }
+});
+async function userGithubRemove() { await require('../utils/userGithub').remove('fay'); }
+
 test('admins use the owner\'s key with no ticket and no cap', async () => {
     bodies = [];
     assert.equal((await ask(admin)).status, 200);

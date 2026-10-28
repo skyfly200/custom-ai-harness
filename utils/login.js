@@ -59,7 +59,8 @@ catch{err.textContent='Could not reach the harness'}b.disabled=false});
 </script></body></html>`;
 }
 
-function createLogin({ users, legacyPassword = '', sessionStore = null }) {
+// `guests` (optional, needs the database): { ensure(name, capUsd), setCap(name, capUsd), forget(name), all() } for guest credit
+function createLogin({ users, legacyPassword = '', sessionStore = null, guests = null }) {
     const sessions = new Map(); // sha(token) -> { name, expires }
     // sessions saved in a database come back after a restart; requests wait for them (see `gate`)
     const loaded = sessionStore ? sessionStore.load().then((rows) => { for (const [k, v] of rows) sessions.set(k, v); }).catch((err) => console.error(`[db] loading sessions failed: ${err.message}`)) : null;
@@ -110,7 +111,7 @@ function createLogin({ users, legacyPassword = '', sessionStore = null }) {
         setCookie(req, res, token, SESSION_MS / 1000);
     }
 
-    const principal = (u) => ({ name: u.name, role: u.role, core: Boolean(u.core) });
+    const principal = (u) => ({ name: u.name, role: u.role, core: Boolean(u.core), ...(u.guest ? { guest: true } : {}) });
 
     // Who is this request? Returns { user, used } or { error, wait } for rate-limited Basic attempts
     function identify(req) {
@@ -241,29 +242,57 @@ function createLogin({ users, legacyPassword = '', sessionStore = null }) {
         basicOk.clear();
         res.json({ ok: true });
     }));
-    api.get('/ui/api/users', admin, (req, res) => res.json({ users: users.list(), minPassword: MIN_PASSWORD }));
-    api.post('/ui/api/users', admin, guarded((req, res) => {
-        users.add(req.body?.name, req.body?.password, req.body?.role);
-        res.json({ users: users.list() });
+    // the users with each guest's credit; if the database doesn't answer the list still comes, without credit
+    const withCredit = async () => {
+        let credit = {};
+        if (guests) { try { credit = await guests.all(); } catch (err) { console.warn(`[login] guest credit unavailable: ${err.message}`); } }
+        return users.list().map((u) => (u.guest && credit[u.name] ? { ...u, credit: credit[u.name] } : u));
+    };
+    const aguarded = (fn) => async (req, res) => {
+        try { await fn(req, res); } catch (e) { res.status(400).json({ error: e.message }); }
+    };
+    const capOf = (body) => {
+        const cap = body?.capUsd === undefined || body.capUsd === '' ? Number(process.env.HARNESS_GUEST_CAP_USD || 1) : Number(body.capUsd);
+        if (!Number.isFinite(cap) || cap < 0 || cap > 1000) throw new Error('the guest cap must be a dollar amount from 0 to 1000');
+        return cap;
+    };
+    api.get('/ui/api/users', admin, aguarded(async (req, res) => res.json({ users: await withCredit(), minPassword: MIN_PASSWORD, guests: Boolean(guests) })));
+    api.post('/ui/api/users', admin, aguarded(async (req, res) => {
+        const guest = req.body?.guest === true || req.body?.guest === 'on' || req.body?.guest === 'true';
+        if (guest && !guests) throw new Error('guest accounts need the hosted database (DATABASE_URL)');
+        const cap = guest ? capOf(req.body) : null;
+        users.add(req.body?.name, req.body?.password, req.body?.role, { guest });
+        if (guest) {
+            try { await guests.ensure(req.body.name, cap); } catch (err) { users.remove(req.body.name); throw new Error(`could not open the guest's credit: ${err.message}`); }
+        }
+        res.json({ users: await withCredit() });
     }));
-    api.post('/ui/api/users/:name', admin, guarded((req, res) => {
-        const { password, role } = req.body || {};
+    api.post('/ui/api/users/:name', admin, aguarded(async (req, res) => {
+        const { password, role, guest, capUsd } = req.body || {};
         if (role && req.params.name.toLowerCase() === req.harnessUser.name.toLowerCase()) throw new Error('you can\'t change your own role');
+        if ((guest !== undefined || capUsd !== undefined) && !guests) throw new Error('guest accounts need the hosted database (DATABASE_URL)');
         if (password) { users.setPassword(req.params.name, password); basicOk.clear(); }
         if (role) users.setRole(req.params.name, role);
-        res.json({ users: users.list() });
+        if (guest !== undefined) {
+            if (guest) await guests.ensure(req.params.name, capOf(req.body));
+            users.setGuest(req.params.name, Boolean(guest));
+        }
+        if (capUsd !== undefined && capUsd !== '') await guests.setCap(req.params.name, capOf(req.body));
+        res.json({ users: await withCredit() });
     }));
-    api.delete('/ui/api/users/:name', admin, guarded((req, res) => {
+    api.delete('/ui/api/users/:name', admin, aguarded(async (req, res) => {
         if (req.params.name.toLowerCase() === req.harnessUser.name.toLowerCase()) throw new Error('you can\'t remove yourself');
         users.remove(req.params.name);
+        if (guests) await guests.forget(req.params.name).catch((err) => console.warn(`[login] forgetting ${req.params.name}'s credit failed: ${err.message}`));
         for (const [k, s] of sessions) if (s.name.toLowerCase() === req.params.name.toLowerCase()) sessions.delete(k);
         if (sessionStore) sessionStore.dropUser(req.params.name);
         basicOk.clear();
-        res.json({ users: users.list() });
+        res.json({ users: await withCredit() });
     }));
     // Invited emails for Google / GitHub sign-in
     api.get('/ui/api/invites', admin, (req, res) => res.json({ invites: users.listInvites(), providers: oauth.enabled() ? oauth.providers() : [] }));
     api.post('/ui/api/invites', admin, guarded((req, res) => {
+        if (req.body?.role === 'guest' && !guests) throw new Error('guest accounts need the hosted database (DATABASE_URL)');
         users.addInvite(req.body?.email, req.body?.role);
         res.json({ invites: users.listInvites() });
     }));

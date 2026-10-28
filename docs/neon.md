@@ -38,3 +38,12 @@ With logins on and a database, signed-in people who are not admins get their own
 - **Compression.** `GET/POST /ui/api/my/settings` lets a person switch the terse-output instruction, Headroom and the context anchor for their own requests on the default routing. Every other setting stays global.
 
 The Routing page's editor still shows admin-only parts to a non-admin; the API is in place and the page for non-admins has not been adapted.
+
+## Guests and bringing your own OpenRouter key
+
+Two kinds of non-admin, both set up by an admin on the Users page (or by inviting an email with the role *Guest*). A guest can't be self-made.
+
+- **Guest.** Uses the owner's key with a hard lifetime cap (default $1, `HARNESS_GUEST_CAP_USD`; not monthly). Before each request the worst case it could cost is *reserved* in one atomic SQL update (`credit_accounts`, `credit_holds`, `utils/credit.js`): input estimated pessimistically at 2 characters a token, output capped at `HARNESS_GUEST_MAX_OUTPUT` (4096), priced at the dearest model the Gateway might fall back to. If the credit can't cover that, the answer is a 429 and nothing reaches a model. When the reply ends the reservation becomes the real cost from the reply's token counts; a reply with no counts is charged the worst case, a failed call nothing, and a reservation nobody settled (a crash) is charged in full after 20 minutes. Guests get only models with a known price (free ones cost nothing); requests with no known price, and every request while the database is down, are refused. Fallbacks are limited to priced models.
+- **Full user** (with `HARNESS_USER_CREDENTIALS=1`). Refused with a 402 until they save their own OpenRouter key on the Users page (stored encrypted in `user_credentials`). Their requests carry a signed ticket (`utils/credentialTicket.js`) in `extra_headers`; the Gateway forwards it to the harness's `/openrouter-proxy`, which swaps in their key. They may use OpenRouter models only. The server refuses to start with this switched on unless logins, `DATABASE_URL`, `ENCRYPTION_KEY` and a proxy key are all set.
+
+Before relying on this, check against a real LiteLLM that `extra_headers` in the request body reach the proxy: if the Gateway dropped them, a full user's request would run on the owner's key. The Router's Jev calls send no ticket, so they always use the owner's key. Keys given through federation (no stored secret) come in the next change.

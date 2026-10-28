@@ -30,6 +30,7 @@
         <label class="field"><span>User name</span><input name="name" required pattern="[A-Za-z0-9._-]{1,40}" autocapitalize="none"></label>
         <label class="field"><span>Password</span><input name="password" type="password" required autocomplete="new-password"><small id="minpw"></small></label>
         <label class="field"><span>Role</span><select name="role"><option value="user">User: chat and API</option><option value="admin">Admin: also Settings and Users</option></select></label>
+        <label class="field" id="guestRow" hidden><span>Guest</span><span><input name="guest" type="checkbox"> uses your key, capped at <input name="capUsd" type="number" min="0" max="1000" step="0.01" value="1" style="width:5em"> dollars in all</span></label>
         <div class="field"><span>&nbsp;</span><button class="primary">Add user</button></div>
       </form>
       <p class="muted" style="margin-bottom:0">Admins marked <em>env</em> come from <code>HARNESS_ADMINS</code> and are changed in .env.</p>
@@ -43,7 +44,7 @@
       <table id="inviteTable" style="width:100%;border-collapse:collapse"></table>
       <form id="addInvite" class="form" autocomplete="off" style="margin-top:12px">
         <label class="field"><span>Email</span><input name="email" type="email" required autocapitalize="none"></label>
-        <label class="field"><span>Role</span><select name="role"><option value="user">User: chat and API</option><option value="admin">Admin: also Settings and Users</option></select></label>
+        <label class="field"><span>Role</span><select name="role"><option value="user">User: chat and API</option><option value="guest" class="guestOpt" hidden>Guest: your key, capped credit</option><option value="admin">Admin: also Settings and Users</option></select></label>
         <div class="field"><span>&nbsp;</span><button class="primary">Invite</button></div>
       </form>
     </div>
@@ -60,6 +61,23 @@
     </form>
     <pre id="newKey" hidden style="white-space:pre-wrap;word-break:break-all;margin:12px 0 0"></pre>
   </div>
+
+  <section id="keySection" hidden>
+    <h2>Your OpenRouter key</h2>
+    <div class="card">
+      <p class="muted" style="margin-top:0" id="keyNote">Your requests are billed to your own OpenRouter account. Paste a key from openrouter.ai/keys; it is stored encrypted and never shown again.</p>
+      <p id="keyState"></p>
+      <form id="setKey" class="form" autocomplete="off">
+        <label class="field"><span>OpenRouter key</span><input name="key" type="password" placeholder="sk-or-…" autocomplete="off" required></label>
+        <div class="field"><span>&nbsp;</span><button class="primary">Save key</button> <button type="button" id="clearKey">Remove</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="guestSection" hidden>
+    <h2>Guest credit</h2>
+    <div class="card"><p id="guestState" style="margin:0"></p></div>
+  </section>
 
   <section id="pwSection" hidden>
     <h2>Change my password</h2>

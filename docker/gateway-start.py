@@ -99,13 +99,13 @@ def build(config: dict) -> dict:
 
 
 def use_federation() -> None:
-    """With OPENROUTER_FEDERATION_POLICY_ID set, the harness holds the short-lived OpenRouter tokens and the
+    """With OPENROUTER_FEDERATION_POLICY_ID (or HARNESS_USER_CREDENTIALS) set, the harness holds the short-lived OpenRouter tokens and the
     Gateway calls OpenRouter through its /openrouter-proxy, using the proxy key as OPENROUTER_API_KEY."""
-    if not env("OPENROUTER_FEDERATION_POLICY_ID"):
+    if not env("OPENROUTER_FEDERATION_POLICY_ID") and env("HARNESS_USER_CREDENTIALS").lower() not in ("1", "true", "yes", "on"):
         return
     key = env("OPENROUTER_PROXY_KEY") or env("LITELLM_MASTER_KEY")
     if not key:
-        sys.exit("OPENROUTER_FEDERATION_POLICY_ID needs OPENROUTER_PROXY_KEY or LITELLM_MASTER_KEY in .env")
+        sys.exit("OPENROUTER_FEDERATION_POLICY_ID and HARNESS_USER_CREDENTIALS need OPENROUTER_PROXY_KEY or LITELLM_MASTER_KEY in .env")
     os.environ["OPENROUTER_API_KEY"] = key
     os.environ["OPENROUTER_API_BASE"] = (env("OPENROUTER_PROXY_URL") or "http://harness:3000").rstrip("/") + "/openrouter-proxy/v1"
 

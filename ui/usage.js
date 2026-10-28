@@ -592,9 +592,9 @@ $('assume').addEventListener('change', (e) => {
 });
 $('assumeReset').addEventListener('click', () => { assumptions = { ...Costs.ASSUMED, perModel: {} }; Costs.saveAssumptions(assumptions); render(); });
 $('clear').addEventListener('click', async () => {
-  if (!confirm('Clear all saved token totals? This cannot be undone.')) return;
+  if (!await ui.confirm('Clear all saved token totals? This cannot be undone.')) return;
   const res = await fetch('api/usage/clear', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-  if (!res.ok) { alert((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`); return; }
+  if (!res.ok) { ui.toast((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`, { kind: 'error' }); return; }
   refresh();
 });
 

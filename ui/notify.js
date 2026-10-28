@@ -90,7 +90,7 @@
     });
     el.addEventListener('click', async (e) => {
       if (e.target.dataset?.n !== 'test') return;
-      if (permission() !== 'granted') return alert('Turn notifications on first.');
+      if (permission() !== 'granted') return ui.toast('Turn notifications on first.');
       const { title, body } = TEXT.reply;
       const reg = await navigator.serviceWorker?.getRegistration?.().catch(() => null);
       const o = { body: `Test: ${body}`, icon: 'icon-192.png', tag: 'harness-test' };

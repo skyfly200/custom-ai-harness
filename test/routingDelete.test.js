@@ -6,7 +6,7 @@ const path = require('node:path');
 const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'ui', 'routing.js'), 'utf8');
 
 function loadRemoveModel(graph, profile, other) {
-    const from = SOURCE.indexOf('function removeModel(');
+    const from = SOURCE.indexOf('async function removeModel(');
     const end = SOURCE.indexOf('\n}\n\n// Press and hold:', from) + 2;
     assert.ok(from > 0 && end > from, 'ui/routing.js has a removeModel function');
     const fallback = graph.fallbacks;
@@ -21,7 +21,7 @@ function loadRemoveModel(graph, profile, other) {
       ${SOURCE.slice(from, end)}
       return { removeModel, selected: () => selected };
     `;
-    return new Function('R', 'graph', 'ownFb', 'routeOuts', 'setOut', 'changed', 'note', 'routingName', 'strategies', 'allFb', 'confirm', body)(
+    return new Function('R', 'graph', 'ownFb', 'routeOuts', 'setOut', 'changed', 'note', 'routingName', 'strategies', 'allFb', 'ui', body)(
         () => profile,
         graph,
         ownFb,
@@ -32,11 +32,11 @@ function loadRemoveModel(graph, profile, other) {
         () => 'the selected strategy',
         () => [graph, profile, other],
         () => [fallback, profile.fallbacks, other.fallbacks].filter(Boolean),
-        () => { throw new Error('removing from one strategy should not ask to delete the shared model'); },
+        { confirm: () => { throw new Error('removing from one strategy should not ask to delete the shared model'); } },
     );
 }
 
-test('removing a model from a named strategy leaves the Gateway and other routings alone', () => {
+test('removing a model from a named strategy leaves the Gateway and other routings alone', async () => {
     const graph = {
         deployments: [{ name: 'model-x' }],
         routes: { strong: 'model-x', weak: 'other' },
@@ -46,7 +46,7 @@ test('removing a model from a named strategy leaves the Gateway and other routin
     const other = { name: 'Quick', routes: { strong: 'model-x', weak: 'other' }, fallbacks: { 'model-x': ['other'] } };
     const { removeModel, selected } = loadRemoveModel(graph, profile, other);
 
-    removeModel('model-x');
+    await removeModel('model-x');
 
     assert.deepEqual(profile.routes, { strong: null, weak: null });
     assert.deepEqual(profile.fallbacks, {});

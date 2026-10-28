@@ -146,6 +146,7 @@ const sync = {
     } catch { return; }
     if (!remote || !remote.db) return;
     this.on = true;
+    this.serverSchedules = Boolean(remote.serverSchedules);
     let changed = false;
     const raw = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
     const byId = new Map(remote.chats.map(e => [e.id, e]));
@@ -190,11 +191,48 @@ const sync = {
         if (v !== null) this.pushData(key, v);
       }
     }
+    if (this.serverSchedules && schedules.some(x => !x.tz)) { schedules.forEach(x => { x.tz = x.tz || myZone; }); saveSchedules(); } // the server needs each schedule's time zone
     const guarded = sessionStorage.getItem('harness-sync-reloaded');
     if (changed && !guarded && !running.size) { sessionStorage.setItem('harness-sync-reloaded', '1'); location.reload(); }
     else sessionStorage.removeItem('harness-sync-reloaded');
   },
 };
+// With schedules on the server, what it sends arrives as new chats and moved times: look for them now and then
+sync.refresh = async function () {
+  if (!this.on || !this.serverSchedules || document.hidden) return;
+  let remote;
+  try { const r = await fetch('api/sync', { headers: { accept: 'application/json' } }); if (!r.ok) return; remote = await r.json(); } catch { return; }
+  const raw = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
+  const theirs = remote.data?.[SCHEDULES_KEY];
+  let ours = 0;
+  try { ours = Number(localStorage.getItem(`harness-sync-ts:${SCHEDULES_KEY}`)) || 0; } catch {}
+  if (theirs && theirs.updated > ours && !$('schedDialog').open) {
+    schedules = theirs.value; raw(SCHEDULES_KEY, schedules);
+    try { localStorage.setItem(`harness-sync-ts:${SCHEDULES_KEY}`, String(theirs.updated)); } catch {}
+    drawSchedules();
+  }
+  let added = false;
+  for (const e of remote.chats || []) {
+    if (e.deleted || chat?.id === e.id || running.has(e.id)) continue;
+    const local = index.find(x => x.id === e.id);
+    if (local && local.updated >= e.updated) continue;
+    try {
+      const r = await this.api(`/chats/${e.id}`);
+      if (!r.ok) continue;
+      const c = await r.json();
+      raw(CHAT_KEY(c.id), c);
+      this.noteSaved(c.id, c.syncVersion, c.messages);
+      cache.delete(c.id);
+      const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches };
+      const i = index.findIndex(x => x.id === c.id);
+      if (i >= 0) index[i] = entry; else index.push(entry);
+      added = true;
+    } catch {}
+  }
+  if (added) { index.sort((a, b) => b.updated - a.updated); raw(INDEX_KEY, index); drawList(); }
+};
+setInterval(() => sync.refresh(), 60000);
+
 // Fill in the bytes of attachments this device only has a stub for (a chat made on another device)
 async function hydrateAttachments(c, only) {
   if (!sync.on || !c) return;
@@ -3919,19 +3957,9 @@ let editingSchedule = null;
 const pad = (n) => String(n).padStart(2, '0');
 const localInput = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
-// The next time after `from` that a schedule starting at `start` repeats
-function nextRun(start, repeat, from = Date.now()) {
-  if (repeat === 'once') return start > from ? start : null;
-  let t = start;
-  const d = () => new Date(t);
-  for (let i = 0; t <= from && i < 100000; i++) {
-    if (repeat === 'hourly') t += Math.max(1, Math.ceil((from - t) / 3600000)) * 3600000;
-    else if (repeat === 'weekly') t += Math.max(1, Math.ceil((from - t) / 604800000)) * 604800000;
-    else { const n = d(); n.setDate(n.getDate() + 1); t = n.getTime(); }
-  }
-  if (repeat === 'weekdays') while ([0, 6].includes(d().getDay())) { const n = d(); n.setDate(n.getDate() + 1); t = n.getTime(); }
-  return t;
-}
+// The next time after `from` that a schedule starting at `start` repeats (ui/schedule.js, shared with the server)
+const myZone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; } })();
+const nextRun = (start, repeat, from = Date.now(), tz = myZone) => Schedule.nextRun(start, repeat, from, tz);
 
 function openScheduleDialog(id) {
   editingSchedule = schedules.find(s => s.id === id) || null;
@@ -3960,8 +3988,8 @@ $('schedForm').addEventListener('submit', (e) => {
   if (!prompt) return $('sPrompt').focus();
   if (!start) return $('sWhen').focus();
   const s = editingSchedule || { id: uid() };
-  Object.assign(s, { name: $('sName').value.trim(), prompt, repeat: $('sRepeat').value, start, target: $('sTarget').value });
-  s.next = s.repeat === 'once' ? start : nextRun(start, s.repeat, Date.now() - 1);
+  Object.assign(s, { name: $('sName').value.trim(), prompt, repeat: $('sRepeat').value, start, target: $('sTarget').value, tz: myZone });
+  s.next = s.repeat === 'once' ? start : nextRun(start, s.repeat, Date.now() - 1, s.tz);
   if (!editingSchedule) schedules.push(s);
   saveSchedules();
   $('schedDialog').close();
@@ -3988,7 +4016,7 @@ function runSchedule(s, manual = false) {
   }
   c.messages.push({ id: uid(), role: 'user', content: s.prompt, time: Date.now(), scheduled: true });
   s.last = Date.now();
-  if (!manual) s.next = nextRun(s.start, s.repeat);
+  if (!manual) s.next = nextRun(s.start, s.repeat, Date.now(), s.tz || myZone);
   saveSchedules();
   runReply(c);
   drawSchedules();
@@ -3996,6 +4024,7 @@ function runSchedule(s, manual = false) {
   return true;
 }
 function checkSchedules() {
+  if (sync.serverSchedules) return; // the server sends them, with or without this page
   let changed = false;
   for (const s of schedules) if (s.next && s.next <= Date.now()) changed = runSchedule(s) || changed;
   if (changed) drawSchedules();

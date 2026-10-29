@@ -110,7 +110,8 @@ const sync = {
     const base = c.sharedFrom ? `/shared/${encodeURIComponent(c.sharedFrom)}/chats/${id}` : `/chats/${id}`;
     if (!c.sharedFrom) await this.uploadAttachments(c);
     const { upserts, order, fingerprints } = ChatMerge.delta(this.wire(c.messages), snap.known);
-    const { messages, syncVersion, ...chatMeta } = c;
+    // The linked folder belongs to the device it was linked on: it is not sent, so another device or a hosted server never sees it
+    const { messages, syncVersion, repo: _folder, ...chatMeta } = c;
     const r = await this.api(`${base}/delta`, { method: 'PUT', body: { chat: chatMeta, order, upserts, base: snap.version } });
     if (r.status === 409 && attempt < 2) {
       const got = await this.api(base);
@@ -119,7 +120,9 @@ const sync = {
       const remote = await got.json();
       const merged = ChatMerge.mergeChats(c, remote);
       const { messages: joined, ...rest } = merged;
+      const keepRepo = c.repo;
       Object.assign(c, rest);
+      if (keepRepo) c.repo = keepRepo;
       c.messages.splice(0, c.messages.length, ...joined);
       this.noteSaved(c.id, remote.syncVersion, remote.messages);
       return this.saveChat(id, attempt + 1);
@@ -763,7 +766,8 @@ function emptyState() {
     
     ${quickPicker()}
     <div class="suggest">${picks.map(t => `<button type="button" class="chip-btn" data-suggest="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-    <p class="small tip">Drop files, dictate, or type <kbd>/</kbd> for skills and tools.</p></div>`;
+    <p class="small tip">Drop files, dictate, or type <kbd>/</kbd> for skills and tools.</p>
+    ${hostedNoFolders() && !ghOf(chat) ? '<p class="small tip">To ask about your code, attach a GitHub repo under Options &gt; Tools.</p>' : ''}</div>`;
 }
 
 // Quick pick on a new chat: a strategy, or one model directly. Outside projects
@@ -1366,7 +1370,9 @@ $('log').addEventListener('click', async (e) => {
 // Sending
 // ---------------------------------------------------------------------------
 // The chat's own repo, else its project's
-const repoOf = (c) => c?.repo || projectOf(c)?.repo || null;
+// A folder on someone's own computer means nothing to a hosted server, which says so with localRepos: false
+const hostedNoFolders = () => toolInfo?.localRepos === false;
+const repoOf = (c) => (hostedNoFolders() ? null : c?.repo || projectOf(c)?.repo || null);
 // The chat's GitHub repo ({ full: "owner/name", branch, private }), attached under Options > Tools
 const ghOf = (c) => c?.github || null;
 // Skills on for this chat: its own and its project's
@@ -2694,6 +2700,17 @@ $('mcpReload').addEventListener('click', async () => {
 });
 
 function drawRepo() {
+  const hosted = hostedNoFolders();
+  $('repoLink').disabled = hosted && !chat?.repo;
+  if (hosted) {
+    $('repoInfo').innerHTML = chat?.repo
+      ? `This chat's repo is a folder on your own computer (<code>${esc(chat.repo.path)}</code>), which this hosted server cannot read. Unlink it, then attach a GitHub repo below.`
+      : 'Folders on your computer cannot be read from this hosted server. Attach a GitHub repo below instead.';
+    $('repoPath').value = chat?.repo ? chat.repo.path : '';
+    $('repoPath').readOnly = !!chat?.repo;
+    $('repoLink').textContent = chat?.repo ? 'Unlink' : 'Link';
+    return;
+  }
   const r = chat?.repo;
   $('repoPath').value = r ? r.path : $('repoPath').dataset.typed || '';
   $('repoPath').readOnly = !!r;

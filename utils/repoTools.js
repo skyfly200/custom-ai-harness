@@ -7,6 +7,26 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 
+// A hosted server (Fly, Docker with a database) has no folders of the person's own. Folder repos and the
+// shell are for the harness running on their computer; HARNESS_LOCAL_REPOS=1 turns them back on.
+function localFoldersAvailable(env = process.env) {
+    if (/^(1|true|yes|on)$/i.test(env.HARNESS_LOCAL_REPOS || '')) return true;
+    return !(env.HARNESS_SERVER === '1' || env.DATABASE_URL);
+}
+
+const HOSTED_MESSAGE = 'a folder repo is a folder on your own computer, and this is a hosted server, so it cannot reach it: unlink it and attach a GitHub repo instead (Options > Tools > Connect GitHub)';
+
+// What a folder path from the page may be on this machine; throws a plain reason when it cannot be used here
+function checkFolderPath(dir, { platform = process.platform, env = process.env } = {}) {
+    if (!localFoldersAvailable(env)) throw new Error(HOSTED_MESSAGE);
+    if (typeof dir !== 'string' || !dir.trim()) throw new Error('give the path of a folder inside a git repository');
+    const text = dir.trim();
+    if (platform !== 'win32' && (/^[a-zA-Z]:[\\/]/.test(text) || text.startsWith('\\\\'))) {
+        throw new Error(`${text} is a Windows path, but the harness runs on ${platform} here and cannot open it`);
+    }
+    return text;
+}
+
 const MAX_OUTPUT = 60000;     // characters of git output handed to the model
 const MAX_LINES = 2000;       // lines per read_file call
 const GIT_TIMEOUT_MS = 30000;
@@ -37,8 +57,7 @@ function checkRef(ref) {
 
 /** The repository holding `dir`: its top folder, name, branch and remote. */
 async function inspect(dir) {
-    if (typeof dir !== 'string' || !dir.trim()) throw new Error('give the path of a folder inside a git repository');
-    const folder = path.resolve(dir.trim().replace(/^~(?=$|[\\/])/, require('os').homedir()));
+    const folder = path.resolve(checkFolderPath(dir).replace(/^~(?=$|[\\/])/, require('os').homedir()));
     if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new Error(`no folder at ${folder}`);
     let top;
     try {
@@ -192,4 +211,4 @@ async function call(repoDir, name, args = {}) {
     }
 }
 
-module.exports = { inspect, call, definitions: () => DEFINITIONS, isRepoTool: (name) => NAMES.has(name), globToRegExp, insideRepo };
+module.exports = { inspect, localFoldersAvailable, checkFolderPath, HOSTED_MESSAGE, call, definitions: () => DEFINITIONS, isRepoTool: (name) => NAMES.has(name), globToRegExp, insideRepo };

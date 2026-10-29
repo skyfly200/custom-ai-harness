@@ -1293,23 +1293,24 @@ const noOwnTools = { error: 'Your own tools need the hosted database and ENCRYPT
 app.get('/ui/api/tools', async (req, res) => {
     if (isMember(req)) {
         // Only the member's own servers: shell and repo tools run on this machine, and the shared servers are the admins'
-        if (!userMcpMod.available()) return res.json({ servers: [], definitions: {}, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions(), note: noOwnTools.error });
+        if (!userMcpMod.available()) return res.json({ servers: [], definitions: {}, localRepos: false, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions(), note: noOwnTools.error });
         try {
             const mgr = userMcp.manager(ownerOf(req));
             await mgr.start();
             const status = mgr.status();
             const definitions = {};
             for (const s of status.servers) definitions[s.name] = mgr.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
-            return res.json({ ...status, file: 'your account', definitions, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions() });
+            return res.json({ ...status, file: 'your account', definitions, localRepos: false, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions() });
         } catch (err) {
             return res.status(500).json({ error: err.message });
         }
     }
     await mcp.start();
+    const localRepos = repoTools.localFoldersAvailable();
     const status = mcp.status();
     const definitions = {};
     for (const s of status.servers) definitions[s.name] = mcp.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
-    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions(), shellDefinitions: settings.get().shellInRepo ? chatShell.definitions() : [], githubDefinitions: githubApi.definitions() });
+    res.json({ ...status, definitions, localRepos, repoDefinitions: localRepos ? repoTools.definitions() : [], shellDefinitions: localRepos && settings.get().shellInRepo ? chatShell.definitions() : [], githubDefinitions: githubApi.definitions() });
 });
 
 app.post('/ui/api/tools/reload', memberOrLocalJson, async (req, res) => {
@@ -1478,6 +1479,7 @@ async function shellCall(repo, args, confirmed) {
 // to /ui/api/tools/call with `confirmed`.
 app.post('/ui/api/tools/shell/check', localJsonOnly, async (req, res) => {
     const { command } = req.body || {};
+    if (!repoTools.localFoldersAvailable()) return res.json({ decision: 'deny', reason: repoTools.HOSTED_MESSAGE });
     if (typeof command !== 'string' || !command.trim()) return res.status(400).json({ error: 'command is required' });
     const { guardJev, guardAskAt, guardDenyAt, shellInRepo } = settings.get();
     if (!shellInRepo) return res.json({ decision: 'deny', reason: 'the shell is off in the settings' });
@@ -1507,6 +1509,7 @@ app.post('/ui/api/tools/call', memberOrLocalJson, async (req, res) => {
             return res.json({ ...(await mgr.call(name, args || {}, { confirmed: confirmed === true })), ms: Date.now() - started });
         }
         const needsRepo = chatShell.isShellTool(name) || repoTools.isRepoTool(name);
+        if (needsRepo && !repoTools.localFoldersAvailable()) throw new Error(repoTools.HOSTED_MESSAGE);
         const workspace = needsRepo && repo && chatId ? await chatWorktrees.create(repo, chatId) : null;
         const toolRepo = workspace?.path || repo;
         let result;

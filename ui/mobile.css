@@ -68,3 +68,10 @@
   .chatbar button.icon { width: 34px; padding: 6px; }
   .top-actions { gap: 0; }
 }
+
+/* touch screens: form help is folded away until you tap into the field */
+@media (hover: none) {
+  .field > small, .field.check small { display: none; }
+  .field:focus-within > small, .field.check:focus-within small { display: block; }
+  .field.check:focus-within br { display: none; }
+}

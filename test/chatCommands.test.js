@@ -44,14 +44,16 @@ function context({ chat = { id: 'c1', messages: [] }, models = [], commands = []
   return ctx;
 }
 
-function subagentContext({ models = SERVED, response = { id: 'r1', branch: 'harness/r1' } } = {}) {
+function subagentContext({ hosted = false, github = null, models = SERVED, response = { id: 'r1', branch: 'harness/r1' } } = {}) {
   const toasts = [];
   const saved = [];
   const requests = [];
   const chat = { id: 'c1', messages: [] };
   const ctx = {
     chat, gatewayModels: models, modelAlias, console, JSON, Date,
-    repoOf: () => ({ path: 'C:\\repos\\demo', name: 'demo' }),
+    repoOf: () => (hosted ? null : { path: 'C:\\repos\\demo', name: 'demo' }),
+    hostedNoFolders: () => hosted,
+    ghOf: () => github,
     routeOf: () => ({ model: 'auto' }),
     toast: (t) => toasts.push(t),
     saveChat: (c) => saved.push(c),
@@ -215,4 +217,14 @@ test('the model suggestion list shows for /advisor, /model and the first word of
   assert.equal(modelArgument('/advisor off'), null);
   assert.equal(modelArgument('/agent Docs op'), null);
   assert.equal(modelArgument('/advisor'), null);
+});
+
+test('/subagent in a hosted chat uses the attached GitHub repo, and asks for one when there is none', async () => {
+  const withRepo = subagentContext({ hosted: true, github: { full: 'skyfly200/demo' } });
+  await withRepo.subagentCommand('/subagent look around');
+  assert.equal(withRepo.requests[0].body.repo, 'skyfly200/demo');
+  const without = subagentContext({ hosted: true });
+  await without.subagentCommand('/subagent look around');
+  assert.equal(without.requests.length, 0);
+  assert.match(without.toasts.at(-1), /Attach a GitHub repo/);
 });

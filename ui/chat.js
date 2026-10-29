@@ -2178,9 +2178,12 @@ function subagentCommand(text) {
   const typed = (m[2] || '').trim();
   const c = chat;
   return (async () => {
-    const repo = repoOf(c);
+    // a hosted chat has no folders: its repo is the GitHub one attached under Options > Tools
+    const repo = hostedNoFolders() ? (ghOf(c)?.full ? { path: ghOf(c).full } : null) : repoOf(c);
     if (!repo) {
-      toast(`Link a git repo first (Options → Context): a ${plan ? 'plan' : 'subagent'} works in a copy of it.`);
+      toast(hostedNoFolders()
+        ? `Attach a GitHub repo first (Options → Tools): a ${plan ? 'plan' : 'subagent'} works in a copy of it.`
+        : `Link a git repo first (Options → Context): a ${plan ? 'plan' : 'subagent'} works in a copy of it.`);
       return;
     }
     if (!typed) {
@@ -2350,6 +2353,12 @@ function autoGrow() {
   ta.style.height = Math.min(ta.scrollHeight + 2, 240) + 'px';
   drawHint();
 }
+
+// Helper text under fields shows one line; a tap (or hover, in the CSS) shows the rest
+document.addEventListener('click', (e) => {
+  const note = e.target.closest('.opt-body div.muted.small, .note-clamp');
+  if (note && !e.target.closest('a, button')) note.classList.toggle('open');
+});
 
 // ---------------------------------------------------------------------------
 // Commands. Typing / lists them with the model each one sends to, and under

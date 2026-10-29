@@ -154,3 +154,39 @@ body.runs-off main > :not(header):not(#down) { display: none; }
 .composer .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
 .composer .actions .fine { margin-left: auto; font-size: 12px; }
 .composer #startBtn { padding: 8px 22px; border-radius: 999px; }
+
+/* Floating orbs home: each agent drifts gently; hover, focus or a tap shows its details */
+.bubbles { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 34px 40px; min-height: 52vh; padding: 36px 8px 90px; }
+.bubbles[hidden], .backbar[hidden] { display: none; }
+.bubble { position: relative; animation: drift var(--t, 10s) ease-in-out var(--d, 0s) infinite alternate; }
+.bubble:hover, .bubble:focus-within, .bubble.peek { animation-play-state: paused; z-index: 5; }
+.orbbtn { display: grid; justify-items: center; gap: 10px; margin: 0; padding: 6px; border: 0; background: transparent; color: var(--text); cursor: pointer; border-radius: 18px; }
+.orbbtn .orb { width: 84px; height: 84px; transition: transform .25s; }
+.orbbtn:hover .orb, .orbbtn:focus-visible .orb { transform: scale(1.08); }
+.orbbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.orbbtn .nm { font-weight: 650; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bubble.add .orbbtn { color: var(--muted); }
+.bubble.add .orb { background: transparent; border: 1.5px dashed var(--border); box-shadow: none; display: grid; place-items: center; }
+.bubble.add .orb i { display: none; }
+.bubble.add .orb span { font-size: 34px; line-height: 1; color: var(--accent); }
+.orbcard { position: absolute; left: 50%; top: calc(100% - 6px); z-index: 6; width: 250px; display: grid; gap: 4px; padding: 12px 14px; font-size: 12.5px; text-align: left; color: var(--text);
+  border: 1px solid var(--border); border-radius: 14px; background: var(--glass, var(--bg)); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: var(--shadow);
+  opacity: 0; visibility: hidden; transform: translate(-50%, 6px); transition: opacity .18s, transform .18s, visibility .18s; pointer-events: none; }
+.orbcard b { color: var(--muted); font-weight: 600; margin-right: 4px; }
+.orbcard .open { margin-top: 4px; color: var(--accent); font-weight: 600; }
+.bubble:hover .orbcard, .bubble:focus-within .orbcard, .bubble.peek .orbcard { opacity: 1; visibility: visible; transform: translate(-50%, 0); pointer-events: auto; }
+.backbar { margin: 4px 0 8px; }
+.livepanel { position: fixed; right: 18px; bottom: 18px; z-index: 20; width: min(300px, calc(100vw - 36px)); max-height: 40vh; overflow: auto; padding: 12px 14px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 16px; background: var(--glass, var(--bg)); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: var(--shadow);
+  animation: drift 8s ease-in-out infinite alternate; }
+.livepanel[hidden] { display: none; }
+.livepanel .lg { margin-top: 8px; } .livepanel .lgn { display: block; color: var(--muted); font-size: 12px; }
+.livepanel a { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--text); text-decoration: none; }
+.livepanel a:hover .g { text-decoration: underline; }
+.livepanel .g { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes drift { from { transform: translate(0, -7px); } to { transform: translate(var(--dx, 8px), 7px); } }
+@media (prefers-reduced-motion: reduce) { .bubble, .livepanel { animation: none; } .orbbtn .orb, .orbcard { transition: none; } }
+@media (max-width: 760px) { .bubbles { gap: 26px 22px; padding-bottom: 150px; } .orbbtn .orb { width: 72px; height: 72px; } .orbcard { width: min(250px, 80vw); }
+  .livepanel { right: 12px; left: 12px; width: auto; bottom: 12px; } }
+.hero[hidden], .split[hidden], #listTitle[hidden], #newRun[hidden], #agentInfo[hidden], .livepanel[hidden] { display: none !important; }
+.orbcard, .livepanel { background: var(--panel, #fff); }

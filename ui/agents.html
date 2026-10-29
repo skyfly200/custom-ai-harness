@@ -43,7 +43,9 @@
     <div><h2 id="heroTitle">Agents</h2><p class="muted" id="heroSub">Loading…</p></div>
   </section>
 
-  <div class="agent-grid" id="agentChips" data-hint="An agent has a name, a repo and standing instructions. Each task you give it starts from what its last task committed, and it is told what the earlier ones did"></div>
+  <div class="bubbles" id="agentChips" role="list" aria-label="Agents"></div>
+  <aside class="livepanel" id="livePanel" aria-label="Open runs" hidden></aside>
+  <p class="backbar" id="backBar" hidden><button type="button" id="backBtn">← All agents</button></p>
   <div id="agentInfo" class="card agent-info" hidden></div>
 
   <div id="appsBox">

@@ -18,6 +18,8 @@ const statusWord = (r) => (r.status === 'incomplete' && r.outOfBudget ? 'cost li
 let selected = location.hash.slice(1) || null;
 let runs = [];
 let agents = [];
+let inAgent = false;   // false: the floating-orbs home; true: one agent's page (agentSel null = the default agent)
+let peekId = null;     // the orb whose details card is open by tap
 let agentSel = null;   // the agent whose tasks are shown, or null for every run
 let busy = false;
 let hosted = false;    // a shared server: GitHub repos, your own runs only, push to GitHub
@@ -72,7 +74,7 @@ const agentSpend = (id) => {
   const cost = all.reduce((n, r) => n + (r.cost || 0), 0), unpriced = all.reduce((n, r) => n + (r.unpricedCalls || 0), 0);
   return (cost || !unpriced ? Costs.usd(cost) : '$?') + (unpriced ? '+' : '');
 };
-const shown = () => (agentSel ? runs.filter((r) => r.agent === agentSel) : runs);
+const shown = () => (agentSel ? runs.filter((r) => r.agent === agentSel) : runs.filter((r) => !r.agent));
 
 // Redraw only when the markup changed, so the refresh every 1.5 s doesn't replay the newest line's animation
 // or restart the orb and scroll position when nothing is new
@@ -551,6 +553,7 @@ async function initSandboxes() {
 }
 
 async function init() {
+  applyView();
   initSandboxes();
   initWorkflows();
   await initRepoPicker();
@@ -560,11 +563,13 @@ async function init() {
   } catch { /* the default routing is enough */ }
   await initAgentDialog();
   const first = location.hash.slice(1);
-  if (first.startsWith('a')) { selected = null; agentSel = first; }
+  if (first === 'default') { selected = null; inAgent = true; }
+  else if (first.startsWith('a')) { selected = null; agentSel = first; inAgent = true; }
+  else if (first) inAgent = true;
   await refresh();
   // a run's link opens on the agent it belongs to
   if (selected && !agentSel) agentSel = runs.find((r) => r.id === selected)?.agent || null;
-  applyMode();
+  applyMode(); applyView();
   renderAgents(); renderList();
   setInterval(refresh, 1500);
 }
@@ -586,22 +591,76 @@ function renderHero() {
     : 'An agent is a named helper for one repo. It keeps working on it, task after task.';
 }
 
+const nameLine = (s) => String(s || '').split('\n')[0];
+function lastRunOf(id) {
+  const r = runs.filter((x) => !x.parent && (id ? x.agent === id : !x.agent)).sort((x, y) => String(y.created).localeCompare(String(x.created)))[0];
+  return r ? `${statusWord(r)} ${ago(r.created)}` : 'none yet';
+}
+function orbCard(a) {
+  const def = !a;
+  const route = def ? 'Default' : [a.profile || 'Default', a.effort ? `effort ${a.effort}` : ''].filter(Boolean).join(', ');
+  const rows = [
+    ['Does', def ? 'One-off runs on any repo you pick' : (a.instructions ? nameLine(a.instructions) : `Works on ${a.repo.split(/[\\/]/).filter(Boolean).pop() || a.repo}`)],
+    ['Workflow', def ? 'Jev picks per goal' : nameOf(a.workflow)],
+    ['Models', route],
+    ['Sandbox', def ? 'Your choice per run' : (SANDBOX_NAMES[a.sandbox] || a.sandbox || 'This machine')],
+    ['Cost cap', a && a.maxCost ? `$${a.maxCost} per task` : 'none'],
+    ['Last run', lastRunOf(def ? '' : a.id)],
+  ];
+  return `<span class="orbcard" role="tooltip">${rows.map(([k, v]) => `<span><b>${k}</b> ${esc(v)}</span>`).join('')}<span class="open">Open ${esc(def ? 'Default' : a.name)} →</span></span>`;
+}
 function renderAgents() {
   renderHero();
   const state = (a) => (a.waiting ? 'wait' : a.active ? 'live' : '');
-  const card = (a) => `<button type="button" class="agent-card${agentSel === a.id ? ' on' : ''}" data-aid="${esc(a.id)}" title="${esc(a.repo)}">
-    <span class="orb ${state(a)}"><i></i><i></i><i></i></span>
-    <span class="nm">${esc(a.name)}</span>
-    <span class="st ${state(a)}">${a.waiting ? 'Needs you' : a.active ? 'Working' : 'Idle'}</span>
-    <span class="meta">${esc(a.repo.split(/[\\/]/).filter(Boolean).pop() || a.repo)} · ${a.taskCount} task${a.taskCount === 1 ? '' : 's'} · ${agentSpend(a.id)}</span></button>`;
-  $('agentChips').innerHTML = `<button type="button" class="agent-card all${agentSel ? '' : ' on'}" data-aid=""><span class="nm">All runs</span><span class="meta">${runs.filter((r) => !r.parent).length} in total</span></button>${agents.map(card).join('')}<button type="button" class="agent-card add" id="newAgent" data-hint="Make a named agent for a repo that keeps working on it task after task"><span class="plus">+</span><span class="nm">New agent</span></button>`;
+  const bubble = (a, i) => {
+    const def = !a;
+    const id = def ? 'default' : a.id;
+    const st = def ? (runs.some((r) => !r.agent && !r.parent && r.status === 'waiting') ? 'wait' : runs.some((r) => !r.agent && !r.parent && ACTIVE.has(r.status)) ? 'live' : '') : state(a);
+    return `<div class="bubble${peekId === id ? ' peek' : ''}${def ? ' def' : ''}" role="listitem" style="--d:${(i * 1.7) % 7}s;--t:${9 + (i * 3) % 5}s;--dx:${(i % 2 ? -1 : 1) * (6 + (i * 5) % 8)}px">
+      <button type="button" class="orbbtn" data-aid="${esc(def ? '' : a.id)}" data-bid="${esc(id)}" aria-label="${esc(def ? 'Default' : a.name)}${st === 'wait' ? ', needs you' : st === 'live' ? ', working' : ''}">
+        <span class="orb ${st}"><i></i><i></i><i></i></span><span class="nm">${esc(def ? 'Default' : a.name)}</span></button>${orbCard(a)}</div>`;
+  };
+  const addB = `<div class="bubble add" role="listitem" style="--d:3s;--t:11s;--dx:7px"><button type="button" class="orbbtn" id="newAgent" aria-label="New agent"><span class="orb plus"><span>+</span></span><span class="nm">New agent</span></button></div>`;
+  setHtml('agentChips', [bubble(null, 0), ...agents.map((a, i) => bubble(a, i + 1)), addB].join(''));
+  renderLive();
   const a = agentOf(agentSel);
-  $('agentInfo').hidden = !a;
+  $('agentInfo').hidden = !inAgent;
   if (a) {
     $('agentInfo').innerHTML = `<h3>${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span><span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
+  } else if (inAgent) {
+    $('agentInfo').innerHTML = '<h3>Default</h3><div class="facts"><span>For standard one-off runs: pick any repo below and say what to do.</span></div>';
   }
+}
+
+// the small floating panel of open runs, grouped under their agent
+function renderLive() {
+  const open = runs.filter((r) => ACTIVE.has(r.status) && !r.parent);
+  const panel = $('livePanel');
+  panel.hidden = inAgent || !open.length;
+  if (!open.length) { lastHtml.delete('livePanel'); return; }
+  const groups = new Map();
+  for (const r of open) { const k = r.agent || ''; (groups.get(k) || groups.set(k, []).get(k)).push(r); }
+  setHtml('livePanel', `<strong>Open runs</strong>${[...groups].map(([k, rs]) => `<div class="lg"><span class="lgn">${esc(k ? agentOf(k)?.name || 'Agent' : 'Default')}</span>${rs.map((r) => `<a href="#${esc(r.id)}" data-run="${esc(r.id)}"><i class="sdot ${TAGS[r.status] || 'live'} pulse"></i><span class="g">${esc(nameLine(r.goal))}</span><span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span></a>`).join('')}</div>`).join('')}`);
+}
+
+// home (floating orbs) or one agent's page
+function applyView() {
+  document.body.classList.toggle('view-agent', inAgent);
+  document.body.classList.toggle('view-home', !inAgent);
+  $('agentChips').hidden = inAgent;
+  $('backBar').hidden = !inAgent;
+  $('hero').hidden = inAgent;
+  $('agentInfo').hidden = !inAgent;
+  for (const id of ['newRun', 'listTitle', 'termPanel', 'shipPanel', 'previewPanel']) if (!inAgent) $(id).hidden = true; else if (id === 'newRun' || id === 'listTitle') $(id).hidden = false;
+  document.querySelector('.split').hidden = !inAgent;
+  $('appsBox').hidden = !inAgent || Boolean(agentSel) || hosted;
+}
+function goHome() {
+  inAgent = false; agentSel = null; selected = null; peekId = null;
+  history.pushState(null, '', location.pathname + location.search);
+  applyView(); applyMode(); renderAgents(); renderList(); renderDetail(null); drawTerminal(null); drawPreview(null); drawShip(null);
 }
 
 // the form is for one-off runs, or for a task of the selected agent
@@ -620,16 +679,32 @@ function applyMode() {
 
 function chooseAgent(id) {
   agentSel = id || null;
+  inAgent = true; peekId = null;
   selected = null;
-  location.hash = agentSel || '';
+  location.hash = agentSel || 'default';
   openDetails = new Set();
-  applyMode(); renderAgents(); renderList(); renderDetail(null); drawTerminal(null);
+  applyView(); applyMode(); renderAgents(); renderList(); renderDetail(null); drawTerminal(null);
 }
 $('agentChips').addEventListener('click', (e) => {
   if (e.target.closest('#newAgent')) return openAgentDialog(null);
-  const b = e.target.closest('[data-aid]');
-  if (b) chooseAgent(b.dataset.aid);
+  const b = e.target.closest('[data-bid]');
+  if (!b) return;
+  // touch has no hover: the first tap shows the details card, the second opens the agent
+  if (matchMedia('(hover: none)').matches && peekId !== b.dataset.bid) { peekId = b.dataset.bid; lastHtml.delete('agentChips'); renderAgents(); return; }
+  chooseAgent(b.dataset.aid);
 });
+$('agentChips').addEventListener('click', (e) => { if (e.target.closest('.orbcard .open')) chooseAgent(e.target.closest('.bubble').querySelector('[data-aid]').dataset.aid); });
+document.addEventListener('click', (e) => { if (peekId && !e.target.closest('.bubble')) { peekId = null; lastHtml.delete('agentChips'); renderAgents(); } });
+$('backBtn').addEventListener('click', goHome);
+$('livePanel').addEventListener('click', (e) => {
+  const a = e.target.closest('[data-run]');
+  if (!a) return;
+  e.preventDefault();
+  const r = runs.find((x) => x.id === a.dataset.run);
+  selected = r.id; agentSel = r.agent || null; inAgent = true; location.hash = r.id; openDetails = new Set();
+  applyView(); applyMode(); renderAgents(); renderList(); refresh();
+});
+window.addEventListener('popstate', () => { if (!location.hash && inAgent) goHome(); });
 $('agentInfo').addEventListener('click', async (e) => {
   const act = e.target.closest('[data-aact]')?.dataset.aact;
   const a = agentOf(agentSel);
@@ -637,7 +712,7 @@ $('agentInfo').addEventListener('click', async (e) => {
   if (act === 'edit') return openAgentDialog(a);
   if (act === 'delete') {
     if (!await ui.confirm(`Delete the agent “${a.name}”? Its tasks stay in the list as ordinary runs, and their branches stay in your repo.`)) return;
-    try { await sendAgent('DELETE', `/${a.id}`); chooseAgent(null); refresh(); } catch (err) { ui.toast(err.message, { kind: 'error' }); }
+    try { await sendAgent('DELETE', `/${a.id}`); goHome(); refresh(); } catch (err) { ui.toast(err.message, { kind: 'error' }); }
   }
 });
 

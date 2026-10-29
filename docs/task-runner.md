@@ -24,6 +24,8 @@ To use it, run `npm run all` (it starts the runner as a fourth part), put a git 
 
 ### Persistent agents
 
+The Agents page opens on floating orbs, one per agent plus a built-in **Default** agent for one-off runs and a **+** orb to make a new agent. Hover (or tap, then tap again) an orb for its details card; click it to open that agent's page and start runs there. Open runs float in a small panel grouped by agent. Motion stops under reduced-motion.
+
 A run is a one-off. An **agent** is a named, long-lived worker for one repo that you give task after task. Press **+ New agent** on the Agents page and set a name, the repo, standing instructions ("keep changes small, run `npm test` before finishing"), one workflow, a routing, an effort, step and minute limits, and optionally a chat project. Pick the agent in the bar to see its tasks and give it a new one.
 
 - **Its work builds up.** Each task is an ordinary run (own `harness/<id>` branch, same guard and approvals), but it starts from the commit the agent's last finished task left, so the branch of task 2 holds task 1's changes too. If you have merged that work into the repo (the commit is an ancestor of the repo's current commit), or the commit is gone, the next task starts from the repo's current commit like any run. Plan-only tasks and tasks that fail leave the starting point where it was.

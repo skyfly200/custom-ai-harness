@@ -25,6 +25,8 @@ test('answers land in the argument, env variable or header the entry says', () =
     assert.deepEqual(gh.headers, [{ key: 'Authorization', value: 'Bearer ghp_x' }]);
     const brave = TS.buildEntry(item('brave-search'), { key: 'BSA1' });
     assert.deepEqual(brave.env, [{ key: 'BRAVE_API_KEY', value: 'BSA1' }]);
+    const wolfram = TS.buildEntry(item('wolfram'), { appid: 'W1' });
+    assert.deepEqual(wolfram.env, [{ key: 'WOLFRAM_APP_ID', value: 'W1' }]);
     // an empty answer leaves the catalog's own default
     assert.equal(TS.buildEntry(item('filesystem'), { folder: '' }).args[2], '${HOME}/Documents');
     assert.deepEqual(item('filesystem').spec.args[2], '${HOME}/Documents', 'the catalog itself is not changed');

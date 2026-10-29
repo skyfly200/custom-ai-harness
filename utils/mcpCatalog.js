@@ -41,6 +41,10 @@ module.exports = [
         inputs: [{ id: 'key', label: 'Brave Search API key', kind: 'secret', into: { env: 'BRAVE_API_KEY' },
             get: { url: 'https://brave.com/search/api/', label: 'Get a Brave Search API key', steps: ['Sign up for a plan (there is a free one).', 'Open API Keys in the dashboard and copy a key here.'] } }],
         spec: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-brave-search'], env: { BRAVE_API_KEY: '${BRAVE_API_KEY}' } } },
+    { id: 'wolfram', name: 'Wolfram Alpha', description: 'Maths, units, science facts and up-to-date data from Wolfram Alpha (community server, wolfram-mcp).', needs: 'Put a Wolfram Alpha AppID in .env as WOLFRAM_APP_ID.',
+        inputs: [{ id: 'appid', label: 'Wolfram Alpha AppID', kind: 'secret', into: { env: 'WOLFRAM_APP_ID' },
+            get: { url: 'https://developer.wolframalpha.com/access', label: 'Get a Wolfram Alpha AppID', steps: ['Sign in with a Wolfram ID (free to create).', 'Press Get an AppID, name the app and choose the LLM API.', 'Copy the AppID here.'] } }],
+        spec: { command: 'npx', args: ['-y', 'wolfram-mcp'], env: { WOLFRAM_APP_ID: '${WOLFRAM_APP_ID}' } } },
     { id: 'jev-files', name: 'Jev file questions', description: "Ask Jev yes/no or 0-10 questions about a file on this computer (this harness's own tool).", ready: true, needs: 'Needs the harness running.',
         spec: { command: 'node', args: ['scripts/jev-files-mcp.js'] } },
 ];

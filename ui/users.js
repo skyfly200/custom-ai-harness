@@ -12,6 +12,23 @@
     if (!r.ok) throw new Error(j.error || `${r.status}`);
     return j;
   }
+  // the second password box must match the first; says so inline (no alert)
+  const mismatch = (f) => (f.password !== f.confirm ? 'The two passwords do not match.' : '');
+  // shows the mismatch under the Confirm box of `form` ('' clears it); returns true if it is showing
+  function confirmError(form, text) {
+    const input = form.elements.confirm;
+    let small = input.parentElement.querySelector('.fieldErr');
+    if (!small) {
+      small = document.createElement('small'); small.className = 'fieldErr'; small.setAttribute('role', 'alert');
+      small.style.cssText = 'position:static;width:auto;max-width:none;padding:0;border:0;background:none;box-shadow:none;color:var(--bad, #c4264a)'; // in the flow, not calm.css's hover bubble
+      input.parentElement.append(small);
+    }
+    small.textContent = text; small.style.display = text ? 'block' : 'none'; input.setAttribute('aria-invalid', text ? 'true' : 'false');
+    if (text && document.activeElement !== input) input.focus();
+    return Boolean(text);
+  }
+  // typing in either password box clears the message
+  document.addEventListener('input', (e) => { if (e.target.form && e.target.form.elements.confirm && /^(password|confirm)$/.test(e.target.name)) confirmError(e.target.form, ''); });
   const cell = (text) => { const td = document.createElement('td'); td.style.padding = '6px 8px'; td.textContent = text; return td; };
   const btn = (text, fn, hint) => {
     const b = document.createElement('button');
@@ -20,6 +37,29 @@
     return b;
   };
   const when = (iso) => (iso ? new Date(iso).toLocaleDateString() : '');
+
+  // inline row under the user: new password + confirm
+  function resetForm(name, after) {
+    const open = after.nextElementSibling;
+    if (open && open.className === 'resetRow') { open.remove(); return; }
+    const row = document.createElement('tr'); row.className = 'resetRow';
+    const td = document.createElement('td'); td.colSpan = 5; td.style.padding = '6px 8px';
+    const form = document.createElement('form'); form.className = 'form'; form.autocomplete = 'off';
+    form.innerHTML = `<label class="field"><span>New password</span><input name="password" type="password" required autocomplete="new-password"></label>
+      <label class="field"><span>Confirm password</span><input name="confirm" type="password" required autocomplete="new-password"></label>
+      <div class="field"><span>&nbsp;</span><span><button class="primary">Set password</button> <button type="button" class="cancel">Cancel</button></span></div>
+`;
+    form.querySelector('span').textContent = `New password for ${name}`;
+    form.querySelector('.cancel').addEventListener('click', () => row.remove());
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(form));
+      if (confirmError(form, mismatch(f))) return;
+      try { await api('POST', `/ui/api/users/${encodeURIComponent(name)}`, f); row.remove(); say(`Password changed for ${name}.`); } catch (x) { confirmError(form, x.message); }
+    });
+    td.append(form); row.append(td); after.after(row);
+    form.password.focus();
+  }
 
   function drawUsers(users) {
     const t = $('userTable');
@@ -32,12 +72,7 @@
       td.style.cssText = 'padding:6px 8px;text-align:right;white-space:nowrap';
       if (!u.core) {
         td.append(
-          btn('Reset password', async () => {
-            const password = await ui.prompt(`New password for ${u.name} (at least ${me.minPassword} characters):`, { type: 'password', ok: 'Change' });
-            if (!password) return;
-            await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { password });
-            say(`Password changed for ${u.name}.`);
-          }),
+          btn('Reset password', () => resetForm(u.name, tr)),
           ' ',
         );
         if (managedOn && !u.guest && u.role !== 'admin') {
@@ -133,8 +168,9 @@
     e.preventDefault();
     try {
       const f = Object.fromEntries(new FormData(e.target));
+      if (confirmError(e.target, mismatch(f))) return;
       drawUsers((await api('POST', '/ui/api/users', f)).users);
-      e.target.reset(); say(`Added ${f.name}.`); fillOwners();
+      e.target.reset(); confirmError(e.target, ''); say(`Added ${f.name}.`); fillOwners();
     } catch (err) { say(err.message, true); }
   });
   async function drawCredential() {
@@ -182,8 +218,10 @@
   $('pw').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api('POST', '/ui/api/me/password', Object.fromEntries(new FormData(e.target)));
-      e.target.reset(); say('Password changed.');
+      const f = Object.fromEntries(new FormData(e.target));
+      if (confirmError(e.target, mismatch(f))) return;
+      await api('POST', '/ui/api/me/password', f);
+      e.target.reset(); confirmError(e.target, ''); say('Password changed.');
     } catch (err) { say(err.message, true); }
   });
 

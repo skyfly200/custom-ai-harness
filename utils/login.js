@@ -10,7 +10,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const { passwordsFrom, viaCloudflare, PASSWORD_HEADER } = require('./access');
-const { sha, MIN_PASSWORD } = require('./users');
+const { sha, MIN_PASSWORD, checkConfirm } = require('./users');
 const oauth = require('./oauth');
 
 const COOKIE = 'harness_session';
@@ -234,7 +234,8 @@ function createLogin({ users, legacyPassword = '', sessionStore = null, guests =
     api.post('/ui/api/me/password', guarded((req, res) => {
         const me = req.harnessUser;
         if (me.core) throw new Error('admins from HARNESS_ADMINS change their password in .env (npm run hash)');
-        const { current, password } = req.body || {};
+        const { current, password, confirm } = req.body || {};
+        checkConfirm(password, confirm);
         const wait = lockedFor(req, me.name);
         if (wait) return res.status(429).json({ error: 'too many wrong passwords; wait and try again' });
         if (!users.check(me.name, current)) { fail(req, me.name); throw new Error('current password is wrong'); }
@@ -261,6 +262,7 @@ function createLogin({ users, legacyPassword = '', sessionStore = null, guests =
         const guest = req.body?.guest === true || req.body?.guest === 'on' || req.body?.guest === 'true';
         if (guest && !guests) throw new Error('guest accounts need the hosted database (DATABASE_URL)');
         const cap = guest ? capOf(req.body) : null;
+        checkConfirm(req.body?.password, req.body?.confirm);
         users.add(req.body?.name, req.body?.password, req.body?.role, { guest });
         if (guest) {
             try { await guests.ensure(req.body.name, cap); } catch (err) { users.remove(req.body.name); throw new Error(`could not open the guest's credit: ${err.message}`); }
@@ -268,7 +270,8 @@ function createLogin({ users, legacyPassword = '', sessionStore = null, guests =
         res.json({ users: await withCredit() });
     }));
     api.post('/ui/api/users/:name', admin, aguarded(async (req, res) => {
-        const { password, role, guest, capUsd } = req.body || {};
+        const { password, confirm, role, guest, capUsd } = req.body || {};
+        checkConfirm(password, confirm);
         if (role && req.params.name.toLowerCase() === req.harnessUser.name.toLowerCase()) throw new Error('you can\'t change your own role');
         if ((guest !== undefined || capUsd !== undefined) && !guests) throw new Error('guest accounts need the hosted database (DATABASE_URL)');
         if (password) { users.setPassword(req.params.name, password); basicOk.clear(); }

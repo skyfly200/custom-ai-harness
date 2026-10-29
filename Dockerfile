@@ -9,7 +9,7 @@ RUN npm ci --omit=dev
 COPY server.js caveman-compress.js validate-config.js ./
 COPY utils ./utils
 COPY migrations ./migrations
-COPY scripts/migrate.js ./scripts/migrate.js
+COPY scripts/migrate.js scripts/jev-files-mcp.js ./scripts/
 COPY ui ./ui
 COPY config.yaml ./
 EXPOSE 3000

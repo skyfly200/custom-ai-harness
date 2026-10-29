@@ -117,3 +117,14 @@ test('when Neon refuses the address, the message names it and Neon\'s reason', a
         assert.match(html, /INVALID_CALLBACKURL/);
     } finally { server.close(); }
 });
+
+test('with renderError, a refusal shows the login page with the message and the same status', async () => {
+    const app = express();
+    app.use(createOAuth({ users: newUsers(), env, fetchFn: async () => new Response('{}', { status: 401 }), safeNext: (n) => n, startSession() {}, renderError: (m) => `<login>${m}</login>` }));
+    const server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    try {
+        const r = await fetch(`http://127.0.0.1:${server.address().port}/auth/callback?neon_auth_session_verifier=v`);
+        assert.equal(r.status, 400);
+        assert.match(await r.text(), /^<login>That sign-in took too long/);
+    } finally { server.close(); }
+});

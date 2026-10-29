@@ -40,7 +40,7 @@ h1{margin:0;font-size:20px}p{margin:0;color:var(--muted);font-size:14px}label{di
 input{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--field);background:var(--bg);color:var(--ink)}
 input:focus{outline:2px solid var(--accent);outline-offset:1px}
 button{font:inherit;font-weight:600;padding:10px;border:0;border-radius:10px;background:var(--accent);color:#fff;cursor:pointer}
-button:disabled{opacity:.6}.oauth{display:block;text-align:center;font-weight:600;padding:10px;border:1px solid var(--line);border-radius:10px;color:var(--ink);text-decoration:none}.or{color:var(--muted);font-size:13px;text-align:center}.err{color:var(--bad);font-size:14px;min-height:1.2em}
+button:disabled{opacity:.6}.oauth{display:block;text-align:center;font-weight:600;padding:10px;border:1px solid var(--line);border-radius:10px;color:var(--ink);text-decoration:none}.or{color:var(--muted);font-size:13px;text-align:center}.err{color:var(--bad);font-size:14px;min-height:1.2em;overflow-wrap:anywhere}
 </style></head><body>
 <form id="f" method="post" action="/login">
 <h1>Bright Chat</h1><p>Sign in to continue.</p>
@@ -182,7 +182,7 @@ function createLogin({ users, legacyPassword = '', sessionStore = null, guests =
         if (identify(req).user) return res.redirect(safeNext(req.query.next));
         res.set('cache-control', 'no-store').type('html').send(loginPage({ next: safeNext(req.query.next), providers: oauth.enabled() ? oauth.providers() : [] }));
     });
-    if (oauth.enabled()) router.use(oauth.createOAuth({ users, startSession, safeNext }));
+    if (oauth.enabled()) router.use(oauth.createOAuth({ users, startSession, safeNext, renderError: (error) => loginPage({ next: '/', error, providers: oauth.providers() }) }));
     router.get('/login/favicon.svg', (req, res) => res.sendFile(require('path').join(__dirname, '..', 'ui', 'favicon.svg')));
     router.post('/login', express.json({ limit: '4kb' }), (req, res) => {
         const { username = '', password = '', next } = req.body || {};

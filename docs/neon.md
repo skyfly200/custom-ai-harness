@@ -28,6 +28,16 @@ Set `NEON_AUTH_BASE_URL` and the login page offers the buttons in `OAUTH_PROVIDE
 
 Sign-in is **invite-only**: an admin adds an email on the Users page, and only a verified provider email on that list can sign in. `HARNESS_ADMIN_EMAILS` lists emails that are admins without an invite. People who sign in this way get a normal user (created on first sign-in) and can make API keys for programs like Claude Code.
 
+### Turning on GitHub sign-in
+
+No code change is needed; the login page just needs the provider switched on, after Neon has one to talk to:
+
+1. **GitHub OAuth App.** GitHub > Settings > Developer settings > OAuth Apps > New. Homepage URL: your `HARNESS_PUBLIC_URL`. Authorization callback URL: the one the Neon console shows for GitHub (it is your `NEON_AUTH_BASE_URL` followed by `/callback/github`; the harness's own address is not used here). Copy the Client ID and make a Client secret. This is a different app from the "Connect GitHub" App in [Run it on Fly.io](fly.md); sign-in only needs the default `read:user` and `user:email` access.
+2. **Neon console.** Project > Auth > OAuth providers (or Settings) > GitHub: paste the Client ID and secret and enable it. The address people use must also be a trusted domain (below).
+3. **Show the button.** `fly secrets set OAUTH_PROVIDERS="google,github"` (locally: `OAUTH_PROVIDERS=google,github` in `.env`). `fly.toml` leaves it unset on purpose so the button appears only once steps 1 and 2 are done.
+
+The email GitHub reports must be verified and on the Users page invite list (or in `HARNESS_ADMIN_EMAILS`), exactly as with Google; a GitHub account with no verified email is refused.
+
 The address people use must be trusted by Neon Auth: `neon neon-auth domain add https://your-host` (set `HARNESS_PUBLIC_URL` if the harness sits behind a proxy). `localhost` is trusted already.
 
 ## Each person's own tools, routings and settings

@@ -10,15 +10,17 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="calm.css">
 <link rel="stylesheet" href="mobile.css">
 </head>
 <body>
 <main>
   <header>
-    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Users</span></h1><a href="./">Dashboard</a><a href="chat.html">Chat</a></nav>
+    <nav data-site-nav></nav>
     <span class="muted" id="who"></span>
   </header>
+  <script src="nav.js"></script>
 
   <p class="muted" id="off" hidden>Logins are off. Set <code>HARNESS_REQUIRE_LOGIN=1</code> and <code>HARNESS_ADMINS</code> in .env to turn them on.</p>
   <div id="msg" class="muted" role="status" style="min-height:1.4em"></div>

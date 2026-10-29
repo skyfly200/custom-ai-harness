@@ -245,17 +245,28 @@
     <div class="swatches" id="pColors" role="radiogroup" aria-label="Colour"></div>
     <label>Instructions for every chat in this project
       <textarea id="pInstructions" rows="5" placeholder="Who the model is helping, house style, facts it should always know…"></textarea></label>
-    <label>Git repo <span class="repo-row"><input type="text" id="pRepo" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false"></span>
+    <label class="own-only">Git repo <span class="repo-row"><input type="text" id="pRepo" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false"></span>
       <small class="muted">Chats in the project can read it (read-only) unless they link their own.</small></label>
-    <div class="pair">
+    <div class="pair own-only">
       <label title="Where chats in this project send their messages, unless a chat picks its own">Routing <select id="pRoute"></select></label>
       <label id="pModelRow" hidden>Model <input type="text" id="pModel" list="models" placeholder="e.g. fast-openrouter" autocomplete="off"></label>
     </div>
-    <div class="dlg-skills"><span class="small"><b>Skills for every chat</b></span><div class="pick" id="pSkills"></div></div>
-    <div class="dlg-skills"><span class="small" title="Agents on the Agents page that belong to this project. Chats here can hand them tasks with /agent"><b>Agents in this project</b></span><div class="pick" id="pAgents"></div></div>
-    <div class="proj-usage muted small" id="pUsage"></div>
+    <div class="dlg-skills own-only"><span class="small"><b>Skills for every chat</b></span><div class="pick" id="pSkills"></div></div>
+    <div class="dlg-skills own-only"><span class="small" title="Agents on the Agents page that belong to this project. Chats here can hand them tasks with /agent"><b>Agents in this project</b></span><div class="pick" id="pAgents"></div></div>
+    <div class="dlg-skills own-only" id="pShare" hidden>
+      <span class="small"><b>Sharing</b> <span class="muted">Private unless you add someone. Shared people see this project’s instructions and its chats, not its repo or skills.</span></span>
+      <div class="share-all"><span>Everyone with an account</span>
+        <select id="pShareAll" aria-label="Everyone with an account"><option value="">Nobody (private)</option><option value="view">Can view</option><option value="edit">Can edit</option></select></div>
+      <div class="share-list" id="pShareList"></div>
+      <div class="share-add">
+        <select id="pSharePerson" aria-label="Person to share with"></select>
+        <select id="pShareRole" aria-label="What they can do"><option value="view">Can view</option><option value="edit">Can edit</option></select>
+        <button type="button" id="pShareAdd">Share</button>
+      </div>
+    </div>
+    <div class="proj-usage muted small own-only" id="pUsage"></div>
     <div class="dlg-actions">
-      <button type="button" class="link danger" id="pDelete">Delete project</button>
+      <button type="button" class="link danger own-only" id="pDelete">Delete project</button>
       <span class="spacer"></span>
       <button value="cancel" formnovalidate>Cancel</button>
       <button class="primary" id="pSave" value="save">Save</button>
@@ -338,6 +349,7 @@
 <datalist id="models"></datalist>
 
 <script src="dialogs.js"></script>
+<script src="ownerScope.js"></script>
 <script src="markdown.js"></script>
 <script src="cachetimer.js"></script>
 <script src="tokens.js"></script>

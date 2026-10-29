@@ -112,6 +112,7 @@ if (openrouterAuth.federated() || USER_CREDENTIALS || MAIN_KEY_RENEW) {
 // Checked before the password gate, which they replace for POST /v1/chat/completions only.
 const runKeys = new RunKeys();
 let findLoginUser = () => null;
+let listLoginUsers = null; // set when logins are on: lets people share projects with each other
 app.use(runKeys.middleware((name) => findLoginUser(name)));
 // The server's own scheduled messages call /v1/chat/completions as the person they belong to (utils/internalAuth.js)
 app.use(internalAuth.middleware((name) => findLoginUser(name)));
@@ -135,6 +136,7 @@ if (LOGIN_ON) {
     }
     const users = new Users({ admins, store });
     findLoginUser = (name) => users.find(name);
+    listLoginUsers = () => users.list();
     const guests = db.enabled() ? {
         ensure: credit.ensure, setCap: credit.setCap, all: credit.all,
         forget: async (name) => { await credit.forget(name); await userCredentials.remove(name); },
@@ -157,7 +159,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 if (db.enabled()) {
     const ready = db.init();
     app.use((req, res, next) => (req.path.startsWith('/ui/api/sync') ? ready.then(() => next(), next) : next()));
-    app.use(createChatSync({ serverSchedules: Boolean(schedules) }));
+    app.use(createChatSync({ serverSchedules: Boolean(schedules), users: listLoginUsers && { names: () => listLoginUsers() } }));
 } else {
     app.get('/ui/api/sync', (req, res) => res.json({ db: false }));
 }

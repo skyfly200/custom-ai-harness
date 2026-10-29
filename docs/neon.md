@@ -50,6 +50,19 @@ Before relying on this, check against a real LiteLLM that `extra_headers` in the
 
 Not tried against a real OpenRouter account: the flow is checked against a stand-in for `/auth/keys`. The pending sign-in (verifier) is held in memory for 10 minutes, so it needs one server machine, which is how the Fly app runs. Per-person workload identity federation (the harness as an OIDC issuer) was replaced by this; the owner's own install-wide federation (#90, `OPENROUTER_FEDERATION_POLICY_ID`) is unchanged.
 
+## Sharing projects
+
+Everything is private to the signed-in person: every query on chats, projects and settings filters on the owner, and `test/projectShares.test.js` checks that one user cannot read or write another's. A project is shared only when its owner says so, in the project's settings (Sharing):
+
+- With named people (existing, non-guest accounts only), each **Can view** or **Can edit**, or with **everyone with an account** (view or edit). Sharing is stored in `project_shares` (migration 011).
+- A shared project shows its name, colour, instructions and its chats, not its repo path or skills. The chats stay in the owner's rows; people with edit write into them, and a chat they start in the project is kept by the owner. Only the owner deletes chats or the project.
+- Guests can neither share nor receive. Without logins (single user) there is no Sharing section.
+- Taking a share back removes the project and its chats from the other person's browser at their next sync (within a minute).
+
+### Another person on the same browser
+
+The chat page keeps a working copy in the browser's localStorage, and a browser profile is shared by everyone who signs in on it. With a database, the page records whose copy it is (`harness-owner`) and clears it when a different account signs in, before anything is shown or uploaded (`ui/ownerScope.js`). A copy with no label (made before this existed) is claimed only if the account already has data; otherwise it is cleared. Without a database nothing is cleared, since that browser holds the only copy: use a separate browser profile per person.
+
 ## Attachments
 
 Images and text files attached in chat are stored in the `attachments` table, apart from the chat text. The synced message keeps a stub (name, kind, size, id); the page uploads each file once (`POST /ui/api/sync/chats/:chat/attachments`) and a second device fetches the bytes only when it shows an image or sends the file to a model. A file over `HARNESS_ATTACH_MAX_MB` (default 6) or past `HARNESS_ATTACH_QUOTA_MB` (default 200 per person) stays on that device only, with a note. Deleting a chat deletes its attachments. Neon Free has 1 GB in all, so lower the quota if several people attach images.

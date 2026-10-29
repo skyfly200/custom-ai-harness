@@ -88,8 +88,11 @@ function createOAuth({ users, startSession, safeNext, env = process.env, fetchFn
                 body: JSON.stringify({ provider, callbackURL: `${origin}/auth/callback` }),
             });
         } catch { return fail(res, 'Could not reach the sign-in service. Try again.', 502); }
-        const body = r.ok ? await r.json().catch(() => null) : null;
-        if (!body || !body.url) return fail(res, 'The sign-in service refused this address. An admin must trust it with `neon neon-auth domain add`.', 502);
+        const body = await r.json().catch(() => null);
+        if (!r.ok || !body || !body.url) {
+            const why = body && (body.code || body.error || body.message);
+            return fail(res, `The sign-in service refused ${origin}${why ? ` (${why})` : ''}. An admin must trust that address with \`neon neon-auth domain add\`, or set HARNESS_PUBLIC_URL to the address people use.`, 502);
+        }
         sweep();
         const nonce = crypto.randomBytes(24).toString('base64url');
         pending.set(nonce, { cookie: cookieHeaderFrom(r.headers.getSetCookie ? r.headers.getSetCookie() : []), origin, next: req.query.next, expires: Date.now() + TTL_MS });

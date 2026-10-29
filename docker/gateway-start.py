@@ -101,7 +101,9 @@ def build(config: dict) -> dict:
 def use_federation() -> None:
     """With OPENROUTER_FEDERATION_POLICY_ID (or HARNESS_USER_CREDENTIALS) set, the harness holds the short-lived OpenRouter tokens and the
     Gateway calls OpenRouter through its /openrouter-proxy, using the proxy key as OPENROUTER_API_KEY."""
-    if not env("OPENROUTER_FEDERATION_POLICY_ID") and env("HARNESS_USER_CREDENTIALS").lower() not in ("1", "true", "yes", "on"):
+    on = ("1", "true", "yes", "on")
+    renew_main = env("OPENROUTER_MAIN_KEY_RENEW").lower() in on and env("OPENROUTER_MANAGEMENT_KEY")
+    if not env("OPENROUTER_FEDERATION_POLICY_ID") and env("HARNESS_USER_CREDENTIALS").lower() not in on and not renew_main:
         return
     key = env("OPENROUTER_PROXY_KEY") or env("LITELLM_MASTER_KEY")
     if not key:

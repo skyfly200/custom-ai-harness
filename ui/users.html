@@ -30,6 +30,7 @@
       <form id="addUser" class="form" autocomplete="off" style="margin-top:12px">
         <label class="field"><span>User name</span><input name="name" required pattern="[A-Za-z0-9._-]{1,40}" autocapitalize="none"></label>
         <label class="field"><span>Password</span><input name="password" type="password" required autocomplete="new-password"><small id="minpw"></small></label>
+        <label class="field"><span>Confirm password</span><input name="confirm" type="password" required autocomplete="new-password"></label>
         <label class="field"><span>Role</span><select name="role"><option value="user">User: chat and API</option><option value="admin">Admin: also Settings and Users</option></select></label>
         <label class="field" id="guestRow" hidden><span>Guest</span><span><input name="guest" type="checkbox"> uses your key, capped at <input name="capUsd" type="number" min="0" max="1000" step="0.01" value="1" style="width:5em"> dollars in all</span></label>
         <div class="field"><span>&nbsp;</span><button class="primary">Add user</button></div>
@@ -88,6 +89,7 @@
       <form id="pw" class="form" autocomplete="off">
         <label class="field"><span>Current password</span><input name="current" type="password" required autocomplete="current-password"></label>
         <label class="field"><span>New password</span><input name="password" type="password" required autocomplete="new-password"></label>
+        <label class="field"><span>Confirm new password</span><input name="confirm" type="password" required autocomplete="new-password"></label>
         <div class="field"><span>&nbsp;</span><button class="primary">Change password</button></div>
       </form>
     </div>

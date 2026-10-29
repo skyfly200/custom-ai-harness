@@ -71,7 +71,7 @@ function buildSpec(input, old = {}) {
     const type = input.type || 'stdio';
     if (!TYPES.has(type)) fail('type must be stdio, http or sse');
     const spec = { ...old };
-    for (const k of ['command', 'args', 'cwd', 'type', 'url', 'env', 'headers', 'timeoutMs', 'retries', 'callTimeoutMs']) delete spec[k];
+    for (const k of ['command', 'args', 'cwd', 'type', 'url', 'env', 'headers', 'timeoutMs', 'retries', 'callTimeoutMs', 'askBefore']) delete spec[k];
 
     if (type === 'stdio') {
         const command = String(input.command ?? '').trim();
@@ -110,6 +110,10 @@ function buildSpec(input, old = {}) {
     if (input.retries !== undefined && input.retries !== null && input.retries !== '') {
         if (!Number.isInteger(Number(input.retries)) || Number(input.retries) < 0) fail('retries must be 0 or more');
         spec.retries = Number(input.retries);
+    }
+    if (input.askBefore !== undefined && input.askBefore !== null && input.askBefore !== '') {
+        if (input.askBefore !== 'writes' && input.askBefore !== 'all') fail('askBefore must be writes, all or empty');
+        spec.askBefore = input.askBefore;
     }
     if (input.disabled !== undefined) {
         if (input.disabled) spec.disabled = true;

@@ -73,6 +73,9 @@ const path = require('path');
 
 const app = express();
 // For Fly's health check and uptime pings: answers before any login, says nothing about the Gateway
+// The pages call their API with relative URLs ("api/status"), which resolve to /ui/api/... under /ui and to /api/...
+// when served at the site root. Answer both.
+app.use((req, res, next) => { if (req.url.startsWith('/api/')) req.url = `/ui${req.url}`; next(); });
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 // Sleep after HARNESS_IDLE_STOP_MIN idle minutes, and the Dashboard's Stop button. Only where something can act on
 // a stop: the Fly launcher (HARNESS_STOP_VIA_PARENT) asks its parent to stop everything and exit cleanly.
@@ -93,8 +96,17 @@ for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federa
 // (utils/userCredentials.js). The Gateway then reaches OpenRouter through this proxy too, and each request
 // carries a signed ticket saying whose credential to use (utils/credentialTicket.js).
 const USER_CREDENTIALS = /^(1|true|yes|on)$/i.test(process.env.HARNESS_USER_CREDENTIALS || '');
-if (openrouterAuth.federated() || USER_CREDENTIALS) {
-    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth, { resolveUser: USER_CREDENTIALS ? userCredentials.resolve : null }));
+// OPENROUTER_MAIN_KEY_RENEW=1 (with OPENROUTER_MANAGEMENT_KEY): the owner's own key is replaced before it lapses
+// (utils/mainKey.js); the Gateway and Router go through this proxy so they follow the swap.
+const mainKey = require('./utils/mainKey');
+const MAIN_KEY_RENEW = mainKey.enabled();
+const mainKeyRenewal = MAIN_KEY_RENEW ? mainKey.create({ store: mainKey.createStore({ db: db.enabled() && secrets.available() ? db : null, creds: userCredentials }), auth: orAuth }) : null;
+if (openrouterAuth.federated() || USER_CREDENTIALS || MAIN_KEY_RENEW) {
+    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth, {
+        resolveUser: USER_CREDENTIALS ? userCredentials.resolve : null,
+        onBadCredential: USER_CREDENTIALS ? (name) => userCredentials.markBad(name) : null,
+        onBadMain: mainKeyRenewal ? () => mainKeyRenewal.refused() : null,
+    }));
 }
 // Run keys: capped, short-lived keys for one agent run's model calls (utils/runKeys.js).
 // Checked before the password gate, which they replace for POST /v1/chat/completions only.
@@ -690,6 +702,7 @@ app.get('/ui/api/me/credential', async (req, res) => {
         if (user.guest) out.credit = await credit.get(user.name);
         else if (db.enabled() && user.role !== 'admin') {
             out.credential = await userCredentials.status(user.name);
+            if (out.credential.set) out.credential.health = await userCredentials.check(user.name);
         }
         res.json(out);
     } catch (err) {
@@ -745,6 +758,30 @@ app.delete('/ui/api/me/credential', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// Admin: issue (or replace) a person's key through OpenRouter's Management API, or take it back. These keys bill the
+// owner's account, each capped at OPENROUTER_USER_KEY_LIMIT. /ui/api/users/* is admin-only at the login gate. The
+// hourly sweep replaces the ones that lapse; the management key itself never leaves the server.
+app.post('/ui/api/users/:name/managed-key', async (req, res) => {
+    if (!db.enabled()) return res.status(503).json({ error: 'issuing keys needs the hosted database' });
+    try {
+        const u = findLoginUser ? findLoginUser(req.params.name) : null;
+        if (!u || u.role === 'admin' || u.guest) return res.status(400).json({ error: 'only full, non-admin accounts hold their own key' });
+        const made = await userCredentials.issue(u.name);
+        res.json({ credential: await userCredentials.status(u.name), expires: made.expires });
+    } catch (err) {
+        res.status(err.status || 500).json({ error: err.message });
+    }
+});
+app.delete('/ui/api/users/:name/managed-key', async (req, res) => {
+    if (!db.enabled()) return res.status(503).json({ error: 'needs the hosted database' });
+    try { await userCredentials.remove(req.params.name); res.json({ credential: { set: false } }); } catch (err) { res.status(500).json({ error: err.message }); }
+});
+if (db.enabled() && require('./utils/openrouterKeys').configured()) {
+    setInterval(() => {
+        userCredentials.managedOwners().then((names) => names.reduce((p, n) => p.then(() => userCredentials.check(n)), Promise.resolve())).catch(() => {});
+    }, 3600000).unref();
+}
 
 // The Interceptor settings a member may change for their own requests (the rest are admin-only)
 app.get('/ui/api/my/settings', async (req, res) => {
@@ -1431,7 +1468,7 @@ app.post('/ui/api/tools/call', memberOrLocalJson, async (req, res) => {
             if (!userMcpMod.available()) throw new Error(noOwnTools.error);
             const mgr = userMcp.manager(ownerOf(req));
             await mgr.start();
-            return res.json({ ...(await mgr.call(name, args || {})), ms: Date.now() - started });
+            return res.json({ ...(await mgr.call(name, args || {}, { confirmed: confirmed === true })), ms: Date.now() - started });
         }
         const needsRepo = chatShell.isShellTool(name) || repoTools.isRepoTool(name);
         const workspace = needsRepo && repo && chatId ? await chatWorktrees.create(repo, chatId) : null;
@@ -1444,7 +1481,7 @@ app.post('/ui/api/tools/call', memberOrLocalJson, async (req, res) => {
             result = { text: await repoTools.call(toolRepo, name, args || {}), isError: false };
         } else {
             await mcp.start();
-            result = await mcp.call(name, args || {});
+            result = await mcp.call(name, args || {}, { confirmed: confirmed === true });
         }
         res.json({ ...result, ms: Date.now() - started });
     } catch (err) {
@@ -1720,6 +1757,10 @@ if (require.main === module) {
         console.log('Harness interceptor active on port 3000');
         if (schedules) { schedules.start(); console.log('Scheduled messages run on the server'); }
     });
+    if (mainKeyRenewal) {
+        if (!openrouterAuth.proxyKey()) console.warn('OPENROUTER_MAIN_KEY_RENEW needs LITELLM_MASTER_KEY or OPENROUTER_PROXY_KEY so the Gateway and Router can reach OpenRouter through this server');
+        Promise.resolve(db.enabled() ? db.init() : null).then(() => mainKeyRenewal.start()).catch((err) => console.warn(`OpenRouter main key renewal: ${err.message}`));
+    }
     mcp.start().then(() => {
         for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);
     });

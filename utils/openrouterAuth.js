@@ -156,6 +156,9 @@ function createAuth(opts = {}) {
         return pending;
     }
 
+    /** Forget the cached token (OpenRouter answered 401 for it before its expiry): the next key() exchanges again. */
+    function invalidate() { cached = null; failure = null; }
+
     /** { mode: 'federation'|'key'|'none', ok, expiresInSec?, error? }, for the dashboard and logs. Never the token. */
     function status() {
         if (!isFederated()) return { mode: trim(env.OPENROUTER_API_KEY) ? 'key' : 'none', ok: Boolean(trim(env.OPENROUTER_API_KEY)) };
@@ -171,7 +174,7 @@ function createAuth(opts = {}) {
     }
 
     const configured = () => isFederated() || Boolean(trim(env.OPENROUTER_API_KEY));
-    return { key, status, configured };
+    return { key, status, configured, invalidate };
 }
 
 // ---- The local door for programs that only know a static key (the Gateway, the Router) ----
@@ -194,14 +197,14 @@ const digest = (v) => crypto.createHash('sha256').update(String(v)).digest();
  * credential from `resolveUser(name)` (null: they have none, answered 402); 'shared' tickets and calls
  * with no ticket (the Router) use the owner's.
  */
-function proxyHandler(auth, { env = process.env, fetchFn = fetch, resolveUser = null } = {}) {
+function proxyHandler(auth, { env = process.env, fetchFn = fetch, resolveUser = null, onBadCredential = null, onBadMain = null } = {}) {
     const { Readable } = require('stream');
     return async function openrouterProxy(req, res) {
         const want = proxyKey(env);
         const given = String(req.headers.authorization || '').replace(/^bearer\s+/i, '') || String(req.headers['x-api-key'] || '');
         if (!want) return res.status(503).json({ error: 'set OPENROUTER_PROXY_KEY (or LITELLM_MASTER_KEY) in .env to use federation' });
         if (!given || !crypto.timingSafeEqual(digest(given), digest(want))) return res.status(401).json({ error: 'wrong key for the OpenRouter proxy' });
-        let token;
+        let token, ownerOfToken = null;
         const sentTicket = req.headers[ticket.HEADER];
         if (sentTicket !== undefined) {
             const t = ticket.verify(want, sentTicket);
@@ -213,6 +216,7 @@ function proxyHandler(auth, { env = process.env, fetchFn = fetch, resolveUser = 
                 }
                 if (!cred || !cred.key) return res.status(402).json({ error: { message: 'You have not added your own OpenRouter credential. Add it on the Users page, then try again.' } });
                 token = cred.key;
+                ownerOfToken = t.user;
             }
         }
         try {
@@ -232,6 +236,16 @@ function proxyHandler(auth, { env = process.env, fetchFn = fetch, resolveUser = 
                 method: req.method, headers, signal: controller.signal,
                 ...(hasBody ? { body: Readable.toWeb(req), duplex: 'half' } : {}),
             });
+            if (upstream.status === 401) {
+                // The key was refused. A person's own: say so plainly and flag it; the install's token: drop it so the next call exchanges again.
+                if (ownerOfToken) {
+                    if (onBadCredential) onBadCredential(ownerOfToken);
+                    controller.abort();
+                    return res.status(401).json({ error: { code: 'openrouter_reconnect', message: 'OpenRouter no longer accepts your connected key. Open the Users page and press Reconnect OpenRouter, then try again.' } });
+                }
+                if (auth.invalidate) auth.invalidate();
+                if (onBadMain) onBadMain();
+            }
             res.status(upstream.status);
             for (const h of ['content-type', 'cache-control', 'retry-after']) {
                 const v = upstream.headers.get(h);

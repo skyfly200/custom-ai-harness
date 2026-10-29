@@ -303,3 +303,13 @@ def test_federation_sends_openrouter_calls_through_the_harness_proxy(monkeypatch
     plain = {"base_url": "https://openrouter.ai/api"}
     router.apply_federation(plain, {})
     assert plain == {"base_url": "https://openrouter.ai/api"}
+
+
+def test_main_key_renewal_also_sends_openrouter_calls_through_the_proxy():
+    env = {"OPENROUTER_MAIN_KEY_RENEW": "1", "OPENROUTER_MANAGEMENT_KEY": "sk-or-m", "LITELLM_MASTER_KEY": "sk-master"}
+    jev = {"backend": "systemone", "base_url": "https://openrouter.ai/api", "api_key_env": "OPENROUTER_API_KEY"}
+    router.apply_federation(jev, env)
+    assert jev["base_url"] == "http://127.0.0.1:3000/openrouter-proxy"
+    only_switch = {"base_url": "https://openrouter.ai/api"}
+    router.apply_federation(only_switch, {"OPENROUTER_MAIN_KEY_RENEW": "1", "LITELLM_MASTER_KEY": "k"})
+    assert only_switch == {"base_url": "https://openrouter.ai/api"}, "no management key: stays on the static key"

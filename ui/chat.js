@@ -23,6 +23,7 @@ const ICONS = {
   clip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>',
   headset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>',
+  panel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M17 7 7 17M7 7l10 10"/></svg>',
@@ -33,7 +34,7 @@ const ICONS = {
 const setIcon = (id, name) => { $(id).innerHTML = ICONS[name]; };
 setIcon('copyChat', 'copy'); setIcon('exportChat', 'download'); setIcon('toggleOptions', 'sliders');
 setIcon('toggleActivity', 'pulse'); setIcon('attach', 'clip'); setIcon('mic', 'mic'); setIcon('handsFreeBtn', 'headset');
-setIcon('toggleSide', 'menu'); setIcon('closeActivity', 'close'); setIcon('closeOptions', 'close'); setIcon('deleteChat', 'trash'); setIcon('exportAll', 'download'); setIcon('deleteAll', 'trash'); setIcon('kitBtn', 'kit');
+setIcon('toggleSide', 'panel'); setIcon('pagesMenu', 'menu'); setIcon('closeActivity', 'close'); setIcon('closeOptions', 'close'); setIcon('deleteChat', 'trash'); setIcon('exportAll', 'download'); setIcon('deleteAll', 'trash'); setIcon('kitBtn', 'kit');
 
 // ---------------------------------------------------------------------------
 // Storage: an index of chats plus one key per chat, so streaming a reply only
@@ -141,7 +142,7 @@ const sync = {
   // Pull what is newer on the server, push what is newer here (a first sign-in uploads this browser's chats)
   async start() {
     await window.OwnerScope?.ready; // another person's copy in this browser is cleared first, never uploaded
-    if (window.OwnerScope?.reloading) return;
+    if (window.OwnerScope?.reloading || window.OwnerScope?.ok === false) return;
     let remote;
     try {
       const r = await fetch('api/sync', { headers: { accept: 'application/json' } });
@@ -722,6 +723,18 @@ $('deleteAll').addEventListener('click', async () => {
   if (!index.length) return toast('No saved chats to delete.');
   if (await ui.confirm(`Delete all ${index.length} saved chat${index.length === 1 ? '' : 's'} in this browser? This can't be undone. (Export all chats first to keep a copy.)`)) deleteAllChats();
 });
+// The pages bar is folded into a menu on this page: the brand and its orb live beside the replies
+function setPagesMenu(on) {
+  document.body.classList.toggle('menu-open', on);
+  $('pagesMenu').setAttribute('aria-expanded', String(on));
+}
+$('pagesMenu').addEventListener('click', (e) => { e.stopPropagation(); setPagesMenu(!document.body.classList.contains('menu-open')); });
+document.addEventListener('click', (e) => {
+  if (document.body.classList.contains('menu-open') && (e.target.closest('.top a') || !e.target.closest('.top'))) setPagesMenu(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('menu-open')) { setPagesMenu(false); $('pagesMenu').focus(); e.stopImmediatePropagation(); }
+}, true);
 $('toggleSide').addEventListener('click', () => setSide(!$('app').classList.contains('side-open')));
 $('title').addEventListener('change', () => { chat.title = $('title').value.trim(); saveChat(chat, { touch: false }); drawList(); });
 $('system').addEventListener('change', () => { chat.system = $('system').value; saveChat(chat); drawList(); drawContextSize(); });
@@ -888,8 +901,13 @@ function modelLabelHtml(m) {
   return `<span class="name model" title="${esc(`Written by ${model}${asked && asked !== model ? ` (routed to ${asked})` : ''}${why ? ` · ${why}` : ''}`)}"><code>${esc(model)}</code></span>`;
 }
 
+// Under a finished reply, one quiet "Details" row. Opened it shows the facts (route,
+// time, tokens, cost) and, one level further in, the thinking, the tool calls and the
+// routing steps. The Activity drawer lists every call too.
 function metaHtml(m) {
   const tr = m.trace, meta = m.meta || {};
+  const rounds = m.rounds || [];
+  const calls = rounds.reduce((n, r) => n + r.calls.length, 0);
   const bits = [
     (routeWhy(tr?.routed) || meta.route) && esc(routeWhy(tr?.routed) || meta.route),
     m.turn?.command && `<span class="tag" title="Sent by the command /${esc(m.turn.command)}${turnNote(m.turn) ? `: ${esc(turnNote(m.turn))}` : ''}">/${esc(m.turn.command)}</span>`,
@@ -898,8 +916,13 @@ function metaHtml(m) {
     replyUsageHtml(m),
     costHtml(m),
   ].filter(Boolean);
-  if (!bits.length) return '';
-  return `<div class="meta">${bits.join(' · ')}${tr ? `<details data-k="trace"><summary>How this reply was made</summary>${traceHtml(m)}</details>` : ''}</div>`;
+  const inner = [reasoningHtml(m), toolCallsHtml(rounds),
+    tr ? `<details class="routing-steps" data-k="trace"><summary>Routing steps</summary>${traceHtml(m)}</details>` : ''].join('');
+  if (!bits.length && !inner) return '';
+  const hint = [m.reasoning && 'thinking', calls && `${calls} tool call${calls > 1 ? 's' : ''}`].filter(Boolean).join(', ');
+  const needsInput = rounds.some(r => r.calls.some(c => c.approval?.state === 'ask'));
+  return `<details class="meta more" data-k="more"${needsInput ? ' open' : ''}><summary>Details${hint ? `<span class="hint-bits"> · ${hint}</span>` : ''}</summary>
+    ${bits.length ? `<div class="facts">${bits.join(' · ')}</div>` : ''}${inner}</details>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -940,7 +963,8 @@ function computeCost(m) {
   if (!info || info.inputCost == null || !k) return null;
   return { usd: Costs.rowCost(k, info).cost, free: false, estimated: !k.exact };
 }
-const replyCost = (m) => (m.cost !== undefined && !m.streaming ? m.cost : computeCost(m));
+// A cost saved as null means the price wasn't known yet (the price list was still loading), so it is worked out again
+const replyCost = (m) => (m.cost != null && !m.streaming ? m.cost : computeCost(m));
 
 function costHtml(m) {
   const c = replyCost(m);
@@ -1031,11 +1055,18 @@ function drawStats(countNext = true) {
   ].filter(Boolean).join('\n');
 }
 
+// After a wake from sleep the Gateway (and OpenRouter's list) can still be
+// loading; model-info then answers with what config.yaml knows, without prices.
+// Ask again a few times so the prices appear without a reload.
+let modelInfoTries = 0;
 function loadModelInfo() {
   fetch('api/model-info').then(r => r.json()).then((j) => {
     modelInfo = j.models || {};
+    const complete = j.source === 'gateway' && (!j.openrouter || j.openrouter.ok);
+    if (!complete && modelInfoTries < 6) setTimeout(loadModelInfo, 5000 * 2 ** modelInfoTries++);
+    else if (complete) modelInfoTries = 0;
     if (chat && !running.has(chat.id)) drawLog(); else drawStats();
-  }).catch(() => {});
+  }).catch(() => { if (modelInfoTries < 6) setTimeout(loadModelInfo, 5000 * 2 ** modelInfoTries++); });
 }
 
 const fresh = (m) => m.time && Date.now() - m.time < 1500;
@@ -1055,7 +1086,7 @@ function messageHtml(m, i, list) {
         <button data-act="copy" title="Copy">${ICONS.copy}</button></span></div>
       <div class="bubble">${esc(m.content)}</div>${m.hint ? `<div class="hint">${esc(m.hint)}</div>` : ''}${m.trace ? `<div class="meta"><details open><summary>What happened</summary>${traceHtml(m)}</details></div>` : ''}</div>`;
   }
-  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><div class="who">${modelLabelHtml(m)}<span class="actions">
+  return `<div class="msg assistant${m.streaming ? ' streaming' : ''}${lastAssistant ? ' latest' : ''}${fresh(m) ? ' enter' : ''}" data-id="${m.id}"><span class="orb-av" aria-hidden="true"><i></i><i></i><i></i></span><div class="who">${modelLabelHtml(m)}<span class="actions">
       ${m.streaming ? `<button data-act="stop" class="stop" title="Stop this reply (Esc)">${ICONS.stop} Stop</button>` : ''}
       <button data-act="copy" title="Copy as Markdown">${ICONS.copy}</button>
       <button data-act="speak" title="${speaking ? 'Stop reading' : 'Read aloud'}" class="${speaking ? 'speaking' : ''}">${speaking ? ICONS.stop : ICONS.speak}</button>
@@ -1070,12 +1101,19 @@ function messageHtml(m, i, list) {
 // the chat and goes above the tool calls it led to, but is never sent back to
 // the model as part of the conversation.
 const REASONING_SHOWN = 20000;
+function isThinking(m) {
+  const rounds = m.rounds || [];
+  const since = m.content.slice(rounds.length ? rounds[rounds.length - 1].end : 0);
+  return !!m.streaming && !since.trim() && rounds.every(r => r.calls.every(c => c.result != null));
+}
 function reasoningHtml(m) {
   const text = m.reasoning || '';
   if (!text) return '';
   const shown = text.length > REASONING_SHOWN ? `${text.slice(0, REASONING_SHOWN)}\n… (${(text.length - REASONING_SHOWN).toLocaleString()} more characters)` : text;
-  return `<details class="reasoning" data-k="reasoning"><summary>
-      <span class="spark"><i></i><i></i><i></i></span><span>${m.streaming ? 'Thinking' : 'Thought'}</span>
+  // the dots hop only while the model is thinking: not once text or a tool call has followed
+  const live = isThinking(m);
+  return `<details class="reasoning${live ? ' live' : ''}" data-k="reasoning"><summary>
+      <span class="spark"><i></i><i></i><i></i></span><span>${live ? 'Thinking' : 'Thought'}</span>
       <span class="t">${text.length.toLocaleString()} characters</span></summary><pre>${esc(shown)}</pre></details>`;
 }
 
@@ -1084,8 +1122,10 @@ function replyBodyHtml(m) {
   const rounds = m.rounds || [];
   const last = rounds.length ? rounds[rounds.length - 1].end : 0;
   const rest = m.content.slice(last);
-  let html = reasoningHtml(m), from = 0;
-  let toolsAdded = false;
+  // a finished reply keeps its thinking and tool calls in the Details under it
+  const fold = !m.streaming;
+  let html = fold ? '' : reasoningHtml(m), from = 0;
+  let toolsAdded = fold;
   rounds.forEach((r) => {
     const text = m.content.slice(from, r.end);
     if (text.trim()) html += `<div class="md">${render(text)}</div>`;
@@ -1845,6 +1885,19 @@ async function runTool(call, c, signal, onChange) {
       const allow = await askApproval(call, githubChange(call.name, args, ghOf(c)?.full), onChange, signal);
       if (!allow) {
         call.result = 'Error: the user declined this GitHub change. Do not try it again; ask what they want instead.';
+        call.isError = true;
+        call.ms = Date.now() - started;
+        onChange();
+        return;
+      }
+      confirmed = true;
+    }
+    const mcpAsk = (toolInfo?.servers || []).flatMap((s) => s.tools || []).find((t) => t.name === call.name && t.needsApproval);
+    if (mcpAsk) {
+      // An MCP server set to "ask first" (Tools page): show the input, wait for Allow or Decline
+      const allow = await askApproval(call, `${mcpAsk.title || call.name} may change something. Allow it with the input shown below?`, onChange, signal);
+      if (!allow) {
+        call.result = 'Error: the user declined this tool call. Do not try it again; ask what they want instead.';
         call.isError = true;
         call.ms = Date.now() - started;
         onChange();

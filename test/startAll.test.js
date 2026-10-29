@@ -47,6 +47,8 @@ test('with federation on, the Gateway is pointed at the Interceptor\'s OpenRoute
     const gateway = buildCommands({ platform: 'linux', env, argv: [], exists: () => true }).commands[0];
     assert.equal(gateway.env.OPENROUTER_API_KEY, 'sk-master');
     assert.equal(gateway.env.OPENROUTER_API_BASE, 'http://127.0.0.1:3000/openrouter-proxy/v1');
+    const renew = buildCommands({ platform: 'linux', env: { OPENROUTER_MAIN_KEY_RENEW: '1', OPENROUTER_MANAGEMENT_KEY: 'sk-or-m', LITELLM_MASTER_KEY: 'sk-master' }, argv: [], exists: () => true }).commands[0];
+    assert.equal(renew.env.OPENROUTER_API_BASE, 'http://127.0.0.1:3000/openrouter-proxy/v1', 'main key renewal goes through the proxy too');
     const plain = buildCommands({ platform: 'linux', env: {}, argv: [], exists: () => true }).commands[0];
     assert.equal(plain.env.OPENROUTER_API_KEY, undefined);
 });

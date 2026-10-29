@@ -392,7 +392,7 @@ class McpManager {
                 type: s.type,
                 status: s.status,
                 error: s.error || null,
-                tools: s.tools.filter(t => names.has(`${s.name}\0${t.name}`)).map(t => ({ name: names.get(`${s.name}\0${t.name}`), title: t.title || t.annotations?.title || t.name, description: t.description || '' })),
+                tools: s.tools.filter(t => names.has(`${s.name}\0${t.name}`)).map(t => ({ name: names.get(`${s.name}\0${t.name}`), title: t.title || t.annotations?.title || t.name, description: t.description || '', needsApproval: askFirst(s.spec, t) })),
             })),
         };
     }
@@ -424,10 +424,17 @@ class McpManager {
         return this.byTool.has(name);
     }
 
-    async call(name, args) {
+    // Does this tool wait for the person's Allow (the server's "askBefore" setting)?
+    needsApproval(name) {
+        const entry = this.byTool.get(name);
+        return !!entry && askFirst(entry.server.spec, entry.tool);
+    }
+
+    async call(name, args, { confirmed = false } = {}) {
         const entry = this.byTool.get(name);
         if (!entry) throw new Error(`no MCP tool named ${name}`);
         const { server, tool } = entry;
+        if (!confirmed && askFirst(server.spec, tool)) throw new Error(`${tool.name} needs the person's approval (server ${server.name} is set to ask first), but the page sent none`);
         if (!server.client) throw new Error(`MCP server ${server.name} is not connected`);
         const result = await server.client.callTool({ name: tool.name, arguments: args || {} }, undefined, { timeout: positive((this.plain ? server.spec : expand(server.spec)).callTimeoutMs) ?? CALL_TIMEOUT_MS });
         return { text: resultText(result), isError: !!result.isError, server: server.name, tool: tool.name };
@@ -444,6 +451,13 @@ class McpManager {
             try { await client?.close(); } catch {}
         }));
     }
+}
+
+// "askBefore": "all" asks for every tool of the server; "writes" for every tool the server
+// does not mark read-only (annotations.readOnlyHint), so an unmarked tool is treated as a change.
+function askFirst(spec, tool) {
+    if (spec.askBefore === 'all') return true;
+    return spec.askBefore === 'writes' && tool.annotations?.readOnlyHint !== true;
 }
 
 module.exports = { McpManager, readConfig, writeConfig, transportType, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };

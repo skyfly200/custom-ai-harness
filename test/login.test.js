@@ -140,7 +140,12 @@ test('admins manage users; plain users get chat and API but not Settings or cont
 
     // carol can change her own password but not remove herself or read others' keys
     assert.equal((await fetch(`${base}/ui/api/me/password`, post(carol, { current: 'bad', password: 'brand-new-pass' }))).status, 400);
-    assert.equal((await fetch(`${base}/ui/api/me/password`, post(carol, { current: 'carol-password', password: 'brand-new-pass' }))).status, 200);
+    const bad = await fetch(`${base}/ui/api/me/password`, post(carol, { current: 'carol-password', password: 'brand-new-pass', confirm: 'brand-new-pasx' }));
+    assert.equal(bad.status, 400);
+    assert.match((await bad.json()).error, /do not match/);
+    assert.equal((await fetch(`${base}/ui/api/users/carol`, post(admin, { password: 'another-pass-1', confirm: 'nope' }))).status, 400);
+    assert.equal((await signIn('carol', 'carol-password')).r.status, 200, 'mismatch changed nothing');
+    assert.equal((await fetch(`${base}/ui/api/me/password`, post(carol, { current: 'carol-password', password: 'brand-new-pass', confirm: 'brand-new-pass' }))).status, 200);
     assert.equal((await fetch(`${base}/ui/api/keys?owner=alice`, as(carol))).status, 400);
     assert.equal((await signIn('carol', 'brand-new-pass')).r.status, 200);
 

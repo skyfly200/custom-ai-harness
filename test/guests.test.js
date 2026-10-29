@@ -122,6 +122,116 @@ test('the proxy sends a person\'s own credential for their ticket, the owner\'s 
     } finally { server.close(); }
 });
 
+test('a 401 for a person\'s key flags it and answers with a reconnect message; a 401 for the install\'s token drops the cached token', async () => {
+    await userCredentials.setKey('bob', 'sk-or-v1-bobkeybobkeybobkey1234');
+    const env = { OPENROUTER_PROXY_KEY: PROXY_KEY, OPENROUTER_URL: 'https://or.test/api/v1', OPENROUTER_API_KEY: 'sk-or-owner' };
+    let invalidated = 0;
+    const auth = { key: async () => 'sk-or-owner', invalidate: () => { invalidated++; } };
+    const fetchFn = async () => new Response('{"error":{"message":"User not found."}}', { status: 401, headers: { 'content-type': 'application/json' } });
+    const express = require('express');
+    const app = express();
+    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(auth, { env, fetchFn, resolveUser: userCredentials.resolve, onBadCredential: (n) => userCredentials.markBad(n) }));
+    const server = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+    const call = (headers) => fetch(`http://127.0.0.1:${server.address().port}/openrouter-proxy/v1/chat/completions`, {
+        method: 'POST', headers: { authorization: `Bearer ${PROXY_KEY}`, 'content-type': 'application/json', ...headers }, body: '{}',
+    });
+    try {
+        const r = await call({ [ticket.HEADER]: ticket.mint(PROXY_KEY, { user: 'bob' }) });
+        assert.equal(r.status, 401);
+        const body = await r.json();
+        assert.equal(body.error.code, 'openrouter_reconnect');
+        assert.match(body.error.message, /Reconnect OpenRouter/);
+        assert.equal((await userCredentials.check('bob', { fetchFn: async () => { throw new Error('should not ask'); } })).state, 'invalid');
+        assert.equal(invalidated, 0);
+        await call({});
+        assert.equal(invalidated, 1);
+        await userCredentials.setKey('bob', 'sk-or-v1-newkeynewkeynewkey1234');
+        assert.equal((await userCredentials.check('bob', { fetchFn: async () => Response.json({ data: {} }) })).state, 'ok', 'saving a new key clears the flag');
+    } finally { server.close(); }
+});
+
+test('check() reads GET /key: ok, expiring, expired, exhausted, invalid, and unknown when OpenRouter does not answer', async () => {
+    const env = { OPENROUTER_URL: 'https://or.test/api/v1' };
+    const day = 24 * 3600 * 1000;
+    const state = async (owner, answer) => {
+        await userCredentials.setKey(owner, `sk-or-v1-${owner}keys${owner}keys1234`);
+        const urls = [];
+        const v = await userCredentials.check(owner, { env, fetchFn: async (u, init) => { urls.push([u, init.headers.authorization]); if (answer instanceof Error) throw answer; return answer; } });
+        assert.equal(urls[0][0], 'https://or.test/api/v1/key');
+        assert.equal(urls[0][1], `Bearer sk-or-v1-${owner}keys${owner}keys1234`);
+        return v;
+    };
+    assert.equal((await state('c1', Response.json({ data: { limit: 10, limit_remaining: 4 } }))).state, 'ok');
+    const soon = await state('c2', Response.json({ data: { expires_at: new Date(Date.now() + 2 * day).toISOString() } }));
+    assert.equal(soon.state, 'expiring');
+    assert.ok(soon.expiresAt > Date.now());
+    assert.equal((await state('c3', Response.json({ data: { expires_at: new Date(Date.now() - day).toISOString() } }))).state, 'expired');
+    assert.equal((await state('c4', Response.json({ data: { limit: 5, limit_remaining: 0 } }))).state, 'exhausted');
+    assert.equal((await state('c5', new Response('{}', { status: 401 }))).state, 'invalid');
+    assert.equal((await state('c6', new Error('offline'))).state, 'unknown');
+    assert.equal((await userCredentials.check('nobody')).state, 'unknown');
+});
+
+test('Management API: issue makes a capped key, replaces and deletes the old one; remove deletes it; the management key stays out of errors', async () => {
+    const env = { OPENROUTER_URL: 'https://or.test/api/v1', OPENROUTER_MANAGEMENT_KEY: 'sk-or-v1-MANAGEMENTSECRET00', OPENROUTER_USER_KEY_LIMIT: '3', OPENROUTER_USER_KEY_DAYS: '30' };
+    const calls = [];
+    let n = 0;
+    const fetchFn = async (url, init) => {
+        calls.push({ url, method: init.method, auth: init.headers.authorization, body: init.body ? JSON.parse(init.body) : null });
+        if (init.method === 'POST') { n++; return Response.json({ data: { key: `sk-or-v1-issued${n}issued${n}issued${n}xx`, hash: `hash${n}` } }); }
+        return Response.json({ deleted: true });
+    };
+    const now = () => Date.parse('2026-10-28T12:00:00Z');
+    const opts = { env, fetchFn, now };
+    await userCredentials.issue('dee', opts);
+    assert.equal(calls[0].url, 'https://or.test/api/v1/keys');
+    assert.equal(calls[0].auth, 'Bearer sk-or-v1-MANAGEMENTSECRET00');
+    assert.deepEqual(calls[0].body, { name: 'harness: dee', limit: 3, expires_at: '2026-11-27T12:00:00Z' });
+    assert.equal((await userCredentials.resolve('dee')).key, 'sk-or-v1-issued1issued1issued1xx');
+    const st = await userCredentials.status('dee');
+    assert.equal(st.kind, 'managed');
+    assert.ok(st.expires > Date.now() - 1);
+    assert.doesNotMatch(JSON.stringify((await pg.query('SELECT * FROM user_credentials WHERE owner = $1', ['dee'])).rows), /issued1/);
+    // a second issue replaces the key and deletes hash1
+    await userCredentials.issue('dee', opts);
+    assert.deepEqual(calls.slice(1).map((c) => [c.method, c.url]), [['POST', 'https://or.test/api/v1/keys'], ['DELETE', 'https://or.test/api/v1/keys/hash1']]);
+    // taking it back deletes hash2
+    await userCredentials.remove('dee', opts);
+    assert.equal(calls.at(-1).url, 'https://or.test/api/v1/keys/hash2');
+    assert.equal((await userCredentials.status('dee')).set, false);
+    // errors never carry the management key
+    await assert.rejects(userCredentials.issue('dee', { env, fetchFn: async () => new Response('{"error":{"message":"nope"}}', { status: 403 }) }), (e) => /HTTP 403/.test(e.message) && !/MANAGEMENTSECRET/.test(e.message));
+    await assert.rejects(userCredentials.issue('dee', { env: {} }), /OPENROUTER_MANAGEMENT_KEY/);
+});
+
+test('a managed key that OpenRouter refuses is replaced once an hour; pasted keys and exhausted limits are not', async () => {
+    const env = { OPENROUTER_URL: 'https://or.test/api/v1', OPENROUTER_MANAGEMENT_KEY: 'sk-or-v1-MANAGEMENTSECRET00' };
+    let n = 0;
+    const mgmt = async (url, init) => {
+        if (init.method === 'POST') { n++; return Response.json({ data: { key: `sk-or-v1-rot${n}rot${n}rot${n}rot${n}x`, hash: `rh${n}` } }); }
+        return Response.json({});
+    };
+    await userCredentials.issue('eve', { env, fetchFn: mgmt });
+    const base = n;
+    const refuse = async (url, init) => (url.endsWith('/keys') || /\/keys\//.test(url) ? mgmt(url, init) : new Response('{}', { status: 401 }));
+    const v = await userCredentials.check('eve', { env, fetchFn: refuse });
+    assert.deepEqual(v, { state: 'ok', rotated: true });
+    assert.equal(n, base + 1);
+    assert.equal((await userCredentials.resolve('eve')).key, `sk-or-v1-rot${n}rot${n}rot${n}rot${n}x`);
+    assert.equal(await userCredentials.rotate('eve', { env, fetchFn: mgmt }), false, 'not again within the hour');
+    // pasted key: reconnect prompt, no rotation
+    await userCredentials.setKey('fin', 'sk-or-v1-pastedpastedpasted1234');
+    assert.equal((await userCredentials.check('fin', { env, fetchFn: refuse })).state, 'invalid');
+    assert.equal(n, base + 1);
+    // managed key at its limit: no free refill
+    await userCredentials.issue('gus', { env, fetchFn: mgmt });
+    const used = n;
+    const empty = async (url, init) => (/\/keys/.test(url) ? mgmt(url, init) : Response.json({ data: { limit: 5, limit_remaining: 0 } }));
+    assert.equal((await userCredentials.check('gus', { env, fetchFn: empty })).state, 'exhausted');
+    assert.equal(n, used);
+    assert.deepEqual(await userCredentials.managedOwners().then((o) => o.sort()), ['eve', 'gus']);
+});
+
 // ---- through the server ----
 
 const priced = (name, up, inCost, outCost, api_base) => ({ model_name: name, model_info: { input_cost_per_token: inCost, output_cost_per_token: outCost, max_input_tokens: 100000, max_output_tokens: 8000 }, litellm_params: { model: up, api_base } });

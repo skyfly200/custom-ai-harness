@@ -27,6 +27,7 @@
   // server keeps the copy (a database): without one this browser holds the only copy and is left alone.
   async function guard() {
     if (typeof window === 'undefined') return;
+    api.ok = true;
     let owner;
     try {
       const r = await fetch('api/me', { headers: { accept: 'application/json' } });
@@ -38,7 +39,8 @@
       const stored = localStorage.getItem(OWNER_KEY);
       if (stored === owner) return;
       const sync = await fetch('api/sync', { headers: { accept: 'application/json' } }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-      if (!sync || !sync.db) return;
+      if (!sync) { api.ok = false; return; } // can't tell yet: the page does not sync this time
+      if (!sync.db) return;
       const keys = Object.keys(localStorage).filter(isPersonal);
       const accountHasData = (sync.chats || []).length > 0 || Object.keys(sync.data || {}).length > 0;
       const verdict = decide({ stored, owner, hasData: keys.length > 0, accountHasData });

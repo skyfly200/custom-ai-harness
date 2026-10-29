@@ -116,6 +116,16 @@ test('the open redirect after login stays on this site', async () => {
     assert.equal((await r.json()).next, '/');
 });
 
+test('a signed-in chat bigger than the 16 KB login-form limit is not refused', async () => {
+    const { cookie } = await signIn('alice', 'alice-password');
+    const big = 'x'.repeat(200 * 1024);
+    const r = await fetch(`${base}/ui/api/settings`, post(cookie, { note: big }));
+    assert.equal(r.status, 400, "reached the settings route, which refused the unknown key");
+    // the small limit still guards the account routes, and says 413 rather than blaming the Gateway
+    const small = await fetch(`${base}/ui/api/me/password`, post(cookie, { current: big, next: 'y' }));
+    assert.equal(small.status, 413);
+});
+
 test('admins manage users; plain users get chat and API but not Settings or controls', async () => {
     const admin = (await signIn('alice', 'alice-password')).cookie;
     assert.equal((await fetch(`${base}/ui/api/users`, post(admin, { name: 'carol', password: 'short' }))).status, 400);

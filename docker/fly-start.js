@@ -67,7 +67,7 @@ function commands(dataDir = DATA, env = process.env) {
                  HARNESS_STOP_VIA_PARENT: '1',
                  // the first request after a wake waits for LiteLLM to load
                  HARNESS_GATEWAY_WAIT_S: env.HARNESS_GATEWAY_WAIT_S || '240',
-                 ...(runs ? { HARNESS_HOSTED_RUNS: '1', RUNNER_TOKEN: runnerToken, RUNNER_URL: 'http://127.0.0.1:3100' } : {}) } },
+                 ...(runs ? { HARNESS_HOSTED_RUNS: '1', RUNNER_TOKEN: runnerToken, RUNNER_URL: 'http://127.0.0.1:3100' } : { HARNESS_RUNS_OFF: '1' }) } },
         ...(runs ? [{ name: 'runner', cmd: 'node', args: ['runner/server.js'],
           env: { RUNNER_HOSTED: '1', RUNNER_TOKEN: runnerToken, RUNNER_PORT: '3100', HARNESS_URL: 'http://127.0.0.1:3000',
                  RUNNER_DIR: path.join(dataDir, 'runs'), RUNNER_REPOS_DIR: path.join(dataDir, 'repos') } }] : []),

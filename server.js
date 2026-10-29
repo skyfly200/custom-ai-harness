@@ -560,6 +560,9 @@ const RUNNER_URL = (process.env.RUNNER_URL || 'http://127.0.0.1:3100').replace(/
 // them (HARNESS_RUNS_FOR=users; the default admins keeps them to admins), each only on their own runs. The runner is told
 // whose request it is, and gets that person's GitHub token for the one request (clone, fetch, push) and never keeps it.
 const HOSTED_RUNS = /^(1|true|yes|on)$/i.test(process.env.HARNESS_HOSTED_RUNS || '');
+// Set by the Fly launcher when HARNESS_RUNS is off: there is no runner here, so say so instead of a connection error
+const runsOff = () => /^(1|true|yes|on)$/i.test(process.env.HARNESS_RUNS_OFF || '');
+const RUNS_OFF_MESSAGE = 'Agents are not turned on for this server. Set HARNESS_RUNS=1 (fly secrets set HARNESS_RUNS=1) and redeploy to start the task runner.';
 function hostedRunsGate(req, res, next) {
     const user = req.harnessLogin && req.harnessUser;
     if (!user) return res.status(403).json({ error: 'Runs need a signed-in account' });
@@ -569,7 +572,7 @@ function hostedRunsGate(req, res, next) {
     next();
 }
 for (const part of ['runs', 'agents', 'tickets', 'apps']) {
-    app.use(`/ui/api/${part}`, HOSTED_RUNS ? hostedRunsGate : (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
+    app.use(`/ui/api/${part}`, (req, res, next) => (runsOff() ? res.status(503).json({ error: RUNS_OFF_MESSAGE, disabled: true }) : next()), HOSTED_RUNS ? hostedRunsGate : (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
         const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
         if (HOSTED_RUNS) {
             headers['x-runner-owner'] = req.harnessUser.name;
@@ -585,7 +588,7 @@ for (const part of ['runs', 'agents', 'tickets', 'apps']) {
             });
             res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(await upstream.text());
         } catch (err) {
-            res.status(502).json({ error: `The task runner is not running (${err.cause?.code || err.message}). Start it with npm run all, or node runner/server.js.` });
+            res.status(502).json({ error: HOSTED_RUNS ? `The task runner is not answering (${err.cause?.code || err.message}). It starts with the server; see fly logs.` : `The task runner is not running (${err.cause?.code || err.message}). Start it with npm run all, or node runner/server.js.` });
         }
     });
 }
@@ -1224,13 +1227,14 @@ app.post('/ui/api/tts', async (req, res) => {
 // and always fail with "network". STT_URL points this at OpenRouter, Groq,
 // OpenAI, a local Whisper or the Gateway. STT_MODEL is the model to ask for and
 // STT_LANGUAGE the default language; the page can override both per request.
-const STT_URL = (process.env.STT_URL || (process.env.OPENROUTER_API_KEY ? OPENROUTER_URL : '')).replace(/\/+$/, '');
+const STT_URL = (process.env.STT_URL || (orAuth.configured() ? OPENROUTER_URL : '')).replace(/\/+$/, '');
 const STT_OPENROUTER = /openrouter\.ai/.test(STT_URL);
 const STT_MODEL = process.env.STT_MODEL || (STT_OPENROUTER ? 'mistralai/voxtral-mini-transcribe-3-0' : 'whisper-1');
 const STT_LANGUAGE = process.env.STT_LANGUAGE || '';
-const STT_KEY = process.env.STT_API_KEY
+// like the TTS key: federation-aware on OpenRouter
+const sttKey = async () => process.env.STT_API_KEY
     || (STT_URL.startsWith(GATEWAY_URL) ? GATEWAY_KEY : '')
-    || (STT_OPENROUTER ? process.env.OPENROUTER_API_KEY || '' : '');
+    || (STT_OPENROUTER ? await orAuth.key().catch((err) => { console.warn(`STT: ${err.message}`); return ''; }) : '');
 
 app.get('/ui/api/stt', (req, res) => {
     if (!STT_URL) return res.json({ configured: false });
@@ -1262,9 +1266,9 @@ app.post('/ui/api/stt', async (req, res) => {
     try {
         const upstream = await fetch(`${STT_URL}/audio/transcriptions`, {
             method: 'POST',
-            headers: STT_KEY ? { authorization: `Bearer ${STT_KEY}` } : {},
+            headers: await sttKey().then((key) => (key ? { authorization: `Bearer ${key}` } : {})),
             body: form,
-            signal: AbortSignal.timeout(120000),
+            signal: AbortSignal.timeout(45000),
         });
         const body = await upstream.text();
         if (!upstream.ok) return res.status(502).json({ error: `Speech server answered HTTP ${upstream.status}: ${body.slice(0, 300)}` });
@@ -1272,6 +1276,8 @@ app.post('/ui/api/stt', async (req, res) => {
         try { text = JSON.parse(body).text ?? ''; } catch {}
         res.json({ text: String(text).trim() });
     } catch (err) {
+        // answer before the host's proxy gives up with its own HTML 504
+        if (err.name === 'TimeoutError') return res.status(504).json({ error: `The speech model (${new URL(STT_URL).host}) did not answer in 45 seconds. It may not offer transcription; try another STT_MODEL or STT_URL.` });
         res.status(502).json({ error: `Speech server unreachable: ${err.cause?.code || err.message}` });
     }
 });
@@ -1287,23 +1293,24 @@ const noOwnTools = { error: 'Your own tools need the hosted database and ENCRYPT
 app.get('/ui/api/tools', async (req, res) => {
     if (isMember(req)) {
         // Only the member's own servers: shell and repo tools run on this machine, and the shared servers are the admins'
-        if (!userMcpMod.available()) return res.json({ servers: [], definitions: {}, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions(), note: noOwnTools.error });
+        if (!userMcpMod.available()) return res.json({ servers: [], definitions: {}, localRepos: false, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions(), note: noOwnTools.error });
         try {
             const mgr = userMcp.manager(ownerOf(req));
             await mgr.start();
             const status = mgr.status();
             const definitions = {};
             for (const s of status.servers) definitions[s.name] = mgr.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
-            return res.json({ ...status, file: 'your account', definitions, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions() });
+            return res.json({ ...status, file: 'your account', definitions, localRepos: false, repoDefinitions: [], shellDefinitions: [], githubDefinitions: githubApi.definitions() });
         } catch (err) {
             return res.status(500).json({ error: err.message });
         }
     }
     await mcp.start();
+    const localRepos = repoTools.localFoldersAvailable();
     const status = mcp.status();
     const definitions = {};
     for (const s of status.servers) definitions[s.name] = mcp.definitions(status.servers.filter(o => o.name !== s.name).map(o => o.name));
-    res.json({ ...status, definitions, repoDefinitions: repoTools.definitions(), shellDefinitions: settings.get().shellInRepo ? chatShell.definitions() : [], githubDefinitions: githubApi.definitions() });
+    res.json({ ...status, definitions, localRepos, repoDefinitions: localRepos ? repoTools.definitions() : [], shellDefinitions: localRepos && settings.get().shellInRepo ? chatShell.definitions() : [], githubDefinitions: githubApi.definitions() });
 });
 
 app.post('/ui/api/tools/reload', memberOrLocalJson, async (req, res) => {
@@ -1472,6 +1479,7 @@ async function shellCall(repo, args, confirmed) {
 // to /ui/api/tools/call with `confirmed`.
 app.post('/ui/api/tools/shell/check', localJsonOnly, async (req, res) => {
     const { command } = req.body || {};
+    if (!repoTools.localFoldersAvailable()) return res.json({ decision: 'deny', reason: repoTools.HOSTED_MESSAGE });
     if (typeof command !== 'string' || !command.trim()) return res.status(400).json({ error: 'command is required' });
     const { guardJev, guardAskAt, guardDenyAt, shellInRepo } = settings.get();
     if (!shellInRepo) return res.json({ decision: 'deny', reason: 'the shell is off in the settings' });
@@ -1501,6 +1509,7 @@ app.post('/ui/api/tools/call', memberOrLocalJson, async (req, res) => {
             return res.json({ ...(await mgr.call(name, args || {}, { confirmed: confirmed === true })), ms: Date.now() - started });
         }
         const needsRepo = chatShell.isShellTool(name) || repoTools.isRepoTool(name);
+        if (needsRepo && !repoTools.localFoldersAvailable()) throw new Error(repoTools.HOSTED_MESSAGE);
         const workspace = needsRepo && repo && chatId ? await chatWorktrees.create(repo, chatId) : null;
         const toolRepo = workspace?.path || repo;
         let result;

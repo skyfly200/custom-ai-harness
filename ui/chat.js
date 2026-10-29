@@ -110,7 +110,8 @@ const sync = {
     const base = c.sharedFrom ? `/shared/${encodeURIComponent(c.sharedFrom)}/chats/${id}` : `/chats/${id}`;
     if (!c.sharedFrom) await this.uploadAttachments(c);
     const { upserts, order, fingerprints } = ChatMerge.delta(this.wire(c.messages), snap.known);
-    const { messages, syncVersion, ...chatMeta } = c;
+    // The linked folder belongs to the device it was linked on: it is not sent, so another device or a hosted server never sees it
+    const { messages, syncVersion, repo: _folder, ...chatMeta } = c;
     const r = await this.api(`${base}/delta`, { method: 'PUT', body: { chat: chatMeta, order, upserts, base: snap.version } });
     if (r.status === 409 && attempt < 2) {
       const got = await this.api(base);
@@ -119,7 +120,9 @@ const sync = {
       const remote = await got.json();
       const merged = ChatMerge.mergeChats(c, remote);
       const { messages: joined, ...rest } = merged;
+      const keepRepo = c.repo;
       Object.assign(c, rest);
+      if (keepRepo) c.repo = keepRepo;
       c.messages.splice(0, c.messages.length, ...joined);
       this.noteSaved(c.id, remote.syncVersion, remote.messages);
       return this.saveChat(id, attempt + 1);
@@ -763,7 +766,8 @@ function emptyState() {
     
     ${quickPicker()}
     <div class="suggest">${picks.map(t => `<button type="button" class="chip-btn" data-suggest="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-    <p class="small tip">Drop files, dictate, or type <kbd>/</kbd> for skills and tools.</p></div>`;
+    <p class="small tip">Drop files, dictate, or type <kbd>/</kbd> for skills and tools.</p>
+    ${hostedNoFolders() && !ghOf(chat) ? '<p class="small tip">To ask about your code, attach a GitHub repo under Options &gt; Tools.</p>' : ''}</div>`;
 }
 
 // Quick pick on a new chat: a strategy, or one model directly. Outside projects
@@ -1277,15 +1281,22 @@ function patch(el, html) {
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   const fresh = tmp.firstElementChild;
-  const who = el.firstElementChild, freshWho = fresh.firstElementChild;
+  // The orb avatar sits before .who. Keep it, and the element itself, so the
+  // pop-in and orbit animations don't start over on every redraw.
+  const who = el.querySelector(':scope > .who'), freshWho = fresh.querySelector(':scope > .who');
   // keep tool calls and "How this reply was made" open if they were
   const open = [...el.querySelectorAll('details[data-k]')].filter(d => d.open).map(d => d.dataset.k);
-  if (el.className !== fresh.className || !who?.classList.contains('who') || who.innerHTML !== freshWho.innerHTML) {
+  if (!who || !freshWho || el.className.split(' ')[1] !== fresh.className.split(' ')[1]) {
+    fresh.classList.remove('enter');
     el.replaceWith(fresh);
     el = fresh;
   } else {
+    // only classes that carry state change; `enter` stays as it was
+    for (const c of ['streaming', 'latest']) el.classList.toggle(c, fresh.classList.contains(c));
+    if (who.innerHTML !== freshWho.innerHTML) who.innerHTML = freshWho.innerHTML;
     while (el.lastChild !== who) el.lastChild.remove();
     freshWho.remove();
+    fresh.querySelector(':scope > .orb-av')?.remove();
     el.append(...fresh.childNodes);
   }
   for (const k of open) { const d = el.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; }
@@ -1359,7 +1370,9 @@ $('log').addEventListener('click', async (e) => {
 // Sending
 // ---------------------------------------------------------------------------
 // The chat's own repo, else its project's
-const repoOf = (c) => c?.repo || projectOf(c)?.repo || null;
+// A folder on someone's own computer means nothing to a hosted server, which says so with localRepos: false
+const hostedNoFolders = () => toolInfo?.localRepos === false;
+const repoOf = (c) => (hostedNoFolders() ? null : c?.repo || projectOf(c)?.repo || null);
 // The chat's GitHub repo ({ full: "owner/name", branch, private }), attached under Options > Tools
 const ghOf = (c) => c?.github || null;
 // Skills on for this chat: its own and its project's
@@ -2687,6 +2700,17 @@ $('mcpReload').addEventListener('click', async () => {
 });
 
 function drawRepo() {
+  const hosted = hostedNoFolders();
+  $('repoLink').disabled = hosted && !chat?.repo;
+  if (hosted) {
+    $('repoInfo').innerHTML = chat?.repo
+      ? `This chat's repo is a folder on your own computer (<code>${esc(chat.repo.path)}</code>), which this hosted server cannot read. Unlink it, then attach a GitHub repo below.`
+      : 'Folders on your computer cannot be read from this hosted server. Attach a GitHub repo below instead.';
+    $('repoPath').value = chat?.repo ? chat.repo.path : '';
+    $('repoPath').readOnly = !!chat?.repo;
+    $('repoLink').textContent = chat?.repo ? 'Unlink' : 'Link';
+    return;
+  }
   const r = chat?.repo;
   $('repoPath').value = r ? r.path : $('repoPath').dataset.typed || '';
   $('repoPath').readOnly = !!r;
@@ -3201,6 +3225,8 @@ const dictation = {
   quietSince: 0,
   discard: false,    // the next stop is a pause or a cancel: drop the audio
   segmentStart: 0,
+  listening: false,  // the browser recogniser has the microphone open
+  heard: false, quiet: 0, startedAt: 0,
 
   // Which engine to use now: the browser's own unless it has none, or the
   // user picked the server
@@ -3235,22 +3261,23 @@ const dictation = {
   listen() {
     if (this.rec) return;
     const rec = new SR();
-    rec.continuous = true;
+    rec.continuous = DictationText.wantsContinuous(navigator.userAgent);
     rec.interimResults = true;
     rec.lang = $('sttLang').value.trim() || navigator.language || 'en-US';
     const box = $('input');
     this.base = box.value ? box.value.replace(/\s*$/, ' ') : '';
+    this.heard = false; this.startedAt = Date.now();
+    rec.onstart = () => { this.listening = true; this.draw(); };
     rec.onresult = (e) => {
-      let finalText = '', interim = '';
-      for (let k = e.resultIndex; k < e.results.length; k++) {
-        const r = e.results[k];
-        if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
-      }
-      if (finalText) this.base += finalText.trim() + ' ';
-      box.value = this.base + interim;
+      // rebuilt from every result each time: Android resends cumulative text
+      const all = [];
+      for (let k = 0; k < e.results.length; k++) all.push({ transcript: e.results[k][0].transcript, isFinal: e.results[k].isFinal });
+      const text = DictationText.sessionText(all);
+      if (text.final || text.interim) { this.heard = true; this.quiet = 0; }
+      box.value = DictationText.compose(this.base, text);
       autoGrow();
       clearTimeout(this.silence);
-      if ($('autoSend').checked && this.base.trim() && !interim) {
+      if ($('autoSend').checked && text.final && !text.interim) {
         this.silence = setTimeout(() => {
           if (!this.want || running.has(chat.id)) return;
           this.base = '';
@@ -3262,33 +3289,40 @@ const dictation = {
       }
     };
     rec.onerror = (e) => {
-      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      const info = DictationText.describeError(e.error);
       // No speech service in this browser (Brave, some Chromium builds): the
       // harness's speech model does the same job, so carry on with that
       if ((e.error === 'network' || e.error === 'service-not-allowed') && !browserBroken && serverSTT.ok) {
         browserBroken = true;
-        this.rec = null;
+        this.rec = null; this.listening = false;
         toast('This browser has no speech service. Dictating through the harness instead.');
         this.draw();
         this.begin();
         return;
       }
-      this.want = false;
+      console.warn('Dictation error:', e.error, e.message || '');
+      if (!info.stop) return;
+      this.want = false; this.listening = false;
       this.rec = null;
-      toast(e.error === 'not-allowed' || e.error === 'service-not-allowed'
-        ? 'The microphone is blocked. Allow it for this page (it needs http://localhost or https).'
-        : e.error === 'network'
-          ? 'This browser has no speech service. Pick “Speech model” under Options → Voice, or set OPENROUTER_API_KEY or STT_URL in .env.'
-          : `Dictation stopped: ${e.error}`);
+      toast(info.text);
       this.draw();
     };
     rec.onend = () => {
-      this.rec = null;
-      // browsers end recognition after a pause; keep going while the mic is on
-      if (this.want && !this.paused) setTimeout(() => this.begin(), 150);
+      this.rec = null; this.listening = false;
+      // browsers end recognition after a pause; keep going while the mic is on,
+      // but give up when it keeps ending with nothing heard (denied, no mic)
+      if (this.want && !this.paused) {
+        this.quiet = this.heard ? 0 : (this.quiet || 0) + 1;
+        if (this.quiet >= (Date.now() - this.startedAt < 800 ? 4 : 3)) {
+          this.want = false; this.quiet = 0;
+          toast(this.startedAt && Date.now() - this.startedAt < 800
+            ? 'Dictation keeps stopping at once. Check the microphone is allowed for this page and not in use by another app.'
+            : 'Dictation heard nothing. Check the right microphone is selected, then click the mic to try again.');
+        } else setTimeout(() => this.begin(), 150);
+      }
       this.draw();
     };
-    try { rec.start(); this.rec = rec; } catch (err) { toast(`Dictation: ${err.message}`); this.want = false; }
+    try { rec.start(); this.rec = rec; } catch (err) { toast(`Dictation: ${DictationText.errText(err)}`); this.want = false; }
     this.draw();
   },
 
@@ -3304,7 +3338,7 @@ const dictation = {
       this.starting = false; this.want = false; this.draw();
       return toast(err.name === 'NotAllowedError'
         ? 'The microphone is blocked. Allow it for this page (it needs http://localhost or https).'
-        : `Microphone: ${err.message}`);
+        : `Microphone: ${DictationText.errText(err)}`);
     }
     this.starting = false;
     // the mic was turned off or paused while the permission prompt was up
@@ -3316,7 +3350,7 @@ const dictation = {
     this.media = rec; this.chunks = []; this.spoke = false; this.segmentStart = Date.now();
     rec.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data); };
     rec.onstop = () => this.finishSegment(rec, type);
-    try { rec.start(1000); } catch (err) { this.media = null; for (const t of stream.getTracks()) t.stop(); toast(`Dictation: ${err.message}`); this.want = false; }
+    try { rec.start(1000); } catch (err) { this.media = null; for (const t of stream.getTracks()) t.stop(); toast(`Dictation: ${DictationText.errText(err)}`); this.want = false; }
     this.meterStart();
     this.draw();
   },
@@ -3407,10 +3441,11 @@ const dictation = {
         body: JSON.stringify({ audio, format: blob.type, language: $('sttLang').value.trim() }),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+      if (!res.ok) { console.warn('Dictation: speech server answered', res.status, out); throw new Error(out.error ? DictationText.errText(out, res.status) : `The server did not answer (HTTP ${res.status}). If this is the hosted app, the speech model may be down or the app asleep; try again.`); }
       text = String(out.text || '').trim();
     } catch (err) {
-      toast(`Dictation: ${err.message}`);
+      console.warn('Dictation:', err);
+      toast(`Dictation: ${DictationText.errText(err)}`);
     }
     if (!text) return;
     const box = $('input');
@@ -3452,6 +3487,9 @@ const dictation = {
     const engine = this.engine;
     const on = this.want && !this.paused;
     $('mic').classList.toggle('listening', on);
+    // say plainly whether the microphone is open
+    const open = on && (engine === 'server' ? !!this.media : this.listening);
+    $('input').placeholder = on ? (open ? 'Listening… speak now' : 'Starting the microphone…') : 'Message';
     $('mic').disabled = engine === 'none';
     $('mic').title = engine === 'none' ? 'Dictation needs Chrome, Edge, or a speech model'
       : on ? 'Stop dictating (Ctrl+M)'

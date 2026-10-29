@@ -128,3 +128,9 @@ test('an unknown workflow is refused when the run is created', () => {
     const manager = new RunManager({ dir: path.join(dir, 'runs2'), roots: [dir], harnessUrl: 'http://127.0.0.1:9' });
     assert.throws(() => manager.create({ goal: 'x', repo: dir, workflow: 'nope' }), /no workflow named nope|does not exist|git/);
 });
+
+test('the shipped workflows set no step limit on any stage', () => {
+    const { list } = workflows.load();
+    assert.ok(list.length);
+    for (const w of list) for (const s of w.stages) assert.equal(s.maxSteps, 0, `${w.id}/${s.id}`);
+});

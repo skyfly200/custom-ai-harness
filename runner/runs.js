@@ -904,7 +904,7 @@ class RunManager {
             const stageEffort = run.effort || stage.effort || null;
             if (stage.canWait) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageEffort, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
             else outcome = await runAgent({
-                run: { goal: run.goal, maxSteps: run.maxSteps ? Math.min(stage.maxSteps, run.maxSteps) : stage.maxSteps, deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
+                run: { goal: run.goal, maxSteps: Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity) === Infinity ? 0 : Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity), deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
                 chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),

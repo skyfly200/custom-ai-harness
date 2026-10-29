@@ -202,3 +202,27 @@ test('servers that download their program connect one at a time, the rest alongs
     assert.equal(peak, 1);
     assert.equal(plain, 1);
 });
+
+test('lazy mode: a stdio server stops after listing, wakes on a call, and a second start uses the remembered tools', async () => {
+    const file = path.join(dir, 'lazy.json');
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { echo: { command: process.execPath, args: [fixture] } } }));
+    const first = new McpManager({ file, lazy: true, idleMs: 150 });
+    try {
+        await first.start();
+        const echo = first.servers.get('echo');
+        assert.equal(echo.status, 'connected');
+        assert.equal(echo.client, null, 'not running until called');
+        assert.ok(fs.existsSync(`${file}.tools.json`));
+        assert.equal((await first.call('mcp__echo__add', { a: 1, b: 2 })).text, '3');
+        assert.ok(echo.client, 'running after the call');
+        await new Promise((r) => setTimeout(r, 400));
+        assert.equal(echo.client, null, 'stopped again after idleMs');
+        assert.equal((await first.call('mcp__echo__add', { a: 4, b: 5 })).text, '9');
+    } finally { await first.close(); }
+    const second = new McpManager({ file, lazy: true });
+    try {
+        await second.start();
+        assert.ok(!second.servers.get('echo').client);
+        assert.equal(second.definitions().length, 3);
+    } finally { await second.close(); }
+});

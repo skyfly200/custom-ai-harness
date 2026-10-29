@@ -12,6 +12,7 @@ const ROOT = path.join(__dirname, '..');
 const CONFIG_FILE = process.env.MCP_CONFIG || path.join(__dirname, '..', 'mcp-servers.json');
 const CALL_TIMEOUT_MS = 120000;
 const CONNECT_TIMEOUT_MS = 30000;
+const IDLE_CLOSE_MS = 5 * 60 * 1000;
 // npx, uvx and docker download the server on first use, which can take minutes on a cold cache
 const LAUNCHER_CONNECT_TIMEOUT_MS = 120000;
 const LAUNCHERS = new Set(['npx', 'pnpx', 'bunx', 'uvx', 'docker']);
@@ -208,8 +209,12 @@ class McpManager {
     // `specs` (async, returns the {name: entry} object) replaces the file for a source that is not mcp-servers.json
     // (a user's servers in the database). `plain` turns off ${VAR} expansion, so an entry can't read this process's
     // environment; `vet` (async, throws) checks an entry before each connection.
-    constructor({ file = CONFIG_FILE, specs = null, plain = false, vet = null } = {}) {
+    // `lazy` (a small hosted Machine): a stdio server's tool list is remembered next to the file, and the program itself
+    // starts on its first call and stops again after idleMs, so Playwright's browser and the npx servers don't sit in memory.
+    constructor({ file = CONFIG_FILE, specs = null, plain = false, vet = null, lazy = false, idleMs = IDLE_CLOSE_MS } = {}) {
         this.file = file;
+        this.lazy = lazy;
+        this.idleMs = idleMs;
         this.specsFn = specs;
         this.plain = plain;
         this.vet = vet;
@@ -248,11 +253,74 @@ class McpManager {
     // fight over the network, the npm cache and a small Machine's CPU and memory, and every one of them times out.
     // The rest connect in parallel alongside.
     async connectAll(list) {
+        if (this.lazy) list = this.fromCache(list);
         const queue = list.filter(s => isLauncher(s.spec));
         await Promise.all([
-            ...list.filter(s => !isLauncher(s.spec)).map(s => this.connect(s)),
-            (async () => { for (const s of queue) await this.connect(s); })(),
+            ...list.filter(s => !isLauncher(s.spec)).map(s => this.connectKept(s)),
+            (async () => { for (const s of queue) await this.connectKept(s); })(),
         ]);
+    }
+
+    // --- lazy mode ---
+    get cacheFile() { return `${this.file}.tools.json`; }
+    cacheKey(spec) { return JSON.stringify({ ...spec, disabledTools: undefined, askBefore: undefined }); }
+    readCache() { try { return JSON.parse(fs.readFileSync(this.cacheFile, 'utf8')); } catch { return {}; } }
+    writeCache(server) {
+        try {
+            const all = this.readCache();
+            all[server.name] = { key: this.cacheKey(server.spec), tools: server.tools };
+            fs.writeFileSync(this.cacheFile, JSON.stringify(all));
+        } catch {}
+    }
+    // Servers with a remembered tool list are shown as connected without starting; the rest still connect once
+    fromCache(list) {
+        const cache = this.readCache();
+        return list.filter((s) => {
+            const hit = cache[s.name];
+            if (transportType(s.spec) !== 'stdio' || !hit || hit.key !== this.cacheKey(s.spec)) return true;
+            s.tools = hit.tools;
+            s.status = 'connected';
+            s.idle = true;
+            return false;
+        });
+    }
+    // connect(), then in lazy mode keep the tool list and stop the program until it is called
+    async connectKept(server) {
+        await this.connect(server);
+        if (!this.lazy || server.status !== 'connected' || transportType(server.spec) !== 'stdio') return;
+        this.writeCache(server);
+        await this.sleep(server);
+    }
+    async sleep(server) {
+        const client = server.client;
+        server.client = null;
+        server.idle = true;
+        try { await client?.close(); } catch {}
+    }
+    // Start an idle server for a call, and schedule its stop
+    async wake(server) {
+        if (!server.waking) {
+            server.waking = (async () => {
+                const spec = this.plain ? server.spec : expand(server.spec);
+                const { timeoutMs } = connectPolicy(spec);
+                try {
+                    await this.attempt(server, spec, timeoutMs);
+                    server.idle = false;
+                    this.writeCache(server);
+                } catch (err) {
+                    try { await server.client?.close(); } catch {}
+                    server.client = null;
+                    throw new Error(`MCP server ${server.name} did not start: ${describeFailure(err, spec, { timeoutMs, tries: 1 })}`);
+                } finally { server.waking = null; }
+            })();
+        }
+        return server.waking;
+    }
+    touch(server) {
+        if (!this.lazy) return;
+        clearTimeout(server.idleTimer);
+        server.idleTimer = setTimeout(() => { if (server.client && !server.busy) this.sleep(server); }, this.idleMs);
+        server.idleTimer.unref?.();
     }
 
     async readSpecs() {
@@ -469,8 +537,13 @@ class McpManager {
         if (!entry) throw new Error(`no MCP tool named ${name}`);
         const { server, tool } = entry;
         if (!confirmed && askFirst(server.spec, tool)) throw new Error(`${tool.name} needs the person's approval (server ${server.name} is set to ask first), but the page sent none`);
+        if (!server.client && server.idle) await this.wake(server);
         if (!server.client) throw new Error(`MCP server ${server.name} is not connected`);
-        const result = await server.client.callTool({ name: tool.name, arguments: args || {} }, undefined, { timeout: positive((this.plain ? server.spec : expand(server.spec)).callTimeoutMs) ?? CALL_TIMEOUT_MS });
+        server.busy = (server.busy || 0) + 1;
+        let result;
+        try {
+            result = await server.client.callTool({ name: tool.name, arguments: args || {} }, undefined, { timeout: positive((this.plain ? server.spec : expand(server.spec)).callTimeoutMs) ?? CALL_TIMEOUT_MS });
+        } finally { server.busy--; this.touch(server); }
         return { text: resultText(result), isError: !!result.isError, server: server.name, tool: tool.name };
     }
 
@@ -480,6 +553,7 @@ class McpManager {
         this.byTool.clear();
         this.loading = null;
         await Promise.all(servers.map(async (s) => {
+            clearTimeout(s.idleTimer);
             const client = s.client;
             s.client = null;
             try { await client?.close(); } catch {}

@@ -30,6 +30,7 @@ function chatIdOf(value) {
 
 async function create(repoPath, chatId) {
     if (typeof repoPath !== 'string' || !repoPath.trim()) throw new Error('a git repository is required');
+    require('./repoTools').checkFolderPath(repoPath);
     const id = chatIdOf(chatId);
     const requested = path.resolve(repoPath.trim().replace(/^~(?=$|[\\/])/, os.homedir()));
     let repo;

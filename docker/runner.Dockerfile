@@ -2,7 +2,7 @@
 # The runner needs git to pack a run's base commit into a bundle for the sandbox
 # and to fetch the branch back. Its agents' commands run in the E2B sandbox
 # (RUNNER_SANDBOX=e2b), not here, so this image needs no language toolchains.
-FROM node:22-slim
+FROM node:24-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 # ./repos is bind-mounted from the server, so its files belong to another user;

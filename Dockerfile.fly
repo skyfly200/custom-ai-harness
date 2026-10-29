@@ -1,7 +1,7 @@
 # The whole harness in one Machine for Fly.io: Gateway (LiteLLM), Router and Interceptor.
 # docker/fly-start.js starts the three; only the Interceptor (:3000) is published. See docs/fly.md.
 # The compose files in this repo are for your own server; this is for Fly, which has no compose.
-FROM node:22-slim AS node-modules
+FROM node:24-slim AS node-modules
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev

@@ -20,18 +20,19 @@ function emit(type, event) {
 }
 
 // A request arrived and is waiting on the Router. Not stored, only announced.
-function recordRouting({ path, clientId, prompt }) {
-    live.emit('update', { type: 'routing', event: { path, clientId: clientId || null, prompt: (prompt || '').slice(0, PROMPT_PREVIEW_CHARS), time: new Date().toISOString() } });
+function recordRouting({ path, clientId, prompt, user }) {
+    live.emit('update', { type: 'routing', event: { path, user: user || '', clientId: clientId || null, prompt: (prompt || '').slice(0, PROMPT_PREVIEW_CHARS), time: new Date().toISOString() } });
 }
 
 /**
  * Record a routing decision. Returns the event so the response can be added
  * to it once the Gateway answers.
  */
-function recordRoute({ path, model, threshold, winRate, tools, tokens, prompt, routerError, reason, clientId, transforms, routeMs, profile, tier, effort, auto, asked }) {
+function recordRoute({ user, path, model, threshold, winRate, tools, tokens, prompt, routerError, reason, clientId, transforms, routeMs, profile, tier, effort, auto, asked }) {
     const event = {
         id: nextId++,
         time: new Date().toISOString(),
+        user: user || '', // the signed-in person ('' with logins off), so people see only their own requests
         path,
         model,
         threshold,
@@ -119,8 +120,9 @@ function recordUsage(event, row) {
     emit('usage', event);
 }
 
-function recentEvents(limit = 50) {
-    return events.slice(-limit).reverse().map(publicEvent);
+function recentEvents(limit = 50, { user } = {}) {
+    const mine = user === undefined ? events : events.filter((e) => String(e.user || '').toLowerCase() === String(user).toLowerCase());
+    return mine.slice(-limit).reverse().map(publicEvent);
 }
 
 const startedAt = new Date().toISOString();

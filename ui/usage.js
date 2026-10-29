@@ -558,11 +558,26 @@ async function loadPrices() {
   } catch {}
 }
 
+// With logins on the page shows the signed-in person's own requests; admins also get a link to everyone's
+let isAdmin = null;
+async function renderScope() {
+  const scope = state.data.scope || {};
+  $('clear').hidden = Boolean(scope.login); // clearing wipes every person's totals: that is on the All users page
+  $('scope').hidden = !scope.login;
+  if (!scope.login) { $('allUsers').hidden = true; return; }
+  $('scope').textContent = `These are your own requests${scope.user ? ` (signed in as ${scope.user})` : ''}: chats, API keys and agent runs started by you.`;
+  if (isAdmin === null) {
+    try { isAdmin = (await (await fetch('/ui/api/me', { credentials: 'same-origin' })).json()).role === 'admin'; } catch { isAdmin = false; }
+  }
+  $('allUsers').hidden = !isAdmin;
+}
+
 async function refresh() {
   try {
     const res = await fetch(`api/usage?days=${state.days}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.data = await res.json();
+    renderScope();
     render();
   } catch (err) {
     $('updated').textContent = `Couldn't load usage: ${err.message}`;

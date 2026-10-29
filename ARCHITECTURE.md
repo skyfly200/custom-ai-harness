@@ -31,7 +31,7 @@ A request arrives as OpenAI (`/v1/chat/completions`) or Anthropic (`/v1/messages
 - **Charge** (hosted only): guests reserve against a capped credit (`utils/credit.js`); full users use their own OpenRouter credential (`utils/credentialTicket.js`).
 - **Cache markers**: `utils/cacheMarkers.js`, for Claude models when the chat page asks.
 - **Gateway**: `utils/gatewayGuard.js` bounds waits and shapes errors. LiteLLM applies `fallbacks` from `config.yaml` or the strategy.
-- **Reply**: response headers `x-harness-event`, `x-harness-model`, `x-harness-route`; `utils/monitor.js` (routing log and live feed), `utils/usage.js` and `utils/runCost.js` for the Usage page, `utils/langfuse.js`.
+- **Reply**: response headers `x-harness-event`, `x-harness-model`, `x-harness-route`; `utils/monitor.js` (routing log and live feed), `utils/usage.js` (per person; `utils/usageDb.js` with a database) and `utils/runCost.js` for the Usage page, `utils/langfuse.js`.
 
 ## Web UI
 
@@ -43,7 +43,7 @@ Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Ev
 | Dashboard | `index.html` | Health, routing log, recent chats, usage summary, command guard |
 | Routing | `routing.html`, `routing.js`, `autoroute.js` | Node editor for routings, models, fallbacks, Auto-route |
 | Settings | `settings.html` | Interceptor and Router settings, notifications |
-| Usage | `usage.html`, `usage.js`, `costs.js` | Cost and savings per layer |
+| Usage | `usage.html`, `usage.js`, `costs.js`; admins: `usage-users.html`, `usage-users.js`, `userUsage.js` | Cost and savings per layer; your own requests with logins on, everyone's per person for admins |
 | Tools | `tools.html`, `tools.js` | MCP servers |
 | Runs, Agents | `runs.html`, `agents.html`, `agents.js`, `agentBoard.js`, `apps.js` | Task runner, agents, in-app apps (`agent-widget.js`) |
 | Users | `users.html`, `users.js` | Logins, invites, guests, credentials |
@@ -73,11 +73,11 @@ Sign-in is invite-only. `utils/oauth.js` hands Google or GitHub sign-in to Neon 
 | Who pays | Admins use the owner's key. Guests: `utils/credit.js`. Full users: their own key (`utils/userCredentials.js`), from OpenRouter OAuth (`utils/openrouterOAuth.js`), pasted, or issued through the Management API (`utils/openrouterKeys.js`). The owner's key can renew itself (`utils/mainKey.js`). |
 | Credentials reach OpenRouter | Gateway and Router call `/openrouter-proxy` (`utils/openrouterAuth.js`); a signed ticket names the person. Optional owner-level workload identity federation (a JWT from your own identity provider, 15-minute tokens): also `utils/openrouterAuth.js`. |
 | GitHub | `utils/githubOAuth.js` (GitHub App or OAuth App), the person's token in `utils/userGithub.js`, repo tools in `utils/githubApi.js` (hosted) and `utils/repoTools.js` (local) |
-| Database | `utils/db.js` (optional; `DATABASE_URL`), `migrations/*.sql` applied by `npm run migrate`, stores in `utils/pgStore.js`, `utils/pgSessions.js`, `utils/chatSync.js` |
+| Database | `utils/db.js` (optional; `DATABASE_URL`), `migrations/*.sql` applied by `npm run migrate`, stores in `utils/pgStore.js`, `utils/pgSessions.js`, `utils/chatSync.js`, `utils/usageDb.js` |
 | Chats | The page works from `localStorage` and syncs to Postgres: `chats` (order, version) and `chat_messages` (one row per message), plus `user_data` for projects, skills, commands and schedules. Conflicts return 409 and the page merges. |
 | Attachments | `attachments` table (`utils/attachments.js`); messages keep stubs |
 | Schedules | The page's schedules; with a database `utils/serverSchedules.js` runs due ones with every tab closed |
-| Files (no database) | `users.json`, `harness-settings.json`, `routing-profiles.json`, `model-stats.json`, `runs/` |
+| Files (no database) | `users.json`, `harness-usage.json`, `harness-settings.json`, `routing-profiles.json`, `model-stats.json`, `runs/` |
 | Secrets at rest | `utils/secrets.js` (`ENCRYPTION_KEY`) |
 
 ## MCP tools and the Jev guard

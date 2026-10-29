@@ -40,7 +40,7 @@ const modelStats = require('./utils/modelStats');
 const gatewayConfig = require('./utils/gatewayConfig');
 const gatewayGuard = require('./utils/gatewayGuard');
 const gatewayWait = require('./utils/gatewayWait');
-const { McpManager, readConfig, writeConfig } = require('./utils/mcp');
+const { McpManager, readConfig, writeConfig, onPath, INSTALL_HINTS } = require('./utils/mcp');
 const mcpAdmin = require('./utils/mcpAdmin');
 const mcpCatalog = require('./utils/mcpCatalog');
 const userMcpMod = require('./utils/userMcp');
@@ -1345,6 +1345,9 @@ async function mcpList(req) {
             tools: tools.get(name) || [],
         })),
         catalog: member ? userMcpMod.remoteCatalog() : mcpCatalog,
+        // what the setup wizard checks: the programs stdio servers start with, and where they would run
+        programs: member ? {} : Object.fromEntries(['node', 'npx', 'uvx'].map(p => [p, { found: onPath(p), hint: INSTALL_HINTS[p] }])),
+        hosted: !repoTools.localFoldersAvailable(),
     };
 }
 

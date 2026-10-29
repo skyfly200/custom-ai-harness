@@ -460,4 +460,4 @@ function askFirst(spec, tool) {
     return spec.askBefore === 'writes' && tool.annotations?.readOnlyHint !== true;
 }
 
-module.exports = { McpManager, readConfig, writeConfig, transportType, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };
+module.exports = { onPath, INSTALL_HINTS, McpManager, readConfig, writeConfig, transportType, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };

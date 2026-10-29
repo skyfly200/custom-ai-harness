@@ -41,7 +41,7 @@ Run the harness on [Fly.io](https://fly.io) at your own address, with chats and 
    ```powershell
    fly certs add ai.skylerfly.com --app YOUR-APP-NAME
    ```
-   It prints the DNS records it wants. In Cloudflare DNS for `skylerfly.com`, add a `CNAME` record named `ai` with the value `YOUR-APP-NAME.fly.dev`, set to **DNS only** (grey cloud), plus the `_acme-challenge` record if Fly asks for one (also DNS only). Then run `fly certs check ai.skylerfly.com --app YOUR-APP-NAME` until the certificate shows as issued. (Cloudflare only provides the DNS here; keep the records grey-clouded so Fly can issue and renew its certificate. Turning the orange proxy on works only with SSL/TLS mode set to Full (strict) after the Fly certificate is issued, and it can interfere with long streaming replies, so DNS only is the safer choice.)
+   It prints the DNS records it wants, normally an `A` and an `AAAA` record for the name. In Cloudflare DNS for `skylerfly.com`, add them as Fly prints them: an `A` record named `ai` with the IPv4 address and an `AAAA` record named `ai` with the IPv6 address, both set to **DNS only** (grey cloud). (If you prefer a `CNAME`, point `ai` at `YOUR-APP-NAME.fly.dev` instead, and add the `_acme-challenge` CNAME Fly asks for, also DNS only.) Then run `fly certs check ai.skylerfly.com --app YOUR-APP-NAME` until the certificate shows as issued. (Cloudflare only provides the DNS here; keep the records grey-clouded so Fly can issue and renew its certificate. Turning the orange proxy on works only with SSL/TLS mode set to Full (strict) after the Fly certificate is issued, and it can interfere with long streaming replies, so DNS only is the safer choice.)
 7. **Tell Neon Auth about the address**, or Google sign-in is refused:
    ```powershell
    neon neon-auth domain add https://ai.skylerfly.com
@@ -67,7 +67,7 @@ Notes: the token can deploy and nothing else; revoke it with `fly tokens list` a
 The app is configured by one value, `HARNESS_PUBLIC_URL` in `fly.toml`. To move from `agents.skylerfly.com` to `ai.skylerfly.com` (the repo already points at the new one; `HARNESS_OLD_HOSTS` redirects the old name to it with a 308). Do these in order, so the old address keeps working until the new one does. Run them in PowerShell unless noted:
 
 1. **Add the new certificate:** `fly certs add ai.skylerfly.com --app YOUR-APP-NAME`. Keep the old one for now.
-2. **Cloudflare DNS** (skylerfly.com, DNS > Records > Add record): type `CNAME`, name `ai`, target `YOUR-APP-NAME.fly.dev`, proxy status **DNS only** (grey cloud). Add the `_acme-challenge` CNAME Fly asks for the same way. Leave the `agents` record.
+2. **Cloudflare DNS** (skylerfly.com, DNS > Records > Add record): add the `A` and `AAAA` records named `ai` that `fly certs add` printed (same addresses as `fly ips list --app YOUR-APP-NAME`), proxy status **DNS only** (grey cloud). Alternative: a `CNAME` named `ai` to `YOUR-APP-NAME.fly.dev` plus the `_acme-challenge` CNAME Fly asks for, also DNS only. Leave the `agents` record.
 3. **Wait** for `fly certs check ai.skylerfly.com --app YOUR-APP-NAME` to show issued.
 4. **Neon Auth:** `neon neon-auth domain add https://ai.skylerfly.com` (or in the Neon console, Auth, Domains). Keep the old domain until the end.
 5. **Google sign-in:** Neon's shared Google provider needs nothing. If you later use your own Google OAuth client, add `https://ai.skylerfly.com` as an authorized origin and its redirect URI (the one Neon shows) in Google Cloud Console.

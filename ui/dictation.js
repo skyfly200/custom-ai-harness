@@ -69,7 +69,23 @@
   // and onend restarts it
   const wantsContinuous = (ua) => !/android/i.test(String(ua || ''));
 
-  const api = { sessionText, compose, describeError, wantsContinuous };
+  // A readable message from whatever failed: a string, an Error, a DOMException,
+  // or a server reply such as {error:"..."} or {error:{message:"..."}}
+  // (never "[object Object]")
+  function errText(x, status) {
+    const pick = (v) => {
+      if (!v) return '';
+      if (typeof v === 'string') return v;
+      if (typeof v.message === 'string' && v.message) return v.message;
+      if (v.error) return pick(v.error);
+      if (typeof v.name === 'string' && v.name) return v.name;
+      if (typeof v.type === 'string' && v.type && v.type !== 'error') return v.type;
+      try { const j = JSON.stringify(v); return j && j !== '{}' ? j.slice(0, 200) : ''; } catch { return ''; }
+    };
+    return pick(x) || (status ? `HTTP ${status}` : 'unknown error');
+  }
+
+  const api = { errText, sessionText, compose, describeError, wantsContinuous };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.DictationText = api;
 })(typeof window !== 'undefined' ? window : globalThis);

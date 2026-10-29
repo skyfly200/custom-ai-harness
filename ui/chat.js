@@ -3298,7 +3298,7 @@ const dictation = {
       }
       this.draw();
     };
-    try { rec.start(); this.rec = rec; } catch (err) { toast(`Dictation: ${err.message}`); this.want = false; }
+    try { rec.start(); this.rec = rec; } catch (err) { toast(`Dictation: ${DictationText.errText(err)}`); this.want = false; }
     this.draw();
   },
 
@@ -3314,7 +3314,7 @@ const dictation = {
       this.starting = false; this.want = false; this.draw();
       return toast(err.name === 'NotAllowedError'
         ? 'The microphone is blocked. Allow it for this page (it needs http://localhost or https).'
-        : `Microphone: ${err.message}`);
+        : `Microphone: ${DictationText.errText(err)}`);
     }
     this.starting = false;
     // the mic was turned off or paused while the permission prompt was up
@@ -3326,7 +3326,7 @@ const dictation = {
     this.media = rec; this.chunks = []; this.spoke = false; this.segmentStart = Date.now();
     rec.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data); };
     rec.onstop = () => this.finishSegment(rec, type);
-    try { rec.start(1000); } catch (err) { this.media = null; for (const t of stream.getTracks()) t.stop(); toast(`Dictation: ${err.message}`); this.want = false; }
+    try { rec.start(1000); } catch (err) { this.media = null; for (const t of stream.getTracks()) t.stop(); toast(`Dictation: ${DictationText.errText(err)}`); this.want = false; }
     this.meterStart();
     this.draw();
   },
@@ -3417,10 +3417,11 @@ const dictation = {
         body: JSON.stringify({ audio, format: blob.type, language: $('sttLang').value.trim() }),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+      if (!res.ok) { console.warn('Dictation: speech server answered', res.status, out); throw new Error(DictationText.errText(out, res.status)); }
       text = String(out.text || '').trim();
     } catch (err) {
-      toast(`Dictation: ${err.message}`);
+      console.warn('Dictation:', err);
+      toast(`Dictation: ${DictationText.errText(err)}`);
     }
     if (!text) return;
     const box = $('input');

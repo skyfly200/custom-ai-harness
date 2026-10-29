@@ -54,3 +54,14 @@ test('android requests one phrase at a time', () => {
   assert.strictEqual(wantsContinuous('Mozilla/5.0 (Linux; Android 14) Chrome/130'), false);
   assert.strictEqual(wantsContinuous('Mozilla/5.0 (Windows NT 10.0) Chrome/130'), true);
 });
+
+test('errText never gives [object Object]', () => {
+  const { errText } = require('../ui/dictation');
+  assert.strictEqual(errText('plain'), 'plain');
+  assert.strictEqual(errText(new Error('boom')), 'boom');
+  assert.strictEqual(errText({ error: 'Speech server answered HTTP 401' }, 502), 'Speech server answered HTTP 401');
+  assert.strictEqual(errText({ type: 'error', error: { type: 'unauthorized', message: 'Sign in first' } }), 'Sign in first');
+  assert.strictEqual(errText({}, 403), 'HTTP 403');
+  assert.strictEqual(errText({ name: 'NotFoundError' }), 'NotFoundError');
+  assert.strictEqual(errText(null), 'unknown error');
+});

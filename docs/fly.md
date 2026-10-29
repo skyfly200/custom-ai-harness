@@ -75,7 +75,7 @@ The app is configured by one value, `HARNESS_PUBLIC_URL` in `fly.toml`. To move 
 7. **OpenRouter** (if connecting accounts with OAuth or federation): the callback and token issuer follow `HARNESS_PUBLIC_URL`. If a federation policy names the old address as its issuer, update it to `https://ai.skylerfly.com`.
 8. **Deploy:** merge to `master` (or `fly deploy --app YOUR-APP-NAME --ha=false`). This applies the new `HARNESS_PUBLIC_URL`.
 9. **Check:** open `https://ai.skylerfly.com`, sign in, press Connect GitHub, and open the old address to confirm it redirects.
-10. **Clean up** when happy: delete the GitHub App's old callback URL, `neon neon-auth domain remove https://agents.skylerfly.com`, delete the `agents` record in Cloudflare, `fly certs remove agents.skylerfly.com --app YOUR-APP-NAME`, and remove `HARNESS_OLD_HOSTS` from `fly.toml`.
+10. **Clean up** when happy: delete the GitHub App's old callback URL, `neon neon-auth domain remove https://agents.skylerfly.com`, delete the `agents` record in Cloudflare, `fly certs remove agents.skylerfly.com --app YOUR-APP-NAME`,.
 
 **What the move costs people.** A browser keeps sign-in cookies, saved settings and anything stored in the page per address, so everyone signs in again at the new address, and the PWA must be installed again. Chats, schedules, users and credentials are in Neon and follow you. Per-browser items do not: Options and Settings preferences, the new-chat routing choice, notification choice, the chat-page theme and background, and any chat that never synced. Open the old address once before the move and use Export all in the chat sidebar if you want a copy. API keys keep working, but tools pointed at the old address are redirected only if they follow 308s; update `ANTHROPIC_BASE_URL`.
 

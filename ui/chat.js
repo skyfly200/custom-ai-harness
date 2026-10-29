@@ -670,7 +670,21 @@ for (const btn of document.querySelectorAll('.sec-toggle')) {
 }
 $('search').addEventListener('input', drawList);
 
-function openChat(id) {
+// Each chat has its own address, chat.html#chat=ID. Opening a chat pushes it (so Back/Forward walk through the
+// chats you looked at); the first chat of a page load replaces the entry instead.
+const chatHash = id => `#chat=${encodeURIComponent(id)}`;
+let urlFresh = true;
+function syncUrl() {
+  if (!chat || location.hash === chatHash(chat.id)) { urlFresh = false; return; }
+  try { history[urlFresh ? 'replaceState' : 'pushState'](null, '', location.pathname + location.search + chatHash(chat.id)); } catch {}
+  urlFresh = false;
+}
+window.addEventListener('popstate', () => {
+  const id = decodeURIComponent((location.hash.match(/^#chat=(.+)$/) || [])[1] || '');
+  if (id && id !== chat?.id && index.some(e => e.id === id)) openChat(id, { fromUrl: true });
+});
+
+function openChat(id, { fromUrl = false } = {}) {
   if (chat && chat.id !== id) saveDraft();
   chat = (id && loadChat(id)) || newChatObject();
   if (!id && scope) chat.project = scope; // a new chat starts in the project being shown
@@ -694,6 +708,7 @@ function openChat(id) {
   drawQueue();
   drawAdvisor();
   try { localStorage.setItem('harness-chat-open', chat.id); } catch {}
+  if (!fromUrl) syncUrl();
   $('input').focus();
 }
 
@@ -4661,7 +4676,6 @@ loadGithub();
 loadRoutings();
 // chat.html#chat=ID (the Dashboard's recent chats) opens that chat
 const linked = decodeURIComponent((location.hash.match(/^#chat=(.+)$/) || [])[1] || '');
-if (linked) history.replaceState(null, '', location.pathname + location.search);
 let lastOpen = null;
 try { lastOpen = localStorage.getItem('harness-chat-open'); } catch {}
 // chat.html#project=ID (an agent's project link) shows that project's chats
@@ -4671,7 +4685,7 @@ if (linkedProject && projects.some(x => x.id === linkedProject)) {
   openProject = true;
   scope = linkedProject;
   store.set('harness-chat-scope', scope);
-  history.replaceState(null, '', location.pathname + location.search);
+  history.replaceState(null, '', location.pathname + location.search); // the chat opened below puts its own address back
 }
 openChat(openProject ? index.find(e => e.project === scope)?.id
   : [linked, lastOpen].find(id => id && index.some(e => e.id === id)) || index[0]?.id);

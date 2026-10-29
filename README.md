@@ -136,6 +136,7 @@ Everything past the quick start lives in `docs/`. Each page starts with a one-li
 | [Phone and installable app](docs/phone-and-app.md) | Install Bright Chat as an app, and a Cloudflare tunnel for your phone |
 | [Named logins and API keys](docs/logins.md) | `HARNESS_REQUIRE_LOGIN`, admins and per-program keys |
 | [Langfuse](docs/langfuse.md) | See every model call grouped by chat or run |
+| [Architecture](ARCHITECTURE.md) | The one-page map: processes, request flow, hosted setup, auth and storage, where each concern lives |
 | [Architecture and files](docs/architecture.md) | How the parts fit together, and what each file does |
 | [Utility scripts and tests](docs/development.md) | `npm run all`, config validation, context compression, the test suite |
 | [Hand testing checklist](docs/hand-testing.md) | Manual checks on a real phone |

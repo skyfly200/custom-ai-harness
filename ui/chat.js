@@ -670,17 +670,20 @@ for (const btn of document.querySelectorAll('.sec-toggle')) {
 }
 $('search').addEventListener('input', drawList);
 
-// Each chat has its own address, chat.html#chat=ID. Opening a chat pushes it (so Back/Forward walk through the
-// chats you looked at); the first chat of a page load replaces the entry instead.
-const chatHash = id => `#chat=${encodeURIComponent(id)}`;
+// Each chat has its own address, /chat#c=ID. Opening a chat pushes it (so Back/Forward walk through the
+// chats you looked at); the first chat of a page load replaces the entry instead. The old chat.html#chat=ID
+// links still open the chat, and the first load rewrites them to the short form.
+const chatHash = id => `#c=${encodeURIComponent(id)}`;
+const hashChatId = () => decodeURIComponent((location.hash.match(/^#(?:c|chat)=(.+)$/) || [])[1] || '');
 let urlFresh = true;
 function syncUrl() {
-  if (!chat || location.hash === chatHash(chat.id)) { urlFresh = false; return; }
-  try { history[urlFresh ? 'replaceState' : 'pushState'](null, '', location.pathname + location.search + chatHash(chat.id)); } catch {}
+  const path = location.pathname.replace(/\.html$/, '');
+  if (!chat || (location.hash === chatHash(chat.id) && path === location.pathname)) { urlFresh = false; return; }
+  try { history[urlFresh ? 'replaceState' : 'pushState'](null, '', path + location.search + chatHash(chat.id)); } catch {}
   urlFresh = false;
 }
 window.addEventListener('popstate', () => {
-  const id = decodeURIComponent((location.hash.match(/^#chat=(.+)$/) || [])[1] || '');
+  const id = hashChatId();
   if (id && id !== chat?.id && index.some(e => e.id === id)) openChat(id, { fromUrl: true });
 });
 
@@ -1738,7 +1741,7 @@ async function runReply(c, turn) {
     drawList();
     if (reply.content && !reply.timedOut) nameChat(c);
     speech.endReply(reply);
-    if (reply.content && !reply.timedOut && !controller.signal.aborted && c.messages.includes(reply)) window.Notify?.show('reply', `chat.html#chat=${c.id}`);
+    if (reply.content && !reply.timedOut && !controller.signal.aborted && c.messages.includes(reply)) window.Notify?.show('reply', `chat#c=${c.id}`);
     finish();
     // a message typed while this reply was arriving goes next, as if you had just sent it
     if (queues.get(c.id)?.length) setTimeout(() => drainQueue(c.id), 0);
@@ -1793,7 +1796,7 @@ function askApproval(call, reason, onChange, signal) {
   const key = call.id || (call.id = `call_${++approvalCount}`);
   call.approval = { state: 'ask', reason: reason || '' };
   onChange();
-  window.Notify?.show('approval', `chat.html#chat=${chat?.id || ''}`);
+  window.Notify?.show('approval', `chat#c=${chat?.id || ''}`);
   return new Promise((resolve) => {
     const settle = (allow) => {
       pendingApprovals.delete(key);
@@ -2215,7 +2218,7 @@ function subagentCommand(text) {
       const what = plan ? 'Plan' : 'Subagent';
       toast(`${what} started: ${run.id}${model ? ` on ${model}` : ''}. It runs on its own branch; open Agents to watch it.`);
       // the chat itself says what it started, so the conversation keeps the thread
-      const note = { id: uid(), role: 'assistant', content: `*${what} started: \`${run.id}\`${model ? ` on \`${model}\`` : ''}${plan ? ', changing nothing' : `, on branch \`${run.branch}\``}. Watch it on the [Agents page](agents.html#${run.id}).*`, time: Date.now(), meta: { note: true } };
+      const note = { id: uid(), role: 'assistant', content: `*${what} started: \`${run.id}\`${model ? ` on \`${model}\`` : ''}${plan ? ', changing nothing' : `, on branch \`${run.branch}\``}. Watch it on the [Agents page](agents#${run.id}).*`, time: Date.now(), meta: { note: true } };
       c.messages.push(note);
       saveChat(c);
       if (chat === c) drawLog();
@@ -2275,7 +2278,7 @@ function agentCommand(text) {
       chat.draft = '';
       autoGrow();
       toast(`${agent.name} has the task: ${run.id}. It builds on its earlier work; open Agents to watch it.`);
-      c.messages.push({ id: uid(), role: 'assistant', content: `*Handed to the agent **${agent.name}**: \`${run.id}\`${agent.active ? ' (it is busy, so this waits its turn)' : ''}. Follow it on the [Agents page](agents.html#${run.id}).*`, time: Date.now(), meta: { note: true } });
+      c.messages.push({ id: uid(), role: 'assistant', content: `*Handed to the agent **${agent.name}**: \`${run.id}\`${agent.active ? ' (it is busy, so this waits its turn)' : ''}. Follow it on the [Agents page](agents#${run.id}).*`, time: Date.now(), meta: { note: true } });
       saveChat(c);
       if (chat === c) drawLog();
     } catch (err) {
@@ -2791,7 +2794,7 @@ function drawTools() {
   });
   if (toolInfo?.error) rows.unshift(`<li class="err">${esc(toolInfo.error)}</li>`);
   $('mcpList').innerHTML = rows.join('') || (toolInfo
-    ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. <a href="tools.html">Add one</a> on the Tools page.</li>`
+    ? `<li class="muted small" title="Same format as Claude Code's .mcp.json; press Reload after editing">None yet. <a href="tools">Add one</a> on the Tools page.</li>`
     : '<li class="err">Could not reach the harness.</li>');
 }
 
@@ -2908,7 +2911,7 @@ function drawGithub() {
   $('ghAttach').textContent = g ? 'Detach' : 'Attach';
   $('ghRepo').hidden = $('ghAttach').hidden = !st.connected;
   $('ghBox').querySelector('label').hidden = !st.connected;
-  const connect = st.canConnect ? `<a href="api/me/github/connect?back=chat.html">${st.connected ? 'Reconnect GitHub' : 'Connect GitHub'}</a>` : '';
+  const connect = st.canConnect ? `<a href="api/me/github/connect?back=chat">${st.connected ? 'Reconnect GitHub' : 'Connect GitHub'}</a>` : '';
   const install = st.connected && st.app && st.installUrl ? ` · <a href="${esc(st.installUrl)}" target="_blank" rel="noopener">Choose which repos it can reach</a>` : '';
   $('ghInfo').innerHTML = !st.connected
     ? `${connect || esc(st.note || 'GitHub is not connected.')} to let the model read your repos.`
@@ -3958,9 +3961,9 @@ function drawRoute() {
   $('routeNote').innerHTML = r.empty ? 'Type a model name.'
     : r.missing ? `The strategy “${esc(r.missing)}” was deleted, so the default is used.`
     : r.model ? 'Straight to this model, no Router.'
-    : r.auto ? 'Picks the strategy that fits each message. <a href="routing.html">Set rules</a>'
-    : r.profile ? `${r.profile.pin ? `Pinned to ${esc(r.profile.pin)}. ` : ''}Compression: ${['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).length ? ['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).map(k => ({ caveman: 'short replies', headroom: 'shrink tool results', contextAnchor: 'skip repeats' })[k]).join(', ') : 'off'}. <a href="routing.html?routing=${encodeURIComponent(r.profile.id)}">Edit it</a>`
-    : '<a href="routing.html">Make strategies</a>';
+    : r.auto ? 'Picks the strategy that fits each message. <a href="routing">Set rules</a>'
+    : r.profile ? `${r.profile.pin ? `Pinned to ${esc(r.profile.pin)}. ` : ''}Compression: ${['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).length ? ['caveman', 'headroom', 'contextAnchor'].filter(k => r.profile[k]).map(k => ({ caveman: 'short replies', headroom: 'shrink tool results', contextAnchor: 'skip repeats' })[k]).join(', ') : 'off'}. <a href="routing?routing=${encodeURIComponent(r.profile.id)}">Edit it</a>`
+    : '<a href="routing">Make strategies</a>';
 }
 
 $('routeSel').addEventListener('change', () => {
@@ -4107,7 +4110,7 @@ async function drawProjectAgents(projectId) {
   box.innerHTML = projectAgents.map(a => {
     const other = a.project && a.project.id !== projectId ? projects.find(x => x.id === a.project.id)?.name || a.project.name || 'another project' : '';
     return `<label class="check" title="${esc(a.repo)}"><input type="checkbox" value="${esc(a.id)}"${projectId && a.project?.id === projectId ? ' checked' : ''}> ${esc(a.name)}${other ? ` <span class="muted small">(now in ${esc(other)})</span>` : ''}</label>`;
-  }).join('') || '<span class="muted small">No agents yet. Make one on the <a href="agents.html">Agents page</a>.</span>';
+  }).join('') || '<span class="muted small">No agents yet. Make one on the <a href="agents">Agents page</a>.</span>';
 }
 // link or unlink the agents ticked in the dialog (best effort: the project saves either way)
 async function saveProjectAgents(p) {
@@ -4540,7 +4543,7 @@ function drawUsagePop() {
     <div class="small">About ${next.toLocaleString()} tokens${ctxMax ? ` of ${esc(model)}'s ${ctxMax.toLocaleString()}` : ''}${requestPrompt().images ? `, plus ${requestPrompt().images} image${requestPrompt().images === 1 ? '' : 's'}` : ''}.</div>
     ${ctxMax ? `<div class="up-meter"><i style="width:${Math.min(100, 100 * next / ctxMax)}%"></i></div>` : ''}
     ${pu ? `<div class="up-head">Project “${esc(p.name)}”</div><div class="small">${pu.chats} chats · ${fmtTok(pu.input + pu.output)} tokens · ${pu.usd ? fmtUsd(pu.usd) : 'free'}${pu.priced ? '' : '+'}</div>` : ''}
-    <a class="small" href="usage.html">Every client's usage and costs →</a>`;
+    <a class="small" href="usage">Every client's usage and costs →</a>`;
 }
 $('chatStats').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -4789,18 +4792,18 @@ loadModelInfo();
 loadTools();
 loadGithub();
 loadRoutings();
-// chat.html#chat=ID (the Dashboard's recent chats) opens that chat
-const linked = decodeURIComponent((location.hash.match(/^#chat=(.+)$/) || [])[1] || '');
+// /chat#c=ID (the Dashboard's recent chats) opens that chat; the old #chat=ID form still does
+const linked = hashChatId();
 let lastOpen = null;
 try { lastOpen = localStorage.getItem('harness-chat-open'); } catch {}
-// chat.html#project=ID (an agent's project link) shows that project's chats
+// /chat#project=ID (an agent's project link) shows that project's chats
 const linkedProject = decodeURIComponent((location.hash.match(/^#project=(.+)$/) || [])[1] || '');
 let openProject = false;
 if (linkedProject && projects.some(x => x.id === linkedProject)) {
   openProject = true;
   scope = linkedProject;
   store.set('harness-chat-scope', scope);
-  history.replaceState(null, '', location.pathname + location.search); // the chat opened below puts its own address back
+  history.replaceState(null, '', location.pathname.replace(/\.html$/, '') + location.search); // the chat opened below puts its own address back
 }
 openChat(openProject ? index.find(e => e.project === scope)?.id
   : [linked, lastOpen].find(id => id && index.some(e => e.id === id)) || index[0]?.id);

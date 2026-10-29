@@ -14,7 +14,7 @@ function counts(req) {
     const path = String(req.path || req.url || '').split('?')[0];
     if (req.method !== 'GET' && req.method !== 'HEAD') return true;
     if (path.startsWith('/v1') || path.startsWith('/openrouter-proxy')) return true;
-    return path === '/' || path === '/ui' || path === '/ui/' || path.endsWith('.html');
+    return path === '/' || path === '/ui' || path === '/ui/' || path.endsWith('.html') || /^(\/ui)?\/(index|chat|usage|usage-users|routing|agents|runs|tools|settings|users)$/.test(path);
 }
 
 function create({ minutes = 0, stop = null, busy = [], now = () => Date.now(), poll = POLL_MS } = {}) {

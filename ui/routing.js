@@ -603,8 +603,8 @@ function toolsNode() {
     return `<li data-hint="${esc(tip)}"><label class="check"><input type="checkbox" data-mcp="${esc(s.name)}"${off.has(s.name) ? '' : ' checked'}>
       <span class="dot ${dot}"></span><span class="name">${esc(s.name)}</span><span class="muted">${esc(detail)}</span></label></li>`;
   });
-  const body = `<ul class="mcp">${rows.join('') || `<li class="muted small">${toolInfo ? `No servers. <a href="tools.html">Add one</a> on the Tools page.` : 'Couldn’t read the tool servers.'}</li>`}</ul>
-    <small>Ticked servers are offered to the model in Bright Chat chats on this strategy (each chat can still turn them off in Options). Claude Code brings its own tools. <a href="tools.html">Add or edit servers</a>.</small>
+  const body = `<ul class="mcp">${rows.join('') || `<li class="muted small">${toolInfo ? `No servers. <a href="tools">Add one</a> on the Tools page.` : 'Couldn’t read the tool servers.'}</li>`}</ul>
+    <small>Ticked servers are offered to the model in Bright Chat chats on this strategy (each chat can still turn them off in Options). Claude Code brings its own tools. <a href="tools">Add or edit servers</a>.</small>
     <button class="add-dep" data-act="reloadtools" data-hint="Read mcp-servers.json again and reconnect every server">Reload servers</button>`;
   return nodeHTML('tools', 'tools', 'Tools', 'MCP', body, '', false);
 }

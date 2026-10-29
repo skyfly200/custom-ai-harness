@@ -429,10 +429,11 @@ function waitForGateway(err, req, res) {
 }
 
 // Control UI: monitor the stack and switch the Router's classifier.
-// The same pages answer at the site root (https://host/ = dashboard, /chat.html, ...) and under /ui, so old links
-// and the installed app keep working. Static files only: an unknown path falls through to the API routes and Gateway.
-app.use('/ui', express.static(path.join(__dirname, 'ui')));
-app.use(express.static(path.join(__dirname, 'ui')));
+// The same pages answer at the site root (https://host/ = dashboard, /chat, ...) and under /ui, so old links
+// and the installed app keep working. A page answers with or without .html (/chat and /chat.html). Static files
+// only: an unknown path falls through to the API routes and Gateway.
+app.use('/ui', express.static(path.join(__dirname, 'ui'), { extensions: ['html'] }));
+app.use(express.static(path.join(__dirname, 'ui'), { extensions: ['html'] }));
 
 // Langfuse logging (utils/langfuse.js): are keys set, can we reach it, are prompts logged
 app.get('/ui/api/langfuse', async (req, res) => res.json(await langfuse.status(settings.get())));
@@ -614,8 +615,8 @@ app.delete('/ui/api/me/github', githubGate, async (req, res) => {
 });
 // "Connect GitHub" (utils/githubOAuth.js): any signed-in, non-guest person links their own GitHub account, once, for
 // Runs and for chats linked to a repo. Both routes sit behind the login gate: GitHub sends the browser back with its cookie.
-const GITHUB_BACK = new Set(['chat.html', 'agents.html', 'users.html']);
-const githubBack = (res, back, result) => res.redirect(`/${GITHUB_BACK.has(back) ? back : 'chat.html'}?github=${encodeURIComponent(result)}`);
+const GITHUB_BACK = new Set(['chat', 'agents', 'users', 'chat.html', 'agents.html', 'users.html']);
+const githubBack = (res, back, result) => res.redirect(`/${GITHUB_BACK.has(back) ? back : 'chat'}?github=${encodeURIComponent(result)}`);
 app.get('/ui/api/me/github/connect', (req, res) => {
     const back = String(req.query.back || '');
     if (!req.harnessLogin || !db.enabled() || req.harnessUser.guest) return githubBack(res, back, 'unavailable');
@@ -759,7 +760,7 @@ app.put('/ui/api/me/credential', async (req, res) => {
 });
 // "Connect OpenRouter": OAuth PKCE (utils/openrouterOAuth.js). The key OpenRouter returns is stored like a pasted one.
 // Both routes are behind the login gate: OpenRouter sends the browser back with its session cookie.
-const oauthBack = (res, result) => res.redirect(`/users.html?openrouter=${encodeURIComponent(result)}`);
+const oauthBack = (res, result) => res.redirect(`/users?openrouter=${encodeURIComponent(result)}`);
 const oauthCallbackUrl = (req, path = '/ui/api/me/credential/callback') => `${process.env.HARNESS_PUBLIC_URL
     ? String(process.env.HARNESS_PUBLIC_URL).replace(/\/+$/, '')
     : `${(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim()}://${req.headers['x-forwarded-host'] || req.headers.host}`}${path}`;

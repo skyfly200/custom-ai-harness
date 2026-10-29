@@ -12,6 +12,8 @@ test('what counts as use: pages, API calls and changes, not polling or the live 
     assert.equal(counts(req('POST', '/v1/messages')), true);
     assert.equal(counts(req('GET', '/v1/models')), true);
     assert.equal(counts(req('GET', '/ui/chat.html')), true);
+    assert.equal(counts(req('GET', '/chat')), true);
+    assert.equal(counts(req('GET', '/ui/routing')), true);
     assert.equal(counts(req('GET', '/ui/')), true);
     assert.equal(counts(req('GET', '/ui/api/status')), false);
     assert.equal(counts(req('GET', '/ui/api/live')), false);

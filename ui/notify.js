@@ -105,7 +105,7 @@
   function watchRuns(runs) {
     const fresh = newWaiting(seenRuns, runs);
     if (first) { first = false; return; }
-    if (fresh.length) show('run', 'agents.html');
+    if (fresh.length) show('run', 'agents');
   }
 
   root.Notify = { ...api, show, mount, watchRuns, load };

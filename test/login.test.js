@@ -145,7 +145,9 @@ test('admins manage users; plain users get chat and API but not Settings or cont
     assert.equal((await fetch(`${base}/ui/api/users`, as(carol))).status, 403);
     assert.equal((await fetch(`${base}/ui/api/settings`, post(carol, { caveman: false }))).status, 403);
     assert.equal((await fetch(`${base}/ui/api/router/save`, post(carol, {}))).status, 403);
+    assert.equal((await fetch(`${base}/settings`, { ...as(carol, { accept: 'text/html' }) })).status, 403);
     assert.equal((await fetch(`${base}/ui/settings.html`, as(admin, { accept: 'text/html' }))).status, 200);
+    assert.equal((await fetch(`${base}/settings`, as(admin, { accept: 'text/html' }))).status, 200);
     assert.equal((await fetch(`${base}/ui/api/settings`, post(admin, { caveman: false }))).status, 200);
 
     // carol can change her own password but not remove herself or read others' keys

@@ -407,7 +407,7 @@ test('Connect GitHub stores the person\'s token, lists their repos, and lets a c
     assert.equal(go.status, 302);
     const to = new URL(go.headers.get('location'));
     assert.equal(to.origin + to.pathname, 'https://github.com/login/oauth/authorize');
-    assert.equal(new URL(to.searchParams.get('redirect_uri')).pathname, '/ui/api/me/github/callback');
+    assert.equal(new URL(to.searchParams.get('redirect_uri')).pathname, '/auth/github/callback');
     const gh = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (url, init = {}) => {
@@ -424,7 +424,7 @@ test('Connect GitHub stores the person\'s token, lists their repos, and lets a c
     };
     try {
         assert.equal((await (await fetch(`${base}/ui/api/github/status`, as(fay))).json()).connected, false);
-        const done = await fetch(`${base}/ui/api/me/github/callback?code=C1&state=${to.searchParams.get('state')}`, { ...as(fay), redirect: 'manual' });
+        const done = await fetch(`${base}/auth/github/callback?code=C1&state=${to.searchParams.get('state')}`, { ...as(fay), redirect: 'manual' });
         assert.equal(done.headers.get('location'), '/chat.html?github=connected');
         const st = await (await fetch(`${base}/ui/api/github/status`, as(fay))).json();
         assert.deepEqual([st.connected, st.login, st.via, st.canConnect], [true, 'faycat', 'oauth', true]);

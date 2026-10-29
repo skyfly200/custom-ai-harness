@@ -9,7 +9,7 @@ const oauth = require('../utils/githubOAuth');
 const db = require('../utils/db');
 const userGithub = require('../utils/userGithub');
 
-const CALLBACK = 'https://agents.example.com/ui/api/me/github/callback';
+const CALLBACK = 'https://agents.example.com/auth/github/callback';
 const OAUTH_APP = { GITHUB_CLIENT_ID: 'Iv1.abc', GITHUB_CLIENT_SECRET: 'shh' };
 const GH_APP = { ...OAUTH_APP, GITHUB_APP_SLUG: 'harness-chat' };
 const stateOf = (url) => new URL(url).searchParams.get('state');

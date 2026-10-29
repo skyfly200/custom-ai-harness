@@ -77,6 +77,7 @@ const app = express();
 // The pages call their API with relative URLs ("api/status"), which resolve to /ui/api/... under /ui and to /api/...
 // when served at the site root. Answer both.
 app.use((req, res, next) => { if (req.url.startsWith('/api/')) req.url = `/ui${req.url}`; next(); });
+app.use(require('./utils/oldHosts').oldHostsRedirect());
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 // Sleep after HARNESS_IDLE_STOP_MIN idle minutes, and the Dashboard's Stop button. Only where something can act on
 // a stop: the Fly launcher (HARNESS_STOP_VIA_PARENT) asks its parent to stop everything and exit cleanly.
@@ -621,10 +622,11 @@ app.get('/ui/api/me/github/connect', (req, res) => {
     const back = String(req.query.back || '');
     if (!req.harnessLogin || !db.enabled() || req.harnessUser.guest) return githubBack(res, back, 'unavailable');
     try {
-        res.redirect(githubOAuth.begin({ owner: req.harnessUser.name, callback: oauthCallbackUrl(req, '/ui/api/me/github/callback'), back }));
+        res.redirect(githubOAuth.begin({ owner: req.harnessUser.name, callback: oauthCallbackUrl(req, '/auth/github/callback'), back }));
     } catch (err) { githubBack(res, back, err.message); }
 });
-app.get('/ui/api/me/github/callback', async (req, res) => {
+// /auth/github/callback is the address to give GitHub; the old /ui/api path keeps working for apps that still use it
+app.get(['/auth/github/callback', '/ui/api/me/github/callback'], async (req, res) => {
     let back = '';
     if (!req.harnessLogin || !db.enabled() || req.harnessUser.guest) return githubBack(res, back, 'unavailable');
     try {

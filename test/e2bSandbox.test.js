@@ -90,7 +90,8 @@ class FakeSandbox {
         };
     }
     async kill() { killed.push(this.sandboxId); return true; }
-    static async create(id) {
+    static async create(id, opts) {
+        FakeSandbox.lastOpts = opts;
         const dir = path.join(root, 'sandboxes', id);
         fs.mkdirSync(path.join(dir, 'work'), { recursive: true });
         fs.mkdirSync(path.join(dir, 'files'), { recursive: true });
@@ -209,6 +210,19 @@ test('createSandbox picks the cloud only when it is asked for, and says what is 
     await assert.rejects(createSandbox({ kind: 'e2b', repo, branch: 'harness/e2b8', base }), /E2B_API_KEY/);
     process.env.E2B_API_KEY = key;
     await assert.rejects(createSandbox({ kind: 'firecracker', repo, branch: 'b', base }), /unknown sandbox/);
+});
+
+test('the sandbox lifetime is clamped to what the E2B plan allows', async () => {
+    const hour = 60 * 60 * 1000;
+    const box = await E2BSandbox.create({ repo, branch: 'harness/e2b10', base });
+    assert.equal(FakeSandbox.lastOpts.timeoutMs, hour);
+    await box.destroy();
+    process.env.E2B_MAX_TIMEOUT_MIN = '120';
+    const box2 = await E2BSandbox.create({ repo, branch: 'harness/e2b11', base });
+    assert.equal(FakeSandbox.lastOpts.timeoutMs, 2 * hour);
+    await box2.destroy();
+    assert.equal(E2BSandbox.lifetime(1000), 1000);
+    delete process.env.E2B_MAX_TIMEOUT_MIN;
 });
 
 test('a base that is not a branch tip is still sent whole', async () => {

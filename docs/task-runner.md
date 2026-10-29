@@ -114,6 +114,7 @@ How the branch gets there and back:
 
 Notes:
 
+- A sandbox lives at most `E2B_MAX_TIMEOUT_MIN` minutes (default 60, the free tier's cap; E2B answers "Timeout cannot be greater than 1 hours" above it). On Pro set it higher, up to 1440. A run longer than the cap ends when its sandbox does.
 - The cloud sandbox has no copy of your other branches, and `E2B_API_KEY` is never given to the commands the agent runs.
 - The run's own record and the branch stay here, in `runs/<id>/run.json` and your repo; delete the run to remove the record.
 - `apt-get install git` runs once in a new sandbox if the template has no git.

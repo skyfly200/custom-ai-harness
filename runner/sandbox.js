@@ -438,7 +438,18 @@ class E2BSandbox extends CloudSandbox {
 
     static async open({ template, lifetimeMs }) {
         const { Sandbox } = require('e2b');
-        return Sandbox.create(template || process.env.E2B_TEMPLATE || 'base', { timeoutMs: lifetimeMs });
+        return Sandbox.create(template || process.env.E2B_TEMPLATE || 'base', { timeoutMs: this.lifetime(lifetimeMs) });
+    }
+
+    /**
+     * E2B refuses a sandbox lifetime above the plan's cap (1 hour on the free tier, 24 on
+     * Pro), so it is clamped to E2B_MAX_TIMEOUT_MIN (default 60). A longer run then ends
+     * when the sandbox does, with the provider's own message.
+     */
+    static lifetime(wantedMs) {
+        const capMin = Number(process.env.E2B_MAX_TIMEOUT_MIN);
+        const capMs = (capMin > 0 ? capMin : 60) * 60 * 1000;
+        return Math.min(wantedMs, capMs);
     }
 
     static classify(err) {

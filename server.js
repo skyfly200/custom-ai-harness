@@ -51,6 +51,7 @@ const credentialTicket = require('./utils/credentialTicket');
 const secrets = require('./utils/secrets');
 const openrouterOAuth = require('./utils/openrouterOAuth');
 const claudeKit = require('./utils/claudeKit');
+const localRepoScan = require('./utils/localRepos');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
 const chatWorktrees = require('./utils/chatWorktrees');
@@ -1445,6 +1446,9 @@ app.post('/ui/api/mcp/test', memberOrLocalJson, async (req, res) => {
 
 // Claude Code's commands and skills (.claude in this repo and in the home folder), to import into the chat page
 app.get('/ui/api/claude-kit', localOnly, (req, res) => res.json({ items: claudeKit.list() }));
+
+// Git repos found on this machine (utils/localRepos.js), for the repo fields. A hosted server answers with none.
+app.get('/ui/api/local-repos', localOnly, (req, res) => res.json(localRepoScan.list(process.env, { fresh: req.query.fresh === '1' })));
 
 app.post('/ui/api/repo', localJsonOnly, async (req, res) => {
     try {

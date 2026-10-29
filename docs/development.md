@@ -82,6 +82,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | MCP tools | `mcp`, `mcpAdmin`, `toolsApi`, `mcpAskFirst` (ask-first approval, Vercel entry) |
 | Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands` |
 | Connect OpenRouter (OAuth PKCE) | `openrouterOAuth` |
+| Repo field suggestions (local scan) | `localRepos` |
 | Connect GitHub, chat GitHub tools | `githubOAuth` (token renewal, in-process Postgres), `githubApi`, `guests` (routes) |
 | Guests, credit, own keys, proxy tickets | `guests` (in-process Postgres) |
 | Per-user tools, routings, settings | `userTools` (secrets, address checks, member MCP, routings; in-process Postgres) |

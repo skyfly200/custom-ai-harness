@@ -48,3 +48,5 @@ button.quiet { background: transparent; }
 @media (max-width: 620px) { .row { grid-template-columns: 1fr auto; } .row input:nth-child(2) { grid-column: 1 / 2; } }
 [hidden] { display: none !important; }
 .field > button.quiet { align-self: flex-start; }
+.srv.fresh { outline: 2px solid var(--ok); outline-offset: 2px; transition: outline-color .4s; }
+.catalog .card .fail { color: var(--bad); word-break: break-word; }

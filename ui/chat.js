@@ -1277,15 +1277,22 @@ function patch(el, html) {
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
   const fresh = tmp.firstElementChild;
-  const who = el.firstElementChild, freshWho = fresh.firstElementChild;
+  // The orb avatar sits before .who. Keep it, and the element itself, so the
+  // pop-in and orbit animations don't start over on every redraw.
+  const who = el.querySelector(':scope > .who'), freshWho = fresh.querySelector(':scope > .who');
   // keep tool calls and "How this reply was made" open if they were
   const open = [...el.querySelectorAll('details[data-k]')].filter(d => d.open).map(d => d.dataset.k);
-  if (el.className !== fresh.className || !who?.classList.contains('who') || who.innerHTML !== freshWho.innerHTML) {
+  if (!who || !freshWho || el.className.split(' ')[1] !== fresh.className.split(' ')[1]) {
+    fresh.classList.remove('enter');
     el.replaceWith(fresh);
     el = fresh;
   } else {
+    // only classes that carry state change; `enter` stays as it was
+    for (const c of ['streaming', 'latest']) el.classList.toggle(c, fresh.classList.contains(c));
+    if (who.innerHTML !== freshWho.innerHTML) who.innerHTML = freshWho.innerHTML;
     while (el.lastChild !== who) el.lastChild.remove();
     freshWho.remove();
+    fresh.querySelector(':scope > .orb-av')?.remove();
     el.append(...fresh.childNodes);
   }
   for (const k of open) { const d = el.querySelector(`details[data-k="${k}"]`); if (d) d.open = true; }

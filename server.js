@@ -73,6 +73,9 @@ const path = require('path');
 
 const app = express();
 // For Fly's health check and uptime pings: answers before any login, says nothing about the Gateway
+// The pages call their API with relative URLs ("api/status"), which resolve to /ui/api/... under /ui and to /api/...
+// when served at the site root. Answer both.
+app.use((req, res, next) => { if (req.url.startsWith('/api/')) req.url = `/ui${req.url}`; next(); });
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 // Sleep after HARNESS_IDLE_STOP_MIN idle minutes, and the Dashboard's Stop button. Only where something can act on
 // a stop: the Fly launcher (HARNESS_STOP_VIA_PARENT) asks its parent to stop everything and exit cleanly.

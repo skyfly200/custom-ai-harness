@@ -3,11 +3,11 @@
   "name": "Refactor",
   "when": "restructuring, renaming, cleaning up or simplifying code without changing what it does",
   "stages": [
-    { "id": "plan", "role": "Planner", "tools": "check", "maxSteps": 12, "effort": "medium",
+    { "id": "plan", "role": "Planner", "tools": "check", "effort": "medium",
       "prompt": "Run the project's tests first so you know the starting state. Then plan the refactor: what moves or changes and in what order, keeping behaviour identical. Do not change any file. Call finish with the plan and the test result before any change." },
-    { "id": "implement", "role": "Implementer", "tools": "all", "maxSteps": 40,
+    { "id": "implement", "role": "Implementer", "tools": "all",
       "prompt": "Carry out the refactor in small steps, running the tests after each. Do not change behaviour and do not add features. Call finish with what you changed." },
-    { "id": "verify", "role": "Verifier", "tools": "check", "maxSteps": 10, "effort": "low", "verdict": true, "retryTo": "implement", "maxRetries": 1,
+    { "id": "verify", "role": "Verifier", "tools": "check", "effort": "low", "verdict": true, "retryTo": "implement", "maxRetries": 1,
       "prompt": "Run the tests and read the diff (`git diff HEAD`). Start your finish summary with PASS if the tests still pass and behaviour is unchanged, or FAIL followed by what broke or changed." }
   ]
 }

@@ -3,9 +3,9 @@
   "name": "Research the code",
   "when": "an investigation that needs reading across the code: how something works, where something is used, or a comparison of approaches, with nothing to change",
   "stages": [
-    { "id": "gather", "role": "Reader", "tools": "read", "maxSteps": 20, "effort": "low",
+    { "id": "gather", "role": "Reader", "tools": "read", "effort": "low",
       "prompt": "Gather what the question needs: search the repository and read the relevant files. Do not change any file. Call finish with your notes: file, line and what it shows, for everything relevant." },
-    { "id": "write", "role": "Writer", "tools": "read", "maxSteps": 6, "effort": "medium",
+    { "id": "write", "role": "Writer", "tools": "read", "effort": "medium",
       "prompt": "Answer the question from the notes. Check any claim you are unsure of in the code. Call finish with a clear answer, then a short list of the files it rests on." }
   ]
 }

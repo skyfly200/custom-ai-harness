@@ -3,7 +3,7 @@
   "name": "Quick answer",
   "when": "a question or a request to explain something about the code, with nothing to change",
   "stages": [
-    { "id": "answer", "role": "Explainer", "tools": "read", "maxSteps": 12, "effort": "low",
+    { "id": "answer", "role": "Explainer", "tools": "read", "effort": "low",
       "prompt": "Answer the question about this repository. Look only at what you need. Do not change any file. Call finish with the answer, naming the files and lines it rests on." }
   ]
 }

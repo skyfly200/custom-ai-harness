@@ -37,8 +37,8 @@ function clean(raw, file) {
         if (s.model && !MODEL_RE.test(String(s.model))) throw new Error(`${file}: stage ${sid} model must be a model name`);
         return {
             id: sid, role: String(s.role || sid), prompt: String(s.prompt), tools: s.tools || 'all',
-            // 0 means the stage sets no step limit of its own (the run's still applies)
-            maxSteps: Math.min(10000, Math.max(0, Number.isFinite(Math.floor(Number(s.maxSteps))) ? Math.floor(Number(s.maxSteps)) : 30)), effort: s.effort || null,
+            // 0 (the default) means the stage sets no step limit of its own (the run's still applies, if it has one)
+            maxSteps: Math.min(10000, Math.max(0, Number.isFinite(Math.floor(Number(s.maxSteps))) ? Math.floor(Number(s.maxSteps)) : 0)), effort: s.effort || null,
             verdict: Boolean(s.verdict), retryTo: s.retryTo || null, maxRetries: Math.min(MAX_RETRIES, Math.max(0, Math.floor(Number(s.maxRetries)) || 0)),
             model: s.model ? String(s.model) : null,
             // canWait: one request, no tools, sent as a half-price batch and waited for (maxWaitMinutes); diff: put the working diff in it

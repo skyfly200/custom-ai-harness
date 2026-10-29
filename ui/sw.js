@@ -5,7 +5,7 @@
 // that isn't a plain GET: chats, answers and keys are never stored here.
 'use strict';
 
-const CACHE = 'bright-chat-v4';
+const CACHE = 'bright-chat-v5';
 
 function keepable(request) {
   if (request.method !== 'GET') return false;
@@ -22,7 +22,7 @@ function keepable(request) {
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   // Fetched with the page's credentials, so a harness behind HARNESS_PASSWORD still works
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'mobile.css', 'dialogs.js', 'bright.js', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'mobile.css', 'dialogs.js', 'bright.js', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'dictation.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
 });
 
 self.addEventListener('activate', (event) => {

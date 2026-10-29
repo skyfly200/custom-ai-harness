@@ -8,3 +8,7 @@
 - A single file: `node --test test/<name>.test.js`.
 - Run the full `npm test` (about 430 tests, under 30 s) once before opening or pushing a PR. Router tests: `python -m pytest test/` (see docs/development.md).
 - Run test files one at a time or through these scripts; don't loop the whole suite repeatedly.
+
+## Web UI
+
+- Never use native `alert()`, `confirm()` or `prompt()` in `ui/`; use `ui.toast`, `ui.confirm`, `ui.prompt` from `ui/dialogs.js` (see docs/development.md). `test/dialogs.test.js` enforces it.

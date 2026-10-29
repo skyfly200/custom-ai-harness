@@ -17,3 +17,18 @@ test('every page loads the calm stylesheet, which only hides things on devices t
 test('the installed app keeps the calm stylesheet', () => {
   assert.match(fs.readFileSync(path.join(ui, 'sw.js'), 'utf8'), /'calm\.css'/);
 });
+
+test('every page loads the phone stylesheet last and the installed app keeps it', () => {
+  for (const p of ['chat', 'index', 'usage', 'routing', 'settings', 'agents', 'tools', 'users']) {
+    const html = fs.readFileSync(path.join(ui, `${p}.html`), 'utf8');
+    assert.ok(html.indexOf('href="mobile.css"') > html.indexOf('href="calm.css"'), p);
+  }
+  assert.match(fs.readFileSync(path.join(ui, 'sw.js'), 'utf8'), /'mobile\.css'/);
+});
+
+test('the chats toggle sits in the chat bar, below the top bar with the brand', () => {
+  const html = fs.readFileSync(path.join(ui, 'chat.html'), 'utf8');
+  const top = html.match(/<header class="top">[\s\S]*?<\/header>/)[0];
+  assert.doesNotMatch(top, /toggleSide/);
+  assert.match(html.match(/<div class="chatbar">[\s\S]*?<\/div>/)[0], /toggleSide/);
+});

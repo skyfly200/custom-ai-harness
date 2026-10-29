@@ -285,7 +285,7 @@ function removeWire(id) {
 }
 
 // Called once × in the title has been held down; Discard changes brings it back
-function removeModel(name) {
+async function removeModel(name) {
   const routing = R();
   if (routing !== graph) {
     const uses = routeOuts(routing).filter(o => o.model === name).map(o => `“${o.label}”`);
@@ -304,7 +304,7 @@ function removeModel(name) {
   const uses = strategies().flatMap(r => routeOuts(r).filter(o => o.model === name)
     .map(o => `“${o.label}”${r === graph ? '' : ` in ${r.name}`}`));
   const others = strategies().filter(r => r !== R() && routeOuts(r).some(o => o.model === name));
-  if (others.length && !confirm(`${name} is a model every strategy shares. Removing it also disconnects it in ${others.map(routingName).join(', ')}.\n\nRemove it anyway? Nothing changes in config.yaml until you press Save.`)) return;
+  if (others.length && !await ui.confirm(`${name} is a model every strategy shares. Removing it also disconnects it in ${others.map(routingName).join(', ')}.\n\nRemove it anyway? Nothing changes in config.yaml until you press Save.`)) return;
   graph.deployments = graph.deployments.filter(d => d.name !== name);
   for (const f of allFb()) {
     delete f[name];
@@ -360,11 +360,11 @@ function unconnected() {
   return models().filter(m => !reach.has(m));
 }
 
-function clearUnconnected() {
+async function clearUnconnected() {
   const names = unconnected();
   if (!names.length) return;
   const count = graph.deployments.filter(d => names.includes(d.name)).length;
-  if (!confirm(`Remove ${names.length} model${names.length === 1 ? '' : 's'} no route reaches${count ? `, with ${count === 1 ? 'its provider model' : `their ${count} provider models`} and fallback lines` : ''}?\n\n${names.join('\n')}\n\nNothing changes in config.yaml until you press Save.`)) return;
+  if (!await ui.confirm(`Remove ${names.length} model${names.length === 1 ? '' : 's'} no route reaches${count ? `, with ${count === 1 ? 'its provider model' : `their ${count} provider models`} and fallback lines` : ''}?\n\n${names.join('\n')}\n\nNothing changes in config.yaml until you press Save.`)) return;
   graph.deployments = graph.deployments.filter(d => !names.includes(d.name));
   for (const f of allFb()) for (const [src, targets] of Object.entries(f)) {
     const kept = names.includes(src) ? [] : targets.filter(t => !names.includes(t));
@@ -1321,8 +1321,8 @@ $('profileSel').addEventListener('change', () => showRouting($('profileSel').val
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 
-function askName(title, current) {
-  const name = (prompt(title, current || '') || '').trim().slice(0, 60);
+async function askName(title, current) {
+  const name = ((await ui.prompt(title, { value: current || '' })) || '').trim().slice(0, 60);
   if (!name) return null;
   const taken = graph.profiles.some(p => p.name.toLowerCase() === name.toLowerCase() && p.id !== view);
   if (!slug(name) || slug(name) === 'default' || taken) { note(`Pick another name than “${name}”.`, 'err'); return null; }
@@ -1412,27 +1412,27 @@ $('compareBody').addEventListener('click', (e) => {
   showRouting(b.dataset.show);
 });
 
-$('profileFb').addEventListener('click', () => {
+$('profileFb').addEventListener('click', async () => {
   const p = R();
-  if (!p.fallbacks || !confirm(`Drop the fallback lines kept for “${p.name}” and use the Gateway's again?\n\nNothing changes until you press Save.`)) return;
+  if (!p.fallbacks || !await ui.confirm(`Drop the fallback lines kept for “${p.name}” and use the Gateway's again?\n\nNothing changes until you press Save.`)) return;
   p.fallbacks = null;
   selected = null;
   drawProfiles();
   changed();
 });
 
-$('profileRename').addEventListener('click', () => {
+$('profileRename').addEventListener('click', async () => {
   const p = R();
-  const name = askName('New name for this strategy. Chats using it keep using it.', p.name);
+  const name = await askName('New name for this strategy. Chats using it keep using it.', p.name);
   if (!name) return;
   p.name = name;
   drawProfiles();
   changed();
 });
 
-$('profileDelete').addEventListener('click', () => {
+$('profileDelete').addEventListener('click', async () => {
   const p = R();
-  if (!confirm(`Delete the strategy “${p.name}”? Chats and projects set to it go back to the default strategy.\n\nNothing changes until you press Save.`)) return;
+  if (!await ui.confirm(`Delete the strategy “${p.name}”? Chats and projects set to it go back to the default strategy.\n\nNothing changes until you press Save.`)) return;
   graph.profiles = graph.profiles.filter(x => x !== p);
   showRouting('');
 });

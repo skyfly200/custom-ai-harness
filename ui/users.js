@@ -33,7 +33,7 @@
       if (!u.core) {
         td.append(
           btn('Reset password', async () => {
-            const password = prompt(`New password for ${u.name} (at least ${me.minPassword} characters):`);
+            const password = await ui.prompt(`New password for ${u.name} (at least ${me.minPassword} characters):`, { type: 'password', ok: 'Change' });
             if (!password) return;
             await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { password });
             say(`Password changed for ${u.name}.`);
@@ -53,7 +53,7 @@
           );
           if (u.guest) {
             td.append(btn('Set cap', async () => {
-              const v = prompt(`Total dollars ${u.name} may spend (now $${u.credit ? u.credit.capUsd.toFixed(2) : '?'}):`);
+              const v = await ui.prompt(`Total dollars ${u.name} may spend (now $${u.credit ? u.credit.capUsd.toFixed(2) : '?'}):`, { ok: 'Set cap' });
               if (v === null || v === '') return;
               drawUsers((await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { capUsd: v })).users);
             }), ' ');
@@ -64,7 +64,7 @@
             btn(u.role === 'admin' ? 'Make user' : 'Make admin', async () => { drawUsers((await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { role: u.role === 'admin' ? 'user' : 'admin' })).users); }),
             ' ',
             btn('Remove', async () => {
-              if (!confirm(`Remove ${u.name} and their API keys?`)) return;
+              if (!await ui.confirm(`Remove ${u.name} and their API keys?`)) return;
               drawUsers((await api('DELETE', `/ui/api/users/${encodeURIComponent(u.name)}`)).users);
               fillOwners(); loadKeys();
             }),
@@ -88,7 +88,7 @@
       const td = document.createElement('td');
       td.style.cssText = 'padding:6px 8px;text-align:right';
       td.append(btn('Remove', async () => {
-        if (!confirm(`Remove the invite for ${i.email}? Existing sessions keep working until they end.`)) return;
+        if (!await ui.confirm(`Remove the invite for ${i.email}? Existing sessions keep working until they end.`)) return;
         drawInvites(await api('DELETE', `/ui/api/invites/${encodeURIComponent(i.email)}`));
       }));
       tr.append(td);
@@ -120,7 +120,7 @@
       const td = document.createElement('td');
       td.style.cssText = 'padding:6px 8px;text-align:right';
       td.append(btn('Revoke', async () => {
-        if (!confirm(`Revoke the key "${k.name}"? Programs using it stop working.`)) return;
+        if (!await ui.confirm(`Revoke the key "${k.name}"? Programs using it stop working.`)) return;
         await api('DELETE', `/ui/api/keys/${k.id}?owner=${encodeURIComponent(owner())}`);
         loadKeys(); fillOwners();
       }));

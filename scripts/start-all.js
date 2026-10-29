@@ -65,7 +65,7 @@ function buildCommands(opts = {}) {
     ];
 
     // Federation: the Gateway calls OpenRouter through the Interceptor, which holds the short-lived tokens
-    if ((env.OPENROUTER_FEDERATION_POLICY_ID && env.OPENROUTER_FEDERATION_POLICY_ID.trim()) || /^(1|true|yes|on)$/i.test(env.HARNESS_USER_CREDENTIALS || '')) {
+    if ((env.OPENROUTER_FEDERATION_POLICY_ID && env.OPENROUTER_FEDERATION_POLICY_ID.trim()) || /^(1|true|yes|on)$/i.test(env.HARNESS_USER_CREDENTIALS || '') || (/^(1|true|yes|on)$/i.test(env.OPENROUTER_MAIN_KEY_RENEW || '') && (env.OPENROUTER_MANAGEMENT_KEY || '').trim())) {
         const key = env.OPENROUTER_PROXY_KEY || env.LITELLM_MASTER_KEY;
         const gateway = commands[0];
         gateway.env = {

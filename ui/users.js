@@ -43,7 +43,7 @@
     const open = after.nextElementSibling;
     if (open && open.className === 'resetRow') { open.remove(); return; }
     const row = document.createElement('tr'); row.className = 'resetRow';
-    const td = document.createElement('td'); td.colSpan = 5; td.style.padding = '6px 8px';
+    const td = document.createElement('td'); td.colSpan = 6; td.style.padding = '6px 8px';
     const form = document.createElement('form'); form.className = 'form'; form.autocomplete = 'off';
     form.innerHTML = `<label class="field"><span>New password</span><input name="password" type="password" required autocomplete="new-password"></label>
       <label class="field"><span>Confirm password</span><input name="confirm" type="password" required autocomplete="new-password"></label>
@@ -61,13 +61,29 @@
     form.password.focus();
   }
 
+  // each person's last 30 days of requests, from the admin usage view (loaded by fillOwners)
+  let usage30 = {};
+  const usageCell = (name) => {
+    const td = document.createElement('td');
+    td.style.padding = '6px 8px';
+    const u = usage30[name.toLowerCase()];
+    const a = document.createElement('a');
+    a.href = `usage-users.html#user=${encodeURIComponent(name)}`;
+    a.textContent = u && u.requests ? `${u.requests.toLocaleString()} request${u.requests === 1 ? '' : 's'} · ${shortCount(u.input + u.output)} tokens` : 'no requests';
+    a.title = 'Usage in the last 30 days. Open the details';
+    a.style.color = u && u.requests ? 'var(--accent)' : 'var(--muted)';
+    td.append(a);
+    return td;
+  };
+  const shortCount = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+
   function drawUsers(users) {
     const t = $('userTable');
     t.replaceChildren();
     for (const u of users) {
       const tr = document.createElement('tr');
       const credit = u.credit ? ` · $${u.credit.spentUsd.toFixed(2)} of $${u.credit.capUsd.toFixed(2)} used` : '';
-      tr.append(cell(u.name), cell(u.core ? 'admin (env)' : u.guest ? `guest${credit}` : u.role), cell(`${u.keys} key${u.keys === 1 ? '' : 's'}`), cell(when(u.created)));
+      tr.append(cell(u.name), cell(u.core ? 'admin (env)' : u.guest ? `guest${credit}` : u.role), cell(`${u.keys} key${u.keys === 1 ? '' : 's'}`), cell(when(u.created)), usageCell(u.name));
       const td = document.createElement('td');
       td.style.cssText = 'padding:6px 8px;text-align:right;white-space:nowrap';
       if (!u.core) {
@@ -135,6 +151,7 @@
   async function fillOwners() {
     if (me.role !== 'admin') return;
     const { users, guests, managedKeys } = await api('GET', '/ui/api/users');
+    try { usage30 = Object.fromEntries((await api('GET', '/ui/api/admin/usage?days=30')).users.map((p) => [p.user.toLowerCase(), p])); } catch { usage30 = {}; }
     guestsOn = Boolean(guests);
     managedOn = Boolean(managedKeys);
     $('guestRow').hidden = !guestsOn;

@@ -74,6 +74,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | Area | Test files |
 |---|---|
 | Login, passwords, API keys | `access`, `login`, `oauth`, `runKeys` |
+| Usage per person, admin usage view | `userUsage` (store, database layer, sums), `userUsageApi` (nobody sees another person's usage) |
 | Routing, tiers, profiles, Auto | `interceptor`, `profiles`, `tiers`, `autoStrategy`, `autoroute`, `escalate`, `jevQuestions` |
 | Command guard, Jev file tools | `guard`, `gatewayGuard`, `jevFiles` |
 | Gateway config and model info | `gateway`, `gatewayConfig`, `modelInfo`, `modelInfoApi`, `modelStats`, `openrouterCatalog` |

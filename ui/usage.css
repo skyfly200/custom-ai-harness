@@ -95,3 +95,27 @@ tfoot td { font-weight: 600; border-top: 1px solid var(--border); }
 .assume-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin: 10px 0; }
 .assume-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--muted); }
 .assume input[type=number] { width: 90px; }
+
+/* All users (usage-users.html) */
+.back { display: inline-flex; align-items: center; min-height: 30px; padding: 0 4px; color: var(--muted); }
+.back:hover { color: var(--text); }
+.notice { margin: 12px 0 0; padding: 8px 12px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--panel); color: var(--muted); font-size: 13px; }
+#detailTiles { margin-top: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.people th { white-space: nowrap; }
+.people th .sort { border: 0; background: none; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; }
+.people th .sort:hover, .people th .sort:focus-visible { color: var(--accent); }
+.people th[aria-sort=ascending] .sort::after { content: " ▲"; font-size: 10px; }
+.people th[aria-sort=descending] .sort::after { content: " ▼"; font-size: 10px; }
+.people td.who { white-space: nowrap; }
+.people td.models code { margin-right: 4px; font-size: 12px; }
+.people tr.sel { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.people tr.idle td { color: var(--muted); }
+.people td, .people th { padding: 7px 10px; }
+.detail-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.detail-head h2 { overflow-wrap: anywhere; }
+#detail { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--border); }
+#detail h3 { margin: 16px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+@media (max-width: 600px) {
+  .people td.models { max-width: 180px; overflow-x: auto; white-space: nowrap; }
+}
+a.usage-all { margin-left: 8px; }

@@ -158,6 +158,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Chats and per-person data in Postgres; without DATABASE_URL the page reports db:false and stays on localStorage
 if (db.enabled()) {
     const ready = db.init();
+    // The Usage page's totals live in the database too (utils/usageDb.js); on any problem they stay in harness-usage.json
+    usage.useDatabase(require('./utils/usageDb')).catch((err) => console.warn(`Usage totals stay in ${usage.FILE}: ${err.message}`));
     app.use((req, res, next) => (req.path.startsWith('/ui/api/sync') ? ready.then(() => next(), next) : next()));
     app.use(createChatSync({ serverSchedules: Boolean(schedules), users: listLoginUsers && { names: () => listLoginUsers() } }));
 } else {
@@ -283,6 +285,7 @@ function recordUsage(req, proxyRes) {
     usage.tap(proxyRes, ({ usage: counts, outputChars, model: upstream, text, aborted }) => {
         chatReplies.afterReply(req, { text, model: event.model, aborted });
         const row = usage.record({
+            user: personOf(req),
             client: req.harnessClient,
             route: usage.routeOf(event),
             model: event.model,
@@ -445,17 +448,40 @@ app.post('/ui/api/server/stop', localJsonOnly, (req, res) => {
     res.json({ stopping: true });
 });
 
-// Token totals by client, model and provider; days=N for the last N days
+// Whose request this is, for the usage log and the routing log: the signed-in person's name, '' when logins are off
+const personOf = (req) => (req.harnessLogin && req.harnessUser ? req.harnessUser.name : '');
+// With logins on, the Usage page counts only the signed-in person's own requests, admins' included (the All users view
+// has everyone's). The routing log is each member's own too; admins see the whole install's, to run it.
+const ownScope = (req) => (req.harnessLogin && req.harnessUser ? { user: req.harnessUser.name } : {});
+const logScope = (req) => (isMember(req) ? ownScope(req) : {});
+
+// Token totals by client, model and provider; days=N for the last N days. With logins on: the signed-in person's own.
 app.get('/ui/api/usage', (req, res) => {
-    res.json(usage.summary(Math.max(0, parseInt(req.query.days, 10) || 0)));
+    res.json({ ...usage.summary(Math.max(0, parseInt(req.query.days, 10) || 0), ownScope(req)), scope: { user: personOf(req) || null, login: Boolean(req.harnessLogin) } });
 });
-app.post('/ui/api/usage/clear', localJsonOnly, (req, res) => {
-    usage.clear();
-    res.json(usage.summary());
+app.post('/ui/api/usage/clear', localJsonOnly, async (req, res) => {
+    try {
+        await usage.clear();
+        res.json(usage.summary());
+    } catch (err) {
+        res.status(500).json({ error: `Could not clear the saved totals: ${err.message}` });
+    }
+});
+
+// Everyone's usage, for admins (or this machine, with logins off): per person, with the people who have none yet,
+// guests' credit and the spend of their agent runs. The page prices the rows, as the Usage page does.
+app.get('/ui/api/admin/usage', localOnly, async (req, res) => {
+    const days = Math.max(0, parseInt(req.query.days, 10) || 0);
+    const out = { ...usage.byUser(days), login: Boolean(listLoginUsers), people: [], credit: {} };
+    if (listLoginUsers) out.people = listLoginUsers().map((u) => ({ name: u.name, role: u.role, guest: Boolean(u.guest) }));
+    if (db.enabled()) {
+        try { out.credit = await credit.all(); } catch (err) { out.creditError = err.message; }
+    }
+    res.json(out);
 });
 
 app.get('/ui/api/events', (req, res) => {
-    res.json(monitor.recentEvents(Math.min(parseInt(req.query.limit, 10) || 50, 200)));
+    res.json(monitor.recentEvents(Math.min(parseInt(req.query.limit, 10) || 50, 200), logScope(req)));
 });
 
 // Live feed of the same events (Server-Sent Events): a request arriving, the
@@ -464,7 +490,11 @@ app.get('/ui/api/live', (req, res) => {
     res.set({ 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
     res.flushHeaders();
     res.write('retry: 2000\n\n');
-    const send = (update) => res.write(`data: ${JSON.stringify(update)}\n\n`);
+    const own = logScope(req).user;
+    const send = (update) => {
+        if (own !== undefined && String(update.event?.user || '').toLowerCase() !== own.toLowerCase()) return;
+        res.write(`data: ${JSON.stringify(update)}\n\n`);
+    };
     const ping = setInterval(() => res.write(': ping\n\n'), 20000);
     monitor.live.on('update', send);
     req.on('close', () => { clearInterval(ping); monitor.live.off('update', send); });
@@ -1674,7 +1704,7 @@ async function chargeGate(req, res) {
 async function routeAndRecord(req, res) {
     const clientId = req.get('x-harness-request-id');
     const prompt = latestUserText(req.body.messages);
-    monitor.recordRouting({ path: req.path, clientId, prompt });
+    monitor.recordRouting({ path: req.path, clientId, prompt, user: personOf(req) });
     const started = Date.now();
     const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile, req.get('x-harness-effort'), req.get('x-harness-max-tier'));
     route.model = profiles.currentName(route.model);
@@ -1689,7 +1719,7 @@ async function routeAndRecord(req, res) {
         + Math.ceil(JSON.stringify(req.body.system || '').length / 4)
         + Math.ceil(JSON.stringify(req.body.tools || []).length / 4);
     req.harnessEvent = monitor.recordRoute({
-        path: req.path, ...route, tokens: estimateTokens(req.body), prompt, clientId,
+        user: personOf(req), path: req.path, ...route, tokens: estimateTokens(req.body), prompt, clientId,
         transforms: activeTransforms(req), routeMs: Date.now() - started, auto: req.harnessAuto,
     });
     // Tell the client where its request went (the chat page shows it)
@@ -1765,7 +1795,7 @@ if (require.main === module) {
         for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);
     });
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
-        Promise.all([chatShell.closePowerShellSessions(), mcp.close(), userMcp.closeAll()]).finally(() => process.exit(0));
+        Promise.all([chatShell.closePowerShellSessions(), mcp.close(), userMcp.closeAll(), usage.flush()]).finally(() => process.exit(0));
     });
 }
 

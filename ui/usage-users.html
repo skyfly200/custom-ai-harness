@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bright Chat · Usage by user</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bright Chat">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="usage.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body>
+<main>
+  <header>
+    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">All users</span></h1><a href="./" data-hint="Health of each part, recent chats, usage and requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service" class="here" aria-current="page">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a><a href="agents.html" data-hint="Named agents that keep working on your repos, and one-off runs">Agents</a><a href="settings.html" data-hint="Interceptor and Router settings">Settings</a></nav>
+    <span class="muted" id="updated">Loading…</span>
+  </header>
+
+  <div class="controls filters">
+    <a href="usage.html" class="back" data-hint="Your own usage, savings and charts">← My usage</a>
+    <div class="seg" id="range" role="group" aria-label="Time range">
+      <button data-days="7" data-hint="The last 7 days">7 days</button><button data-days="30" data-hint="The last 30 days">30 days</button><button data-days="0" data-hint="Everything kept">All time</button>
+    </div>
+    <div class="seg" id="measure" role="group" aria-label="Measure">
+      <button data-m="cost" data-hint="Money spent, from the same price lists as the Usage page">Cost</button><button data-m="tokens" data-hint="Input plus output tokens">Tokens</button><button data-m="requests" data-hint="Number of requests">Requests</button>
+    </div>
+    <span class="spacer"></span>
+    <button id="clear" data-hint="Delete every person's usage totals" hidden>Clear all totals</button>
+  </div>
+
+  <p class="notice" id="notice" role="status" hidden></p>
+  <div class="grid" id="tiles"></div>
+
+  <h2 id="chartTitle">Per day, everyone</h2>
+  <div class="card chart-card">
+    <div class="legend" id="legend"></div>
+    <div class="chart-scroll"><svg id="all" class="chart" role="img" aria-label="Usage per day, one band per person"></svg></div>
+  </div>
+
+  <h2>People</h2>
+  <div class="table-wrap">
+    <table class="people" id="people">
+      <thead><tr>
+        <th aria-sort="none"><button class="sort" data-k="name" data-hint="Sort by name">Person</button></th>
+        <th class="r" aria-sort="none"><button class="sort" data-k="requests">Requests</button></th>
+        <th class="r" aria-sort="none"><button class="sort" data-k="input">Tokens in</button></th>
+        <th class="r" aria-sort="none"><button class="sort" data-k="output">Tokens out</button></th>
+        <th class="r" aria-sort="none"><button class="sort" data-k="cost" data-hint="Tokens times the price of the model that answered, with cached input at the provider's cache price">Cost</button></th>
+        <th class="r" aria-sort="none"><button class="sort" data-k="agentCost" data-hint="What their agent runs' model calls cost, part of Cost">Agent runs</button></th>
+        <th>Top models</th>
+        <th aria-sort="none"><button class="sort" data-k="last">Last active</button></th>
+        <th class="r" aria-sort="none"><button class="sort" data-k="left" data-hint="Guests only: credit left of the cap the owner set">Credit left</button></th>
+        <th></th>
+      </tr></thead>
+      <tbody id="peopleRows"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody>
+      <tfoot id="peopleTotal"></tfoot>
+    </table>
+  </div>
+  <div class="sub muted fine" id="priceNote" style="margin-top:8px"></div>
+
+  <section id="detail" hidden>
+    <div class="detail-head">
+      <h2 id="detailName"></h2>
+      <button id="detailClose" data-hint="Back to everyone">Close</button>
+    </div>
+    <div class="sub muted" id="detailSub"></div>
+    <div class="grid" id="detailTiles"></div>
+    <h3 id="detailChartTitle">Per day</h3>
+    <div class="card chart-card">
+      <div class="legend" id="detailLegend"></div>
+      <div class="chart-scroll"><svg id="one" class="chart" role="img" aria-label="Usage per day for this person"></svg></div>
+    </div>
+    <h3>Models</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Served by</th><th>Service</th><th class="r">Requests</th><th class="r">Input</th><th class="r">Cached input</th><th class="r">Output</th><th class="r">Cost</th></tr></thead>
+        <tbody id="detailModels"></tbody>
+      </table>
+    </div>
+    <h3>Clients</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Client</th><th class="r">Requests</th><th class="r">Tokens</th><th class="r">Cost</th></tr></thead>
+        <tbody id="detailClients"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="sub muted fine" style="margin-top:12px">Each request is counted for the person who signed in to send it: the chat page, an API key from the Users page, or an agent run they started. Usage from before per-user tracking, and requests with no signed-in person, are under <em>Unassigned</em>. Only admins can see this page; everyone else sees only their own usage on the Usage page.</div>
+</main>
+<script src="dialogs.js"></script>
+<script src="hints.js"></script>
+<script src="costs.js"></script>
+<script src="userUsage.js"></script>
+<script src="usage-users.js"></script>
+<script src="bright.js"></script>
+</body>
+</html>

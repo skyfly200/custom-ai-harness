@@ -18,7 +18,7 @@ const SESSION_MS = 7 * 24 * 3600 * 1000;
 const MAX_SESSIONS = 500;
 const MAX_FAILS = 5;
 const WINDOW_MS = 15 * 60 * 1000;
-const ADMIN_ONLY_PAGES = new Set(['/ui/settings.html', '/settings.html']);
+const ADMIN_ONLY_PAGES = new Set(['/ui/settings.html', '/settings.html', '/ui/usage-users.html', '/usage-users.html']);
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const safeNext = (next) => (typeof next === 'string' && /^\/(?!\/|\\)/.test(next) ? next : '/');

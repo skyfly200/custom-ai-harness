@@ -1,7 +1,13 @@
 // Token usage for the Usage page (/ui/usage.html): real token counts read from
-// the Gateway's replies, totalled per day by client, model and provider.
-// Saved to harness-usage.json (gitignored) so totals survive a restart; the
-// page's "Clear" button or deleting the file starts them fresh.
+// the Gateway's replies, totalled per day by person, client, model and provider.
+// With a database (DATABASE_URL) the totals live in the usage_daily table
+// (utils/usageDb.js); without one they are saved to harness-usage.json
+// (gitignored). Either way they survive a restart; the page's "Clear" button
+// or deleting the file starts them fresh.
+//
+// A row's `user` is the signed-in person's name. '' is usage from before
+// per-user tracking and any request that had no signed-in person (the whole
+// install, when logins are off).
 
 const fs = require('fs');
 const path = require('path');
@@ -16,22 +22,44 @@ const CONFIG_FILE = process.env.HARNESS_GATEWAY_CONFIG || path.join(__dirname, '
 const MAX_BODY_CHARS = 20 * 1024 * 1024; // non-streamed replies bigger than this go unparsed
 const SAVE_DELAY_MS = 2000;
 
-// rows: one per day + client + route + model + servedBy + provider
+// rows: one per day + user + client + route + model + servedBy + provider
 let data = { since: null, rows: {} };
 let saveTimer = null;
+// with a database: the table's access, the counts added since the last write (by row key), and the load of its totals
+let store = null;
+let pending = new Map();
+let loaded = null;
+
+const COUNTS = ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated', 'savedAnchor', 'savedHeadroom'];
+const rowKey = (r) => [r.day, String(r.user || '').toLowerCase(), r.client, r.route, r.model, r.servedBy, r.provider].join('|');
+const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+
+// Adds a row's counts to data.rows under its key (rows saved before per-user tracking have no user)
+function fold(r) {
+    const key = rowKey(r);
+    const t = data.rows[key] || (data.rows[key] = { day: r.day, user: r.user || '', client: r.client, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
+    addCounts(t, r);
+}
+
+function addCounts(t, r) {
+    for (const k of COUNTS) if (r[k]) t[k] = (t[k] || 0) + r[k];
+    if (r.upstream) t.upstream = r.upstream;
+    if (r.last && (!t.last || r.last > t.last)) t.last = r.last;
+}
 
 function load() {
     try {
         const saved = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-        if (saved && typeof saved.rows === 'object') data = { since: saved.since || null, rows: saved.rows };
+        if (saved && typeof saved.rows === 'object') {
+            data = { since: saved.since || null, rows: {} };
+            for (const r of Object.values(saved.rows)) fold(r);
+        }
     } catch {
         data = { since: null, rows: {} };
     }
 }
 
-function saveNow() {
-    clearTimeout(saveTimer);
-    saveTimer = null;
+function saveFile() {
     try {
         fs.writeFileSync(FILE, JSON.stringify(data));
     } catch (err) {
@@ -39,12 +67,76 @@ function saveNow() {
     }
 }
 
-// Many requests in a burst write the file once
+function saveNow() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (store) flush(); else saveFile();
+}
+
+// Many requests in a burst write once
 function scheduleSave() {
     if (!saveTimer) {
         saveTimer = setTimeout(saveNow, SAVE_DELAY_MS);
         saveTimer.unref?.();
     }
+}
+
+/** Write what the database hasn't got yet. A failure keeps the counts for the next try. Never rejects. */
+async function flush() {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (!store) return;
+    await loaded?.catch(() => {}); // the table's own counts are loaded first, so none is counted twice
+    if (!store || !pending.size) return;
+    const batch = [...pending.values()];
+    pending = new Map();
+    try {
+        await store.add(batch);
+    } catch (err) {
+        console.warn(`Could not save token usage to the database: ${err.message}`);
+        for (const r of batch) {
+            const key = rowKey(r);
+            if (pending.has(key)) addCounts(pending.get(key), r); else pending.set(key, r);
+        }
+        scheduleSave();
+    }
+}
+
+/**
+ * Keep the totals in the database `dbStore` (utils/usageDb.js: loadAll, add, clear) from now on; call it at
+ * start, before requests arrive. What the table holds is added to the counts made while it loads. The first
+ * time (an empty table), totals from harness-usage.json are moved in, as usage with no person. If the table
+ * can't be read, the file stays the store. Resolves once the totals are loaded.
+ */
+async function useDatabase(dbStore) {
+    const fileRows = Object.values(data.rows);
+    const fileSince = data.since;
+    data = { since: null, rows: {} };
+    pending = new Map();
+    store = dbStore;
+    loaded = (async () => {
+        try {
+            const stored = await dbStore.loadAll();
+            for (const r of stored) fold(r);
+            if (!stored.length && fileRows.length) {
+                for (const r of fileRows) fold(r);
+                await dbStore.add(fileRows);
+                data.since = fileSince;
+                try { fs.writeFileSync(FILE, JSON.stringify({ since: null, rows: {} })); } catch { /* the file was only the first-run source */ }
+            }
+            data.since = data.since || Object.values(data.rows).map((r) => r.day).sort()[0] || null;
+        } catch (err) {
+            // back to the file, with what was counted meanwhile
+            store = null;
+            const fresh = Object.values(data.rows);
+            data = { since: fileSince, rows: {} };
+            for (const r of [...fileRows, ...fresh]) fold(r);
+            pending = new Map();
+            scheduleSave();
+            throw err;
+        }
+    })();
+    await loaded;
 }
 
 // ---- providers -------------------------------------------------------------
@@ -207,6 +299,7 @@ function tap(res, done) {
 function clientOf(req) {
     const agent = String(req.get?.('user-agent') || req.headers?.['user-agent'] || '');
     const id = req.get?.('x-harness-request-id') || req.headers?.['x-harness-request-id'];
+    if (/^run-/.test(String(id || ''))) return 'Agent run';
     if (id) return 'Chat page';
     if (/claude-cli|claude-code/i.test(agent)) return 'Claude Code';
     if (/cursor/i.test(agent)) return 'Cursor';
@@ -228,7 +321,7 @@ function routeOf(event) {
  * input comes from the request size and output from the reply text (about 4
  * characters a token), and the row is marked estimated.
  */
-function record({ time = new Date(), client, route, model, servedBy, upstream, usage, estimate, saved }) {
+function record({ time = new Date(), user, client, route, model, servedBy, upstream, usage, estimate, saved }) {
     const counts = usage || {
         input: estimate?.input ?? 0,
         output: Math.ceil((estimate?.outputChars ?? 0) / 4),
@@ -238,47 +331,52 @@ function record({ time = new Date(), client, route, model, servedBy, upstream, u
     const served = servedBy || model || 'unknown';
     const row = {
         day: new Date(time).toISOString().slice(0, 10),
+        user: user ? String(user) : '',
         client: client || 'Unknown',
         route: route || 'Router',
         model: model || 'unknown',
         servedBy: served,
         provider: providerOf(served),
     };
-    const key = [row.day, row.client, row.route, row.model, row.servedBy, row.provider].join('|');
-    const t = data.rows[key] || (data.rows[key] = { ...row, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0 });
-    t.requests++;
-    // the provider's own name for the model (from the reply), for pricing models the Gateway doesn't list
-    if (typeof upstream === 'string' && upstream) t.upstream = upstream.slice(0, 200);
-    // Input tokens the Interceptor's compression took out before sending
-    if (saved?.anchor) t.savedAnchor = (t.savedAnchor || 0) + saved.anchor;
-    if (saved?.headroom) t.savedHeadroom = (t.savedHeadroom || 0) + saved.headroom;
-    t.input += counts.input;
-    t.output += counts.output;
-    t.cacheRead += counts.cacheRead;
-    t.cacheWrite += counts.cacheWrite;
-    if (!usage) t.estimated++;
+    // what this request adds. upstream is the provider's own name for the model (from the reply), for pricing models
+    // the Gateway doesn't list; savedAnchor/savedHeadroom are input tokens the Interceptor's compression took out
+    const add = {
+        ...row, last: new Date(time).toISOString(), requests: 1,
+        input: counts.input, output: counts.output, cacheRead: counts.cacheRead, cacheWrite: counts.cacheWrite,
+        estimated: usage ? 0 : 1, savedAnchor: saved?.anchor || 0, savedHeadroom: saved?.headroom || 0,
+        ...(typeof upstream === 'string' && upstream ? { upstream: upstream.slice(0, 200) } : {}),
+    };
+    fold(add);
+    if (store) {
+        const key = rowKey(add);
+        if (pending.has(key)) addCounts(pending.get(key), add); else pending.set(key, { ...add });
+    }
     if (!data.since) data.since = new Date(time).toISOString();
     scheduleSave();
     return { ...row, ...counts, estimated: !usage };
 }
 
-const COUNTS = ['requests', 'input', 'output', 'cacheRead', 'cacheWrite', 'estimated', 'savedAnchor', 'savedHeadroom'];
+const blankRow = (extra) => ({ ...extra, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0, savedAnchor: 0, savedHeadroom: 0 });
+const firstDay = (days) => (days > 0 ? new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10) : '');
 
 /**
  * Totals over the last `days` days (0 or missing for all time), one row per
  * client + route + model + servedBy + provider, plus `daily`: one row per
  * day + route + model + servedBy + provider, for charts, costs and savings per day.
+ * `user` limits it to one person's requests ('' is the usage with no person);
+ * leave it out for everyone's together.
  */
-function summary(days = 0) {
-    const from = days > 0 ? new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10) : '';
+function summary(days = 0, { user } = {}) {
+    const from = firstDay(days);
     const rows = {};
     const daily = {};
     for (const r of Object.values(data.rows)) {
         if (r.day < from) continue;
+        if (user !== undefined && !same(r.user, user)) continue;
         const key = [r.client, r.route, r.model, r.servedBy, r.provider].join('|');
-        const t = rows[key] || (rows[key] = { client: r.client, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0, savedAnchor: 0, savedHeadroom: 0 });
+        const t = rows[key] || (rows[key] = blankRow({ client: r.client, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider }));
         const dayKey = [r.day, r.route, r.model, r.servedBy, r.provider].join('|');
-        const d = daily[dayKey] || (daily[dayKey] = { day: r.day, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider, requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, estimated: 0, savedAnchor: 0, savedHeadroom: 0 });
+        const d = daily[dayKey] || (daily[dayKey] = blankRow({ day: r.day, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider }));
         for (const k of COUNTS) { t[k] += r[k] || 0; d[k] += r[k] || 0; }
         if (r.upstream) t.upstream = r.upstream;
     }
@@ -290,12 +388,48 @@ function summary(days = 0) {
     };
 }
 
-function clear() {
+/**
+ * Everyone's usage over the last `days` days (0: all time), for the admin view: `users` (one per person, with
+ * when they were last active), `rows` (person + client + route + model + servedBy + provider) and `daily`
+ * (person + day + client + model + servedBy + provider), each with the counts. The page prices them.
+ */
+function byUser(days = 0) {
+    const from = firstDay(days);
+    const people = {};
+    const rows = {};
+    const daily = {};
+    for (const r of Object.values(data.rows)) {
+        if (r.day < from) continue;
+        const who = String(r.user || '').toLowerCase();
+        const p = people[who] || (people[who] = blankRow({ user: r.user || '', last: null }));
+        const key = [who, r.client, r.route, r.model, r.servedBy, r.provider].join('|');
+        const t = rows[key] || (rows[key] = blankRow({ user: r.user || '', client: r.client, route: r.route, model: r.model, servedBy: r.servedBy, provider: r.provider }));
+        const dayKey = [who, r.day, r.client, r.model, r.servedBy, r.provider].join('|');
+        const d = daily[dayKey] || (daily[dayKey] = blankRow({ user: r.user || '', day: r.day, client: r.client, model: r.model, servedBy: r.servedBy, provider: r.provider }));
+        for (const k of COUNTS) { p[k] += r[k] || 0; t[k] += r[k] || 0; d[k] += r[k] || 0; }
+        if (r.upstream) t.upstream = r.upstream;
+        const at = r.last || `${r.day}T00:00:00.000Z`;
+        if (!p.last || at > p.last) p.last = at;
+    }
+    return {
+        since: data.since,
+        days: days > 0 ? days : null,
+        users: Object.values(people),
+        rows: Object.values(rows),
+        daily: Object.values(daily).sort((a, b) => a.day.localeCompare(b.day)),
+    };
+}
+
+async function clear() {
     data = { since: null, rows: {} };
-    saveNow();
+    pending = new Map();
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    saveFile(); // the file is emptied in database mode too, so an old one is never moved in again
+    if (store) await store.clear();
 }
 
 load();
-process.on('exit', () => { if (saveTimer) saveNow(); });
+process.on('exit', () => { if (saveTimer && !store) saveNow(); });
 
-module.exports = { tap, record, summary, clear, load, normalize, clientOf, routeOf, providerOf, parseProviders, FILE };
+module.exports = { tap, record, summary, byUser, clear, load, flush, useDatabase, normalize, clientOf, routeOf, providerOf, parseProviders, FILE };

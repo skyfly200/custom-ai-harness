@@ -62,7 +62,7 @@
       <div class="card list" id="chats"><div class="sub muted">Loading…</div></div>
     </section>
     <section>
-      <h2 data-hint="Totals from harness-usage.json for the last 7 days. The Usage page has the full breakdown"><a href="usage.html">Usage, last 7 days</a></h2>
+      <h2 data-hint="Totals for the last 7 days (your own requests when logins are on). The Usage page has the full breakdown"><a href="usage.html" id="usageHead">Usage, last 7 days</a></h2>
       <div class="grid tiles four" id="usageTiles"></div>
       <div class="card list" id="usageSavings" hidden></div>
       <div class="card list" id="usageModels"></div>
@@ -226,7 +226,10 @@ const short = (n) => n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${(n / 
 async function loadUsage() {
   try {
     if (!prices) prices = (await getJSON('api/model-info').catch(() => ({}))).models || {};
-    renderUsage(await getJSON('api/usage?days=7'));
+    const usage = await getJSON('api/usage?days=7');
+    // with logins on these are the signed-in person's own requests
+    $('usageHead').textContent = usage.scope?.login ? 'Your usage, last 7 days' : 'Usage, last 7 days';
+    renderUsage(usage);
   } catch (err) {
     $('usageTiles').innerHTML = '';
     $('usageModels').innerHTML = `<div class="sub muted">Usage unavailable: ${esc(err.message)}</div>`;

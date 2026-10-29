@@ -878,7 +878,8 @@ function computeCost(m) {
   if (!info || info.inputCost == null || !k) return null;
   return { usd: Costs.rowCost(k, info).cost, free: false, estimated: !k.exact };
 }
-const replyCost = (m) => (m.cost !== undefined && !m.streaming ? m.cost : computeCost(m));
+// A cost saved as null means the price wasn't known yet (the price list was still loading), so it is worked out again
+const replyCost = (m) => (m.cost != null && !m.streaming ? m.cost : computeCost(m));
 
 function costHtml(m) {
   const c = replyCost(m);
@@ -969,11 +970,18 @@ function drawStats(countNext = true) {
   ].filter(Boolean).join('\n');
 }
 
+// After a wake from sleep the Gateway (and OpenRouter's list) can still be
+// loading; model-info then answers with what config.yaml knows, without prices.
+// Ask again a few times so the prices appear without a reload.
+let modelInfoTries = 0;
 function loadModelInfo() {
   fetch('api/model-info').then(r => r.json()).then((j) => {
     modelInfo = j.models || {};
+    const complete = j.source === 'gateway' && (!j.openrouter || j.openrouter.ok);
+    if (!complete && modelInfoTries < 6) setTimeout(loadModelInfo, 5000 * 2 ** modelInfoTries++);
+    else if (complete) modelInfoTries = 0;
     if (chat && !running.has(chat.id)) drawLog(); else drawStats();
-  }).catch(() => {});
+  }).catch(() => { if (modelInfoTries < 6) setTimeout(loadModelInfo, 5000 * 2 ** modelInfoTries++); });
 }
 
 const fresh = (m) => m.time && Date.now() - m.time < 1500;

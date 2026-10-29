@@ -18,6 +18,11 @@ COPY --from=node-modules /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && pip install --no-cache-dir uv
+# fill the download caches now, so the first start of a common server is a copy from disk, not a download on a
+# 1 GB Machine that is also starting LiteLLM (without this every server timed out)
+ENV UV_TOOL_BIN_DIR=/usr/local/bin npm_config_prefer_offline=true
+RUN npm cache add @modelcontextprotocol/server-memory @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-sequential-thinking @upstash/context7-mcp \
+    && uv tool install mcp-server-fetch && uv tool install mcp-server-time && uv tool install mcp-server-git
 WORKDIR /app
 COPY --from=node-modules /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
@@ -30,7 +35,7 @@ COPY workflows ./workflows
 COPY runner ./runner
 COPY chatdev ./chatdev
 COPY ui ./ui
-COPY scripts/migrate.js ./scripts/migrate.js
+COPY scripts/migrate.js scripts/jev-files-mcp.js ./scripts/
 COPY docker/gateway-start.py docker/fly-start.js ./docker/
 ENV HARNESS_DATA_DIR=/app/data PYTHONUTF8=1
 EXPOSE 3000

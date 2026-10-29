@@ -26,7 +26,7 @@ let openDetails = new Set(); // which <details> are open, kept across redraws
 async function api(path, options) {
   const res = await fetch(`api/runs${path}`, options);
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(body.error || `HTTP ${res.status}`), { disabled: body.disabled });
   return body;
 }
 const agentApi = async (path, options) => {
@@ -253,7 +253,8 @@ async function refresh() {
   } catch (err) {
     $('down').hidden = false;
     $('down').textContent = err.message;
-    $('updated').textContent = 'Task runner unreachable';
+    document.body.classList.toggle('runs-off', Boolean(err.disabled));
+    $('updated').textContent = err.disabled ? 'Agents are off' : 'Task runner unreachable';
   } finally {
     busy = false;
   }

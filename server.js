@@ -560,6 +560,9 @@ const RUNNER_URL = (process.env.RUNNER_URL || 'http://127.0.0.1:3100').replace(/
 // them (HARNESS_RUNS_FOR=users; the default admins keeps them to admins), each only on their own runs. The runner is told
 // whose request it is, and gets that person's GitHub token for the one request (clone, fetch, push) and never keeps it.
 const HOSTED_RUNS = /^(1|true|yes|on)$/i.test(process.env.HARNESS_HOSTED_RUNS || '');
+// Set by the Fly launcher when HARNESS_RUNS is off: there is no runner here, so say so instead of a connection error
+const runsOff = () => /^(1|true|yes|on)$/i.test(process.env.HARNESS_RUNS_OFF || '');
+const RUNS_OFF_MESSAGE = 'Agents are not turned on for this server. Set HARNESS_RUNS=1 (fly secrets set HARNESS_RUNS=1) and redeploy to start the task runner.';
 function hostedRunsGate(req, res, next) {
     const user = req.harnessLogin && req.harnessUser;
     if (!user) return res.status(403).json({ error: 'Runs need a signed-in account' });
@@ -569,7 +572,7 @@ function hostedRunsGate(req, res, next) {
     next();
 }
 for (const part of ['runs', 'agents', 'tickets', 'apps']) {
-    app.use(`/ui/api/${part}`, HOSTED_RUNS ? hostedRunsGate : (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
+    app.use(`/ui/api/${part}`, (req, res, next) => (runsOff() ? res.status(503).json({ error: RUNS_OFF_MESSAGE, disabled: true }) : next()), HOSTED_RUNS ? hostedRunsGate : (req, res, next) => (req.method === 'GET' ? next() : localJsonOnly(req, res, next)), async (req, res) => {
         const headers = { 'content-type': 'application/json', ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}) };
         if (HOSTED_RUNS) {
             headers['x-runner-owner'] = req.harnessUser.name;
@@ -585,7 +588,7 @@ for (const part of ['runs', 'agents', 'tickets', 'apps']) {
             });
             res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(await upstream.text());
         } catch (err) {
-            res.status(502).json({ error: `The task runner is not running (${err.cause?.code || err.message}). Start it with npm run all, or node runner/server.js.` });
+            res.status(502).json({ error: HOSTED_RUNS ? `The task runner is not answering (${err.cause?.code || err.message}). It starts with the server; see fly logs.` : `The task runner is not running (${err.cause?.code || err.message}). Start it with npm run all, or node runner/server.js.` });
         }
     });
 }

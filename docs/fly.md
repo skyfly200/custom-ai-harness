@@ -2,7 +2,7 @@
 
 Run the harness on [Fly.io](https://fly.io) at your own address, with chats and sign-in in [Neon](neon.md). Back to the [README](../README.md). The reasoning and costs are in the [hosted app plan](hosted-app-plan.md). For your own server or a VPS instead, see [Run it on a server](server-docker.md).
 
-**What you get.** One small Fly Machine (1 GB, about $6.70 a month while it runs) running the Gateway, Router and Interceptor from one image (`Dockerfile.fly`, started by `docker/fly-start.js`). Fly adds https. Only the Interceptor is reachable from outside. A 1 GB volume (about $0.15 a month) keeps the files the Routing page edits. The local engine and Ollama are not part of this, so strong requests use OpenRouter models.
+**What you get.** One small Fly Machine (2 GB, about $11 a month while it runs; 1 GB stalls once LiteLLM and several tool servers such as Playwright are running) running the Gateway, Router and Interceptor from one image (`Dockerfile.fly`, started by `docker/fly-start.js`). Fly adds https. Only the Interceptor is reachable from outside. A 1 GB volume (about $0.15 a month) keeps the files the Routing page edits. The local engine and Ollama are not part of this, so strong requests use OpenRouter models.
 
 **Not tested on real Fly yet.** The image builds and starts all three parts (checked locally in Docker, about 365 MB of memory), but the steps below have not been run against a Fly account. Tell me where one fails.
 
@@ -129,7 +129,7 @@ With a database set, the chat page tells the server which chat and message a rep
 
 With `DATABASE_URL` set, scheduled messages are sent by the server (`utils/serverSchedules.js`), not by an open page. Every 30 seconds it looks at each person's schedules, claims one that is due by moving its next time forward in the same database row (so a stale page or a second server can't send it twice), adds the message to the target chat, asks the model through its own `/v1/chat/completions` as that person (so routing, guest credit and the person's own OpenRouter credential all apply) and saves the reply. The page notices the new chat within a minute.
 
-- **It stays awake.** Fly can't wake a stopped Machine for a schedule, so while any schedule has a next run the idle sleep (`HARNESS_IDLE_STOP_MIN`) holds off. Set `HARNESS_SCHEDULES_KEEP_AWAKE=0` to let it sleep anyway (schedules then run late, when something wakes it). That makes the Machine cost the full month (about $6 to $7 on shared-cpu-1x 1 GB).
+- **It stays awake.** Fly can't wake a stopped Machine for a schedule, so while any schedule has a next run the idle sleep (`HARNESS_IDLE_STOP_MIN`) holds off. Set `HARNESS_SCHEDULES_KEEP_AWAKE=0` to let it sleep anyway (schedules then run late, when something wakes it). That makes the Machine cost the full month (about $10 to $12 on shared-cpu-1x 2 GB).
 - **What a run has:** the chat's history (text attachments included, images are noted but not sent), the project's instructions, the chat's system prompt and notes, switched-on skills, and the chat's or project's routing. It has **no tools** (MCP, repo, shell).
 - **Time zones.** The page saves its time zone with each schedule; daily, weekday and weekly runs keep the same wall-clock time through daylight saving.
 - **Off:** `HARNESS_SERVER_SCHEDULES=0` returns to the page sending them. With no database nothing changes.

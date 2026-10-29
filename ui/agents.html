@@ -90,8 +90,8 @@
     <div class="row oneoff pickrow">
       <!-- The repo field is one self-contained block (#repoField). Swap it for another picker by keeping an input named "repo" (id "repo") inside it. -->
       <div class="field repo-field" id="repoField"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
-        <div class="repo-input"><input type="text" name="repo" id="repo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
-        <div class="recent" id="recent"></div></div>
+        <div class="repo-input"><input type="text" name="repo" id="repo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
+        <div class="recent" id="recent"></div><datalist id="repoList"></datalist></div>
       <label class="field"><span data-hint="The steps the agent follows. Auto asks Jev which recipe fits your goal, and shows its pick before you start. Swarm runs several agents at once">How</span>
         <select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select>
         <span class="pick-note muted" id="pickNote"></span></label>

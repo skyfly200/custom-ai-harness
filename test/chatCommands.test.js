@@ -44,14 +44,14 @@ function context({ chat = { id: 'c1', messages: [] }, models = [], commands = []
   return ctx;
 }
 
-function subagentContext({ hosted = false, github = null, models = SERVED, response = { id: 'r1', branch: 'harness/r1' } } = {}) {
+function subagentContext({ hosted = false, noFolder = false, github = null, models = SERVED, response = { id: 'r1', branch: 'harness/r1' } } = {}) {
   const toasts = [];
   const saved = [];
   const requests = [];
   const chat = { id: 'c1', messages: [] };
   const ctx = {
     chat, gatewayModels: models, modelAlias, console, JSON, Date,
-    repoOf: () => (hosted ? null : { path: 'C:\\repos\\demo', name: 'demo' }),
+    repoOf: () => (hosted || noFolder ? null : { path: 'C:\\repos\\demo', name: 'demo' }),
     hostedNoFolders: () => hosted,
     ghOf: () => github,
     routeOf: () => ({ model: 'auto' }),
@@ -227,4 +227,14 @@ test('/subagent in a hosted chat uses the attached GitHub repo, and asks for one
   await without.subagentCommand('/subagent look around');
   assert.equal(without.requests.length, 0);
   assert.match(without.toasts.at(-1), /Attach a GitHub repo/);
+});
+
+test('/subagent on a local chat with only a GitHub repo uses it, and names both ways to connect one', async () => {
+  const gh = subagentContext({ noFolder: true, github: { full: 'skyfly200/demo' } });
+  await gh.subagentCommand('/subagent look around');
+  assert.equal(gh.requests[0].body.repo, 'skyfly200/demo');
+  const none = subagentContext({ noFolder: true });
+  await none.subagentCommand('/subagent look around');
+  assert.equal(none.requests.length, 0);
+  assert.match(none.toasts.at(-1), /Options → Tools → Git repo.*Options → Tools → GitHub/);
 });

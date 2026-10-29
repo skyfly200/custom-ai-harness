@@ -22,6 +22,10 @@ To use it, run `npm run all` (it starts the runner as a fourth part), put a git 
 
 **Terminal.** A **Terminal** panel under the task list (opens when the selected run has run a command) shows what the agent ran and what came back, in [xterm.js](https://xtermjs.org) (vendored in `ui/vendor/xterm/`, so it needs no install or internet): `$ command`, its output, and a red `[exit code N]` on failure, with stage names, approvals and file reads as dim one-liners. It follows the run live as the page refreshes. It is a replay of the run's record, not a shell: typing in it does nothing, and output is cut to the length the run's record keeps. A live interactive shell in the sandbox is not built.
 
+### Sandbox lifetime
+
+The cloud (E2B) sandbox's life is clamped to your plan's cap: `E2B_MAX_TIMEOUT_MIN` sets the longest a sandbox may live (default 60 minutes), so a long run is stopped before the sandbox is killed underneath it.
+
 ### Persistent agents
 
 The Agents page opens on floating orbs, one per agent plus a built-in **Default** agent for one-off runs and a **+** orb to make a new agent. Hover (or tap, then tap again) an orb for its details card; click it to open that agent's page and start runs there. Open runs float in a small panel grouped by agent. Motion stops under reduced-motion.

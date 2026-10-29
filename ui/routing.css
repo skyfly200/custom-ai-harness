@@ -203,7 +203,7 @@ dialog#addDialog [hidden], dialog#statsDialog [hidden] { display: none; }
 dialog#statsDialog { width: min(560px, calc(100vw - 32px)); padding: 18px 20px; color: var(--text); }
 .ladder-warn { margin: 6px 10px 0; }
 
-.auto-box { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 14px; margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--line, #d8dde6); border-radius: 12px; }
+.auto-box { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 14px; margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--field-border); border-radius: 12px; background: var(--panel); }
 .auto-box[hidden] { display: none; }
 .auto-box > b { flex: 1 1 100%; }
 .auto-box label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; flex: 1 1 160px; }
@@ -287,3 +287,31 @@ table.compare button.link { background: none; border: 0; padding: 0; color: inhe
   .profile-pick select { flex: 1 1 100%; min-width: 0; max-width: 100%; }
   .profiles .small { flex-basis: 100%; }
 }
+
+/* Dialogs: a dialog does not inherit the page's text colour, so set it (it was black on the dark panel) */
+dialog.card { color: var(--text); border-color: var(--field-border); box-shadow: var(--shadow); }
+dialog.card::backdrop { background: rgba(0,0,0,.5); }
+dialog.card h3 { margin: 0 0 4px; font-size: 17px; }
+dialog.card .sub, dialog.card .small.muted { color: var(--muted); }
+dialog#newDialog { width: min(440px, calc(100vw - 32px)); padding: 18px 20px; }
+dialog#newDialog form { display: flex; flex-direction: column; gap: 14px; }
+dialog#newDialog .add-head { display: block; }
+dialog#newDialog select, dialog#newDialog input { width: 100%; }
+dialog#compareDialog { width: min(1000px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 18px 20px; }
+dialog#compareDialog .add-head { display: flex; align-items: flex-start; gap: 12px; }
+dialog#compareDialog .add-head > div { flex: 1; }
+dialog#compareDialog .add-head .close { padding: 0 8px; font-size: 18px; line-height: 26px; border-radius: 6px; }
+table.compare th, table.compare td { border-bottom-color: var(--border); }
+table.compare td.differs { background: color-mix(in srgb, var(--accent) 22%, var(--panel)); }
+.auto-box input, .auto-box select { background: var(--bg); }
+
+/* Model boxes: a one-line summary, the rest behind Details */
+.node .brief { font-size: 12px; color: var(--muted); }
+.node .brief .stat { color: var(--text); }
+.node details.more > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--accent); list-style: none; padding: 2px 0; }
+.node details.more > summary::-webkit-details-marker { display: none; }
+.node details.more > summary::before { content: '▸'; display: inline-block; width: 14px; }
+.node details.more[open] > summary::before { content: '▾'; }
+.node .more-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+/* An opened box grows over its neighbours; keep it on top (Tidy layout spaces them out again) */
+.node:has(details.more[open]) { z-index: 5; }

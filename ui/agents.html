@@ -132,7 +132,7 @@
       <div class="picker-head"><strong id="agentDialogTitle">New agent</strong><button type="button" id="agentClose" aria-label="Close">×</button></div>
       <label class="field"><span>Name</span><input type="text" name="name" required maxlength="60" placeholder="Docs keeper"></label>
       <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use. Changing it starts the agent's work over from that repo">Repo</span>
-        <div class="repo-input"><input type="text" name="repo" id="agentRepo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
+        <div class="repo-input"><input type="text" name="repo" id="agentRepo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
       <label class="field"><span data-hint="Told to the agent at the start of every task">Standing instructions</span>
         <textarea name="instructions" rows="4" placeholder="Keep changes small. Update the docs when behaviour changes. Run npm test before finishing."></textarea></label>
       <div class="row">

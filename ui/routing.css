@@ -240,3 +240,50 @@ table.compare button.link { background: none; border: 0; padding: 0; color: inhe
 .catalog-bench .val { font-variant-numeric: tabular-nums; text-align: right; }
 .catalog-bench-note { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .catalog-bench-note code { font-size: 11px; }
+
+/* ---- zoom buttons, and the tap-to-connect state --------------------------- */
+.canvas-wrap { position: relative; }
+.zoombar { position: absolute; right: 14px; bottom: 14px; display: flex; align-items: stretch; z-index: 5;
+  background: var(--panel); border: 1px solid var(--field-border); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+.zoombar button { border: 0; border-radius: 0; background: transparent; color: var(--text); min-width: 34px; padding: 4px 8px; font: inherit; font-size: 14px; cursor: pointer; }
+.zoombar button + button { border-left: 1px solid var(--field-border); }
+.zoombar button:hover { background: var(--bg); }
+#zoomLevel { min-width: 52px; font-variant-numeric: tabular-nums; font-size: 12px; }
+.arm-hint { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 5; max-width: calc(100% - 20px); padding: 6px 12px;
+  border-radius: 999px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; pointer-events: none; text-align: center; }
+.arm-hint[hidden] { display: none; }
+.port.out-port.armed { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent); }
+.canvas.arming .node.model { outline: 2px dashed var(--accent); outline-offset: 2px; }
+
+/* ---- touch: fingers drag boxes, dots and the view, so the browser must not scroll or select ---- */
+.node .head, .port.out-port, .wires .hit, .node button.hold { touch-action: none; }
+.node button.hold, .node .head { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.node .head { -webkit-tap-highlight-color: transparent; }
+
+@media (pointer: coarse) {
+  /* the canvas is panned and pinched by script; scrolling the page happens above and below it */
+  .canvas { touch-action: none; -webkit-user-select: none; user-select: none; overscroll-behavior: contain; height: calc(100dvh - 170px); min-height: 360px; }
+  .canvas input, .canvas select { -webkit-user-select: text; user-select: text; }
+  /* a finger-sized grab area around each output dot, and rows tall enough that neighbours don't overlap */
+  .out { min-height: 36px; }
+  .port.out-port { width: 18px; height: 18px; right: -10px; }
+  .port.out-port::before { content: ''; position: absolute; inset: -9px -14px; }
+  .node .head { padding: 12px 10px; }
+  .node .head .close { min-width: 40px; min-height: 36px; font-size: 18px; display: inline-flex; align-items: center; justify-content: center; }
+  .wires .hit { stroke-width: 30; }
+  .zoombar button { min-height: 44px; min-width: 44px; }
+  #zoomLevel { min-width: 60px; }
+  /* every toolbar button reachable in one swipeable row */
+  .toolbar { display: flex; flex-wrap: nowrap; align-items: center; overflow-x: auto; scrollbar-width: none; gap: 8px; padding-bottom: 4px; }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .toolbar > * { flex: none; }
+  .toolbar .note { max-width: 60vw; white-space: normal; }
+}
+@media (max-width: 760px) {
+  .zoombar { right: 8px; bottom: 8px; }
+}
+@media (max-width: 760px) {
+  .profile-pick { display: flex; flex: 1 1 100%; min-width: 0; flex-wrap: wrap; }
+  .profile-pick select { flex: 1 1 100%; min-width: 0; max-width: 100%; }
+  .profiles .small { flex-basis: 100%; }
+}

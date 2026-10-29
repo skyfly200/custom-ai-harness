@@ -17,6 +17,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const LAYOUT_KEY = 'harness-routing-layout';
 const ZOOM_KEY = 'harness-routing-zoom';
+const MAX_ZOOM = 2;      // pinch and the + button can enlarge up to this
 const MIN_ZOOM = 0.05;   // Tidy scales the canvas down to fit, but not below this
 const BACKEND_HELP = {
   routellm: 'RouteLLM BERT, in the Router process.',
@@ -101,9 +102,11 @@ let newKeys = 0;     // keys for provider models added on this page (saved ones 
 let view = '';       // the strategy being shown: '' for the default, else a profile id
 let toolInfo = null; // MCP servers (GET api/tools)
 
+let worldSize = { w: 0, h: 0 };
+let armed = null;    // output dot tapped on a touch screen: the next model tapped is connected to it
 let zoom = 1;        // scale of the world (set by Tidy so every box is in view)
 try { positions = JSON.parse(localStorage.getItem(LAYOUT_KEY)) || {}; } catch {}
-try { const z = Number(localStorage.getItem(ZOOM_KEY)); if (z >= MIN_ZOOM && z <= 1) { zoom = z; $('world').style.transform = z === 1 ? '' : `scale(${z})`; $('world').style.transformOrigin = '0 0'; } } catch {}
+try { const z = Number(localStorage.getItem(ZOOM_KEY)); if (z >= MIN_ZOOM && z <= MAX_ZOOM) { zoom = z; $('world').style.transform = z === 1 ? '' : `scale(${z})`; $('world').style.transformOrigin = '0 0'; } } catch {}
 
 async function getJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -693,6 +696,7 @@ function render() {
   const keep = $('wires');
   world.innerHTML = entryNode() + compressNode() + routerNode() + toolsNode() + models().map(modelNode).join('');
   world.prepend(keep);
+  disarm();
   placeNodes();
   drawWires();
 }
@@ -746,6 +750,7 @@ function placeNodes() {
 // The world's box is its unscaled size; negative margins take back the space the
 // scale removed, so the canvas scrolls over what is drawn and no more
 function sizeWorld(w, h) {
+  worldSize = { w, h };
   const el = $('world');
   el.style.width = w + 'px';
   el.style.height = h + 'px';
@@ -865,9 +870,11 @@ function tidy() {
 // instead), and scrolls to the top left. Positions stay in unscaled units.
 function setZoom(z) {
   zoom = z;
+  if (worldSize.w) sizeWorld(worldSize.w, worldSize.h);
   $('world').style.transform = z === 1 ? '' : `scale(${z})`;
   $('world').style.transformOrigin = '0 0';
   try { localStorage.setItem(ZOOM_KEY, String(z)); } catch {}
+  showZoom();
 }
 function fitView() {
   const canvas = $('canvas');
@@ -971,10 +978,20 @@ function modelAt(e) {
 
 $('world').addEventListener('pointerdown', (e) => {
   const port = e.target.closest('.out-port');
+  // A dot is armed (tapped): tapping a model connects it, anything else but another dot lets go
+  if (armed && !(port && !port.classList.contains('fixed'))) {
+    const target = e.target.closest('.node.model');
+    const was = armed;
+    disarm();
+    if (target && !e.target.closest('button, input, select, textarea, a')) {
+      e.preventDefault();
+      return connect(was, target.dataset.model);
+    }
+  }
   if (port && !port.classList.contains('fixed')) {
     e.preventDefault();
     port.setPointerCapture(e.pointerId);
-    drag = { kind: 'wire', port: port.dataset.port, draft: { a: pointIn(port), b: worldPoint(e) } };
+    drag = { kind: 'wire', port: port.dataset.port, draft: { a: pointIn(port), b: worldPoint(e) }, at: { x: e.clientX, y: e.clientY }, moved: false };
     drawWires();
     return;
   }
@@ -1008,6 +1025,7 @@ $('world').addEventListener('pointermove', (e) => {
     drag.node.style.top = pos.y + 'px';
     drawWires();
   } else {
+    if (!Gesture.isTap(e.clientX - drag.at.x, e.clientY - drag.at.y)) drag.moved = true;
     drag.draft.b = worldPoint(e);
     for (const n of $('world').querySelectorAll('.node.drop')) n.classList.remove('drop');
     modelAt(e)?.classList.add('drop');
@@ -1026,9 +1044,30 @@ function endDrag(e) {
     return;
   }
   const target = e.type === 'pointerup' ? modelAt(e) : null;
-  if (target) connect(was.port, target.dataset.model);
-  else render();
+  if (target && was.moved) connect(was.port, target.dataset.model);
+  else if (e.type === 'pointerup' && !was.moved) {
+    // Tapped, not dragged: the dot waits for a model to be tapped (a second tap on it lets go)
+    const same = armed === was.port;
+    render();
+    if (!same) arm(was.port);
+  } else render();
 }
+
+function arm(portId) {
+  armed = portId;
+  const dot = $('world').querySelector(`.out-port[data-port="${CSS.escape(portId)}"]`);
+  dot?.classList.add('armed');
+  $('canvas').classList.add('arming');
+  $('armHint').hidden = false;
+}
+function disarm() {
+  armed = null;
+  for (const d of $('world').querySelectorAll('.out-port.armed')) d.classList.remove('armed');
+  $('canvas').classList.remove('arming');
+  $('armHint').hidden = true;
+}
+// A long press on × must not open the browser's menu on a touch screen
+$('world').addEventListener('contextmenu', (e) => { if (e.target.closest('button.hold, .head, .out-port')) e.preventDefault(); });
 $('world').addEventListener('pointerup', endDrag);
 $('world').addEventListener('pointercancel', endDrag);
 // Letting go, or sliding off ×, before the time is up keeps the model
@@ -1804,3 +1843,62 @@ function followLive() {
 
 load().catch(err => note(err.message, 'err'));
 followLive();
+
+// ---- touch: pan, pinch and zoom buttons --------------------------------------
+
+// Zooms to z keeping the point at client (cx, cy) where it is on the screen
+function zoomAt(z, cx, cy) {
+  z = Gesture.clampZoom(z, { min: MIN_ZOOM, max: MAX_ZOOM });
+  if (z === zoom) return;
+  const canvas = $('canvas'), w = $('world').getBoundingClientRect();
+  const dx = cx - w.left, dy = cy - w.top, old = zoom;
+  setZoom(z);
+  canvas.scrollLeft += Gesture.scrollDelta(dx, old, z);
+  canvas.scrollTop += Gesture.scrollDelta(dy, old, z);
+  drawWires();
+}
+function zoomCenter(z) {
+  const r = $('canvas').getBoundingClientRect();
+  zoomAt(z, r.left + r.width / 2, r.top + r.height / 2);
+}
+function showZoom() { $('zoomLevel').textContent = Math.round(zoom * 100) + '%'; }
+$('zoomIn').addEventListener('click', () => zoomCenter(Gesture.stepZoom(zoom, 1, { min: MIN_ZOOM, max: MAX_ZOOM })));
+$('zoomOut').addEventListener('click', () => zoomCenter(Gesture.stepZoom(zoom, -1, { min: MIN_ZOOM, max: MAX_ZOOM })));
+$('zoomLevel').addEventListener('click', () => zoomCenter(1));
+showZoom();
+
+// Fingers (and pens) on empty canvas: one drags the view, two pinch it. Mouse
+// keeps its scrollbars. Boxes' titles, dots, lines and fields do their own thing.
+const fingers = new Map();   // pointerId -> { x, y } on the screen
+let gesture = null;          // { kind: 'pan' } or { kind: 'pinch', dist, zoom }
+const PAN_SKIP = '.head, .out-port, button, input, select, textarea, a, label, [data-wire], .zoombar';
+$('canvas').addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse' || drag || hold) return;
+  if (fingers.size === 0 && e.target.closest(PAN_SKIP)) return;
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (fingers.size === 2) {
+    const [a, b] = [...fingers.values()];
+    gesture = { kind: 'pinch', dist: Gesture.distance(a, b), zoom };
+  } else if (fingers.size === 1) gesture = { kind: 'pan' };
+});
+$('canvas').addEventListener('pointermove', (e) => {
+  const f = fingers.get(e.pointerId);
+  if (!f || !gesture) return;
+  if (gesture.kind === 'pan') {
+    $('canvas').scrollLeft -= e.clientX - f.x;
+    $('canvas').scrollTop -= e.clientY - f.y;
+    f.x = e.clientX; f.y = e.clientY;
+    return;
+  }
+  f.x = e.clientX; f.y = e.clientY;
+  const [a, b] = [...fingers.values()];
+  const mid = Gesture.midpoint(a, b);
+  zoomAt(Gesture.pinchZoom(gesture.zoom, gesture.dist, Gesture.distance(a, b), { min: MIN_ZOOM, max: MAX_ZOOM }), mid.x, mid.y);
+});
+function liftFinger(e) {
+  if (!fingers.delete(e.pointerId)) return;
+  // One finger left of a pinch carries on as a pan from where it is
+  gesture = fingers.size === 1 ? { kind: 'pan' } : null;
+}
+$('canvas').addEventListener('pointerup', liftFinger);
+$('canvas').addEventListener('pointercancel', liftFinger);

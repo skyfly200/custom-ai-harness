@@ -169,11 +169,11 @@ body.runs-off main > :not(header):not(#down) { display: none; }
 .bubble.add .orb { background: transparent; border: 1.5px dashed var(--border); box-shadow: none; display: grid; place-items: center; }
 .bubble.add .orb i { display: none; }
 .bubble.add .orb span { font-size: 34px; line-height: 1; color: var(--accent); }
-.orbcard { position: absolute; left: 50%; top: calc(100% - 6px); z-index: 6; width: 250px; display: grid; gap: 4px; padding: 12px 14px; font-size: 12.5px; text-align: left; color: var(--text);
-  border: 1px solid var(--border); border-radius: 14px; background: var(--glass, var(--bg)); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: var(--shadow);
+.orbcard { position: absolute; left: 50%; top: calc(100% + 2px); z-index: 6; width: 210px; display: grid; gap: 3px; padding: 10px 14px; text-align: center; color: var(--text);
+  border: 1px solid var(--border); border-radius: 16px; background: var(--panel, #fff); box-shadow: var(--shadow);
   opacity: 0; visibility: hidden; transform: translate(-50%, 6px); transition: opacity .18s, transform .18s, visibility .18s; pointer-events: none; }
-.orbcard b { color: var(--muted); font-weight: 600; margin-right: 4px; }
-.orbcard .open { margin-top: 4px; color: var(--accent); font-weight: 600; }
+.orbcard .does { font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.orbcard .facts { font-size: 11.5px; color: var(--muted); }
 .bubble:hover .orbcard, .bubble:focus-within .orbcard, .bubble.peek .orbcard { opacity: 1; visibility: visible; transform: translate(-50%, 0); pointer-events: auto; }
 .backbar { margin: 4px 0 8px; }
 .livepanel { position: fixed; right: 18px; bottom: 18px; z-index: 20; width: min(300px, calc(100vw - 36px)); max-height: 40vh; overflow: auto; padding: 12px 14px; font-size: 13px;
@@ -190,3 +190,30 @@ body.runs-off main > :not(header):not(#down) { display: none; }
   .livepanel { right: 12px; left: 12px; width: auto; bottom: 12px; } }
 .hero[hidden], .split[hidden], #listTitle[hidden], #newRun[hidden], #agentInfo[hidden], .livepanel[hidden] { display: none !important; }
 .orbcard, .livepanel { background: var(--panel, #fff); }
+
+body.view-home #githubBox, body.view-home #updated, body.view-home .hero { display: none !important; }
+.bubbles { min-height: calc(100vh - 150px); align-content: center; gap: 48px 64px; padding-top: 8px; }
+.orbbtn .orb { width: 96px; height: 96px; }
+.orbbtn .nm { font-weight: 600; font-size: 14px; letter-spacing: .01em; }
+.bubble.def .nm { color: var(--muted); }
+.orbbtn:hover .orb, .orbbtn:focus-visible .orb { transform: scale(1.1); }
+@media (max-width: 760px) { .bubbles { min-height: calc(100vh - 190px); gap: 34px 28px; } .orbbtn .orb { width: 76px; height: 76px; } }
+
+/* Views inside an agent: start a run, the list of runs, one run */
+.backbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel, transparent); }
+.seg[hidden] { display: none; }
+.seg button { margin: 0; padding: 4px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+.seg button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); font-weight: 600; }
+.list[hidden], .runview[hidden] { display: none !important; }
+body.sub-runs .list { max-height: none; }
+.runview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.runview.side { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.runview .detail { max-height: calc(100vh - 190px); overflow: auto; overscroll-behavior: contain; margin: 0; }
+.runview .termpanel { margin: 0; position: sticky; top: 8px; }
+.runview.side .termhost { height: calc(100vh - 290px); min-height: 240px; }
+.runview:not(.side) .detail { max-height: 70vh; }
+.approval { position: sticky; top: 0; z-index: 2; background: var(--panel, var(--bg)); }
+@media (max-width: 900px) { .runview.side { grid-template-columns: minmax(0, 1fr); } .runview .termpanel { position: static; } .runview.side .termhost { height: 300px; } }
+.runview .detail-head { position: sticky; top: -12px; z-index: 1; margin: -12px -12px 8px; padding: 12px; background: var(--panel, var(--bg)); }
+@media (max-width: 900px) { #layoutNav { display: none !important; } }

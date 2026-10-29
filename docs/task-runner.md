@@ -24,7 +24,7 @@ To use it, run `npm run all` (it starts the runner as a fourth part), put a git 
 
 ### Persistent agents
 
-The Agents page opens on floating orbs, one per agent plus a built-in **Default** agent for one-off runs and a **+** orb to make a new agent. Hover (or tap, then tap again) an orb for its details card; click it to open that agent's page and start runs there. Open runs float in a small panel grouped by agent. Motion stops under reduced-motion.
+The Agents page opens on floating orbs, one per agent plus a built-in **Default** agent for one-off runs and a **+** orb to make a new agent. Hover (or tap, then tap again) an orb for its details card; click it to open that agent's page and start runs there. Open runs float in a small panel grouped by agent. Inside an agent there are three views: **New run**, **Runs** (the list) and one run. A run's pane scrolls and follows the newest line by itself while you stay at its bottom, never moving the page, and sits beside the terminal (or above it with **Stacked**; phones always stack). Motion stops under reduced-motion.
 
 A run is a one-off. An **agent** is a named, long-lived worker for one repo that you give task after task. Press **+ New agent** on the Agents page and set a name, the repo, standing instructions ("keep changes small, run `npm test` before finishing"), one workflow, a routing, an effort, step and minute limits, and optionally a chat project. Pick the agent in the bar to see its tasks and give it a new one.
 

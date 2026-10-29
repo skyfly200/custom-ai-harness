@@ -45,7 +45,17 @@
 
   <div class="bubbles" id="agentChips" role="list" aria-label="Agents"></div>
   <aside class="livepanel" id="livePanel" aria-label="Open runs" hidden></aside>
-  <p class="backbar" id="backBar" hidden><button type="button" id="backBtn">← All agents</button></p>
+  <div class="backbar" id="backBar" hidden>
+    <button type="button" id="backBtn">← All agents</button>
+    <span class="seg" id="subNav" role="tablist" aria-label="Views">
+      <button type="button" role="tab" data-sub="start" id="tabStart">New run</button>
+      <button type="button" role="tab" data-sub="runs" id="tabRuns">Runs</button>
+    </span>
+    <span class="seg" id="layoutNav" aria-label="Run layout" hidden>
+      <button type="button" data-layout="side" id="layoutSide" data-hint="Run and terminal next to each other">Side by side</button>
+      <button type="button" data-layout="stack" id="layoutStack" data-hint="Run above, terminal below">Stacked</button>
+    </span>
+  </div>
   <div id="agentInfo" class="card agent-info" hidden></div>
 
   <div id="appsBox">
@@ -159,14 +169,14 @@
   </dialog>
 
   <h2 id="listTitle">Runs</h2>
-  <div class="split">
-    <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
+  <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
+  <div class="runview side" id="runView">
     <div class="card detail" id="detail"><p class="muted">Pick a run to see what the agent did.</p></div>
+    <details class="card termpanel" id="termPanel" hidden open>
+      <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
+      <div id="termHost" class="termhost"></div>
+    </details>
   </div>
-  <details class="card termpanel" id="termPanel" hidden>
-    <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
-    <div id="termHost" class="termhost"></div>
-  </details>
   <div class="card" id="shipPanel" hidden>
     <strong data-hint="Merges the change into the app through a GitHub pull request, so its normal pipeline deploys it. Needs GITHUB_TOKEN in .env. Approve stays off while tests fail or files outside the editable paths changed">Ship this change</strong>
     <div id="shipInfo"></div>

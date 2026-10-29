@@ -187,3 +187,18 @@ test('a program that dies on start shows its error, not the end of the stack', a
 test('the Docker image ships the jev-files tool server', () => {
     assert.match(fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8'), /COPY .*scripts\/jev-files-mcp\.js/);
 });
+
+test('servers that download their program connect one at a time, the rest alongside', async () => {
+    const m = new McpManager({ specs: async () => ({}) });
+    let running = 0, peak = 0, plain = 0;
+    m.connect = async (s) => {
+        if (s.spec.command === 'node') { plain++; return; }
+        peak = Math.max(peak, ++running);
+        await new Promise(r => setTimeout(r, 20));
+        running--;
+    };
+    const list = ['npx', 'uvx', 'npx', 'node'].map((command, i) => ({ name: `s${i}`, spec: { command } }));
+    await m.connectAll(list);
+    assert.equal(peak, 1);
+    assert.equal(plain, 1);
+});

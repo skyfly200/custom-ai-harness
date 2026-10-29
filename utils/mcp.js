@@ -90,6 +90,20 @@ function writeConfig(servers, file = CONFIG_FILE) {
     fs.renameSync(tmp, file);
 }
 
+/**
+ * Settings that keep npx from stalling on a server host: no update check, funding or audit requests, and a
+ * download cache in a folder that can be written (a read-only or missing home folder makes npx hang or fail).
+ */
+function launcherEnv() {
+    const env = { npm_config_update_notifier: 'false', npm_config_fund: 'false', npm_config_audit: 'false', npm_config_yes: 'true' };
+    const writable = (dir) => { try { fs.mkdirSync(dir, { recursive: true }); fs.accessSync(dir, fs.constants.W_OK); return true; } catch { return false; } };
+    if (!process.env.npm_config_cache && !writable(path.join(os.homedir(), '.npm'))) {
+        const dir = path.join(process.env.HARNESS_DATA_DIR || os.tmpdir(), 'npm-cache');
+        if (writable(dir)) env.npm_config_cache = dir;
+    }
+    return env;
+}
+
 function programName(spec) {
     return String(spec.command || '').split(/[\\/]/).pop().replace(/\.(exe|cmd|bat)$/i, '');
 }
@@ -226,8 +240,19 @@ class McpManager {
             specs = {};
         }
         for (const [name, spec] of Object.entries(specs)) this.servers.set(name, this.entry(name, spec));
-        await Promise.all([...this.servers.values()].filter(s => s.status === 'connecting').map(s => this.connect(s)));
+        await this.connectAll([...this.servers.values()].filter(s => s.status === 'connecting'));
         this.indexTools();
+    }
+
+    // Servers that download their program (npx, uvx, docker) connect one after another: started together they
+    // fight over the network, the npm cache and a small Machine's CPU and memory, and every one of them times out.
+    // The rest connect in parallel alongside.
+    async connectAll(list) {
+        const queue = list.filter(s => isLauncher(s.spec));
+        await Promise.all([
+            ...list.filter(s => !isLauncher(s.spec)).map(s => this.connect(s)),
+            (async () => { for (const s of queue) await this.connect(s); })(),
+        ]);
     }
 
     async readSpecs() {
@@ -275,7 +300,7 @@ class McpManager {
             s.client = null;
             try { await client?.close(); } catch {}
         }));
-        await Promise.all(fresh.map(s => this.connect(s)));
+        await this.connectAll(fresh);
         this.indexTools();
     }
 
@@ -352,7 +377,7 @@ class McpManager {
         if (type === 'stdio') {
             if (!spec.command) throw new Error('needs a "command" (or a "url" for an HTTP server)');
             const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
-            const env = { ...process.env, ...(spec.env || {}) };
+            const env = { ...launcherEnv(), ...process.env, ...(spec.env || {}) };
             delete env.NODE_TEST_CONTEXT;
             const transport = new StdioClientTransport({
                 command: spec.command,

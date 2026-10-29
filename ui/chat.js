@@ -2056,6 +2056,9 @@ function submit() {
   // /advisor MODEL sets this chat's advisor and sends nothing
   const asAdvice = advisorCommand(text);
   if (asAdvice) return asAdvice;
+  // /model NAME switches what this chat answers with, same as the "Answer with" picker
+  const asModel = modelCommand(text);
+  if (asModel) return asModel;
   // /subagent and /plan start a run of their own and send nothing to this chat
   const asRun = subagentCommand(text) || agentCommand(text);
   if (asRun) return asRun;
@@ -2111,6 +2114,49 @@ function advisorCommand(text) {
     saveChat(c, { touch: false });
     drawAdvisor(); drawHint();
     toast(`Advisor set to ${pick.model}${pick.from !== pick.model ? ` (from "${pick.from}")` : ''}. This chat's model can ask it for a second opinion.`);
+  })();
+}
+
+// "/model NAME" switches what this chat answers with, as the "Answer with" picker
+// does: a model by any short or partial name, or a strategy by name ("default" and
+// "auto" too). "/model" alone lists the choices. Returns a promise when the message
+// was this command, null otherwise.
+function modelCommand(text) {
+  const m = /^\/model(?:\s+([\s\S]*))?$/i.exec(String(text || '').trim());
+  if (!m) return null;
+  const typed = (m[1] || '').trim();
+  const c = chat;
+  return (async () => {
+    if (!typed) {
+      // list the choices right in the box
+      $('input').value = '/model ';
+      autoGrow(); drawSlash();
+      const r = routeOf(c);
+      toast(`Answering with ${r.model || (r.profile ? `strategy "${r.profile.name}"` : r.auto ? 'Auto' : 'the default strategy')}. Pick one below, or type /model NAME.`);
+      return;
+    }
+    const low = typed.toLowerCase();
+    const strategy = low === 'default' || low === 'auto' ? { value: low, name: low }
+      : (strategies.profiles || []).map(x => ({ value: `p:${x.id}`, name: x.name })).find(x => x.name.toLowerCase() === low || x.value.slice(2) === typed);
+    let value = strategy?.value, label = strategy ? (strategy.name === low ? `the ${low} strategy` : `strategy "${strategy.name}"`) : '';
+    if (!value) {
+      const pick = resolveModelName(typed);
+      if (!pick.model) {
+        const near = modelAlias.search(typed, gatewayModels || [], 6).map(x => x.id);
+        toast(near.length ? `No model matches "${typed}". Did you mean: ${near.join(', ')}?` : `No model matches "${typed}". Type /model to see the choices.`);
+        return;
+      }
+      value = `m:${pick.model}`;
+      label = `${pick.model}${pick.from && pick.from !== pick.model ? ` (from "${pick.from}")` : ''}`;
+    }
+    applyQuick(c, value);
+    saveChat(c, { touch: false });
+    if (chat === c) {
+      $('input').value = ''; c.draft = '';
+      autoGrow(); hideSlash();
+      drawRoute(); drawTools(); drawHint(); drawStats(); drawEffort(); redrawQuick();
+    }
+    toast(`This chat now answers with ${label}.`);
   })();
 }
 
@@ -2381,6 +2427,7 @@ function commandItem(c) {
 // Commands the page itself handles (they do something rather than send a message):
 // setting the advisor, and starting a subagent or a plan.
 const BUILTIN_COMMANDS = [
+  { name: 'model', what: 'Switch what this chat answers with: a model or a strategy', tag: 'this chat', example: '/model opus' },
   { name: 'advisor', what: 'A better model this chat can ask for a second opinion', tag: 'set once', example: '/advisor opus' },
   { name: 'subagent', what: 'Hand one task to an agent on its own branch, on a model of its own', tag: 'one-off run', example: '/subagent haiku find the config loader' },
   { name: 'agent', what: 'Hand a task, with this chat for context, to a standing agent on the Agents page', tag: 'agents page', example: '/agent Docs keeper update the install steps' },
@@ -2396,6 +2443,9 @@ function drawSlash() {
   // the first / fills in the examples, so there is something to try
   if (!commands.length) { commands = STARTER_COMMANDS.map(c => ({ id: uid(), ...c })); saveCommands(); }
   const q = slashQuery($('input').value);
+  // after /advisor, /model or /subagent: the models that fit what is typed so far
+  const arg = modelArgument($('input').value);
+  if (arg) return drawModelMenu(arg);
   if (q === null || q.includes(' ')) return hideSlash(); // past the name: the message itself
   const needle = q.toLowerCase();
   // the page's own commands come first; they do something instead of sending a message
@@ -2420,8 +2470,51 @@ function drawSlash() {
   $('slash').hidden = false;
 }
 
+// The half-typed model after /advisor, /model or /subagent: { command, query }, or
+// null. A subagent's model is only its first word, and only until the task starts.
+function modelArgument(value) {
+  const m = /^\/(advisor|model|subagent)[ \t]+([^\n]*)$/i.exec(String(value || ''));
+  if (!m) return null;
+  const command = m[1].toLowerCase();
+  if (command === 'subagent' && /\s/.test(m[2])) return null;
+  if (command === 'advisor' && /^(off|none|no)$/i.test(m[2].trim())) return null;
+  return { command, query: m[2].trim() };
+}
+
+const MODEL_MENU_ROWS = 20;
+function drawModelMenu({ command, query }) {
+  const found = modelAlias.search(query, gatewayModels || [], MODEL_MENU_ROWS);
+  const strategyRows = command === 'model'
+    ? [{ id: 'default', note: 'strategy' }, { id: 'auto', note: 'strategy' }, ...(strategies.profiles || []).map(x => ({ id: x.name, note: 'strategy' }))]
+      .filter(x => !query || x.id.toLowerCase().includes(query.toLowerCase()))
+    : [];
+  const rows = [...strategyRows, ...found.map(x => ({ id: x.id, note: quickStat(x.id).replace(/^ · /, '') }))];
+  if (!rows.length) {
+    $('slash').innerHTML = `<div class="slash-sec">Models</div><div class="slash-none">${(gatewayModels || []).length ? `No model matches "${esc(query)}".` : 'The Gateway lists no models yet.'}</div>`;
+    slashItems = []; slashPick = 0;
+    $('slash').hidden = false;
+    return;
+  }
+  $('slash').innerHTML = `<div class="slash-sec">${command === 'model' ? 'Models and strategies' : 'Models'}${query ? ` matching "${esc(query)}"` : ''}</div>`
+    + rows.map(r => `<div class="slash-item" role="option" data-kind="model" data-name="${esc(r.id)}"><b>${esc(r.id)}</b><span class="tag">${esc(r.note || '')}</span></div>`).join('');
+  slashItems = rows.map(r => r.id);
+  slashPick = Math.min(slashPick, slashItems.length - 1);
+  markSlash();
+  $('slash').hidden = false;
+}
+
+// Fill a chosen model into the command being typed
+function useModel(name) {
+  const cmd = /^\/(\w+)/.exec($('input').value)[1].toLowerCase();
+  const value = `/${cmd} ${name}${cmd === 'subagent' ? ' ' : ''}`;
+  $('input').value = value;
+  hideSlash(); autoGrow();
+  $('input').focus();
+  $('input').setSelectionRange(value.length, value.length);
+}
+
 function markSlash() {
-  const els = $('slash').querySelectorAll('[data-kind="command"], [data-kind="builtin"]');
+  const els = $('slash').querySelectorAll('[data-kind="command"], [data-kind="builtin"], [data-kind="model"]');
   els.forEach((el, i) => el.classList.toggle('on', i === slashPick));
   els[slashPick]?.scrollIntoView({ block: 'nearest' });
 }
@@ -2444,8 +2537,8 @@ function useSlash(name) {
 
 $('slash').addEventListener('mousedown', (e) => {
   // mousedown, so the box keeps its focus
-  const item = e.target.closest('[data-kind="command"], [data-kind="builtin"]');
-  if (item) { e.preventDefault(); useSlash(item.dataset.name); return; }
+  const item = e.target.closest('[data-kind="command"], [data-kind="builtin"], [data-kind="model"]');
+  if (item) { e.preventDefault(); item.dataset.kind === 'model' ? useModel(item.dataset.name) : useSlash(item.dataset.name); return; }
   if (e.target.closest('#slashMake')) {
     e.preventDefault();
     const name = (slashQuery($('input').value) || '').trim();
@@ -2469,6 +2562,12 @@ $('input').addEventListener('keydown', (e) => {
       e.preventDefault();
       // Enter on a command typed in full sends it; either key completes a half-typed one
       if (e.key === 'Enter' && slashCommand($('input').value.trim())) { submit(); return; }
+      const arg = modelArgument($('input').value);
+      if (arg) {
+        // Enter on the model that is already typed in full runs the command
+        if (e.key === 'Enter' && arg.command !== 'subagent' && arg.query === slashItems[slashPick]) { submit(); return; }
+        useModel(slashItems[slashPick]); return;
+      }
       useSlash(slashItems[slashPick]); return;
     }
     if (e.key === 'Escape') { e.preventDefault(); hideSlash(); return; }

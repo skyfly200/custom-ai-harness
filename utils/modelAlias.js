@@ -21,11 +21,13 @@ function shortName(id) {
         .pop();
     const at = bare.search(VERSION);
     const base = at > 0 ? bare.slice(0, at) : bare;
-    return base.replace(/[-_]+$/g, '');
+    return base.replace(/[-_]latest$/, '').replace(/[-_]+$/g, '');
 }
 
 /** [5, 10] for "5.10"; [] when there is no version at all */
 function versionOf(id) {
+    // "or-claude-opus-latest" is whatever is newest, so it outranks any number
+    if (/[-_]latest(?::|$)/i.test(String(id || ''))) return [Infinity];
     const m = VERSION.exec(String(id || '').toLowerCase());
     return m ? m[1].split(/[._]/).map((n) => Number(n)) : [];
 }
@@ -67,7 +69,47 @@ function candidates(name, models = []) {
         // "claude-opus" also answers to "opus" when nothing is called just "opus"
         return shorts.some((f) => s === `claude-${f}` || s === f);
     });
-    return hits.sort((a, b) => (olderThan(a, b) ? 1 : olderThan(b, a) ? -1 : 0));
+    if (hits.length) return hits.sort(newestFirst);
+    // not a family name: every word typed is somewhere in the id ("gpt mini")
+    return search(want, all).filter((h) => h.score >= TOKENS).map((h) => h.id);
+}
+
+const newestFirst = (a, b) => (olderThan(a, b) ? 1 : olderThan(b, a) ? -1 : 0);
+
+// Match scores, best first. A family name is checked before these in candidates().
+const EXACT = 100, PREFIX = 80, TOKENS = 60, LOOSE = 20;
+
+// every character of `needle` appears in `hay` in order ("cldop" in "claude-opus")
+function subsequence(needle, hay) {
+    let i = 0;
+    for (const ch of hay) if (ch === needle[i] && ++i === needle.length) return true;
+    return needle.length === 0;
+}
+
+/**
+ * Models that fit what has been typed so far, best first, for a suggestion list.
+ * Matches across the whole id (vendor, name, version), so "opus", "or-claude-opus",
+ * "gpt mini" and "cldop" all find something. Equal fits list the newest first.
+ * An empty query lists the models as given. Returns [{ id, score }].
+ */
+function search(query, models = [], limit = 0) {
+    const want = String(query || '').trim().toLowerCase();
+    const all = [...new Set(models.filter((m) => typeof m === 'string' && m.trim()))];
+    if (!want) return (limit ? all.slice(0, limit) : all).map((id) => ({ id, score: 0 }));
+    const words = want.split(/[\s/]+/).filter(Boolean);
+    const out = [];
+    for (const id of all) {
+        const low = id.toLowerCase(), bare = low.replace(/^or-/, '');
+        const parts = bare.split(/[^a-z0-9.]+/).filter(Boolean);
+        let score = 0;
+        if (low === want || bare === want) score = EXACT;
+        else if (bare.startsWith(want) || bare.split('/').pop().startsWith(want) || parts.includes(want)) score = PREFIX;
+        else if (words.every((w) => low.includes(w))) score = TOKENS;
+        else if (subsequence(want.replace(/[\s/-]+/g, ''), low.replace(/[^a-z0-9.]/g, ''))) score = LOOSE;
+        if (score) out.push({ id, score });
+    }
+    out.sort((a, b) => b.score - a.score || newestFirst(a.id, b.id) || a.id.length - b.id.length);
+    return limit ? out.slice(0, limit) : out;
 }
 
 /**
@@ -84,6 +126,6 @@ function resolve(name, models = []) {
     return hits.find((m) => versionOf(m).join('.') === same) || null;
 }
 
-const api = { resolve, candidates, shortName, versionOf, olderThan, FAMILIES };
+const api = { resolve, candidates, search, shortName, versionOf, olderThan, FAMILIES };
 if (typeof module === 'object' && module.exports) module.exports = api;
 else globalThis.ModelAlias = api;

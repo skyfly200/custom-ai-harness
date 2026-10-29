@@ -54,3 +54,29 @@ test('the Gateway name for a family is offered when nothing is called just that'
     const list = ['fast-openrouter', 'claude-opus-4.5'];
     assert.deepEqual(alias.candidates('opus', list), ['claude-opus-4.5']);
 });
+
+test('a "-latest" Gateway name answers to its family and counts as the newest', () => {
+    const list = ['or-claude-opus-latest', 'or-claude-sonnet-latest', 'fast-openrouter'];
+    assert.equal(alias.shortName('or-claude-opus-latest'), 'claude-opus');
+    assert.equal(alias.resolve('opus', list), 'or-claude-opus-latest');
+    assert.equal(alias.resolve('sonnet', list), 'or-claude-sonnet-latest');
+    assert.equal(alias.resolve('opus', [...list, 'anthropic/claude-opus-5.5']), 'or-claude-opus-latest');
+});
+
+test('search finds models by any part of the id, best fit first', () => {
+    const list = ['openai/gpt-4o-mini', 'anthropic/claude-opus-5.5', 'anthropic/claude-opus-4.1', 'fast-openrouter', 'local-engine'];
+    const ids = (q) => alias.search(q, list).map(x => x.id);
+    assert.deepEqual(ids('opus'), ['anthropic/claude-opus-5.5', 'anthropic/claude-opus-4.1'], 'newest first');
+    assert.deepEqual(ids('gpt mini'), ['openai/gpt-4o-mini'], 'every word, any order of the id');
+    assert.deepEqual(ids('anthropic/'), ['anthropic/claude-opus-5.5', 'anthropic/claude-opus-4.1']);
+    assert.deepEqual(ids('cldop'), ['anthropic/claude-opus-5.5', 'anthropic/claude-opus-4.1'], 'letters in order');
+    assert.equal(ids('local')[0], 'local-engine');
+    assert.deepEqual(ids('zzz'), []);
+    assert.equal(alias.search('', list, 2).length, 2, 'nothing typed lists the models');
+});
+
+test('a partial name that is not a family still resolves when it is unambiguous', () => {
+    const list = ['openai/gpt-4o-mini', 'fast-openrouter'];
+    assert.equal(alias.resolve('gpt mini', list), 'openai/gpt-4o-mini');
+    assert.equal(alias.resolve('gpt-9', list), null);
+});

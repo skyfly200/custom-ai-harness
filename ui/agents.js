@@ -19,9 +19,12 @@ let selected = location.hash.slice(1) || null;
 let runs = [];
 let agents = [];
 let inAgent = false;   // false: the floating-orbs home; true: one agent's page (agentSel null = the default agent)
+let sub = 'start';     // inside an agent: 'start' a run or the 'runs' list (a picked run shows its own view)
+let layout = (() => { try { return localStorage.getItem('harness-run-layout') === 'stack' ? 'stack' : 'side'; } catch { return 'side'; } })();
 let peekId = null;     // the orb whose details card is open by tap
 let agentSel = null;   // the agent whose tasks are shown, or null for every run
 let busy = false;
+let lastShown = null;  // the run the detail pane last drew
 let hosted = false;    // a shared server: GitHub repos, your own runs only, push to GitHub
 let openDetails = new Set(); // which <details> are open, kept across redraws
 
@@ -163,6 +166,7 @@ function drawTerminal(run) {
   panel.hidden = !has;
   if (!has) return;
   runTerminal ||= window.RunTerminal?.mount($('termHost'));
+  if (layout === 'side' && !panel.open) panel.open = true;
   runTerminal?.update(run);
 }
 $('termPanel').addEventListener('toggle', () => { if ($('termPanel').open) setTimeout(() => runTerminal?.refit(), 0); });
@@ -262,9 +266,16 @@ async function refresh() {
     if (agentSel && !agentOf(agentSel)) agentSel = null;
     renderAgents();
     renderList();
+    applyView();
     if (selected) {
       const run = await api(`/${selected}`).catch(() => null);
+      // the run's own pane follows the newest line while you are at the bottom; the page never scrolls for it
+      const pane = $('detail');
+      const fresh = lastShown !== selected;
+      const stick = fresh || pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
       renderDetail(run);
+      lastShown = selected;
+      if (run && stick && (ACTIVE.has(run.status) || fresh)) pane.scrollTop = ACTIVE.has(run.status) ? pane.scrollHeight : 0;
       drawTerminal(run);
       drawPreview(run);
       drawShip(run);
@@ -286,6 +297,7 @@ $('list').addEventListener('click', (e) => {
   selected = b.dataset.id;
   location.hash = selected;
   openDetails = new Set();
+  applyView();
   renderList();
   refresh();
 });
@@ -294,7 +306,7 @@ $('detail').addEventListener('click', async (e) => {
   const goAgent = e.target.closest('[data-agent]')?.dataset.agent;
   if (goAgent) { e.preventDefault(); chooseAgent(goAgent); return; }
   const go = e.target.closest('[data-go]')?.dataset.go;
-  if (go) { e.preventDefault(); selected = go; location.hash = go; openDetails = new Set(); renderList(); refresh(); return; }
+  if (go) { e.preventDefault(); selected = go; location.hash = go; openDetails = new Set(); applyView(); renderList(); refresh(); return; }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (!act || !selected) return;
   try {
@@ -598,16 +610,9 @@ function lastRunOf(id) {
 }
 function orbCard(a) {
   const def = !a;
-  const route = def ? 'Default' : [a.profile || 'Default', a.effort ? `effort ${a.effort}` : ''].filter(Boolean).join(', ');
-  const rows = [
-    ['Does', def ? 'One-off runs on any repo you pick' : (a.instructions ? nameLine(a.instructions) : `Works on ${a.repo.split(/[\\/]/).filter(Boolean).pop() || a.repo}`)],
-    ['Workflow', def ? 'Jev picks per goal' : nameOf(a.workflow)],
-    ['Models', route],
-    ['Sandbox', def ? 'Your choice per run' : (SANDBOX_NAMES[a.sandbox] || a.sandbox || 'This machine')],
-    ['Cost cap', a && a.maxCost ? `$${a.maxCost} per task` : 'none'],
-    ['Last run', lastRunOf(def ? '' : a.id)],
-  ];
-  return `<span class="orbcard" role="tooltip">${rows.map(([k, v]) => `<span><b>${k}</b> ${esc(v)}</span>`).join('')}<span class="open">Open ${esc(def ? 'Default' : a.name)} →</span></span>`;
+  const doing = def ? 'One-off runs on any repo' : (a.instructions ? nameLine(a.instructions) : `Works on ${a.repo.split(/[\\/]/).filter(Boolean).pop() || a.repo}`);
+  const facts = [def ? 'Jev picks the steps' : nameOf(a.workflow), a && a.maxCost ? `cap $${a.maxCost}` : '', `last: ${lastRunOf(def ? '' : a.id)}`].filter(Boolean);
+  return `<span class="orbcard" role="tooltip"><span class="does">${esc(doing)}</span><span class="facts">${esc(facts.join(' · '))}</span></span>`;
 }
 function renderAgents() {
   renderHero();
@@ -647,15 +652,30 @@ function renderLive() {
 
 // home (floating orbs) or one agent's page
 function applyView() {
+  const view = !inAgent ? 'home' : selected ? 'run' : sub;
   document.body.classList.toggle('view-agent', inAgent);
   document.body.classList.toggle('view-home', !inAgent);
+  for (const v of ['home', 'start', 'runs', 'run']) document.body.classList.toggle(`sub-${v}`, v === view);
   $('agentChips').hidden = inAgent;
   $('backBar').hidden = !inAgent;
-  $('hero').hidden = inAgent;
-  $('agentInfo').hidden = !inAgent;
-  for (const id of ['newRun', 'listTitle', 'termPanel', 'shipPanel', 'previewPanel']) if (!inAgent) $(id).hidden = true; else if (id === 'newRun' || id === 'listTitle') $(id).hidden = false;
-  document.querySelector('.split').hidden = !inAgent;
-  $('appsBox').hidden = !inAgent || Boolean(agentSel) || hosted;
+  $('hero').hidden = true;
+  $('agentInfo').hidden = view !== 'start';
+  $('newRun').hidden = view !== 'start';
+  $('listTitle').hidden = view !== 'runs';
+  $('list').hidden = view !== 'runs';
+  $('runView').hidden = view !== 'run';
+  $('subNav').hidden = view === 'run';
+  $('layoutNav').hidden = view !== 'run';
+  $('tabStart').classList.toggle('on', view === 'start');
+  $('tabRuns').classList.toggle('on', view === 'runs');
+  const open = shown().filter((r) => ACTIVE.has(r.status) && !r.parent).length;
+  $('tabRuns').textContent = open ? `Runs · ${open} open` : 'Runs';
+  $('backBtn').textContent = view === 'run' ? '← Runs' : '← All agents';
+  $('runView').classList.toggle('side', layout === 'side');
+  $('layoutSide').classList.toggle('on', layout === 'side');
+  $('layoutStack').classList.toggle('on', layout === 'stack');
+  if (view !== 'run') for (const id of ['shipPanel', 'previewPanel', 'termPanel']) $(id).hidden = true;
+  $('appsBox').hidden = view !== 'start' || Boolean(agentSel) || hosted;
 }
 function goHome() {
   inAgent = false; agentSel = null; selected = null; peekId = null;
@@ -695,7 +715,19 @@ $('agentChips').addEventListener('click', (e) => {
 });
 $('agentChips').addEventListener('click', (e) => { if (e.target.closest('.orbcard .open')) chooseAgent(e.target.closest('.bubble').querySelector('[data-aid]').dataset.aid); });
 document.addEventListener('click', (e) => { if (peekId && !e.target.closest('.bubble')) { peekId = null; lastHtml.delete('agentChips'); renderAgents(); } });
-$('backBtn').addEventListener('click', goHome);
+$('backBtn').addEventListener('click', () => {
+  if (inAgent && selected) { selected = null; sub = 'runs'; history.pushState(null, '', `#${agentSel || 'default'}`); applyView(); renderList(); renderDetail(null); drawTerminal(null); drawPreview(null); drawShip(null); } else goHome();
+});
+$('subNav').addEventListener('click', (e) => { const b = e.target.closest('[data-sub]'); if (b) { sub = b.dataset.sub; applyView(); renderList(); } });
+$('layoutNav').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-layout]');
+  if (!b) return;
+  layout = b.dataset.layout;
+  try { localStorage.setItem('harness-run-layout', layout); } catch { /* the choice just isn't remembered */ }
+  applyView();
+  if (layout === 'side') $('termPanel').open = true;
+  setTimeout(() => runTerminal?.refit(), 0);
+});
 $('livePanel').addEventListener('click', (e) => {
   const a = e.target.closest('[data-run]');
   if (!a) return;

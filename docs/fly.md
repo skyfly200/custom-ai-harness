@@ -48,6 +48,20 @@ Run the harness on [Fly.io](https://fly.io) at your own address, with chats and 
    ```
 8. **Sign in** at `https://agents.skylerfly.com` with Google (an invited email or one in `HARNESS_ADMIN_EMAILS`) or with the admin name and password from step 4.
 
+## Deploy automatically
+
+A GitHub Actions workflow (`.github/workflows/fly-deploy.yml`) runs `fly deploy --ha=false` every time something merges to `master`. Changes that only touch `docs/`, `test/` or `.md` files don't deploy. You can also run it by hand from the repo's **Actions** tab (Deploy to Fly, Run workflow). Set it up once:
+
+1. **Make a token that can only deploy this app** (PowerShell):
+   ```powershell
+   fly tokens create deploy --app YOUR-APP-NAME --name github-actions
+   ```
+   It prints a long line starting with `FlyV1`. Copy the whole line.
+2. **Save it as a GitHub secret.** In the repository go to Settings, Secrets and variables, Actions, New repository secret. Name it `FLY_API_TOKEN` and paste the line. (Or, with the GitHub CLI: `fly tokens create deploy --app YOUR-APP-NAME | gh secret set FLY_API_TOKEN`.)
+3. **Merge something to `master`** (or run the workflow by hand) and watch the Actions tab. The deploy takes a few minutes.
+
+Notes: the token can deploy and nothing else; revoke it with `fly tokens list` and `fly tokens revoke`. The app name comes from `fly.toml`. Secrets stay in Fly (`fly secrets set`), so deploys don't need them in GitHub. Nothing runs the tests first, since the repo has no CI; run `npm test` before merging. This workflow has not run against a real Fly account yet.
+
 ## Using it from Claude Code and other tools
 
 Make an API key on the **Users** page, then:
@@ -83,7 +97,7 @@ With a database set, the chat page tells the server which chat and message a rep
 | To | Run |
 |---|---|
 | See what it's doing | `fly logs --app YOUR-APP-NAME` |
-| Update to the latest version | `git pull`, then `fly deploy --app YOUR-APP-NAME --ha=false` |
+| Update to the latest version | merge to `master` (deploys by itself once [set up](#deploy-automatically)), or `git pull` then `fly deploy --app YOUR-APP-NAME --ha=false` |
 | Change a secret | `fly secrets set NAME=value --app YOUR-APP-NAME` (restarts the Machine) |
 | Apply a model change from the Routing page | the Gateway reads `config.yaml` at start: `fly machine restart MACHINE-ID --app YOUR-APP-NAME` |
 | Open a shell on it | `fly ssh console --app YOUR-APP-NAME` |

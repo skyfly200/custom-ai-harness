@@ -1289,7 +1289,8 @@ app.post('/ui/api/stt', async (req, res) => {
 // Tools for the chat page: MCP servers from mcp-servers.json, and read-only
 // tools over a git repo a chat is linked to. The page runs the tool loop: it
 // sends the definitions with each request and calls back here to run a call.
-const mcp = new McpManager();
+// lazy on the hosted Machine: stdio servers start when first called (utils/mcp.js), not at boot
+const mcp = new McpManager({ lazy: process.env.HARNESS_SERVER === '1' });
 // A member's own remote servers, one manager each (utils/userMcp.js); admins use mcp-servers.json
 const userMcp = new userMcpMod.UserMcp();
 const noOwnTools = { error: 'Your own tools need the hosted database and ENCRYPTION_KEY, which this server does not have.' };

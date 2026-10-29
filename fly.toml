@@ -11,10 +11,9 @@ primary_region = "dfw"   # Dallas: Fly has no Denver region
   HARNESS_PUBLIC_URL = "https://ai.skylerfly.com"
   HARNESS_OLD_HOSTS = "agents.skylerfly.com"   # redirects the old address; remove after the move settles
   HARNESS_DATA_DIR = "/app/data"
-  OAUTH_PROVIDERS = "google"
   HARNESS_IDLE_STOP_MIN = "30"   # sleep after 30 idle minutes; the Stop button on the Dashboard does it now
   # secrets (DATABASE_URL, NEON_AUTH_BASE_URL, HARNESS_ADMINS, HARNESS_ADMIN_EMAILS,
-  # LITELLM_MASTER_KEY, OPENROUTER_API_KEY...) are set with `fly secrets set`, never here
+  # LITELLM_MASTER_KEY, OPENROUTER_API_KEY, OAUTH_PROVIDERS="google,github" once GitHub sign-in is set up in Neon...) are set with `fly secrets set`, never here
 
 [mounts]
   source = "agents_data"

@@ -16,7 +16,7 @@ PR 2 (database layer), PR 4 (chats in Neon) and PR 5 (sign-in) shipped in [PR #9
 - **Chats are stored as the page keeps them**, one row per chat in `chats` (plus `user_data` for projects, skills, commands, schedules and prefs), not one row per message. The staged move to message rows is in [Moving chats to message rows](#moving-chats-to-message-rows). The browser still works from localStorage and syncs about 1.5 s after each save. A message-per-row table and server-side message saving are not done.
 - **`DATABASE_DRIVER=http`** (Neon's HTTPS driver) exists for hosts that only allow port 443.
 
-**Fly deploy (PR 3) and the Stop button with idle sleep (3a) are built; next is a real deploy to `agents.skylerfly.com`.** `fly.toml` and a Fly Dockerfile don't exist yet. Still not done: 3a (Stop button and idle stop), 6 to 11.
+**Fly deploy (PR 3) and the Stop button with idle sleep (3a) are built; next is a real deploy to `ai.skylerfly.com`.** `fly.toml` and a Fly Dockerfile don't exist yet. Still not done: 3a (Stop button and idle stop), 6 to 11.
 
 ## The short version
 
@@ -104,8 +104,8 @@ Non-secret settings (`HARNESS_MODE`, `STRONG_MODEL` and the other `.env` launch 
 
 - **Fly region.** Skyler is in Colorado. Fly has no Denver region (checked at deploy time, 2026-10-27), so the app uses Dallas (`dfw`). Fly prices differ by region and the figures above are for `iad`/`ewr`, so check the Machine price for `dfw`.
 - **Neon region.** Neon has no Denver; the nearest AWS regions are `us-west-2` (Oregon) and `us-east-2` (Ohio). Pick one and keep the app in a region with a short round trip to it (every chat save is a database call). I'd choose Oregon, then measure a query from the Machine and switch if it is slow.
-- **Domain.** Use a subdomain such as `agents.skylerfly.com`. With DNS on Netlify: (1) `fly certs add agents.skylerfly.com` and read the DNS records it asks for; (2) in Netlify DNS add a `CNAME` for `harness` pointing at the app's `YOUR-APP.fly.dev` (Fly may also ask for an `_acme-challenge` CNAME, or an `A`/`AAAA` pair if you prefer); (3) wait for `fly certs check` to show the certificate issued. No Netlify hosting is involved, only its DNS.
-- This one address is used everywhere that needs a stable name: the OAuth callbacks (`https://agents.skylerfly.com/auth/github/callback`), the OIDC issuer URL for OpenRouter federation (OpenRouter requires the token's `iss` to equal it exactly, https only), and the PWA install.
+- **Domain.** Use a subdomain such as `ai.skylerfly.com`. With DNS on Cloudflare: (1) `fly certs add ai.skylerfly.com` and read the DNS records it asks for; (2) in Cloudflare DNS add a `CNAME` for `ai` pointing at the app's `YOUR-APP.fly.dev` (Fly may also ask for an `_acme-challenge` CNAME, or an `A`/`AAAA` pair if you prefer); (3) wait for `fly certs check` to show the certificate issued. Keep the records DNS only (grey cloud) so Fly can issue its certificate.
+- This one address is used everywhere that needs a stable name: the OAuth callbacks (`https://ai.skylerfly.com/auth/github/callback`), the OIDC issuer URL for OpenRouter federation (OpenRouter requires the token's `iss` to equal it exactly, https only), and the PWA install.
 - Pick the final subdomain before registering the OAuth apps and the OpenRouter issuer, since both store the address. Changing it later means redoing both.
 
 ### Start and stop to save cost
@@ -323,11 +323,11 @@ Steps 3 and 4 can swap if you would rather have chats in the database before the
 
 ## Decisions so far
 
-- **Subdomain: `agents.skylerfly.com`** (Skyler, 2026-10-27).
+- **Subdomain: `ai.skylerfly.com`** (Skyler; first chosen as `agents` on 2026-10-27, moved to `ai` 2026-10-29).
 - **Two kinds of user:** guests use Skyler's key (hard $1 cap); full users bring their own OpenRouter credential. No per-person policies or workspace keys in Skyler's org. A full user without a credential is refused until they add one (Skyler, 2026-10-27).
 - **Sleeps after 30 idle minutes** (`HARNESS_IDLE_STOP_MIN=30` in hosted mode).
 - **Federation** is the main OpenRouter credential path. No-credential users get a **guest account** only Skyler can make, with a $1 lifetime cap on the shared key (Skyler, 2026-10-27).
-- **Region and domain:** a Fly region near Colorado, and a subdomain of `skylerfly.com` (DNS is on Netlify). See [Region and domain](#region-and-domain).
+- **Region and domain:** a Fly region near Colorado, and a subdomain of `skylerfly.com` (DNS is on Cloudflare). See [Region and domain](#region-and-domain).
 - Users are **invited**, not open sign-up (Skyler, 2026-10-27).
 - **Bring your own OpenRouter credential**, with OpenRouter workload identity federation as the keyless option (Skyler, 2026-10-27).
 - **Start and stop to save cost:** the server sleeps when idle; Fly wakes it on a request, and the UI gets a Stop button (Skyler, 2026-10-27).

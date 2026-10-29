@@ -37,16 +37,16 @@ Run the harness on [Fly.io](https://fly.io) at your own address, with chats and 
    fly status --app YOUR-APP-NAME
    ```
    The first start takes a minute or two while LiteLLM loads. `fly logs --app YOUR-APP-NAME` shows it.
-6. **Point `agents.skylerfly.com` at it.**
+6. **Point `ai.skylerfly.com` at it.**
    ```powershell
-   fly certs add agents.skylerfly.com --app YOUR-APP-NAME
+   fly certs add ai.skylerfly.com --app YOUR-APP-NAME
    ```
-   It prints the DNS records it wants. In Netlify DNS for `skylerfly.com`, add a `CNAME` record named `agents` with the value `YOUR-APP-NAME.fly.dev`, plus the `_acme-challenge` record if Fly asks for one. Then run `fly certs check agents.skylerfly.com --app YOUR-APP-NAME` until the certificate shows as issued. (Netlify only provides the DNS here; nothing is hosted there.)
+   It prints the DNS records it wants. In Cloudflare DNS for `skylerfly.com`, add a `CNAME` record named `ai` with the value `YOUR-APP-NAME.fly.dev`, set to **DNS only** (grey cloud), plus the `_acme-challenge` record if Fly asks for one (also DNS only). Then run `fly certs check ai.skylerfly.com --app YOUR-APP-NAME` until the certificate shows as issued. (Cloudflare only provides the DNS here; keep the records grey-clouded so Fly can issue and renew its certificate. Turning the orange proxy on works only with SSL/TLS mode set to Full (strict) after the Fly certificate is issued, and it can interfere with long streaming replies, so DNS only is the safer choice.)
 7. **Tell Neon Auth about the address**, or Google sign-in is refused:
    ```powershell
-   neon neon-auth domain add https://agents.skylerfly.com
+   neon neon-auth domain add https://ai.skylerfly.com
    ```
-8. **Sign in** at `https://agents.skylerfly.com` with Google (an invited email or one in `HARNESS_ADMIN_EMAILS`) or with the admin name and password from step 4.
+8. **Sign in** at `https://ai.skylerfly.com` with Google (an invited email or one in `HARNESS_ADMIN_EMAILS`) or with the admin name and password from step 4.
 
 ## Deploy automatically
 
@@ -62,18 +62,35 @@ A GitHub Actions workflow (`.github/workflows/fly-deploy.yml`) runs `fly deploy 
 
 Notes: the token can deploy and nothing else; revoke it with `fly tokens list` and `fly tokens revoke`. The app name comes from `fly.toml`. Secrets stay in Fly (`fly secrets set`), so deploys don't need them in GitHub. Nothing runs the tests first, since the repo has no CI; run `npm test` before merging. This workflow has not run against a real Fly account yet.
 
+## Moving to a different address
+
+The app is configured by one value, `HARNESS_PUBLIC_URL` in `fly.toml`. To move from `agents.skylerfly.com` to `ai.skylerfly.com` (the repo already points at the new one; `HARNESS_OLD_HOSTS` redirects the old name to it with a 308). Do these in order, so the old address keeps working until the new one does. Run them in PowerShell unless noted:
+
+1. **Add the new certificate:** `fly certs add ai.skylerfly.com --app YOUR-APP-NAME`. Keep the old one for now.
+2. **Cloudflare DNS** (skylerfly.com, DNS > Records > Add record): type `CNAME`, name `ai`, target `YOUR-APP-NAME.fly.dev`, proxy status **DNS only** (grey cloud). Add the `_acme-challenge` CNAME Fly asks for the same way. Leave the `agents` record.
+3. **Wait** for `fly certs check ai.skylerfly.com --app YOUR-APP-NAME` to show issued.
+4. **Neon Auth:** `neon neon-auth domain add https://ai.skylerfly.com` (or in the Neon console, Auth, Domains). Keep the old domain until the end.
+5. **Google sign-in:** Neon's shared Google provider needs nothing. If you later use your own Google OAuth client, add `https://ai.skylerfly.com` as an authorized origin and its redirect URI (the one Neon shows) in Google Cloud Console.
+6. **GitHub App** (Connect GitHub): in GitHub > Settings > Developer settings > GitHub Apps > your app, set **Callback URL** to `https://ai.skylerfly.com/ui/api/me/github/callback` (add it; GitHub apps may hold several) and **Homepage URL** to `https://ai.skylerfly.com`. If you also use "Continue with GitHub" sign-in, that is Neon's OAuth app and needs no change.
+7. **OpenRouter** (if connecting accounts with OAuth or federation): the callback and token issuer follow `HARNESS_PUBLIC_URL`. If a federation policy names the old address as its issuer, update it to `https://ai.skylerfly.com`.
+8. **Deploy:** merge to `master` (or `fly deploy --app YOUR-APP-NAME --ha=false`). This applies the new `HARNESS_PUBLIC_URL`.
+9. **Check:** open `https://ai.skylerfly.com`, sign in, press Connect GitHub, and open the old address to confirm it redirects.
+10. **Clean up** when happy: delete the GitHub App's old callback URL, `neon neon-auth domain remove https://agents.skylerfly.com`, delete the `agents` record in Cloudflare, `fly certs remove agents.skylerfly.com --app YOUR-APP-NAME`, and remove `HARNESS_OLD_HOSTS` from `fly.toml`.
+
+**What the move costs people.** A browser keeps sign-in cookies, saved settings and anything stored in the page per address, so everyone signs in again at the new address, and the PWA must be installed again. Chats, schedules, users and credentials are in Neon and follow you. Per-browser items do not: Options and Settings preferences, the new-chat routing choice, notification choice, the chat-page theme and background, and any chat that never synced. Open the old address once before the move and use Export all in the chat sidebar if you want a copy. API keys keep working, but tools pointed at the old address are redirected only if they follow 308s; update `ANTHROPIC_BASE_URL`.
+
 ## Using it from Claude Code and other tools
 
 Make an API key on the **Users** page, then:
 
 ```powershell
-$env:ANTHROPIC_BASE_URL = "https://agents.skylerfly.com"
+$env:ANTHROPIC_BASE_URL = "https://ai.skylerfly.com"
 $env:ANTHROPIC_AUTH_TOKEN = "hk_..."
 $env:CLAUDE_CODE_AUTO_MODE_SERVER = "0"
 claude
 ```
 
-Other tools use `https://agents.skylerfly.com/v1` with the key as their API key.
+Other tools use `https://ai.skylerfly.com/v1` with the key as their API key.
 
 ## Keeping the cost down
 
@@ -126,7 +143,7 @@ With `DATABASE_URL` set, scheduled messages are sent by the server (`utils/serve
 Set it up once (you, as owner):
 
 1. **Make a GitHub App** (recommended: each person grants only the repos they choose, and the token expires after 8 hours and renews itself) at GitHub > Settings > Developer settings > GitHub Apps > New.
-   - **Redirect URI:** `https://agents.skylerfly.com/ui/api/me/github/callback` (your `HARNESS_PUBLIC_URL` + `/ui/api/me/github/callback`; add `http://localhost:3000/ui/api/me/github/callback` too if you test locally). GitHub's App settings page labels this field **Callback URL**; it is the same address as the `redirect_uri` in GitHub's OAuth docs, and the two must match exactly (a trailing slash or http versus https is enough to make GitHub refuse the sign-in).
+   - **Redirect URI:** `https://ai.skylerfly.com/ui/api/me/github/callback` (your `HARNESS_PUBLIC_URL` + `/ui/api/me/github/callback`; add `http://localhost:3000/ui/api/me/github/callback` too if you test locally). GitHub's App settings page labels this field **Callback URL**; it is the same address as the `redirect_uri` in GitHub's OAuth docs, and the two must match exactly (a trailing slash or http versus https is enough to make GitHub refuse the sign-in).
    - Leave **Expire user authorization tokens** on. Turn **Webhook** off.
    - **Repository permissions:** Contents: Read and write (Runs push; chats only read), Issues: Read and write, Pull requests: Read and write, **Actions: Read and write** (chats read runs and logs, and start, re-run or cancel workflows), Metadata: Read. Add **Workflows: Read and write** only if agents should be able to push changes to `.github/workflows` files (Runs); chats never edit files. Drop the write levels if you only want chats to read.
    - Install it on your account, and let others install it ("Any account") if you invite people who are not you.

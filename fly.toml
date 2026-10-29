@@ -8,7 +8,8 @@ primary_region = "dfw"   # Dallas: Fly has no Denver region
 [env]
   HARNESS_SERVER = "1"
   HARNESS_REQUIRE_LOGIN = "1"
-  HARNESS_PUBLIC_URL = "https://agents.skylerfly.com"
+  HARNESS_PUBLIC_URL = "https://ai.skylerfly.com"
+  HARNESS_OLD_HOSTS = "agents.skylerfly.com"   # redirects the old address; remove after the move settles
   HARNESS_DATA_DIR = "/app/data"
   OAUTH_PROVIDERS = "google"
   HARNESS_IDLE_STOP_MIN = "30"   # sleep after 30 idle minutes; the Stop button on the Dashboard does it now

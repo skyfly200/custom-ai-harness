@@ -40,7 +40,7 @@ function cookieHeaderFrom(setCookies) {
     return setCookies.map((c) => c.split(';')[0]).filter(Boolean).join('; ');
 }
 
-function createOAuth({ users, startSession, safeNext, env = process.env, fetchFn = fetch }) {
+function createOAuth({ users, startSession, safeNext, renderError, env = process.env, fetchFn = fetch }) {
     const pending = new Map(); // nonce -> { cookie, next, expires }
     const base = () => String(env.NEON_AUTH_BASE_URL || '').replace(/\/+$/, '');
     const adminEmails = () => String(env.HARNESS_ADMIN_EMAILS || '').split(/[,\s]+/).filter(Boolean);
@@ -48,9 +48,13 @@ function createOAuth({ users, startSession, safeNext, env = process.env, fetchFn
         ? String(env.HARNESS_PUBLIC_URL).replace(/\/+$/, '')
         : `${(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim()}://${req.headers['x-forwarded-host'] || req.headers.host}`);
     const sweep = () => { const now = Date.now(); for (const [k, v] of pending) if (v.expires < now) pending.delete(k); };
-    const fail = (res, message, status = 403) => res.status(status).set('cache-control', 'no-store').type('html').send(
-        `<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in</title>`
-        + `<p style="font:16px system-ui;padding:24px;max-width:480px">${esc(message)} <a href="/login">Back to sign in</a></p>`);
+    // The login page again, with the problem shown above the sign-in options (renderError comes from utils/login.js)
+    const fail = (res, message, status = 403) => {
+        res.status(status).set('cache-control', 'no-store').type('html');
+        if (renderError) return res.send(renderError(message));
+        res.send(`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in</title>`
+            + `<p style="font:16px system-ui;padding:24px;max-width:480px">${esc(message)} <a href="/login">Back to sign in</a></p>`);
+    };
 
     const router = express.Router();
 
@@ -58,7 +62,7 @@ function createOAuth({ users, startSession, safeNext, env = process.env, fetchFn
         const verifier = String(req.query.neon_auth_session_verifier || '');
         const entry = pending.get(cookiesOf(req)[COOKIE]);
         res.append('set-cookie', `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
-        if (!verifier || !entry || entry.expires < Date.now()) return fail(res, 'That sign-in has expired or did not start here.', 400);
+        if (!verifier || !entry || entry.expires < Date.now()) return fail(res, 'That sign-in took too long or did not start from this page. Press the button again.', 400);
         pending.delete(cookiesOf(req)[COOKIE]);
         let session;
         try {
@@ -69,9 +73,9 @@ function createOAuth({ users, startSession, safeNext, env = process.env, fetchFn
         } catch { return fail(res, 'Could not reach the sign-in service. Try again.', 502); }
         const email = session && session.user && session.user.email;
         if (!email) return fail(res, 'The provider did not complete the sign-in.', 401);
-        if (session.user.emailVerified === false) return fail(res, 'Your email address is not verified with that provider.');
+        if (session.user.emailVerified === false) return fail(res, 'That provider says your email address is not verified. Verify it with them (GitHub: Settings > Emails), then try again.');
         const user = users.forEmail(email, adminEmails());
-        if (!user) return fail(res, `${email} has not been invited. Ask an admin to add it on the Users page.`);
+        if (!user) return fail(res, `${email} is not on the invite list. Ask an admin to add it on the Users page, or sign in with an account that uses an invited address.`);
         startSession(req, res, user.name);
         res.redirect(safeNext(entry.next));
     });

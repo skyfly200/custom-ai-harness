@@ -2,6 +2,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   let me = null;
+  let managedOn = false; // the server holds a Management API key
   let guestsOn = false; // guest accounts need the database
 
   const say = (text, bad) => { $('msg').textContent = text || ''; $('msg').style.color = bad ? 'var(--bad, #c4264a)' : ''; };
@@ -74,6 +75,12 @@
           btn('Reset password', () => resetForm(u.name, tr)),
           ' ',
         );
+        if (managedOn && !u.guest && u.role !== 'admin') {
+          td.append(btn('Issue key', async () => {
+            await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}/managed-key`);
+            say(`${u.name} has a new key (billed to your OpenRouter account, up to its limit).`);
+          }, 'Creates an OpenRouter key for them, billed to your account up to its limit, and replaces any key they have'), ' ');
+        }
         if (guestsOn && u.role !== 'admin') {
           td.append(
             btn(u.guest ? 'Make full user' : 'Make guest', async () => { drawUsers((await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { guest: !u.guest })).users); }),
@@ -81,7 +88,7 @@
           );
           if (u.guest) {
             td.append(btn('Set cap', async () => {
-              const v = prompt(`Total dollars ${u.name} may spend (now $${u.credit ? u.credit.capUsd.toFixed(2) : '?'}):`);
+              const v = await ui.prompt(`Total dollars ${u.name} may spend (now $${u.credit ? u.credit.capUsd.toFixed(2) : '?'}):`, { ok: 'Set cap' });
               if (v === null || v === '') return;
               drawUsers((await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { capUsd: v })).users);
             }), ' ');
@@ -92,7 +99,7 @@
             btn(u.role === 'admin' ? 'Make user' : 'Make admin', async () => { drawUsers((await api('POST', `/ui/api/users/${encodeURIComponent(u.name)}`, { role: u.role === 'admin' ? 'user' : 'admin' })).users); }),
             ' ',
             btn('Remove', async () => {
-              if (!confirm(`Remove ${u.name} and their API keys?`)) return;
+              if (!await ui.confirm(`Remove ${u.name} and their API keys?`)) return;
               drawUsers((await api('DELETE', `/ui/api/users/${encodeURIComponent(u.name)}`)).users);
               fillOwners(); loadKeys();
             }),
@@ -116,7 +123,7 @@
       const td = document.createElement('td');
       td.style.cssText = 'padding:6px 8px;text-align:right';
       td.append(btn('Remove', async () => {
-        if (!confirm(`Remove the invite for ${i.email}? Existing sessions keep working until they end.`)) return;
+        if (!await ui.confirm(`Remove the invite for ${i.email}? Existing sessions keep working until they end.`)) return;
         drawInvites(await api('DELETE', `/ui/api/invites/${encodeURIComponent(i.email)}`));
       }));
       tr.append(td);
@@ -127,8 +134,9 @@
   const owner = () => (me.role === 'admin' ? $('owner').value || me.name : me.name);
   async function fillOwners() {
     if (me.role !== 'admin') return;
-    const { users, guests } = await api('GET', '/ui/api/users');
+    const { users, guests, managedKeys } = await api('GET', '/ui/api/users');
     guestsOn = Boolean(guests);
+    managedOn = Boolean(managedKeys);
     $('guestRow').hidden = !guestsOn;
     document.querySelectorAll('.guestOpt').forEach((o) => { o.hidden = !guestsOn; });
     const current = $('owner').value || me.name;
@@ -147,7 +155,7 @@
       const td = document.createElement('td');
       td.style.cssText = 'padding:6px 8px;text-align:right';
       td.append(btn('Revoke', async () => {
-        if (!confirm(`Revoke the key "${k.name}"? Programs using it stop working.`)) return;
+        if (!await ui.confirm(`Revoke the key "${k.name}"? Programs using it stop working.`)) return;
         await api('DELETE', `/ui/api/keys/${k.id}?owner=${encodeURIComponent(owner())}`);
         loadKeys(); fillOwners();
       }));
@@ -169,7 +177,15 @@
     const c = await api('GET', '/ui/api/me/credential');
     $('keySection').hidden = !(c.required || (c.credential && c.credential.set));
     if (c.credential) $('keyState').textContent = !c.credential.set ? 'Not connected yet: you cannot use models until you connect OpenRouter.'
-      : `${c.credential.kind === 'oauth' ? 'Connected through OpenRouter' : 'A pasted key'} (key ending …${c.credential.last4 || '????'}).`;
+      : `${c.credential.kind === 'oauth' ? 'Connected through OpenRouter' : c.credential.kind === 'managed' ? 'A key issued for you by the server (replaced automatically when it lapses)' : 'A pasted key'} (key ending …${c.credential.last4 || '????'}).`;
+    const h = c.credential && c.credential.set && c.credential.health;
+    const WHY = {
+      invalid: 'OpenRouter no longer accepts this key. Press Reconnect OpenRouter.',
+      expired: 'This key has expired. Press Reconnect OpenRouter.',
+      expiring: `This key expires ${h && h.expiresAt ? new Date(h.expiresAt).toLocaleDateString() : 'soon'}. Press Reconnect OpenRouter before then.`,
+      exhausted: 'This key has used up its OpenRouter limit. Raise the limit at openrouter.ai/settings/keys, or press Reconnect OpenRouter for a fresh key.',
+    };
+    if (h && WHY[h.state]) { $('keyState').textContent += ' ' + WHY[h.state]; say(WHY[h.state], true); }
     $('guestSection').hidden = !c.guest;
     if (c.guest) $('guestState').textContent = c.credit ? `You are a guest. $${c.credit.leftUsd.toFixed(2)} left of $${c.credit.capUsd.toFixed(2)}, in all (not monthly). Only models with a known price are available.` : 'You are a guest.';
   }

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bright Chat · Usage</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="usage.css">
 <link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
 </head>
 <body>
 <main>
@@ -118,6 +119,7 @@
   <div class="sub muted fine" style="margin-top:8px">Counts come from the usage each reply reports, read the same way the chat page and the dashboard read it (<code>ui/tokens.js</code>), so the three always agree. Values marked ~ are estimates (about 4 characters a token, from the request that was sent and the text that came back) for replies that had none, such as OpenAI streams without <code>stream_options.include_usage</code>. Costs are worked out for the model that answered from OpenRouter's own prices for OpenRouter models, else the Gateway's price list (LiteLLM's <code>/v1/model/info</code>), with cached input at the provider's cache price (a tenth of the input price for Claude when the list doesn't say). Free and local models cost nothing, and models with no listed price show ?. Totals are kept in <code>harness-usage.json</code> across restarts.</div>
 </main>
 <div id="tip" class="tip" hidden></div>
+<script src="dialogs.js"></script>
 <script src="hints.js"></script>
 <script src="costs.js"></script>
 <script src="usage.js"></script>

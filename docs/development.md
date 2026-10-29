@@ -41,6 +41,10 @@ The interceptor scores the text typed in the latest user turn for complexity sig
 The threshold is encoded as `router-bert-<threshold>` — the strict three-part format required to prevent RouteLLM `ValueError` parser crashes.
 
 
+## Dialogs in the web UI
+
+Never use the browser's `alert()`, `confirm()` or `prompt()` in `ui/`. `ui/dialogs.js` (loaded first on every page) gives `ui.toast(text, { kind: 'error' })`, `await ui.confirm(text, { ok, danger })` (true/false) and `await ui.prompt(text, { value, type, ok })` (string, or null when cancelled). They are keyboard accessible (Enter, Esc, Tab stays inside) and follow light/dark and phone width. `test/dialogs.test.js` fails when a native call appears. A new page must load `dialogs.js` before its other scripts.
+
 ## Tests
 
 ```bash
@@ -65,6 +69,8 @@ python -m pytest test/                     # Router: contract tests and every ba
 
 ### Which tests cover what
 
+- `test/dialogs.test.js`: no native alert/confirm/prompt in `ui/`, dialogs.js loaded first on every page.
+
 | Area | Test files |
 |---|---|
 | Login, passwords, API keys | `access`, `login`, `oauth`, `runKeys` |
@@ -75,6 +81,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | MCP tools | `mcp`, `mcpAdmin`, `toolsApi` |
 | Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `chatCommands` |
 | Connect OpenRouter (OAuth PKCE) | `openrouterOAuth` |
+| Connect GitHub, chat GitHub tools | `githubOAuth` (token renewal, in-process Postgres), `githubApi`, `guests` (routes) |
 | Guests, credit, own keys, proxy tickets | `guests` (in-process Postgres) |
 | Per-user tools, routings, settings | `userTools` (secrets, address checks, member MCP, routings; in-process Postgres) |
 | Router (Python) | `test_router.py`, `test_router_backends.py`, `test_gateway_start.py` |

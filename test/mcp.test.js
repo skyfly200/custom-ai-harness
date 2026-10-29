@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { McpManager, readConfig, expand, toolName, resultText, connectPolicy, describeFailure } = require('../utils/mcp');
+const { McpManager, readConfig, expand, toolName, resultText, connectPolicy, describeFailure, crashSummary } = require('../utils/mcp');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-mcp-'));
 const fixture = path.join(__dirname, 'fixtures', 'echo-mcp-server.js');
@@ -168,4 +168,22 @@ test('failures say what to do', () => {
     assert.match(describeFailure(Object.assign(new Error('x'), { code: 401 }), { type: 'http', url: 'https://a.test/' }), /refused the login.*headers/);
     assert.match(describeFailure(Object.assign(new Error('fetch failed'), { cause: { code: 'ENOTFOUND' } }), { type: 'http', url: 'https://a.test/' }), /could not reach.*ENOTFOUND/);
     assert.match(describeFailure(Object.assign(new Error('nf'), { code: 'ENOENT' }), { command: 'uvx' }), /"uvx": not found on PATH \(install uv/);
+});
+
+test('a program that dies on start shows its error, not the end of the stack', async () => {
+    const stack = "node:internal/modules/cjs/loader:1386\n  throw err;\n  ^\n\nError: Cannot find module '/app/scripts/x.js'\nRequire stack:\n- /app/y.js\n    at Function._resolveFilename (node:internal/x:1:1) {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: []\n}\n\nNode.js v22.23.4\n";
+    assert.match(crashSummary(stack), /^Error: Cannot find module '\/app\/scripts\/x\.js'/);
+    assert.doesNotMatch(crashSummary(stack), /Node\.js v/);
+    assert.equal(crashSummary('just a note\nmore'), 'just a note more');
+
+    const file = path.join(dir, 'dead.json');
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { dead: { command: process.execPath, args: ['scripts/does-not-exist.js'] } } }));
+    const manager = new McpManager({ file });
+    await manager.start();
+    assert.match(manager.status().servers.find((s) => s.name === 'dead').error, /Cannot find module.*does-not-exist\.js/);
+    await manager.close();
+});
+
+test('the Docker image ships the jev-files tool server', () => {
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8'), /COPY .*scripts\/jev-files-mcp\.js/);
 });

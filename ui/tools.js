@@ -18,7 +18,22 @@
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
   }
-  const act = (fn) => async (...a) => { try { say(''); await fn(...a); } catch (e) { say(e.message, true); } };
+  const act = (fn) => async (...a) => { try { say(''); await fn(...a); } catch (e) { say(e.message, true); ui.toast(e.message, { kind: 'error' }); } };
+  // After adding: scroll the new server into view and flash it, so the move out of the catalog is seen
+  function reveal(name) {
+    const c = [...document.querySelectorAll('#list .srv')].find((n) => n.dataset.name === name);
+    if (!c) return;
+    c.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    c.classList.add('fresh');
+    setTimeout(() => c.classList.remove('fresh'), 2500);
+  }
+  function result(name, label, s) {
+    const ok = s?.status === 'connected';
+    const text = ok ? `${label} is connected with ${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}.` : `${label} added, but it did not connect: ${s?.error || 'unknown error'}`;
+    say(text, !ok);
+    ui.toast(text, { kind: ok ? 'ok' : 'error' });
+    reveal(name);
+  }
 
   // ---- the servers ----------------------------------------------------------
   const STATUS = { connected: ['ok', 'Connected'], failed: ['bad', 'Failed'], disabled: ['', 'Off'], connecting: ['warn', 'Connecting…'] };
@@ -63,6 +78,7 @@
     head.append(sw, edit, remove);
 
     const c = el('div', { className: `card srv${s.status === 'disabled' ? ' off' : ''}` }, head, el('div', { className: 'what' }, summary(s)));
+    c.dataset.name = s.name;
     if (s.error) c.append(el('div', { className: 'err' }, s.error));
     if (s.tools.length) c.append(toolList(s));
     return c;
@@ -169,16 +185,19 @@
   f.addEventListener('submit', act(async (e) => {
     e.preventDefault();
     const name = f.name.value.trim();
-    $('#save').disabled = true;
-    say('Saving and connecting…');
+    const save = $('#save'), box = $('#testResult');
+    save.disabled = true; save.textContent = 'Saving and connecting…';
+    box.hidden = false; box.className = 'test'; box.textContent = 'Saving and connecting… the first start of an npx or uvx server can take a minute.';
     try {
       data = await api('POST', '/ui/api/mcp/save', { from: editing?.name, name, spec: entry() });
       f.hidden = true;
       draw();
-      const s = data.servers.find((x) => x.name === name);
-      say(s?.status === 'connected' ? `${name} is connected with ${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}.` : `${name} saved${s?.error ? `, but it did not connect: ${s.error}` : '.'}`, s?.status === 'failed');
+      result(name, name, data.servers.find((x) => x.name === name));
+    } catch (err) {
+      box.className = 'test bad'; box.textContent = `Not saved: ${err.message}`; // stays beside the Save button
+      throw err;
     } finally {
-      $('#save').disabled = false;
+      save.disabled = false; save.textContent = 'Save';
     }
   }));
 
@@ -193,14 +212,22 @@
       const blockedNow = TS.blocked(TS.checkPrograms(c, data.programs)).length > 0;
       const oneClick = c.ready && !blockedNow;
       const go = el('button', { type: 'button', className: `go${oneClick && !added ? ' primary' : ''}`, disabled: added }, added ? 'Added' : oneClick ? 'Add' : 'Set up…');
+      const fail = el('small', { className: 'fail', role: 'alert', hidden: true });
       go.addEventListener('click', act(async () => {
         if (!oneClick) return wizard(c);
+        fail.hidden = true;
+        go.disabled = true; go.textContent = 'Adding…';
+        try {
         data = await api('POST', '/ui/api/mcp/save', { name: c.id, spec: { ...c.spec, env: Object.entries(c.spec.env || {}).map(([key, value]) => ({ key, value })), headers: Object.entries(c.spec.headers || {}).map(([key, value]) => ({ key, value })) } });
         draw();
-        const s = data.servers.find((x) => x.name === c.id);
-        say(s?.status === 'connected' ? `${c.name} is connected with ${s.tools.length} tools.` : `${c.name} added, but it did not connect: ${s?.error || 'unknown error'}`, s?.status !== 'connected');
+        result(c.id, c.name, data.servers.find((x) => x.name === c.id));
+        } catch (e) {
+          go.disabled = false; go.textContent = 'Add';
+          fail.textContent = `Not added: ${e.message}`; fail.hidden = false;
+          throw e;
+        }
       }));
-      box.append(el('div', { className: 'card' }, el('b', {}, c.name), el('p', {}, c.description), c.needs && !(c.inputs || []).length ? el('small', {}, c.needs) : (c.inputs || []).length ? el('small', {}, `You'll need: ${c.inputs.map((i) => i.label).join(', ')}.`) : null, go));
+      box.append(el('div', { className: 'card' }, el('b', {}, c.name), el('p', {}, c.description), c.needs && !(c.inputs || []).length ? el('small', {}, c.needs) : (c.inputs || []).length ? el('small', {}, `You'll need: ${c.inputs.map((i) => i.label).join(', ')}.`) : null, go, fail));
     }
   }
 
@@ -314,9 +341,7 @@
     }
     w.hidden = true; wz = null;
     draw();
-    const s = data.servers.find((x) => x.name === item.id);
-    say(s?.status === 'connected' ? `${item.name} is connected with ${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}.` : `${item.name} added, but it did not connect: ${s?.error || 'unknown error'}`, s?.status !== 'connected');
-    $('#list').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    result(item.id, item.name, data.servers.find((x) => x.name === item.id));
   }
   $('#wizClose').addEventListener('click', () => { w.hidden = true; wz = null; });
 

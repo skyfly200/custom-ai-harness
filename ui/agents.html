@@ -95,8 +95,8 @@
       <span class="fine muted"><button type="button" id="fileTickets" data-hint="Write this draft into the repo below as markdown files (wayfinder/<map>/map.md and one file per ticket) you can read, edit and commit. Shows what it will write and asks first">Save as markdown files…</button> <button type="button" id="loadTickets" data-hint="Read a folder of wayfinder markdown files in the repo below back into this box">Load from a folder…</button> <span id="ticketsMsg" role="status"></span></span></label>
     <div class="row oneoff">
       <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
-        <div class="repo-input"><input type="text" name="repo" id="repo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
-        <div class="recent" id="recent"></div></div>
+        <div class="repo-input"><input type="text" name="repo" id="repo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
+        <div class="recent" id="recent"></div><datalist id="repoList"></datalist></div>
       <label class="field"><span data-hint="Which routing picks the models for this run">Routing</span><select name="profile"><option value="">Default</option></select></label>
       <label class="field"><span data-hint="Nudges every request toward cheaper or stronger models">Effort</span>
         <select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
@@ -127,7 +127,7 @@
       <div class="picker-head"><strong id="agentDialogTitle">New agent</strong><button type="button" id="agentClose" aria-label="Close">×</button></div>
       <label class="field"><span>Name</span><input type="text" name="name" required maxlength="60" placeholder="Docs keeper"></label>
       <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use. Changing it starts the agent's work over from that repo">Repo</span>
-        <div class="repo-input"><input type="text" name="repo" id="agentRepo" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
+        <div class="repo-input"><input type="text" name="repo" id="agentRepo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
       <label class="field"><span data-hint="Told to the agent at the start of every task">Standing instructions</span>
         <textarea name="instructions" rows="4" placeholder="Keep changes small. Update the docs when behaviour changes. Run npm test before finishing."></textarea></label>
       <div class="row">

@@ -619,8 +619,7 @@ function routerNode() {
       : '<div class="warn">The Router is down: requests on this strategy go to “Router down” until it is back.</div>')
     + `<label data-hint="How requests are scored. Every strategy shares it. Its other settings (address, key, timeout) are on the Settings page">Classifier${view ? ' · shared' : ''}<select data-field="backend"${up ? '' : ' disabled'}>${backends.map(b => `<option${b === graph.backend ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select>
        <small id="backendHelp">${esc(BACKEND_HELP[graph.backend] || '')}</small></label>
-     <label data-hint="Requests scoring at or above this go to Strong. Empty uses the keyword rule">Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(r.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)">
-       <small>0 always strong, 1 almost always weak.</small></label>`;
+     <label data-hint="Requests scoring at or above this go to Strong. 0 is always strong, 1 almost always weak. Empty uses the keyword rule">Threshold<input type="number" min="0" max="1" step="0.05" data-field="threshold" value="${esc(r.threshold ?? '')}" placeholder="from keywords (0.2 / 0.5 / 0.8)"></label>`;
   const outs = ladder(r, editable);
   return nodeHTML('router', 'router' + (r.pin ? ' dim' : ''), 'Router', 'Classifier', body, outs, true);
 }
@@ -663,6 +662,9 @@ function deploymentRow(d, only) {
     <span class="name" data-hint="${esc(where)}">${esc(id.replace(/^(openrouter|groq|openai)\//, ''))}</span>${remove}</li>`;
 }
 
+// Model boxes whose Details row is open; kept across redraws
+const openMore = new Set();
+
 function modelNode(name) {
   const chain = fb()[name] || [];
   const editable = gatewayEditable();
@@ -670,7 +672,7 @@ function modelNode(name) {
   const servedBy = editable
     ? `<div class="sect" data-hint="The provider models that actually answer requests for ${esc(name)}. With more than one, the Gateway spreads requests across them.">Served by</div>
        ${deps.length ? `<ul class="deps">${deps.map(d => deploymentRow(d, deps.length === 1)).join('')}</ul>`
-         : '<div class="warn">No provider model, so the Gateway can’t serve it. Add one, or remove this box.</div>'}
+         : ''}
        <button class="add-dep" data-act="adddep" data-name="${esc(name)}" data-hint="Add another provider model under this name; the Gateway shares requests between them">+ Add provider model</button>`
     : '';
   const list = chain.length
@@ -688,7 +690,13 @@ function modelNode(name) {
   const close = editable ? `<button class="close hold" data-act="unmodel" data-name="${esc(name)}" aria-label="Remove ${esc(name)}${view ? ' from this strategy' : ''} (press and hold)" data-hint="${removeHint}">×</button>` : '';
   const lost = routerUp() && !reachable().has(name);
   const why = lost ? '<div class="unreach" data-hint="No route in any strategy leads here, directly or through fallbacks. Clear unconnected models removes it">No route reaches it.</div>' : '';
-  return nodeHTML(`m:${name}`, lost ? 'model unreached' : 'model', name, 'Model', why + statBlock(name) + servedBy + list, outs, true, close);
+  // Numbers, provider models and fallbacks sit behind one "Details" row; the box shows a one-line summary
+  const brief = statShort(name);
+  const bits = [editable && `${deps.length} provider${deps.length === 1 ? '' : 's'}`, chain.length && `${chain.length} fallback${chain.length === 1 ? '' : 's'}`].filter(Boolean);
+  const noDep = editable && !deps.length ? '<div class="warn">No provider model, so the Gateway can’t serve it. Add one, or remove this box.</div>' : '';
+  const more = `<details class="more" data-more="${esc(name)}"${openMore.has(name) ? ' open' : ''}><summary data-hint="Quality and price, the provider models behind it and its fallbacks">Details${bits.length ? ` · ${bits.join(' · ')}` : ''}</summary>
+    <div class="more-body">${statBlock(name)}${servedBy}${list}</div></details>`;
+  return nodeHTML(`m:${name}`, lost ? 'model unreached' : 'model', name, 'Model', why + noDep + (brief ? `<div class="brief">${brief}</div>` : '') + more, outs, true, close);
 }
 
 function render() {
@@ -1104,6 +1112,14 @@ $('world').addEventListener('click', (e) => {
   if (chain.length) own[b.dataset.src] = chain; else delete own[b.dataset.src];
   changed();
 });
+
+// Opening Details makes a box taller: its dots move, so the lines are drawn again
+$('world').addEventListener('toggle', (e) => {
+  const d = e.target.closest?.('details.more');
+  if (!d || d.open === openMore.has(d.dataset.more)) return;
+  d.open ? openMore.add(d.dataset.more) : openMore.delete(d.dataset.more);
+  drawWires();
+}, true);
 
 $('world').addEventListener('pointerover', (e) => {
   const model = drag ? null : e.target.closest('.node.model')?.dataset.model || null;

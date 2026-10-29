@@ -1,0 +1,29 @@
+# Deploys to Fly.io when something merges to master. Setup is in docs/fly.md ("Deploy automatically").
+# Needs the repository secret FLY_API_TOKEN. The app name comes from fly.toml.
+name: Deploy to Fly
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "test/**"
+  workflow_dispatch:
+
+# One deploy at a time; a newer merge waits for the running one instead of cancelling it mid-deploy.
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@v1
+      # --ha=false: the volume can only be used by one Machine
+      - run: flyctl deploy --remote-only --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

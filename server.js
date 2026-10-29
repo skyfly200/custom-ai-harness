@@ -1429,7 +1429,7 @@ app.post('/ui/api/tools/call', memberOrLocalJson, async (req, res) => {
             if (!userMcpMod.available()) throw new Error(noOwnTools.error);
             const mgr = userMcp.manager(ownerOf(req));
             await mgr.start();
-            return res.json({ ...(await mgr.call(name, args || {})), ms: Date.now() - started });
+            return res.json({ ...(await mgr.call(name, args || {}, { confirmed: confirmed === true })), ms: Date.now() - started });
         }
         const needsRepo = chatShell.isShellTool(name) || repoTools.isRepoTool(name);
         const workspace = needsRepo && repo && chatId ? await chatWorktrees.create(repo, chatId) : null;
@@ -1442,7 +1442,7 @@ app.post('/ui/api/tools/call', memberOrLocalJson, async (req, res) => {
             result = { text: await repoTools.call(toolRepo, name, args || {}), isError: false };
         } else {
             await mcp.start();
-            result = await mcp.call(name, args || {});
+            result = await mcp.call(name, args || {}, { confirmed: confirmed === true });
         }
         res.json({ ...result, ms: Date.now() - started });
     } catch (err) {

@@ -1789,6 +1789,19 @@ async function runTool(call, c, signal, onChange) {
       }
       confirmed = true;
     }
+    const mcpAsk = (toolInfo?.servers || []).flatMap((s) => s.tools || []).find((t) => t.name === call.name && t.needsApproval);
+    if (mcpAsk) {
+      // An MCP server set to "ask first" (Tools page): show the input, wait for Allow or Decline
+      const allow = await askApproval(call, `${mcpAsk.title || call.name} may change something. Allow it with the input shown below?`, onChange, signal);
+      if (!allow) {
+        call.result = 'Error: the user declined this tool call. Do not try it again; ask what they want instead.';
+        call.isError = true;
+        call.ms = Date.now() - started;
+        onChange();
+        return;
+      }
+      confirmed = true;
+    }
     if (call.name === 'run_command') {
       // Ask the command guard first: a risky command waits here for Allow or Decline
       const check = await fetch('api/tools/shell/check', {

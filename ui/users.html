@@ -13,6 +13,16 @@
 <link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="calm.css">
 <link rel="stylesheet" href="mobile.css">
+<style>
+.orCard { display: flex; align-items: center; gap: 12px; }
+.orText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.orText span { overflow-wrap: anywhere; }
+.orDot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--muted, #8a87a0); }
+.orDot.ok { background: var(--ok, #1a7f37); }
+.orDot.warn { background: var(--warn, #9a6700); }
+.orDot.bad { background: var(--bad, #cf222e); }
+@media (max-width: 520px) { .orCard { flex-wrap: wrap; } .orCard button { width: 100%; } }
+</style>
 </head>
 <body>
 <main>
@@ -24,6 +34,15 @@
 
   <p class="muted" id="off" hidden>Logins are off. Set <code>HARNESS_REQUIRE_LOGIN=1</code> and <code>HARNESS_ADMINS</code> in .env to turn them on.</p>
   <div id="msg" class="muted" role="status" style="min-height:1.4em"></div>
+
+  <section id="keySection" hidden>
+    <h2>Your OpenRouter account</h2>
+    <div class="card orCard">
+      <span class="orDot" id="orDot" aria-hidden="true"></span>
+      <div class="orText"><strong id="orHead">Checking…</strong><span class="muted" id="orSub"></span></div>
+      <button type="button" class="primary" id="orOpen" disabled>Connect</button>
+    </div>
+  </section>
 
   <section id="admin" hidden>
     <h2>Users</h2>
@@ -65,20 +84,6 @@
     </form>
     <pre id="newKey" hidden style="white-space:pre-wrap;word-break:break-all;margin:12px 0 0"></pre>
   </div>
-
-  <section id="keySection" hidden>
-    <h2>Your OpenRouter key</h2>
-    <div class="card">
-      <p class="muted" style="margin-top:0" id="keyNote">Your requests are billed to your own OpenRouter account. Connect it and OpenRouter makes a key for this server; it is stored encrypted and never shown again. You can revoke it any time at openrouter.ai/settings/keys.</p>
-      <p id="keyState"></p>
-      <p><button type="button" class="primary" id="connectOr">Connect OpenRouter</button></p>
-      <p class="muted">Or paste a key from openrouter.ai/keys:</p>
-      <form id="setKey" class="form" autocomplete="off">
-        <label class="field"><span>OpenRouter key</span><input name="key" type="password" placeholder="sk-or-…" autocomplete="off" required></label>
-        <div class="field"><span>&nbsp;</span><button class="primary">Save key</button> <button type="button" id="clearKey">Remove</button></div>
-      </form>
-    </div>
-  </section>
 
   <section id="guestSection" hidden>
     <h2>Guest credit</h2>

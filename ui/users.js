@@ -190,30 +190,83 @@
       e.target.reset(); confirmError(e.target, ''); say(`Added ${f.name}.`); fillOwners();
     } catch (err) { say(err.message, true); }
   });
+  // The OpenRouter connection: a status line here, the details in a dialog (same shape as ui/githubconnect.js).
+  let cred = null;
+  const money = (n) => `$${n.toFixed(2)}`;
+  const KIND = { oauth: 'connected with OpenRouter', managed: 'key issued by this server, replaced when it lapses', key: 'pasted key' };
+  function credState(c) {
+    if (!c || !c.set) return { dot: 'bad', head: 'Not connected', sub: 'Requests are refused until you connect your OpenRouter account.', btn: 'Connect' };
+    const h = c.health || {};
+    const left = typeof h.limitRemaining === 'number' ? `${money(Math.max(0, h.limitRemaining))} left on the key` : '';
+    const ending = `key …${c.last4 || '????'}`;
+    const day = h.expiresAt ? new Date(h.expiresAt).toLocaleDateString() : 'soon';
+    if (h.state === 'invalid') return { dot: 'bad', head: 'OpenRouter no longer accepts this key', sub: 'Reconnect to make a new one.', btn: 'Reconnect', problem: true };
+    if (h.state === 'expired') return { dot: 'bad', head: 'This key has expired', sub: 'Reconnect to make a new one.', btn: 'Reconnect', problem: true };
+    if (h.state === 'exhausted') return { dot: 'bad', head: 'This key has used up its limit', sub: 'Raise it at openrouter.ai/settings/keys, or reconnect for a fresh key.', btn: 'Manage', problem: true };
+    if (h.state === 'expiring') return { dot: 'warn', head: `Connected, key expires ${day}`, sub: [ending, left].filter(Boolean).join(' · '), btn: 'Manage' };
+    return { dot: 'ok', head: 'Connected to OpenRouter', sub: [KIND[c.kind], ending, left].filter(Boolean).join(' · '), btn: 'Manage' };
+  }
+  function drawCredentialLine() {
+    const s = credState(cred);
+    $('orDot').className = `orDot ${s.dot}`;
+    $('orHead').textContent = s.head;
+    $('orSub').textContent = s.sub;
+    $('orOpen').textContent = s.btn;
+    $('orOpen').disabled = false;
+  }
   async function drawCredential() {
     const c = await api('GET', '/ui/api/me/credential');
     $('keySection').hidden = !(c.required || (c.credential && c.credential.set));
-    if (c.credential) $('keyState').textContent = !c.credential.set ? 'Not connected yet: you cannot use models until you connect OpenRouter.'
-      : `${c.credential.kind === 'oauth' ? 'Connected through OpenRouter' : c.credential.kind === 'managed' ? 'A key issued for you by the server (replaced automatically when it lapses)' : 'A pasted key'} (key ending …${c.credential.last4 || '????'}).`;
-    const h = c.credential && c.credential.set && c.credential.health;
-    const WHY = {
-      invalid: 'OpenRouter no longer accepts this key. Press Reconnect OpenRouter.',
-      expired: 'This key has expired. Press Reconnect OpenRouter.',
-      expiring: `This key expires ${h && h.expiresAt ? new Date(h.expiresAt).toLocaleDateString() : 'soon'}. Press Reconnect OpenRouter before then.`,
-      exhausted: 'This key has used up its OpenRouter limit. Raise the limit at openrouter.ai/settings/keys, or press Reconnect OpenRouter for a fresh key.',
-    };
-    if (h && WHY[h.state]) { $('keyState').textContent += ' ' + WHY[h.state]; say(WHY[h.state], true); }
+    cred = c.credential || { set: false };
+    drawCredentialLine();
+    const s = credState(cred);
+    if (s.problem) ui.toast(`${s.head}. ${s.sub}`, { kind: 'error' });
     $('guestSection').hidden = !c.guest;
     if (c.guest) $('guestState').textContent = c.credit ? `You are a guest. $${c.credit.leftUsd.toFixed(2)} left of $${c.credit.capUsd.toFixed(2)}, in all (not monthly). Only models with a known price are available.` : 'You are a guest.';
   }
-  $('setKey').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try { await api('PUT', '/ui/api/me/credential', { key: new FormData(e.target).get('key') }); e.target.reset(); say('Key saved.'); drawCredential(); } catch (err) { say(err.message, true); }
-  });
-  $('connectOr').addEventListener('click', () => { location.href = '/ui/api/me/credential/connect'; });
-  $('clearKey').addEventListener('click', async () => {
-    try { await api('DELETE', '/ui/api/me/credential'); say('Disconnected. Revoke the key at openrouter.ai/settings/keys too if you want it dead.'); drawCredential(); } catch (err) { say(err.message, true); }
-  });
+  function openCredentialDialog() {
+    const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+    return ui.dialog((box, close) => {
+      box.append(el('h3', { textContent: 'OpenRouter' }));
+      const status = el('p', { style: 'margin-bottom:8px' });
+      const why = el('p', { className: 'muted', textContent: 'Your chats and API calls are billed to your own OpenRouter account, not to the owner of this server. OpenRouter makes a key for this server; it is kept encrypted and never shown again. You can revoke it any time at openrouter.ai/settings/keys.' });
+      const form = el('form', { autocomplete: 'off', style: 'margin:0' });
+      const input = el('input', { type: 'password', placeholder: 'sk-or-…', autocomplete: 'off', spellcheck: false });
+      input.setAttribute('aria-label', 'OpenRouter key');
+      form.append(input, el('button', { type: 'submit', className: 'primary', textContent: 'Use this key' }));
+      const paste = el('details', { style: 'margin-bottom:12px' }, el('summary', { className: 'muted', textContent: 'Paste a key instead' }), el('p', { className: 'muted', textContent: 'Make one at openrouter.ai/keys and paste it here.' }), form);
+      const actions = el('div', { className: 'ui-actions' });
+      const closeBtn = el('button', { type: 'button', textContent: 'Close' });
+      closeBtn.addEventListener('click', () => close(null));
+      box.append(status, why, paste, actions);
+
+      const go = el('button', { type: 'button', className: 'primary' });
+      go.addEventListener('click', () => { go.disabled = true; go.textContent = 'Opening OpenRouter…'; location.href = '/ui/api/me/credential/connect'; });
+      const off = el('button', { type: 'button', textContent: 'Disconnect' });
+      off.addEventListener('click', async () => {
+        if (!await ui.confirm('Disconnect OpenRouter? Your requests are refused until you connect again.', { ok: 'Disconnect', danger: true })) return;
+        off.disabled = true;
+        try { await api('DELETE', '/ui/api/me/credential'); ui.toast('Disconnected. Revoke the key at openrouter.ai/settings/keys too if you want it dead.', { kind: 'ok' }); await drawCredential(); draw(); } catch (err) { off.disabled = false; ui.toast(err.message, { kind: 'error' }); }
+      });
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!input.value.trim()) return input.focus();
+        const submit = form.querySelector('button'); submit.disabled = true;
+        try { await api('PUT', '/ui/api/me/credential', { key: input.value.trim() }); input.value = ''; paste.open = false; ui.toast('Key saved.', { kind: 'ok' }); await drawCredential(); draw(); } catch (err) { ui.toast(err.message, { kind: 'error' }); } finally { submit.disabled = false; }
+      });
+      function draw() {
+        const s = credState(cred);
+        status.replaceChildren(el('span', { className: `orDot ${s.dot}`, style: 'display:inline-block;margin-right:8px' }), el('strong', { textContent: s.head }), el('br'), el('span', { className: 'muted', textContent: s.sub }));
+        go.disabled = false;
+        go.textContent = cred && cred.set ? 'Reconnect with OpenRouter' : 'Connect with OpenRouter';
+        input.placeholder = cred && cred.set ? 'Paste a new key to replace it' : 'sk-or-…';
+        actions.replaceChildren(...(cred && cred.set ? [off] : []), closeBtn, go);
+      }
+      draw();
+      return go;
+    });
+  }
+  $('orOpen').addEventListener('click', openCredentialDialog);
   $('addInvite').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -251,6 +304,6 @@
     loadKeys();
     drawCredential().catch(() => {});
     const back = new URLSearchParams(location.search).get('openrouter');
-    if (back) { say(back === 'connected' ? 'OpenRouter connected.' : `OpenRouter was not connected: ${back === 'unavailable' ? 'this account cannot use its own key' : back}`, back !== 'connected'); history.replaceState(null, '', location.pathname); }
+    if (back) { ui.toast(back === 'connected' ? 'OpenRouter connected.' : `OpenRouter was not connected: ${back === 'unavailable' ? 'this account cannot use its own key' : back}`, { kind: back === 'connected' ? 'ok' : 'error' }); history.replaceState(null, '', location.pathname); }
   })();
 })();

@@ -2944,7 +2944,7 @@ $('ghAttach').addEventListener('click', async () => {
   }
   if (chat === c) { drawGithub(); drawHint(); drawContextSize(); }
 });
-// Back from GitHub (api/me/github/callback): ?github=connected, or the reason it did not work
+// Back from GitHub (/auth/github/callback): ?github=connected, or the reason it did not work
 {
   const back = new URLSearchParams(location.search).get('github');
   if (back) {

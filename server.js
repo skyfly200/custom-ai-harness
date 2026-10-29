@@ -621,10 +621,11 @@ app.get('/ui/api/me/github/connect', (req, res) => {
     const back = String(req.query.back || '');
     if (!req.harnessLogin || !db.enabled() || req.harnessUser.guest) return githubBack(res, back, 'unavailable');
     try {
-        res.redirect(githubOAuth.begin({ owner: req.harnessUser.name, callback: oauthCallbackUrl(req, '/ui/api/me/github/callback'), back }));
+        res.redirect(githubOAuth.begin({ owner: req.harnessUser.name, callback: oauthCallbackUrl(req, '/auth/github/callback'), back }));
     } catch (err) { githubBack(res, back, err.message); }
 });
-app.get('/ui/api/me/github/callback', async (req, res) => {
+// /auth/github/callback is the address to give GitHub; the old /ui/api path keeps working for apps that still use it
+app.get(['/auth/github/callback', '/ui/api/me/github/callback'], async (req, res) => {
     let back = '';
     if (!req.harnessLogin || !db.enabled() || req.harnessUser.guest) return githubBack(res, back, 'unavailable');
     try {

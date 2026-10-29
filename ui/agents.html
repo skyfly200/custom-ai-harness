@@ -33,13 +33,8 @@
   <section id="githubBox" hidden>
     <h2 data-hint="Agents work on your GitHub repos. Paste a fine-grained personal access token with Contents: read and write on the repos you want to use. It is kept encrypted and only used to clone, fetch and push your run branches">GitHub</h2>
     <div class="card" id="githubCard">
-      <p class="muted" id="githubNote">Connect GitHub so agents can work in your repos.</p>
-      <p><a id="githubConnect" href="api/me/github/connect?back=agents.html" hidden>Connect with GitHub</a></p>
-      <form id="githubForm" class="repo-input" autocomplete="off">
-        <input type="password" id="githubToken" placeholder="github_pat_…" autocomplete="off" spellcheck="false" aria-label="GitHub token">
-        <button type="submit" class="primary">Connect</button>
-        <button type="button" id="githubOff" hidden>Disconnect</button>
-      </form>
+      <p class="muted" id="githubNote">Checking GitHub…</p>
+      <p><button type="button" id="githubManage" class="primary">Connect GitHub</button></p>
     </div>
   </section>
 
@@ -185,6 +180,7 @@
   </details>
 </main>
 <script src="dialogs.js"></script>
+<script src="githubconnect.js"></script>
 <script src="ownerScope.js"></script>
 <script src="hints.js"></script>
 <script src="bright.js"></script>

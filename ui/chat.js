@@ -2911,14 +2911,20 @@ function drawGithub() {
   $('ghAttach').textContent = g ? 'Detach' : 'Attach';
   $('ghRepo').hidden = $('ghAttach').hidden = !st.connected;
   $('ghBox').querySelector('label').hidden = !st.connected;
-  const connect = st.canConnect ? `<a href="api/me/github/connect?back=chat">${st.connected ? 'Reconnect GitHub' : 'Connect GitHub'}</a>` : '';
-  const install = st.connected && st.app && st.installUrl ? ` · <a href="${esc(st.installUrl)}" target="_blank" rel="noopener">Choose which repos it can reach</a>` : '';
+  // Connecting, reconnecting, choosing repos and disconnecting live in a dialog (githubconnect.js), opened from here
+  const manage = (label) => `<a href="#" data-gh-manage>${label}</a>`;
   $('ghInfo').innerHTML = !st.connected
-    ? `${connect || esc(st.note || 'GitHub is not connected.')} to let the model read your repos.`
+    ? `${st.canConnect ? manage('Connect GitHub') : esc(st.note || 'GitHub is not connected.')} to let the model read your repos.`
     : g
-      ? `Attached <b>${esc(g.full)}</b>${g.branch ? ` (<code>${esc(g.branch)}</code>)` : ''} as <b>${esc(st.login || '')}</b>. Writes wait for your Allow. ${connect}${install}`
-      : `Connected as <b>${esc(st.login || '')}</b>${st.via === 'env' ? ' (GITHUB_TOKEN)' : ''}. Pick a repo or type owner/name. ${connect}${install}`;
+      ? `Attached <b>${esc(g.full)}</b>${g.branch ? ` (<code>${esc(g.branch)}</code>)` : ''} as <b>${esc(st.login || '')}</b>. Writes wait for your Allow. ${manage('Manage')}`
+      : `Connected as <b>${esc(st.login || '')}</b>${st.via === 'env' ? ' (GITHUB_TOKEN)' : ''}. Pick a repo or type owner/name. ${manage('Manage')}`;
 }
+$('ghInfo').addEventListener('click', async (e) => {
+  if (!e.target.closest('[data-gh-manage]')) return;
+  e.preventDefault();
+  await githubConnect.open({ back: 'chat' });
+  loadGithub();
+});
 $('ghRepo').addEventListener('input', () => { $('ghRepo').dataset.typed = $('ghRepo').value; });
 $('ghRepo').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('ghAttach').click(); } });
 $('ghAttach').addEventListener('click', async () => {

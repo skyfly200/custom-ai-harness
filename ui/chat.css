@@ -694,3 +694,13 @@ body.chat-page.menu-open .app > .top nav a.here::after { left: 12px; right: auto
 body.chat-page.menu-open .app > .top nav .install-btn, body.chat-page.menu-open .app > .top nav .account-chip { margin: 4px 0 0; }
 #pagesMenu[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
 @media (max-width: 760px) { .chatbar { padding-top: max(8px, env(safe-area-inset-top, 0px)); } }
+
+/* Helper text under fields: one line, the rest on hover, focus or tap (see chat.js) */
+.opt-body div.muted.small, .note-clamp {
+  display: block;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help;
+}
+.opt-body div.muted.small:hover, .opt-body div.muted.small.open,
+.note-clamp:hover, .note-clamp.open {
+  white-space: normal; overflow: visible; cursor: default;
+}

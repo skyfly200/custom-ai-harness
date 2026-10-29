@@ -44,14 +44,16 @@ function context({ chat = { id: 'c1', messages: [] }, models = [], commands = []
   return ctx;
 }
 
-function subagentContext({ models = SERVED, response = { id: 'r1', branch: 'harness/r1' } } = {}) {
+function subagentContext({ hosted = false, github = null, models = SERVED, response = { id: 'r1', branch: 'harness/r1' } } = {}) {
   const toasts = [];
   const saved = [];
   const requests = [];
   const chat = { id: 'c1', messages: [] };
   const ctx = {
     chat, gatewayModels: models, modelAlias, console, JSON, Date,
-    repoOf: () => ({ path: 'C:\\repos\\demo', name: 'demo' }),
+    repoOf: () => (hosted ? null : { path: 'C:\\repos\\demo', name: 'demo' }),
+    hostedNoFolders: () => hosted,
+    ghOf: () => github,
     routeOf: () => ({ model: 'auto' }),
     toast: (t) => toasts.push(t),
     saveChat: (c) => saved.push(c),
@@ -148,4 +150,81 @@ test('the advisor is asked with its model and no tools, and a short answer comes
   const out = advisor.answer({ choices: [{ message: { content: 'It is.' } }] });
   assert.equal(out.text, 'It is.');
   assert.equal(out.isError, false);
+});
+
+// /model: switches what the chat answers with, like the "Answer with" picker
+function modelContext({ models = SERVED, profiles = [{ id: 'cheap', name: 'Cheap' }] } = {}) {
+  const toasts = [];
+  const chat = { id: 'c1', messages: [] };
+  const input = { value: '/model opus' };
+  const ctx = {
+    chat, gatewayModels: models, modelAlias, console, JSON, Date,
+    strategies: { profiles },
+    toasts, input,
+    $: () => input,
+    toast: (t) => toasts.push(t),
+    saveChat: () => {}, autoGrow: () => {}, hideSlash: () => {}, drawSlash: () => {},
+    drawRoute: () => {}, drawTools: () => {}, drawHint: () => {}, drawStats: () => {}, drawEffort: () => {}, redrawQuick: () => {},
+    routeOf: () => ({}),
+    applyQuick: (c, v) => { if (v.startsWith('m:')) { c.route = 'model'; c.model = v.slice(2); } else c.route = v; },
+  };
+  vm.createContext(ctx);
+  const run = (code, names) => vm.runInContext(`${code}\n${names.map(n => `this.${n} = ${n};`).join('\n')}`, ctx);
+  run(between('function resolveModelName(', 'function serverTools'), ['resolveModelName']);
+  run(between('function modelCommand(', '// ---------------------------------------------------------------------------\n// Subagents:'), ['modelCommand']);
+  run(between('function modelArgument(', 'const MODEL_MENU_ROWS'), ['modelArgument']);
+  return ctx;
+}
+
+test('/model opus points the chat straight at the newest Opus', async () => {
+  const ctx = modelContext();
+  await ctx.modelCommand('/model opus');
+  assert.equal(ctx.chat.route, 'model');
+  assert.equal(ctx.chat.model, 'anthropic/claude-opus-5.5');
+  assert.match(ctx.toasts.at(-1), /now answers with anthropic\/claude-opus-5\.5/);
+});
+
+test('/model takes a strategy by name, and default and auto', async () => {
+  const ctx = modelContext();
+  await ctx.modelCommand('/model cheap');
+  assert.equal(ctx.chat.route, 'p:cheap');
+  await ctx.modelCommand('/model auto');
+  assert.equal(ctx.chat.route, 'auto');
+});
+
+test('/model with no name lists the choices instead of changing anything', async () => {
+  const ctx = modelContext();
+  await ctx.modelCommand('/model');
+  assert.equal(ctx.chat.route, undefined);
+  assert.equal(ctx.input.value, '/model ');
+});
+
+test('/model with a name nothing matches offers near misses and changes nothing', async () => {
+  const ctx = modelContext();
+  await ctx.modelCommand('/model gpt-9');
+  assert.equal(ctx.chat.route, undefined);
+  assert.match(ctx.toasts.at(-1), /No model matches "gpt-9"/);
+  assert.equal(ctx.modelCommand('/modelx'), null);
+  assert.equal(ctx.modelCommand('hello'), null);
+});
+
+test('the model suggestion list shows for /advisor, /model and the first word of /subagent', () => {
+  const { modelArgument } = modelContext();
+  assert.deepEqual({ ...modelArgument('/advisor op') }, { command: 'advisor', query: 'op' });
+  assert.deepEqual({ ...modelArgument('/model ') }, { command: 'model', query: '' });
+  assert.deepEqual({ ...modelArgument('/subagent ha') }, { command: 'subagent', query: 'ha' });
+  assert.equal(modelArgument('/subagent haiku find it'), null, 'past the model, it is the task');
+  assert.equal(modelArgument('/advisor off'), null);
+  assert.equal(modelArgument('/agent Docs op'), null);
+  assert.equal(modelArgument('/advisor'), null);
+});
+
+test('/subagent in a hosted chat uses the attached GitHub repo, and asks for one when there is none', async () => {
+  const withRepo = subagentContext({ hosted: true, github: { full: 'skyfly200/demo' } });
+  await withRepo.subagentCommand('/subagent look around');
+  assert.equal(withRepo.requests[0].body.repo, 'skyfly200/demo');
+  const without = subagentContext({ hosted: true });
+  await without.subagentCommand('/subagent look around');
+  assert.equal(without.requests.length, 0);
+  assert.match(without.toasts.at(-1), /Attach a GitHub repo/);
 });

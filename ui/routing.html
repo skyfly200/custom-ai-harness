@@ -182,12 +182,12 @@
   </div>
 </dialog>
 
-<dialog id="newDialog" class="card">
+<dialog id="newDialog" class="card narrow">
   <form method="dialog" id="newForm" autocomplete="off">
     <div class="add-head"><h3>New strategy</h3></div>
-    <p><label>Name <input id="newName" maxlength="60" required></label></p>
-    <p><label>Start as <select id="newStart" data-hint="A copy keeps the lines of the strategy shown. The others place your models for you, so the new strategy begins different"></select></label></p>
-    <p class="small muted" id="newHint"></p>
+    <label class="field"><span>Name</span><input type="text" id="newName" maxlength="60" required placeholder="e.g. Cheap and quick"></label>
+    <label class="field"><span>Start as</span><select id="newStart" data-hint="A copy keeps the lines of the strategy shown. The others place your models for you, so the new strategy begins different"></select>
+      <small id="newHint"></small></label>
     <div class="actions">
       <button type="submit" class="primary" id="newOk">Add</button>
       <button type="button" id="newCancel">Cancel</button>

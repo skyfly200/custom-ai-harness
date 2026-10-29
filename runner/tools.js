@@ -5,7 +5,7 @@
 // run nobody is watching must not fail open).
 'use strict';
 
-const MAX_READ = 40000;
+const MAX_READ = 16000; // about 4,000 tokens a read; every step sends the earlier reads again
 // What a workflow stage may use: read looks only, check also runs commands, all writes too
 const TOOLSETS = {
     read: ['list_files', 'read_file', 'finish'],

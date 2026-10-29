@@ -15,8 +15,12 @@ Rules:
 - Never touch secrets, .env files or the .git folder. Do not push or publish anything: the person will review your branch.
 - When you are done, or cannot continue, call finish with a short summary: what you changed, how you checked it, and anything they should look at.`;
 
-const KEEP_RECENT = 12;       // tool results in the last N messages stay whole
+const KEEP_RECENT = 8;        // tool results in the last N messages stay whole
 const OLD_RESULT_CHARS = 400; // older ones are cut to this
+const CUT_STEP = 6;           // the cut point moves in jumps of this many messages, so the start of the history
+                              // stays the same between jumps and the provider's prompt cache keeps hitting
+const SAME_CALL_LIMIT = 3;    // the same call this many times in a row is a loop
+const WRAP_UP_AT = 3;         // steps left when the agent is told to finish
 const PARTIAL_CHARS = 2000;   // how much of what the model was saying a run carried on is told
 
 const READ_TOOLS = new Set(['list_files', 'read_file']);
@@ -32,7 +36,7 @@ function partialNote(messages) {
 
 /** Cut the bodies of old tool results so a long run's history stays affordable. */
 function shrinkHistory(messages) {
-    const cutoff = messages.length - KEEP_RECENT;
+    const cutoff = Math.floor((messages.length - KEEP_RECENT) / CUT_STEP) * CUT_STEP;
     return messages.map((m, i) => (m.role === 'tool' && i < cutoff && m.content.length > OLD_RESULT_CHARS
         ? { ...m, content: `${m.content.slice(0, OLD_RESULT_CHARS)}\n[... older output cut to save space ...]` } : m));
 }
@@ -41,11 +45,34 @@ function toolArgs(call) {
     try { return JSON.parse(call.function.arguments || '{}'); } catch { return null; }
 }
 
-async function runTool(call, args, tools, emit) {
+/** An old read of the same file part is a copy the model already has a newer one of: keep a stub. */
+function dropRepeatedReads(messages, callName, args) {
+    if (callName !== 'read_file' || !args?.path) return;
+    const key = (a) => `${a.path}|${a.start || ''}|${a.end || ''}`;
+    const want = key(args);
+    for (let i = 0; i < messages.length; i++) {
+        const m = messages[i];
+        if (m.role !== 'assistant' || !m.tool_calls) continue;
+        for (const c of m.tool_calls) {
+            if (c.function.name !== 'read_file') continue;
+            const a = toolArgs(c);
+            if (!a || key(a) !== want) continue;
+            const r = messages.slice(i + 1).find((x) => x.role === 'tool' && x.tool_call_id === c.id);
+            if (r && r.content.length > OLD_RESULT_CHARS) r.content = `${args.path}: read again later; see the newer copy below.`;
+        }
+    }
+}
+
+async function runTool(call, args, tools, emit, messages = [], recent = []) {
     emit({ type: 'tool', name: call.function.name, args: args ?? call.function.arguments });
-    const result = args === null
-        ? { text: 'Error: the arguments were not valid JSON. Send them again.' }
-        : await tools.call(call.function.name, args);
+    const sig = `${call.function.name}:${call.function.arguments}`;
+    recent.push(sig);
+    if (recent.length > 20) recent.shift();
+    const looping = recent.length >= SAME_CALL_LIMIT && recent.slice(-SAME_CALL_LIMIT).every((s) => s === sig);
+    let result;
+    if (args === null) result = { text: 'Error: the arguments were not valid JSON. Send them again.' };
+    else if (looping && call.function.name !== 'finish') result = { text: `You have made this exact call ${SAME_CALL_LIMIT} times in a row and nothing changed. Do something different (read another file, change your approach), or call finish and say what is blocking you.` };
+    else { dropRepeatedReads(messages, call.function.name, args); result = await tools.call(call.function.name, args); }
     emit({ type: 'result', name: call.function.name, text: result.text });
     return result;
 }
@@ -60,7 +87,8 @@ async function runTool(call, args, tools, emit) {
  */
 async function runAgent({ run, tools, chat, emit, firstContext = '', system = SYSTEM }) {
     const messages = [{ role: 'system', content: system }, { role: 'user', content: `Task:\n${run.goal}${firstContext ? `\n\n${firstContext}` : ''}` }];
-    let nudges = 0;
+    let nudges = 0, wrapped = false;
+    const recent = [];
     // maxSteps of 0 means no step limit: only the deadline and the stop button end it.
     const last = run.maxSteps > 0 ? run.maxSteps : Infinity;
     for (let step = 1; step <= last; step++) {
@@ -81,7 +109,7 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
         const calls = msg.tool_calls;
         if (calls.length > 1 && calls.every(call => READ_TOOLS.has(call.function.name))) {
             if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
-            const results = await Promise.all(calls.map(call => runTool(call, toolArgs(call), tools, emit)));
+            const results = await Promise.all(calls.map(call => runTool(call, toolArgs(call), tools, emit, messages, recent)));
             for (let i = 0; i < calls.length; i++) {
                 messages.push({ role: 'tool', tool_call_id: calls[i].id, content: results[i].text });
                 ran++;
@@ -90,11 +118,16 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
         } else for (const call of calls) {
             // a stop between two calls of one step leaves the rest unrun: the run has ended
             if (run.stopped()) break;
-            const result = await runTool(call, toolArgs(call), tools, emit);
+            const result = await runTool(call, toolArgs(call), tools, emit, messages, recent);
             messages.push({ role: 'tool', tool_call_id: call.id, content: result.text });
             ran += 1;
             if (result.finished) return { status: 'finished', summary: result.text };
             if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
+        }
+        // Nearly out of steps: say so while there is still one to write the summary with.
+        if (!wrapped && last !== Infinity && last - step === WRAP_UP_AT && ran === msg.tool_calls.length) {
+            wrapped = true;
+            messages.push({ role: 'user', content: `You have ${WRAP_UP_AT} steps left. Stop exploring: finish what you can now and call finish with a summary of what is done and what is not.` });
         }
         // This was the last step. A reply that asked for more tools than there were steps
         // left would leave some of them never run, and a tool call with no result after it

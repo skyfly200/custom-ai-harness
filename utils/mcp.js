@@ -181,6 +181,15 @@ function describeFailure(err, spec, { timeoutMs, tries = 1 } = {}) {
     return err.message;
 }
 
+// What a program that died on start printed, boiled down to its error: from the "Error: ..." line on (a stack ends in
+// "}" and "Node.js v22", which says nothing), else the last few lines.
+function crashSummary(stderr) {
+    const lines = String(stderr || '').split('\n').map((l) => l.trim())
+        .filter((l) => l && !/^(\^|\}|\{|Node\.js v[\d.]+|at )/.test(l) && !/^throw /.test(l));
+    const at = lines.findIndex((l) => /\b\w*Error\b/.test(l));
+    return (at >= 0 ? lines.slice(at, at + 3) : lines.slice(-3)).join(' ');
+}
+
 class McpManager {
     // `specs` (async, returns the {name: entry} object) replaces the file for a source that is not mcp-servers.json
     // (a user's servers in the database). `plain` turns off ${VAR} expansion, so an entry can't read this process's
@@ -306,7 +315,7 @@ class McpManager {
         } catch (err) {
             server.status = 'failed';
             const message = describeFailure(err, spec, { timeoutMs, tries });
-            const lines = server.stderr?.trim().split('\n').slice(-3).join(' ');
+            const lines = crashSummary(server.stderr);
             server.error = lines && err.code !== 'ENOENT' ? `${message}: ${lines}` : message;
             try { await server.client?.close(); } catch {}
             server.client = null;
@@ -460,4 +469,5 @@ function askFirst(spec, tool) {
     return spec.askBefore === 'writes' && tool.annotations?.readOnlyHint !== true;
 }
 
-module.exports = { McpManager, readConfig, writeConfig, transportType, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };
+module.exports = {
+    crashSummary, McpManager, readConfig, writeConfig, transportType, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };

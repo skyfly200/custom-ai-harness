@@ -26,32 +26,13 @@
     ['piano', 'rhythm', 'melody', 'chord', 'jazz', 'violin'],
   ];
 
-  // ---- the background switch, at the end of the top bar's links -----------
-  function decorate() {
-    const nav = document.querySelector('nav');
-    if (nav && !document.getElementById('bgToggle')) {
-      const b = document.createElement('button');
-      b.id = 'bgToggle';
-      b.type = 'button';
-      b.className = 'bg-toggle';
-      b.dataset.hint = b.title = 'Turn the moving background on or off';
-      b.setAttribute('aria-label', 'Background animation');
-      b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="7" r="1.6"/><circle cx="17" cy="5" r="1.6"/><circle cx="12" cy="13" r="1.6"/><circle cx="19" cy="18" r="1.6"/><circle cx="6" cy="18" r="1.6"/><path d="M6.4 7.7 10.8 12M13.4 12.2l2.6-5.6M13.3 13.9l4.4 3.1M10.6 13.8 7.3 17"/></svg>';
-      b.addEventListener('click', () => setEnabled(!enabled));
-      nav.appendChild(b);
-      drawToggle();
-    }
-  }
-  function drawToggle() {
-    const b = document.getElementById('bgToggle');
-    if (b) { b.classList.toggle('on', enabled); b.setAttribute('aria-pressed', String(enabled)); }
-  }
+  // ---- the background switch (the button lives in the account menu, ui/nav.js) ----
   function setEnabled(on) {
     enabled = on;
     try { localStorage.setItem(BG_KEY, on ? 'on' : 'off'); } catch {}
-    drawToggle();
     canvas.hidden = !on;
     if (on) start(); else stop();
+    document.dispatchEvent(new CustomEvent('bright:background'));
   }
 
   // ---- edge glow: cards light up along the edge nearest the pointer --------
@@ -236,74 +217,23 @@
 
   // Other pages' scripts can drop a pulse (the chat page does when you send)
   window.Bright = {
+    background: () => enabled,
+    setBackground: setEnabled,
     pulse(x = W / 2, y = H / 2, which = 2) {
       if (!enabled || reduced.matches) return;
       pulses.push({ x, y, age: 0, color: palette[which % palette.length] });
     },
   };
 
-  // ---- installable app: a service worker, and an Install button where the browser offers one ----
-  // Chrome and Edge fire beforeinstallprompt when the app can be installed; Safari never does
-  // (Share, then Add to Home Screen). Service workers need https or localhost.
-  let installEvent = null;
-  function drawInstall() {
-    const nav = document.querySelector('nav');
-    let b = document.getElementById('installBtn');
-    if (!installEvent) { b?.remove(); return; }
-    if (!nav || b) return;
-    b = document.createElement('button');
-    b.id = 'installBtn';
-    b.type = 'button';
-    b.className = 'install-btn';
-    b.textContent = 'Install app';
-    b.dataset.hint = b.title = 'Add Bright Chat to this device as an app';
-    b.addEventListener('click', async () => {
-      const event = installEvent;
-      installEvent = null;
-      drawInstall();
-      try { await event.prompt(); } catch {}
-    });
-    nav.appendChild(b);
-  }
-  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; drawInstall(); });
-  window.addEventListener('appinstalled', () => { installEvent = null; drawInstall(); });
-  // With HARNESS_REQUIRE_LOGIN on, show who is signed in, with a way out
-  async function drawAccount() {
-    const nav = document.querySelector('nav');
-    if (!nav || document.getElementById('accountChip')) return;
-    let me;
-    try {
-      const r = await fetch('/ui/api/me', { credentials: 'same-origin' });
-      if (!r.ok) return;
-      me = await r.json();
-    } catch { return; }
-    if (!me.name || document.getElementById('accountChip')) return;
-    const a = document.createElement('a');
-    a.id = 'accountChip';
-    a.className = 'account-chip';
-    a.href = 'users.html';
-    a.textContent = me.name;
-    a.dataset.hint = a.title = me.role === 'admin' ? 'Your account, other users and API keys' : 'Your password and API keys';
-    const out = document.createElement('button');
-    out.type = 'button';
-    out.className = 'account-out';
-    out.textContent = 'Sign out';
-    out.addEventListener('click', async () => {
-      try { await fetch('/logout', { method: 'POST' }); } catch {}
-      location.href = '/login';
-    });
-    nav.append(a, out);
-  }
-  drawAccount();
+  // installable app: the Install button is in the account menu (ui/nav.js); service workers need https or localhost
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   function init() {
     document.body.prepend(canvas);
     canvas.hidden = !enabled;
-    decorate();
-    drawInstall();
     resize();
     start();
+    document.dispatchEvent(new CustomEvent('bright:background'));
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

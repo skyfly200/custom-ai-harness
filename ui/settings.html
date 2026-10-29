@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="Bright Chat">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="calm.css">
 <link rel="stylesheet" href="mobile.css">
 <link rel="stylesheet" href="settings.css">
@@ -21,12 +22,13 @@
 <body>
 <main class="settings">
   <header>
-    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Settings</span></h1><a href="./" data-hint="Health of each part, recent chats, usage and requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a><a href="agents.html" data-hint="Named agents that keep working on your repos, and one-off runs">Agents</a><a href="settings.html" data-hint="Interceptor and Router settings" class="here" aria-current="page">Settings</a></nav>
+    <nav data-site-nav></nav>
     <div class="tools">
       <input id="setFilter" type="search" placeholder="Find a setting…" aria-label="Find a setting" data-hint="Show only the settings whose name or help text matches">
       <span class="muted" id="updated">Loading…</span>
     </div>
   </header>
+  <script src="nav.js"></script>
 
   <p class="notice muted"><a href="tools.html">Tools</a>: add and test the MCP servers the chat page can use.</p>
   <p class="notice muted" id="usersLink" hidden><a href="users.html">Users and API keys</a>: who can sign in, and keys for programs.</p>

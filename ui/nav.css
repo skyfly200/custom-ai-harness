@@ -1,0 +1,87 @@
+/* The pages bar (ui/nav.js builds it): brand far left, page links with the current one lit,
+   an account menu at the right; on phones the links fold into a menu and the bar slides away
+   while you read down. Also styles the menu items the chat page's pages menu reuses. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip-link { position: fixed; left: 12px; top: -48px; z-index: 60; padding: 8px 14px; border-radius: 8px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--field-border); font-weight: 600; text-decoration: none; transition: top .12s; }
+.skip-link:focus { top: max(10px, env(safe-area-inset-top, 0px)); }
+
+.site-bar { position: sticky; top: 0; z-index: 40; background: var(--glass-strong); border-bottom: 1px solid var(--border);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); transition: transform .2s ease;
+  padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+.site-bar-in { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+body:has(main.wide) .site-bar-in { max-width: none; }
+.site-nav { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-height: 52px; }
+
+.site-nav .brand-link { display: inline-flex; align-items: center; color: var(--text); text-decoration: none; margin-right: 10px; border-radius: 8px; flex: none; }
+.site-nav .brand { display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; font-size: 17px; margin: 0; }
+.site-nav .brand-link:hover .brand-name { filter: brightness(1.15); }
+
+.site-links { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.site-nav a, .menu-item { text-decoration: none; }
+.site-links a { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border-radius: 9px; color: var(--muted); font-weight: 600; font-size: 13.5px; white-space: nowrap; transition: color .15s, background-color .15s; }
+.site-links a:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.site-links a.here { color: var(--text); background: color-mix(in srgb, var(--accent) 15%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent); }
+.site-nav a.here::after { display: none; }
+.site-links a.here .ico { color: var(--accent); }
+.ico { width: 16px; height: 16px; flex: none; }
+
+a:focus-visible, .site-nav button:focus-visible, .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.menu-item:focus-visible { outline-offset: -2px; }
+
+/* account menu */
+.site-account { margin-left: auto; position: relative; flex: none; }
+.account-btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 8px; border-radius: 999px; background: transparent; color: var(--text);
+  border: 1px solid var(--field-border); font-weight: 600; font-size: 13px; }
+.account-btn .who { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-btn .ico:last-child { width: 14px; height: 14px; color: var(--muted); transition: transform .15s; }
+.account-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.account-btn[aria-expanded="true"] .ico:last-child { transform: rotate(180deg); }
+.account-menu, .site-panel { background: var(--panel); border: 1px solid var(--field-border); border-radius: 12px; padding: 6px; box-shadow: 0 14px 36px -10px rgba(0, 0, 0, .45); }
+.account-menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 240px; animation: pop .14s ease-out; }
+.account-menu[hidden], .site-panel[hidden] { display: none; }
+.menu-head { padding: 6px 10px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+.menu-head b { display: block; font-size: 13.5px; overflow-wrap: anywhere; }
+.menu-head small { color: var(--muted); font-size: 12px; }
+.menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--text); font: inherit; font-weight: 600; font-size: 13.5px; text-align: left; cursor: pointer; }
+.menu-item:hover, button.menu-item:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); border: 0; }
+.menu-item .ico { color: var(--muted); }
+.menu-item.here { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.menu-item.here .ico { color: var(--accent); }
+.menu-item .sw { margin-left: auto; position: relative; width: 28px; height: 16px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 40%, transparent); transition: background-color .15s; flex: none; }
+.menu-item .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.menu-item[aria-checked="true"] .sw { background: var(--accent); }
+.menu-item[aria-checked="true"] .sw::after { transform: translateX(12px); }
+.nav-sep { display: block; height: 1px; margin: 4px 6px; background: var(--border); flex: none; }
+@keyframes pop { from { opacity: 0; transform: translateY(-4px); } }
+
+/* the page's own controls (status text, filters, buttons) sit on the right under the bar */
+.site-bar ~ main > header { justify-content: flex-end; align-items: center; }
+
+.site-burger { display: none; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 8px; margin-left: auto; border-radius: 10px;
+  background: transparent; color: var(--text); border: 1px solid var(--field-border); }
+.site-burger[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.site-burger .ico { width: 20px; height: 20px; }
+
+@media (min-width: 761px) { .site-panel { display: none !important; } }
+@media (max-width: 760px) {
+  .site-bar { padding-top: env(safe-area-inset-top, 0px); }
+  .site-bar.away { transform: translateY(-100%); }
+  .site-bar-in { padding: 0 12px; }
+  .site-nav { min-height: 48px; }
+  .site-links, .site-account { display: none; }
+  .site-burger { display: inline-flex; }
+  .site-panel { position: absolute; left: 8px; right: 8px; top: calc(100% + 6px); max-height: calc(100dvh - 72px); overflow-y: auto; animation: pop .14s ease-out; }
+  .site-panel .menu-item { min-height: 44px; font-size: 15px; }
+  .site-panel .menu-head { padding-top: 8px; }
+}
+
+/* the chat page's pages menu lists the same links, flat */
+body.chat-page .top nav a { gap: 10px; color: var(--text); }
+body.chat-page .top nav a .ico { color: var(--muted); }
+body.chat-page .top nav a.here { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+body.chat-page .top nav a.here .ico { color: var(--accent); }
+body.chat-page .top nav a.here::after { display: none; }
+body.chat-page .top nav .menu-item { margin: 0; }
+body.chat-page .top nav .menu-item { padding: 0 12px; }

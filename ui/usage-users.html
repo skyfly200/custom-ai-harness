@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="Bright Chat">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="usage.css">
 <link rel="stylesheet" href="calm.css">
 <link rel="stylesheet" href="mobile.css">
@@ -21,9 +22,10 @@
 <body>
 <main>
   <header>
-    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">All users</span></h1><a href="./" data-hint="Health of each part, recent chats, usage and requests">Dashboard</a><a href="chat.html" data-hint="Talk to the models through the harness">Chat</a><a href="usage.html" data-hint="Tokens used, by client, model and service" class="here" aria-current="page">Usage</a><a href="routing.html" data-hint="Where requests go, as connected boxes you can edit">Routing</a><a href="agents.html" data-hint="Named agents that keep working on your repos, and one-off runs">Agents</a><a href="settings.html" data-hint="Interceptor and Router settings">Settings</a></nav>
+    <nav data-site-nav></nav>
     <span class="muted" id="updated">Loading…</span>
   </header>
+  <script src="nav.js"></script>
 
   <div class="controls filters">
     <a href="usage.html" class="back" data-hint="Your own usage, savings and charts">← My usage</a>

@@ -20,7 +20,8 @@ test('the web UI never calls the browser alert, confirm or prompt (use ui.toast,
 
 test('every page that has scripts loads dialogs.js before them', () => {
   for (const f of fs.readdirSync(ui).filter((x) => x.endsWith('.html'))) {
-    const html = fs.readFileSync(path.join(ui, f), 'utf8');
+    // nav.js builds the pages bar while the page loads, so it comes first and never opens a dialog
+    const html = fs.readFileSync(path.join(ui, f), 'utf8').replace('<script src="nav.js"></script>', '');
     if (!/<script src=/.test(html)) continue;
     const at = html.indexOf('src="dialogs.js"');
     assert.ok(at >= 0, `${f} must load dialogs.js`);

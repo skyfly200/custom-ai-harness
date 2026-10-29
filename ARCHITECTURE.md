@@ -35,7 +35,7 @@ A request arrives as OpenAI (`/v1/chat/completions`) or Anthropic (`/v1/messages
 
 ## Web UI
 
-Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Every page loads `ui/dialogs.js` first and `ui/bright.css` / `ui/bright.js` for the shared look.
+Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Every page loads `ui/dialogs.js` first and `ui/bright.css` / `ui/bright.js` for the shared look. The pages bar is built by `ui/nav.js` (styles in `ui/nav.css`) from a `<nav data-site-nav>` placeholder, so the links, active page, account menu and phone menu live in one place; add a page there, not in each HTML file.
 
 | Page | Files | Purpose |
 |---|---|---|

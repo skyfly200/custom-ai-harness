@@ -11,6 +11,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="calm.css">
 <link rel="stylesheet" href="mobile.css">
 <link rel="stylesheet" href="tools.css">
@@ -18,12 +19,13 @@
 <body>
 <main class="tools-page">
   <header>
-    <nav><h1 class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span><span class="brand-page">Tools</span></h1><a href="./">Dashboard</a><a href="chat.html">Chat</a><a href="settings.html">Settings</a></nav>
+    <nav data-site-nav></nav>
     <div class="bar">
       <button id="add" class="primary" type="button">Add a server</button>
       <button id="reload" type="button" title="Disconnect every server and connect them again">Reconnect all</button>
     </div>
   </header>
+  <script src="nav.js"></script>
 
   <p class="muted lead">MCP servers give the model in Bright Chat extra tools: files, the web, GitHub and more. They are the same servers Claude Code uses, kept in <code id="file">mcp-servers.json</code>. Claude Code itself uses its own list (<code>.mcp.json</code>), not this one.</p>
   <div id="msg" class="muted" role="status" aria-live="polite"></div>

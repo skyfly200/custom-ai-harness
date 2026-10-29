@@ -46,6 +46,12 @@ test('the Gateway and Router listen on loopback and everything points at the vol
     assert.strictEqual(interceptor.env.SECRET, 's');
 });
 
+test('every process reaches /openrouter-proxy on loopback, not the compose name harness:3000', () => {
+    for (const c of commands('/vol', { PATH: 'x', HARNESS_USER_CREDENTIALS: '1' })) {
+        assert.strictEqual(c.env.OPENROUTER_PROXY_URL, 'http://127.0.0.1:3000', c.name);
+    }
+});
+
 test('HARNESS_RUNS=1 adds the task runner, hosted, sharing a token with the Interceptor', () => {
     assert.deepStrictEqual(commands('/vol', { PATH: 'x' }).map((c) => c.name), ['gateway', 'router', 'interceptor']);
     assert.strictEqual(commands('/vol', { PATH: 'x' })[2].env.HARNESS_RUNS_OFF, '1', 'the Interceptor is told there is no runner');

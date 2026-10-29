@@ -57,6 +57,8 @@ function commands(dataDir = DATA, env = process.env) {
         HARNESS_USAGE_FILE: path.join(dataDir, 'harness-usage.json'),
         HARNESS_USERS_FILE: path.join(dataDir, 'users.json'),
         MCP_CONFIG: path.join(dataDir, 'mcp-servers.json'),
+        // one Machine: the Gateway and Router reach the Interceptor's /openrouter-proxy here, not at the compose name harness:3000
+        OPENROUTER_PROXY_URL: 'http://127.0.0.1:3000',
     };
     const list = [
         { name: 'gateway', cmd: 'python', args: ['docker/gateway-start.py'],

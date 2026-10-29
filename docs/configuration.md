@@ -36,7 +36,7 @@ OPENROUTER_FEDERATION_TOKEN_FILE=/var/run/secrets/tokens/openrouter   # re-read 
 
 Restart everything. The Interceptor does the exchange and uses the token for the model picker, read-aloud and prices. The Gateway (LiteLLM) and the Router (Jev) can only hold a fixed key, so with federation on they call OpenRouter through the Interceptor's `/openrouter-proxy`, which adds the current token. They prove themselves to it with `OPENROUTER_PROXY_KEY`, or `LITELLM_MASTER_KEY` when that is set; `npm run all` makes a random one if neither is. `GET /ui/api/status` shows `openrouter: { mode: "federation", ok, expiresInSec }` (never the token), and a failed exchange is logged with OpenRouter's reason (for example `invalid_grant: policy paused`).
 
-**With Docker:** nothing else to change in `docker-compose.yml`; the Gateway and Router already reach the harness at `http://harness:3000` (`OPENROUTER_PROXY_URL` changes that). The harness container must be able to read the JWT, so use a file in a folder it has, such as `data/`:
+**With Docker:** nothing else to change in `docker-compose.yml`; the Gateway and Router already reach the harness at `http://harness:3000` (`OPENROUTER_PROXY_URL` changes that; on Fly, where everything runs in one Machine, it is set to `http://127.0.0.1:3000` for you). The harness container must be able to read the JWT, so use a file in a folder it has, such as `data/`:
 
 ```
 OPENROUTER_FEDERATION_TOKEN_FILE=/app/data/idp-token

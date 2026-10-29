@@ -1194,13 +1194,14 @@ app.post('/ui/api/tts', async (req, res) => {
 // and always fail with "network". STT_URL points this at OpenRouter, Groq,
 // OpenAI, a local Whisper or the Gateway. STT_MODEL is the model to ask for and
 // STT_LANGUAGE the default language; the page can override both per request.
-const STT_URL = (process.env.STT_URL || (process.env.OPENROUTER_API_KEY ? OPENROUTER_URL : '')).replace(/\/+$/, '');
+const STT_URL = (process.env.STT_URL || (orAuth.configured() ? OPENROUTER_URL : '')).replace(/\/+$/, '');
 const STT_OPENROUTER = /openrouter\.ai/.test(STT_URL);
 const STT_MODEL = process.env.STT_MODEL || (STT_OPENROUTER ? 'mistralai/voxtral-mini-transcribe-3-0' : 'whisper-1');
 const STT_LANGUAGE = process.env.STT_LANGUAGE || '';
-const STT_KEY = process.env.STT_API_KEY
+// like the TTS key: federation-aware on OpenRouter
+const sttKey = async () => process.env.STT_API_KEY
     || (STT_URL.startsWith(GATEWAY_URL) ? GATEWAY_KEY : '')
-    || (STT_OPENROUTER ? process.env.OPENROUTER_API_KEY || '' : '');
+    || (STT_OPENROUTER ? await orAuth.key().catch((err) => { console.warn(`STT: ${err.message}`); return ''; }) : '');
 
 app.get('/ui/api/stt', (req, res) => {
     if (!STT_URL) return res.json({ configured: false });
@@ -1232,9 +1233,9 @@ app.post('/ui/api/stt', async (req, res) => {
     try {
         const upstream = await fetch(`${STT_URL}/audio/transcriptions`, {
             method: 'POST',
-            headers: STT_KEY ? { authorization: `Bearer ${STT_KEY}` } : {},
+            headers: await sttKey().then((key) => (key ? { authorization: `Bearer ${key}` } : {})),
             body: form,
-            signal: AbortSignal.timeout(120000),
+            signal: AbortSignal.timeout(45000),
         });
         const body = await upstream.text();
         if (!upstream.ok) return res.status(502).json({ error: `Speech server answered HTTP ${upstream.status}: ${body.slice(0, 300)}` });
@@ -1242,6 +1243,8 @@ app.post('/ui/api/stt', async (req, res) => {
         try { text = JSON.parse(body).text ?? ''; } catch {}
         res.json({ text: String(text).trim() });
     } catch (err) {
+        // answer before the host's proxy gives up with its own HTML 504
+        if (err.name === 'TimeoutError') return res.status(504).json({ error: `The speech model (${new URL(STT_URL).host}) did not answer in 45 seconds. It may not offer transcription; try another STT_MODEL or STT_URL.` });
         res.status(502).json({ error: `Speech server unreachable: ${err.cause?.code || err.message}` });
     }
 });

@@ -3417,7 +3417,7 @@ const dictation = {
         body: JSON.stringify({ audio, format: blob.type, language: $('sttLang').value.trim() }),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) { console.warn('Dictation: speech server answered', res.status, out); throw new Error(DictationText.errText(out, res.status)); }
+      if (!res.ok) { console.warn('Dictation: speech server answered', res.status, out); throw new Error(out.error ? DictationText.errText(out, res.status) : `The server did not answer (HTTP ${res.status}). If this is the hosted app, the speech model may be down or the app asleep; try again.`); }
       text = String(out.text || '').trim();
     } catch (err) {
       console.warn('Dictation:', err);

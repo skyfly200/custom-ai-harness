@@ -126,6 +126,7 @@
     f.args.value = (sp.args || []).join('\n');
     f.cwd.value = sp.cwd || '';
     f.url.value = sp.url || '';
+    f.askBefore.value = sp.askBefore || '';
     for (const k of ['timeoutMs', 'retries', 'callTimeoutMs']) f[k].value = sp[k] ?? '';
     f.querySelector('.more').open = ['timeoutMs', 'retries', 'callTimeoutMs'].some((k) => sp[k] !== undefined);
     // from the server these are lists of { key, value } or { key, secret }; from the catalog, plain maps
@@ -143,7 +144,7 @@
   function entry() {
     const type = f.type.value;
     const num = (n) => (f[n].value === '' ? undefined : Number(f[n].value));
-    const common = { type, timeoutMs: num('timeoutMs'), retries: num('retries'), callTimeoutMs: num('callTimeoutMs') };
+    const common = { type, askBefore: f.askBefore.value, timeoutMs: num('timeoutMs'), retries: num('retries'), callTimeoutMs: num('callTimeoutMs') };
     if (type === 'stdio') return { ...common, command: f.command.value, args: f.args.value.split('\n').map((a) => a.trim()).filter(Boolean), cwd: f.cwd.value, env: rowsOf('env') };
     return { ...common, url: f.url.value, headers: rowsOf('headers') };
   }

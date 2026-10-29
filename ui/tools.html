@@ -49,6 +49,11 @@
       <div class="field wide"><span>Headers</span><div class="rows" data-rows="headers"></div><button type="button" class="quiet" data-addrow="headers">Add a header</button>
         <small>For a key: <code>Authorization</code> = <code>Bearer ${GITHUB_TOKEN}</code>. Saved values are hidden.</small></div>
     </div>
+    <div class="form">
+      <label class="field"><span>Ask me before a tool runs</span>
+        <select name="askBefore"><option value="">Never</option><option value="writes">Tools that change something</option><option value="all">Every tool</option></select>
+        <small>The chat shows what the tool would do and waits for your Allow. "Change" means any tool the server doesn't mark read-only.</small></label>
+    </div>
     <details class="more"><summary>Timeouts</summary>
       <div class="form">
         <label class="field"><span>Connect timeout (ms)</span><input name="timeoutMs" type="number" min="1000" step="1000" placeholder="Automatic"></label>

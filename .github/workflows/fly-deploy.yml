@@ -23,7 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@v1
+      # Pasted tokens often pick up a trailing newline or spaces, which Fly rejects as "token validation error".
+      - name: Check the Fly token
+        env:
+          RAW_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          token="$(printf '%s' "$RAW_TOKEN" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          if [ -z "$token" ]; then echo "::error::The FLY_API_TOKEN secret is empty or missing (docs/fly.md, Deploy automatically)"; exit 1; fi
+          echo "::add-mask::$token"
+          echo "FLY_API_TOKEN=$token" >> "$GITHUB_ENV"
+          FLY_API_TOKEN="$token" flyctl apps list >/dev/null || { echo "::error::Fly rejected the token. Create a new one and paste the whole output (docs/fly.md, Deploy automatically, Troubleshooting)"; exit 1; }
       # --ha=false: the volume can only be used by one Machine
       - run: flyctl deploy --remote-only --ha=false
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

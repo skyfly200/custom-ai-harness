@@ -62,6 +62,12 @@ A GitHub Actions workflow (`.github/workflows/fly-deploy.yml`) runs `fly deploy 
 
 Notes: the token can deploy and nothing else; revoke it with `fly tokens list` and `fly tokens revoke`. The app name comes from `fly.toml`. Secrets stay in Fly (`fly secrets set`), so deploys don't need them in GitHub. Nothing runs the tests first, since the repo has no CI; run `npm test` before merging. This workflow has not run against a real Fly account yet.
 
+**If the run says `Authenticate: token validation error`.** Fly rejected the token. The usual causes, most likely first:
+- The token was cut off or changed when copied. `fly tokens create` can print one long line; copy all of it, including the `FlyV1 ` at the start (the space after `FlyV1` belongs there). Pasting into the secret box with a line break in the middle breaks it.
+- It was created for a different app or org than the one in `fly.toml`. Check `app = "..."` matches the `--app` you used.
+- It was revoked or expired. `fly tokens list --app YOUR-APP-NAME` shows what exists; make a new one and replace the secret.
+- Easiest fix: skip the clipboard. In PowerShell run `fly tokens create deploy --app YOUR-APP-NAME | gh secret set FLY_API_TOKEN` (needs the GitHub CLI signed in). The workflow already trims stray spaces and newlines and stops with a clear message before deploying.
+
 ## Using it from Claude Code and other tools
 
 Make an API key on the **Users** page, then:

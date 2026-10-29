@@ -2766,6 +2766,15 @@ $('repoLink').addEventListener('click', async () => {
   if (chat === c) { drawRepo(); drawHint(); drawContextSize(); }
 });
 
+// Folder repos found on this computer fill the Git repo fields (chat and project). Typing a path still works.
+async function loadLocalRepos() {
+  try {
+    const j = await (await fetch('api/local-repos')).json();
+    $('localRepos').innerHTML = (j.repos || []).map(r => `<option value="${esc(r.path)}">${esc(r.name)}</option>`).join('');
+  } catch {}
+}
+loadLocalRepos();
+
 // GitHub: connect once (Connect GitHub), then attach a repo of yours to this chat. The model reads it
 // through GitHub's API, so it works on a hosted server too.
 let ghStatus = null;

@@ -404,6 +404,18 @@ function hostedMode() {
   for (const id of ['repo', 'agentRepo']) $(id).placeholder = 'owner/name on GitHub, for example skyfly200/my-app';
   $('githubBox').hidden = false;
   loadGithub();
+  loadGithubRepos();
+}
+// Repo fields suggest the person's connected GitHub repos (typing owner/name still works)
+async function loadGithubRepos() {
+  try {
+    const res = await fetch('api/github/repos');
+    if (!res.ok) return;
+    fillRepoList(((await res.json()).repos || []).map((r) => ({ value: r.full, label: r.private ? 'private' : 'public' })));
+  } catch { /* not connected: free typing */ }
+}
+function fillRepoList(items) {
+  $('repoList').innerHTML = items.map((i) => `<option value="${esc(i.value)}">${esc(i.label || '')}</option>`).join('');
 }
 async function githubApi(method, body) {
   const res = await fetch('api/me/github', { method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -486,6 +498,10 @@ async function initRepoPicker() {
     hosted = Boolean(r.hosted);
     repos = hosted ? r.repos.map((p) => p.split(/[\\/]/).pop().replace('__', '/')) : r.repos;
     if (hosted) hostedMode();
+    else {
+      // folders found on this computer (REPO_SCAN_ROOTS, else the runner and file roots, else common code folders)
+      try { fillRepoList(((await (await fetch('api/local-repos')).json()).repos || []).map((x) => ({ value: x.path, label: x.name }))); } catch { /* Browse still works */ }
+    }
     if (!repos.length && !hosted) $('repo').placeholder = `Paste a path inside ${r.roots.join(' or ') || 'RUNNER_ROOTS'}`;
     if (repos.length === 1) $('repo').value = repos[0];
   } catch { /* the notice shows it */ }

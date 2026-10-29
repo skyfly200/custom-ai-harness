@@ -133,5 +133,13 @@
     });
   }
 
-  window.ui = { toast, confirm, prompt };
+  // Your own content in the same modal: await ui.dialog((box, close) => { ...append to box...; return focusElement; })
+  function dialog(build) {
+    return modal((box, done) => {
+      const focus = build(box, done);
+      return { focus: () => focus, submit: () => {} };
+    });
+  }
+
+  window.ui = { toast, confirm, prompt, dialog };
 })();

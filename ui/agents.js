@@ -418,30 +418,27 @@ async function loadGithubRepos() {
 function fillRepoList(items) {
   $('repoList').innerHTML = items.map((i) => `<option value="${esc(i.value)}">${esc(i.label || '')}</option>`).join('');
 }
-async function githubApi(method, body) {
-  const res = await fetch('api/me/github', { method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-  return j;
-}
-function showGithub(g) {
-  $('githubNote').textContent = g.set ? `Connected as ${g.login}${g.via === 'oauth' ? ' with GitHub' : ''}. Agents can clone and push the repos that connection can reach. Chats can read them too (chat Options > Tools).` : 'Not connected. Public repos can be cloned without it; private repos and pushing need a token.';
-  $('githubOff').hidden = !g.set;
-  $('githubToken').placeholder = g.set ? 'Paste a new token to replace it' : 'github_pat_…';
-}
+// Connected: one quiet line. The connect / token / disconnect controls live in a dialog (ui/githubconnect.js)
 async function loadGithub() {
-  try { const j = await githubApi('GET'); $('githubConnect').hidden = !j.oauth; showGithub(j.github); } catch (err) { $('githubNote').textContent = err.message; }
+  try {
+    const j = await (await fetch('api/github/status')).json();
+    $('githubNote').textContent = j.connected ? `GitHub: connected as ${j.login || 'you'}.` : 'GitHub is not connected. Public repos can be cloned without it; private repos and pushing need it.';
+    $('githubManage').textContent = j.connected ? 'Manage' : 'Connect GitHub';
+    $('githubManage').classList.toggle('primary', !j.connected);
+  } catch (err) { $('githubNote').textContent = err.message; }
 }
-$('githubForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const token = $('githubToken').value.trim();
-  if (!token) return $('githubToken').focus();
-  try { showGithub((await githubApi('PUT', { token })).github); $('githubToken').value = ''; } catch (err) { $('githubNote').textContent = err.message; }
+$('githubManage').addEventListener('click', async () => {
+  if (await githubConnect.open({ back: 'agents' })) { loadGithub(); loadGithubRepos(); }
+  else loadGithub();
 });
-$('githubOff').addEventListener('click', async () => {
-  if (!await ui.confirm('Disconnect GitHub? Agents can no longer reach your private repos.')) return;
-  try { showGithub((await githubApi('DELETE')).github); } catch (err) { $('githubNote').textContent = err.message; }
-});
+// Back from GitHub's sign-in: open nothing, just say how it went
+{
+  const back = new URLSearchParams(location.search).get('github');
+  if (back) {
+    history.replaceState(null, '', location.pathname + location.hash);
+    setTimeout(() => ui.toast(back === 'connected' ? 'GitHub connected.' : `GitHub: ${back === 'unavailable' ? 'not available on this server or account' : back}`, { kind: back === 'connected' ? 'ok' : 'error' }), 300);
+  }
+}
 
 // Repo picker: type or paste a path, pick a recent one, or browse the allowed folders
 const RECENT_KEY = 'harness-runs-recent-repos';

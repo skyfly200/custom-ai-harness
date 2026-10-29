@@ -1,6 +1,6 @@
 /* Agents page (agents.html) */
 .notice { color: var(--warn); border-color: var(--warn); }
-#newRun .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 10px; }
+#newRun .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 10px; }
 #newRun .field.wide textarea { width: 100%; resize: vertical; font: inherit; }
 .split { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 12px; align-items: start; }
 @media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); } }
@@ -80,3 +80,77 @@
 .app-row .actions { display: flex; gap: 8px; }
 /* the server has no task runner (HARNESS_RUNS off): show only the explanation */
 body.runs-off main > :not(header):not(#down) { display: none; }
+
+/* ---- Bright Chat look: orbs, hero, agent cards, composer ---- */
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.orb { position: relative; display: inline-block; flex: none; width: 24px; height: 24px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0 9%, var(--glow-a) 24%, var(--glow-b) 52%, var(--glow-c) 78%);
+  box-shadow: 0 0 14px -3px var(--glow-b); }
+.orb i { position: absolute; width: 4px; height: 4px; border-radius: 50%; top: 50%; left: 50%; margin: -2px; background: var(--glow-d);
+  box-shadow: 0 0 6px var(--glow-d); animation: agent-orbit 3.6s linear infinite paused; --r: 17px; }
+.orb i:nth-child(2) { animation-duration: 5.2s; animation-direction: reverse; animation-delay: -1.7s; background: var(--glow-a); box-shadow: 0 0 6px var(--glow-a); }
+.orb i:nth-child(3) { animation-duration: 7s; animation-delay: -3.5s; width: 3px; height: 3px; background: #fff; }
+@keyframes agent-orbit { from { transform: rotate(0) translateX(var(--r)); } to { transform: rotate(360deg) translateX(var(--r)); } }
+.orb.live { animation: agent-pulse 1.8s ease-in-out infinite; }
+.orb.live i { animation-play-state: running; animation-duration: 2.4s; }
+.orb.live i:nth-child(2) { animation-duration: 3.4s; } .orb.live i:nth-child(3) { animation-duration: 4.6s; }
+.orb.wait { filter: hue-rotate(150deg) saturate(1.3); }
+.orb.big { width: 46px; height: 46px; } .orb.big i { --r: 31px; }
+@keyframes agent-pulse { 50% { box-shadow: 0 0 22px 0 var(--glow-b); transform: scale(1.06); } }
+
+.hero { display: flex; align-items: center; gap: 16px; margin: 6px 0 14px; padding-left: 8px; }
+.hero h2 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+.hero p { margin: 2px 0 0; }
+
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.agent-card { position: relative; display: grid; grid-template-columns: auto 1fr; grid-template-areas: 'o n' 'o s' 'm m'; column-gap: 12px; row-gap: 1px;
+  align-items: center; text-align: left; margin: 0; padding: 12px 14px; border-radius: 14px; background: var(--glass);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: var(--shadow); color: var(--text); cursor: pointer; }
+.agent-card .orb { grid-area: o; width: 30px; height: 30px; } .agent-card .orb i { --r: 21px; }
+.agent-card .nm { grid-area: n; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-card .st { grid-area: s; font-size: 12px; color: var(--muted); }
+.agent-card .st.live { color: var(--accent); } .agent-card .st.wait { color: var(--warn); font-weight: 600; }
+.agent-card .meta { grid-area: m; margin-top: 8px; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-card:hover { transform: translateY(-2px); box-shadow: var(--shadow), 0 0 26px -10px var(--glow-c); }
+.agent-card.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--glass)); }
+.agent-card.all, .agent-card.add { grid-template-areas: 'n' 'm'; grid-template-columns: 1fr; align-content: center; }
+.agent-card.add { border-style: dashed; justify-items: center; grid-template-areas: 'p' 'n'; color: var(--muted); }
+.agent-card.add .plus { grid-area: p; font-size: 22px; line-height: 1; color: var(--accent); }
+.agent-card.add .nm { grid-area: n; }
+.agent-info { margin-top: 10px; }
+.agent-info h3 { margin: 0 0 6px; }
+@media (max-width: 760px) { .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hero h2 { font-size: 19px; } }
+
+/* run list and detail */
+.run-item { position: relative; padding-left: 26px; border-radius: 10px; transition: background-color .15s; }
+.run-item .sdot { position: absolute; left: 10px; top: 15px; width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
+.run-item .sdot.ok { background: var(--ok); } .run-item .sdot.bad { background: var(--bad); } .run-item .sdot.warn { background: var(--warn); }
+.run-item .sdot.live { background: var(--accent); }
+.run-item .sdot.pulse { animation: agent-dot 1.4s ease-out infinite; }
+@keyframes agent-dot { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+.run-item.on { box-shadow: inset 3px 0 0 var(--accent); }
+.detail-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.detail-head .orb { width: 20px; height: 20px; } .detail-head .orb i { --r: 14px; }
+.detail .result, .approval { border-radius: 14px; background: color-mix(in srgb, var(--text) 3%, transparent); }
+.approval { box-shadow: 0 0 22px -10px var(--warn); }
+.timeline { position: relative; }
+.ev { border-left-width: 2px; border-radius: 0 8px 8px 0; padding: 3px 0 3px 10px; transition: background-color .15s; }
+.ev:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.ev:last-child { animation: rise .35s ease both; }
+
+/* the new run form: a composer */
+.composer { border-radius: 18px; padding: 16px 18px; margin-top: 4px; }
+.composer h2 { margin: 0 0 10px; font-size: 16px; }
+.composer .goal textarea { font-size: 15px; line-height: 1.5; padding: 12px 14px; border-radius: 14px; min-height: 84px; }
+.composer .pickrow { align-items: start; }
+.composer .pick-note { display: block; padding: 4px 0 0; font-size: 12px; }
+.composer .toggles { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 12px; }
+.composer .toggles .check { margin: 0; padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer; }
+.composer .toggles .check:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.composer .toggles .check[hidden] { display: none; }
+.composer .more { margin-top: 12px; }
+.composer .more > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.composer .more[open] > summary { color: var(--text); }
+.composer .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.composer .actions .fine { margin-left: auto; font-size: 12px; }
+.composer #startBtn { padding: 8px 22px; border-radius: 999px; }

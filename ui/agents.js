@@ -72,6 +72,7 @@ function renderList() {
   $('listTitle').textContent = agentSel ? `${agentOf(agentSel)?.name || 'Agent'}: tasks` : 'Runs';
   if (!list.length) { $('list').innerHTML = `<p class="muted">${agentSel ? 'No tasks yet. Give it one above.' : 'No runs yet.'}</p>`; return; }
   $('list').innerHTML = list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
+    <i class="sdot ${TAGS[r.status] || 'live'}${ACTIVE.has(r.status) ? ' pulse' : ''}" title="${esc(statusWord(r))}"></i>
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
     <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
 }
@@ -101,7 +102,7 @@ function renderDetail(run) {
   const r = run.result;
   const diffOpen = openDetails.has('diff');
   $('detail').innerHTML = `
-    <h3><span class="tag ${TAGS[run.status] || ''}">${esc(run.status === 'incomplete' && run.outOfBudget ? 'cost limit' : run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
+    <h3 class="detail-head"><span class="orb${active ? ' live' : ''}${run.status === 'waiting' ? ' wait' : ''}"><i></i><i></i><i></i></span><span class="tag ${TAGS[run.status] || ''}">${esc(run.status === 'incomplete' && run.outOfBudget ? 'cost limit' : run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
     <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat.html#chat=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
@@ -558,13 +559,32 @@ init();
 // ---------------------------------------------------------------------------
 // Agents: a bar to pick one, its details, and the dialog to make or edit one
 // ---------------------------------------------------------------------------
+function renderHero() {
+  const live = runs.filter((r) => ACTIVE.has(r.status) && !r.parent);
+  const waiting = runs.filter((r) => r.status === 'waiting' || (r.pending && ACTIVE.has(r.status)));
+  const working = live.filter((r) => r.status !== 'waiting').length;
+  $('heroOrb').className = `orb big${working ? ' live' : ''}${waiting.length ? ' wait' : ''}`;
+  $('heroTitle').textContent = waiting.length ? `${waiting.length === 1 ? 'An agent needs' : `${waiting.length} agents need`} you`
+    : working ? `${working} ${working === 1 ? 'agent is' : 'agents are'} working` : agents.length ? 'All quiet' : 'Meet your agents';
+  $('heroSub').textContent = waiting.length ? 'Open the run to allow or decline what it asked for.'
+    : working ? 'Pick one below to watch it. This page refreshes on its own.'
+    : agents.length ? 'Give an agent a task, or start a one-off run below.'
+    : 'An agent is a named helper for one repo. It keeps working on it, task after task.';
+}
+
 function renderAgents() {
-  const chip = (a) => `<button type="button" class="agent-chip${agentSel === a.id ? ' on' : ''}" data-aid="${esc(a.id)}" title="${esc(a.repo)}">${a.active ? `<i class="dot${a.waiting ? ' warn' : ''}" title="${a.waiting ? 'Needs you' : 'Working'}"></i>` : ''}${esc(a.name)}</button>`;
-  $('agentChips').innerHTML = `<button type="button" class="agent-chip${agentSel ? '' : ' on'}" data-aid="">All runs</button>${agents.map(chip).join('')}<button type="button" class="chip" id="newAgent" data-hint="Make a named agent for a repo that keeps working on it task after task">+ New agent</button>`;
+  renderHero();
+  const state = (a) => (a.waiting ? 'wait' : a.active ? 'live' : '');
+  const card = (a) => `<button type="button" class="agent-card${agentSel === a.id ? ' on' : ''}" data-aid="${esc(a.id)}" title="${esc(a.repo)}">
+    <span class="orb ${state(a)}"><i></i><i></i><i></i></span>
+    <span class="nm">${esc(a.name)}</span>
+    <span class="st ${state(a)}">${a.waiting ? 'Needs you' : a.active ? 'Working' : 'Idle'}</span>
+    <span class="meta">${esc(a.repo.split(/[\\/]/).filter(Boolean).pop() || a.repo)} · ${a.taskCount} task${a.taskCount === 1 ? '' : 's'} · ${agentSpend(a.id)}</span></button>`;
+  $('agentChips').innerHTML = `<button type="button" class="agent-card all${agentSel ? '' : ' on'}" data-aid=""><span class="nm">All runs</span><span class="meta">${runs.filter((r) => !r.parent).length} in total</span></button>${agents.map(card).join('')}<button type="button" class="agent-card add" id="newAgent" data-hint="Make a named agent for a repo that keeps working on it task after task"><span class="plus">+</span><span class="nm">New agent</span></button>`;
   const a = agentOf(agentSel);
   $('agentInfo').hidden = !a;
   if (a) {
-    $('agentInfo').innerHTML = `<div class="facts"><span>Repo <code>${esc(a.repo)}</code></span><span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span>${a.taskCount} task${a.taskCount === 1 ? '' : 's'}</span><span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat.html#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+    $('agentInfo').innerHTML = `<h3>${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span><span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat.html#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
   }

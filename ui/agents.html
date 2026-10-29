@@ -43,11 +43,13 @@
     </div>
   </section>
 
-  <h2 data-hint="An agent has a name, a repo and standing instructions. Each task you give it starts from what its last task committed, and it is told what the earlier ones did">Your agents</h2>
-  <div class="card" id="agentBar">
-    <div class="chips" id="agentChips"></div>
-    <div id="agentInfo" class="agent-info" hidden></div>
-  </div>
+  <section class="hero" id="hero" aria-live="polite">
+    <span class="orb big" id="heroOrb"><i></i><i></i><i></i></span>
+    <div><h2 id="heroTitle">Agents</h2><p class="muted" id="heroSub">Loading…</p></div>
+  </section>
+
+  <div class="agent-grid" id="agentChips" data-hint="An agent has a name, a repo and standing instructions. Each task you give it starts from what its last task committed, and it is told what the earlier ones did"></div>
+  <div id="agentInfo" class="card agent-info" hidden></div>
 
   <div id="appsBox">
   <h2 data-hint="An app is a repo you can ask for changes. The agent may edit only the paths you list, runs the app's tests, and the result is a branch with a live preview, like any run">Apps</h2>
@@ -81,45 +83,48 @@
     </form>
   </dialog>
 
-  <h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2>
-  <form class="card" id="newRun" autocomplete="off">
-    <label class="field wide"><span>What should it do?</span>
-      <textarea name="goal" rows="4" required placeholder="Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI"></textarea></label>
-    <div class="row oneoff">
-      <label class="field"><span data-hint="The steps the agent follows. Auto asks Jev which recipe fits your goal, and shows its pick before you start">Workflow</span>
-        <select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select></label>
-      <span class="pick-note muted" id="pickNote"></span>
+  <form class="card composer" id="newRun" autocomplete="off">
+    <h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2>
+    <label class="field wide goal"><span class="sr">What should it do?</span>
+      <textarea name="goal" rows="3" required placeholder="Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI"></textarea></label>
+    <div class="row oneoff pickrow">
+      <!-- The repo field is one self-contained block (#repoField). Swap it for another picker by keeping an input named "repo" (id "repo") inside it. -->
+      <div class="field repo-field" id="repoField"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
+        <div class="repo-input"><input type="text" name="repo" id="repo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
+        <div class="recent" id="recent"></div><datalist id="repoList"></datalist></div>
+      <label class="field"><span data-hint="The steps the agent follows. Auto asks Jev which recipe fits your goal, and shows its pick before you start. Swarm runs several agents at once">How</span>
+        <select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select>
+        <span class="pick-note muted" id="pickNote"></span></label>
     </div>
     <label class="field wide oneoff" id="ticketsField" hidden><span data-hint="Optional. Paste the JSON that /wayfinder returned. The swarm then skips its planner and works the build tickets instead, a wave at a time: a ticket starts once the tickets it depends on are merged">Ticket draft (JSON from /wayfinder)</span>
       <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea>
-      <span class="fine muted"><button type="button" id="fileTickets" data-hint="Write this draft into the repo below as markdown files (wayfinder/<map>/map.md and one file per ticket) you can read, edit and commit. Shows what it will write and asks first">Save as markdown files…</button> <button type="button" id="loadTickets" data-hint="Read a folder of wayfinder markdown files in the repo below back into this box">Load from a folder…</button> <span id="ticketsMsg" role="status"></span></span></label>
-    <div class="row oneoff">
-      <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
-        <div class="repo-input"><input type="text" name="repo" id="repo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
-        <div class="recent" id="recent"></div><datalist id="repoList"></datalist></div>
-      <label class="field"><span data-hint="Which routing picks the models for this run">Routing</span><select name="profile"><option value="">Default</option></select></label>
-      <label class="field"><span data-hint="Nudges every request toward cheaper or stronger models">Effort</span>
-        <select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
-      <label class="field"><span data-hint="Where the agent's commands run. This machine is a git worktree; E2B and Sprites are throwaway cloud machines (their key goes in .env)">Sandbox</span><select name="sandbox" class="sandbox-select"><option value="">Default</option></select></label>
+      <span class="fine muted"><button type="button" id="fileTickets" data-hint="Write this draft into the repo above as markdown files (wayfinder/<map>/map.md and one file per ticket) you can read, edit and commit. Shows what it will write and asks first">Save as markdown files…</button> <button type="button" id="loadTickets" data-hint="Read a folder of wayfinder markdown files in the repo above back into this box">Load from a folder…</button> <span id="ticketsMsg" role="status"></span></span></label>
+    <div class="toggles">
+      <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
+        <input type="checkbox" name="plan" value="1"><span>Plan only</span></label>
+      <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so the harness picks a stronger model. Up to two steps up, never above Highest tier">
+        <input type="checkbox" name="escalate" value="1" checked><span>Stronger model on failure</span></label>
+      <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
+        <input type="checkbox" name="autoDebug" value="1"><span>Auto debug</span></label>
+      <label class="check oneoff" id="auditField" hidden data-hint="Swarm only: each worker's change is checked by an Auditor, who sends it back to the worker (up to 2 times) until nothing real is left. Slower and dearer, safer">
+        <input type="checkbox" name="auditParts" value="1"><span>Audit each part</span></label>
     </div>
-    <div class="row">
-      <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
-      <label class="field"><span data-hint="Most it may spend, in dollars, priced like the Usage page. It stops there and you can Continue it. Blank or 0: no limit. For a swarm, each worker gets this limit">Max cost ($)</span><input type="number" name="maxCost" min="0" max="1000" step="0.01" placeholder="no limit"></label>
-      <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
-    </div>
-    <div class="row">
-      <label class="field"><span data-hint="The highest routing tier this run may use, by name (for example Strong). Blank means no cap. Stronger-model retries stay under it">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
-    </div>
-    <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so the harness picks a stronger model. Up to two steps up, never above Highest tier">
-      <input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
-    <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
-      <input type="checkbox" name="autoDebug" value="1"><span>Auto debug a failed run</span></label>
-    <label class="check oneoff" id="auditField" hidden data-hint="Swarm only: each worker's change is checked by an Auditor, who sends it back to the worker (up to 2 times) until nothing real is left. Slower and dearer, safer">
-      <input type="checkbox" name="auditParts" value="1"><span>Audit each part of the swarm</span></label>
-    <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
-      <input type="checkbox" name="plan" value="1"><span>Plan only, change nothing</span></label>
-    <div class="actions"><button class="primary" type="submit" id="startBtn">Start run</button><span class="note" id="startMsg"></span></div>
-    <p class="sub muted fine">Risky commands and writes wait here for your OK. Nothing is pushed; the result is a branch.</p>
+    <details class="more">
+      <summary>Limits and routing</summary>
+      <div class="row oneoff">
+        <label class="field"><span data-hint="Which routing picks the models for this run">Routing</span><select name="profile"><option value="">Default</option></select></label>
+        <label class="field"><span data-hint="Nudges every request toward cheaper or stronger models">Effort</span>
+          <select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
+        <label class="field"><span data-hint="Where the agent's commands run. This machine is a git worktree; E2B and Sprites are throwaway cloud machines (their key goes in .env)">Sandbox</span><select name="sandbox" class="sandbox-select"><option value="">Default</option></select></label>
+        <label class="field"><span data-hint="The highest routing tier this run may use, by name (for example Strong). Blank means no cap. Stronger-model retries stay under it">Highest tier</span><input type="text" name="maxTier" maxlength="40" placeholder="no cap" spellcheck="false"></label>
+      </div>
+      <div class="row">
+        <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
+        <label class="field"><span data-hint="Most it may spend, in dollars, priced like the Usage page. It stops there and you can Continue it. Blank or 0: no limit. For a swarm, each worker gets this limit">Max cost ($)</span><input type="number" name="maxCost" min="0" max="1000" step="0.01" placeholder="no limit"></label>
+        <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+      </div>
+    </details>
+    <div class="actions"><button class="primary" type="submit" id="startBtn">Start run</button><span class="note" id="startMsg"></span><span class="fine muted">Risky commands wait here for your OK. Nothing is pushed; the result is a branch.</span></div>
   </form>
 
   <dialog id="agentDialog" class="picker agentdlg" aria-label="Agent">

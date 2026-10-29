@@ -13,6 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 # langfuse: only used when LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set
 RUN pip install --no-cache-dir "litellm[proxy]" langfuse fastapi uvicorn pyyaml httpx
 COPY --from=node-modules /usr/local/bin/node /usr/local/bin/node
+# npm and npx, so stdio MCP servers (npx -y @modelcontextprotocol/server-memory) can start; uv gives uvx for Python ones
+COPY --from=node-modules /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && pip install --no-cache-dir uv
 WORKDIR /app
 COPY --from=node-modules /app/node_modules ./node_modules
 COPY package.json package-lock.json ./

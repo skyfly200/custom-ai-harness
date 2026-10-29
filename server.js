@@ -1783,6 +1783,11 @@ app.use((err, req, res, next) => {
         return toGateway(req, res, next);
     }
     if (res.headersSent || res.writableEnded) return;
+    // a body the parser refused (too large, bad JSON) is the client's problem, not the Gateway's
+    if (err?.type === 'entity.too.large' || err?.type === 'entity.parse.failed') {
+        const status = err.status || 400;
+        return res.status(status).json(gatewayGuard.errorBody(req.originalUrl || req.url, status, gatewayGuard.KINDS.upstream, status === 413 ? 'request too large: the body is over the 50 MB limit; shorten the chat or drop attachments' : `the request body is not valid JSON: ${err.message}`));
+    }
     if (waitForGateway(err, req, res)) return;
     req.harnessFailed = true;
     const { kind, message } = gatewayGuard.answerProxyError(err, req, res);

@@ -225,7 +225,10 @@ function createLogin({ users, legacyPassword = '', sessionStore = null, guests =
 
     // JSON routes behind the gate
     const api = express.Router();
-    api.use(express.json({ limit: '16kb' }));
+    // Only these routes get the small limit. The gate sits in front of every route, and a body parser that
+    // runs here first would answer 413 to chats and dictation before server.js's 50 MB parser sees them.
+    const small = express.json({ limit: '16kb' });
+    api.use((req, res, next) => (/^\/ui\/api\/(me|users|invites|keys)(\/|$)/.test(req.path) ? small(req, res, next) : next()));
     const admin = (req, res, next) => (req.harnessUser.role === 'admin' ? next() : res.status(403).json({ error: 'admins only' }));
     const guarded = (fn) => (req, res) => {
         try { fn(req, res); } catch (e) { res.status(400).json({ error: e.message }); }

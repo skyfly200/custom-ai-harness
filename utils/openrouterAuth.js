@@ -197,7 +197,7 @@ const digest = (v) => crypto.createHash('sha256').update(String(v)).digest();
  * credential from `resolveUser(name)` (null: they have none, answered 402); 'shared' tickets and calls
  * with no ticket (the Router) use the owner's.
  */
-function proxyHandler(auth, { env = process.env, fetchFn = fetch, resolveUser = null, onBadCredential = null } = {}) {
+function proxyHandler(auth, { env = process.env, fetchFn = fetch, resolveUser = null, onBadCredential = null, onBadMain = null } = {}) {
     const { Readable } = require('stream');
     return async function openrouterProxy(req, res) {
         const want = proxyKey(env);
@@ -244,6 +244,7 @@ function proxyHandler(auth, { env = process.env, fetchFn = fetch, resolveUser = 
                     return res.status(401).json({ error: { code: 'openrouter_reconnect', message: 'OpenRouter no longer accepts your connected key. Open the Users page and press Reconnect OpenRouter, then try again.' } });
                 }
                 if (auth.invalidate) auth.invalidate();
+                if (onBadMain) onBadMain();
             }
             res.status(upstream.status);
             for (const h of ['content-type', 'cache-control', 'retry-after']) {

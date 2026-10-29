@@ -244,7 +244,8 @@ def federation_overrides(environ) -> dict:
     """With OPENROUTER_FEDERATION_POLICY_ID set, the harness holds the short-lived OpenRouter tokens: this
     process calls OpenRouter through the harness's /openrouter-proxy, with the proxy key as its key."""
     per_user = environ.get("HARNESS_USER_CREDENTIALS", "").strip().lower() in ("1", "true", "yes", "on")
-    if not environ.get("OPENROUTER_FEDERATION_POLICY_ID", "").strip() and not per_user:
+    renew_main = environ.get("OPENROUTER_MAIN_KEY_RENEW", "").strip().lower() in ("1", "true", "yes", "on") and environ.get("OPENROUTER_MANAGEMENT_KEY", "").strip()
+    if not environ.get("OPENROUTER_FEDERATION_POLICY_ID", "").strip() and not per_user and not renew_main:
         return {}
     key = (environ.get("OPENROUTER_PROXY_KEY") or environ.get("LITELLM_MASTER_KEY") or "").strip()
     if not key:

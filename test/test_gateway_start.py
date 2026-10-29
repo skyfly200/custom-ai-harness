@@ -96,3 +96,16 @@ def test_langfuse_keeps_other_callbacks_and_passthrough(monkeypatch):
     monkeypatch.setenv("PASSTHROUGH_MODEL", "fast-openrouter")
     out = gateway_start.build(cfg)
     assert out["litellm_settings"]["success_callback"] == ["custom", "langfuse"]
+
+
+def test_main_key_renewal_points_the_gateway_at_the_harness_proxy(monkeypatch):
+    for k in ("OPENROUTER_FEDERATION_POLICY_ID", "HARNESS_USER_CREDENTIALS", "OPENROUTER_PROXY_URL", "OPENROUTER_API_KEY", "OPENROUTER_API_BASE"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "sk-master")
+    monkeypatch.setenv("OPENROUTER_MAIN_KEY_RENEW", "1")
+    gateway_start.use_federation()
+    assert "OPENROUTER_API_BASE" not in os.environ  # no management key yet
+    monkeypatch.setenv("OPENROUTER_MANAGEMENT_KEY", "sk-or-m")
+    gateway_start.use_federation()
+    assert os.environ["OPENROUTER_API_BASE"].endswith("/openrouter-proxy/v1")
+    monkeypatch.delenv("OPENROUTER_API_KEY"); monkeypatch.delenv("OPENROUTER_API_BASE")

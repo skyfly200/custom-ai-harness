@@ -91,8 +91,17 @@ for (const problem of openrouterAuth.problems()) console.warn(`OpenRouter federa
 // (utils/userCredentials.js). The Gateway then reaches OpenRouter through this proxy too, and each request
 // carries a signed ticket saying whose credential to use (utils/credentialTicket.js).
 const USER_CREDENTIALS = /^(1|true|yes|on)$/i.test(process.env.HARNESS_USER_CREDENTIALS || '');
-if (openrouterAuth.federated() || USER_CREDENTIALS) {
-    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth, { resolveUser: USER_CREDENTIALS ? userCredentials.resolve : null, onBadCredential: USER_CREDENTIALS ? (name) => userCredentials.markBad(name) : null }));
+// OPENROUTER_MAIN_KEY_RENEW=1 (with OPENROUTER_MANAGEMENT_KEY): the owner's own key is replaced before it lapses
+// (utils/mainKey.js); the Gateway and Router go through this proxy so they follow the swap.
+const mainKey = require('./utils/mainKey');
+const MAIN_KEY_RENEW = mainKey.enabled();
+const mainKeyRenewal = MAIN_KEY_RENEW ? mainKey.create({ store: mainKey.createStore({ db: db.enabled() && secrets.available() ? db : null, creds: userCredentials }), auth: orAuth }) : null;
+if (openrouterAuth.federated() || USER_CREDENTIALS || MAIN_KEY_RENEW) {
+    app.use('/openrouter-proxy', openrouterAuth.proxyHandler(orAuth, {
+        resolveUser: USER_CREDENTIALS ? userCredentials.resolve : null,
+        onBadCredential: USER_CREDENTIALS ? (name) => userCredentials.markBad(name) : null,
+        onBadMain: mainKeyRenewal ? () => mainKeyRenewal.refused() : null,
+    }));
 }
 // Run keys: capped, short-lived keys for one agent run's model calls (utils/runKeys.js).
 // Checked before the password gate, which they replace for POST /v1/chat/completions only.
@@ -1666,6 +1675,10 @@ if (require.main === module) {
         console.log('Harness interceptor active on port 3000');
         if (schedules) { schedules.start(); console.log('Scheduled messages run on the server'); }
     });
+    if (mainKeyRenewal) {
+        if (!openrouterAuth.proxyKey()) console.warn('OPENROUTER_MAIN_KEY_RENEW needs LITELLM_MASTER_KEY or OPENROUTER_PROXY_KEY so the Gateway and Router can reach OpenRouter through this server');
+        Promise.resolve(db.enabled() ? db.init() : null).then(() => mainKeyRenewal.start()).catch((err) => console.warn(`OpenRouter main key renewal: ${err.message}`));
+    }
     mcp.start().then(() => {
         for (const s of mcp.status().servers) console.log(`MCP server ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ` · ${s.tools.length} tools`}`);
     });

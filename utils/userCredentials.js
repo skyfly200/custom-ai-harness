@@ -141,7 +141,7 @@ async function status(owner) {
 
 /** Every person holding a harness-issued key; the hourly sweep checks each, which replaces the ones about to lapse. */
 async function managedOwners() {
-    const { rows } = await db.query("SELECT owner FROM user_credentials WHERE kind = 'managed'");
+    const { rows } = await db.query("SELECT owner FROM user_credentials WHERE kind = 'managed' AND owner <> '(main)'");
     return rows.map((r) => r.owner);
 }
 

@@ -44,7 +44,7 @@ async function create(owner, opts = {}) {
     const expires = days ? now + days * 24 * 3600 * 1000 : null;
     const json = await call('POST', '', {
         name: `harness: ${owner}`,
-        limit: limitUsd(env),
+        ...(opts.noLimit ? {} : { limit: limitUsd(env) }),
         ...(expires ? { expires_at: new Date(expires).toISOString().replace(/\.\d+Z$/, 'Z') } : {}),
     }, opts);
     const key = json.data?.key || json.key;

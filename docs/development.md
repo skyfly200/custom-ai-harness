@@ -79,7 +79,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | Gateway config and model info | `gateway`, `gatewayConfig`, `modelInfo`, `modelInfoApi`, `modelStats`, `openrouterCatalog` |
 | Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `e2bSandbox`, `spritesSandbox` |
 | MCP tools | `mcp`, `mcpAdmin`, `toolsApi` |
-| Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `chatCommands` |
+| Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands` |
 | Connect OpenRouter (OAuth PKCE) | `openrouterOAuth` |
 | Connect GitHub, chat GitHub tools | `githubOAuth` (token renewal, in-process Postgres), `githubApi`, `guests` (routes) |
 | Guests, credit, own keys, proxy tickets | `guests` (in-process Postgres) |

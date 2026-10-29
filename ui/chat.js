@@ -104,13 +104,15 @@ const sync = {
   async saveChat(id, attempt = 0) {
     const c = cache.get(id) || store.get(CHAT_KEY(id), null);
     if (!c || c.deleted) return;
+    if (c.sharedFrom && c.sharedRole !== 'edit') return;
     const snap = this.snaps.get(id) || { version: Number(c.syncVersion) || 0, known: new Map() };
-    await this.uploadAttachments(c);
+    const base = c.sharedFrom ? `/shared/${encodeURIComponent(c.sharedFrom)}/chats/${id}` : `/chats/${id}`;
+    if (!c.sharedFrom) await this.uploadAttachments(c);
     const { upserts, order, fingerprints } = ChatMerge.delta(this.wire(c.messages), snap.known);
     const { messages, syncVersion, ...chatMeta } = c;
-    const r = await this.api(`/chats/${id}/delta`, { method: 'PUT', body: { chat: chatMeta, order, upserts, base: snap.version } });
+    const r = await this.api(`${base}/delta`, { method: 'PUT', body: { chat: chatMeta, order, upserts, base: snap.version } });
     if (r.status === 409 && attempt < 2) {
-      const got = await this.api(`/chats/${id}`);
+      const got = await this.api(base);
       if (got.status === 404) { this.snaps.delete(id); c.syncVersion = 0; return this.saveChat(id, attempt + 1); }
       if (!got.ok) return got;
       const remote = await got.json();
@@ -138,6 +140,8 @@ const sync = {
   dropChat(id) { clearTimeout(this.timers.get(`c:${id}`)); this.timers.delete(`c:${id}`); if (this.on) this.api(`/chats/${id}`, { method: 'DELETE' }).catch(() => {}); },
   // Pull what is newer on the server, push what is newer here (a first sign-in uploads this browser's chats)
   async start() {
+    await window.OwnerScope?.ready; // another person's copy in this browser is cleared first, never uploaded
+    if (window.OwnerScope?.reloading) return;
     let remote;
     try {
       const r = await fetch('api/sync', { headers: { accept: 'application/json' } });
@@ -164,7 +168,7 @@ const sync = {
         raw(CHAT_KEY(c.id), c);
         this.noteSaved(c.id, c.syncVersion, c.messages);
         cache.delete(c.id);
-        const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches };
+        const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches, ...(c.sharedFrom ? { sharedFrom: c.sharedFrom, sharedRole: c.sharedRole } : {}) };
         const i = index.findIndex(x => x.id === c.id);
         if (i >= 0) index[i] = entry; else index.push(entry);
         changed = true;
@@ -172,7 +176,11 @@ const sync = {
     }
     index.sort((a, b) => b.updated - a.updated);
     raw(INDEX_KEY, index);
+    this.canShare = Boolean(remote.canShare);
+    const shared = await this.pullShared();
+    if (shared.chats) changed = true;
     for (const e of index) {
+      if (e.sharedFrom) continue; // pushed through the shared route, and only when it has changed
       const theirs = byId.get(e.id);
       if (theirs && !theirs.deleted && theirs.updated >= e.updated) continue;
       const c = store.get(CHAT_KEY(e.id), null);
@@ -194,8 +202,48 @@ const sync = {
     if (this.serverSchedules && schedules.some(x => !x.tz)) { schedules.forEach(x => { x.tz = x.tz || myZone; }); saveSchedules(); } // the server needs each schedule's time zone
     const guarded = sessionStorage.getItem('harness-sync-reloaded');
     if (changed && !guarded && !running.size) { sessionStorage.setItem('harness-sync-reloaded', '1'); location.reload(); }
-    else sessionStorage.removeItem('harness-sync-reloaded');
+    else { sessionStorage.removeItem('harness-sync-reloaded'); if (sharedProjects.length) { drawSide(); drawProjectBits(); drawHint(); } }
   },
+};
+// Projects other people shared with this account, and their chats. The list is kept in memory only; the chats are
+// stored like any other (marked sharedFrom) and dropped again when the share is taken back.
+sync.pullShared = async function () {
+  const none = { chats: false, list: false };
+  if (!this.on || !this.canShare) return none;
+  let got;
+  try { const r = await this.api('/shares'); if (!r.ok) return none; got = await r.json(); } catch { return none; }
+  const raw = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
+  let changed = false;
+  const before = JSON.stringify(sharedProjects);
+  sharedProjects = got.withMe.map(w => ({ ...w.project, owner: w.owner, role: w.role }));
+  const listChanged = JSON.stringify(sharedProjects) !== before;
+  const listed = new Set();
+  for (const w of got.withMe) {
+    for (const e of w.chats) {
+      listed.add(e.id);
+      const local = index.find(x => x.id === e.id);
+      if (local && local.updated >= e.updated && local.sharedRole === w.role) continue;
+      if (chat?.id === e.id && running.has(e.id)) continue;
+      try {
+        const r = await this.api(`/shared/${encodeURIComponent(w.owner)}/chats/${e.id}`);
+        if (!r.ok) continue;
+        const c = await r.json();
+        raw(CHAT_KEY(c.id), c);
+        this.noteSaved(c.id, c.syncVersion, c.messages);
+        cache.delete(c.id);
+        const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches, sharedFrom: w.owner, sharedRole: w.role };
+        const i = index.findIndex(x => x.id === c.id);
+        if (i >= 0) index[i] = entry; else index.push(entry);
+        changed = true;
+      } catch {}
+    }
+  }
+  // a share that was taken back: its chats leave this browser
+  for (const e of index.filter(x => x.sharedFrom && !listed.has(x.id))) {
+    index = index.filter(x => x.id !== e.id); rawRemove(CHAT_KEY(e.id)); cache.delete(e.id); changed = true;
+  }
+  if (changed) { index.sort((a, b) => b.updated - a.updated); raw(INDEX_KEY, index); }
+  return { chats: changed, list: listChanged };
 };
 // With schedules on the server, what it sends arrives as new chats and moved times: look for them now and then
 sync.refresh = async function () {
@@ -223,7 +271,7 @@ sync.refresh = async function () {
       raw(CHAT_KEY(c.id), c);
       this.noteSaved(c.id, c.syncVersion, c.messages);
       cache.delete(c.id);
-      const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches };
+      const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: (c.messages || []).length, project: c.project || undefined, caches: c.caches, ...(c.sharedFrom ? { sharedFrom: c.sharedFrom, sharedRole: c.sharedRole } : {}) };
       const i = index.findIndex(x => x.id === c.id);
       if (i >= 0) index[i] = entry; else index.push(entry);
       added = true;
@@ -232,6 +280,11 @@ sync.refresh = async function () {
   if (added) { index.sort((a, b) => b.updated - a.updated); raw(INDEX_KEY, index); drawList(); }
 };
 setInterval(() => sync.refresh(), 60000);
+setInterval(async () => {
+  if (document.hidden) return;
+  const r = await sync.pullShared();
+  if (r.chats || r.list) { if (scope && !findProject(scope)) scope = ''; drawSide(); }
+}, 60000);
 
 // Fill in the bytes of attachments this device only has a stub for (a chat made on another device)
 async function hydrateAttachments(c, only) {
@@ -266,6 +319,8 @@ const SCHEDULES_KEY = 'harness-schedules';
 
 let index = store.get(INDEX_KEY, []);   // [{id, title, updated, count, project}]
 let projects = store.get(PROJECTS_KEY, []);   // [{id, name, color, instructions, repo, skills, created}]
+let sharedProjects = [];   // projects other people shared with this account: [{id, name, color, instructions, owner, role}] (never stored in the browser)
+const findProject = (id) => projects.find(p => p.id === id) || sharedProjects.find(p => p.id === id);
 let skills = store.get(SKILLS_KEY, []);       // [{id, name, description, body}]
 let commands = store.get(COMMANDS_KEY, []);   // [{id, name, description, body, model, effort}]
 let schedules = store.get(SCHEDULES_KEY, []); // [{id, name, prompt, repeat, next, target, project, last}]
@@ -314,7 +369,7 @@ function saveChat(c, { touch = true } = {}) {
   // an empty chat isn't listed until something is in it
   if (!c.messages.length && !c.system && !c.notes && !c.repo && !c.github && !c.skills?.length) return;
   store.set(CHAT_KEY(c.id), c);
-  const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: c.messages.length, project: c.project || undefined, caches: c.caches };
+  const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: c.messages.length, project: c.project || undefined, caches: c.caches, ...(c.sharedFrom ? { sharedFrom: c.sharedFrom, sharedRole: c.sharedRole } : {}) };
   const i = index.findIndex(e => e.id === c.id);
   if (i >= 0) index[i] = entry; else index.push(entry);
   index.sort((a, b) => b.updated - a.updated);
@@ -323,6 +378,7 @@ function saveChat(c, { touch = true } = {}) {
 
 function deleteChat(id) {
   const c = cache.get(id);
+  if (c?.sharedFrom || index.find(e => e.id === id)?.sharedFrom) return toast('A shared chat can only be deleted by the person who owns it.');
   if (c) c.deleted = true;
   running.get(id)?.controller.abort();
   index = index.filter(e => e.id !== id);
@@ -462,7 +518,7 @@ function download(name, text) {
 // ---------------------------------------------------------------------------
 const COLORS = ['#8b6cff', '#ff5fa2', '#ffb547', '#3fd0ff', '#34d399', '#f87171', '#a3e635', '#c084fc'];
 let scope = store.get('harness-chat-scope', '');   // '' = every chat, else a project id
-if (scope && !projects.some(p => p.id === scope)) scope = '';
+if (scope && !projects.some(p => p.id === scope) && !(sharedProjects.length && findProject(scope))) scope = '';
 const sideOpen = store.get('harness-side-sections', { projects: true, scheduled: true, recent: true });
 
 // The chats panel folds away to a button in the top bar; the choice is kept
@@ -479,7 +535,7 @@ function setSide(open) {
   store.set('harness-side-open', panelOpen);
 }
 
-const projectOf = (c) => (c?.project ? projects.find(p => p.id === c.project) : null);
+const projectOf = (c) => (c?.project ? findProject(c.project) : null);
 const saveProjects = () => store.set(PROJECTS_KEY, projects);
 const saveSkills = () => store.set(SKILLS_KEY, skills);
 const saveSchedules = () => store.set(SCHEDULES_KEY, schedules);
@@ -527,11 +583,11 @@ function visibleChats() {
 function drawList() {
   drawProjects();
   const rows = visibleChats();
-  const p = projects.find(x => x.id === scope);
+  const p = findProject(scope);
   $('chatsHead').textContent = p ? p.name : 'Recent';
   $('clearScope').hidden = !p;
   $('chatList').innerHTML = rows.map(e => {
-    const proj = !scope && e.project ? projects.find(x => x.id === e.project) : null;
+    const proj = !scope && e.project ? findProject(e.project) : null;
     const live = running.has(e.id);
     return `<li data-id="${e.id}" class="${e.id === chat?.id ? 'active' : ''}${live ? ' live' : ''}${unseen.has(e.id) ? ' unseen' : ''}" title="${esc(e.title)}${proj ? ` · ${esc(proj.name)}` : ''}">
       ${proj ? `<i class="pdot" style="background:${proj.color}"></i>` : ''}
@@ -556,7 +612,11 @@ function drawProjects() {
       <i class="pdot" style="background:${p.color}"></i><span class="ct">${esc(p.name)}</span>
       ${live[p.id] ? '<span class="busy" title="A chat in this project is replying"></span>' : ''}<span class="when">${counts[p.id] || 0}</span>
       <button class="del edit" data-edit="${p.id}" title="Project settings" aria-label="Project settings">${ICONS.gear}</button></li>`).join('')
-    || '<li class="muted small empty-row" title="Group chats with shared instructions, skills and a repo">No projects</li>';
+    || (sharedProjects.length ? '' : '<li class="muted small empty-row" title="Group chats with shared instructions, skills and a repo">No projects</li>');
+  $('projectList').innerHTML += sharedProjects.map(p => `<li data-pid="${esc(p.id)}" class="shared${scope === p.id ? ' active' : ''}" title="${esc(`Shared by ${p.owner}, you can ${p.role === 'edit' ? 'edit' : 'view'} it`)}">
+      <i class="pdot" style="background:${esc(p.color || COLORS[0])}"></i><span class="ct">${esc(p.name)}</span>
+      <span class="when share-tag">${esc(p.owner)}</span>
+      ${p.role === 'edit' ? `<button class="del edit" data-edit="${esc(p.id)}" title="Shared project settings" aria-label="Shared project settings">${ICONS.gear}</button>` : ''}</li>`).join('');
 }
 
 function drawSchedules() {
@@ -610,6 +670,8 @@ function openChat(id) {
   if (chat && chat.id !== id) saveDraft();
   chat = (id && loadChat(id)) || newChatObject();
   if (!id && scope) chat.project = scope; // a new chat starts in the project being shown
+  const sp = !id && sharedProjects.find(x => x.id === scope);
+  if (sp) { if (sp.role === 'edit') Object.assign(chat, { sharedFrom: sp.owner, sharedRole: 'edit' }); else delete chat.project; } // a view-only project takes no new chats
   if (!id && !chat.project) { try { applyQuick(chat, localStorage.getItem(NEW_ROUTE_KEY)); } catch {} }
   cache.set(chat.id, chat);
   unseen.delete(chat.id);
@@ -1384,6 +1446,7 @@ const looksLikeQuota = (text) => /\b429\b|rate.?limit|quota|too many requests|ex
 const seconds = (id) => Math.max(0, Number($(id).value) || 0);
 
 async function runReply(c, turn) {
+  if (c.sharedFrom && c.sharedRole !== 'edit') return toast(`${c.sharedFrom} shared this chat for viewing only.`);
   await hydrateAttachments(c);
   const reply = { id: uid(), role: 'assistant', content: '', streaming: true, time: Date.now(), trace: { start: Date.now(), chunks: 0 }, ...(turn ? { turn } : {}) };
   c.messages.push(reply);
@@ -3561,7 +3624,8 @@ function drawProjectBits() {
   badge.hidden = !p;
   if (p) { badge.innerHTML = `<i class="pdot" style="background:${p.color}"></i>${esc(p.name)}`; badge.title = 'Project settings'; }
   $('chatProject').innerHTML = '<option value="">No project</option>'
-    + projects.map(x => `<option value="${x.id}"${x.id === chat?.project ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
+    + projects.concat(chat?.sharedFrom && p ? [p] : []).map(x => `<option value="${x.id}"${x.id === chat?.project ? ' selected' : ''}>${esc(x.name)}</option>`).join('');
+  $('chatProject').disabled = Boolean(chat?.sharedFrom); // a shared chat stays in the project it was shared in
 }
 $('projectBadge').addEventListener('click', () => projectOf(chat) && openProjectDialog(chat.project));
 $('chatProject').addEventListener('change', () => {
@@ -3726,10 +3790,63 @@ function drawSwatches() {
 }
 $('pColors').addEventListener('click', (e) => { const b = e.target.closest('[data-c]'); if (b) { projectColor = b.dataset.c; drawSwatches(); } });
 
+// Sharing: who the open project is shared with. shareDraft is edited in the dialog and sent on Save.
+let shareDraft = null, shareOrig = '', sharePeople = [];
+const shareJson = (d) => JSON.stringify({ everyone: d.everyone, grants: [...d.grants].sort((a, b) => a.user.localeCompare(b.user)) });
+function drawShare() {
+  $('pShareAll').value = shareDraft.everyone;
+  $('pShareList').innerHTML = shareDraft.grants.map(g => `<div class="share-row" data-user="${esc(g.user)}">
+      <span class="who">${esc(g.user)}</span>
+      <select data-role aria-label="What ${esc(g.user)} can do"><option value="view"${g.role === 'view' ? ' selected' : ''}>Can view</option><option value="edit"${g.role === 'edit' ? ' selected' : ''}>Can edit</option></select>
+      <button type="button" class="link" data-unshare="${esc(g.user)}" aria-label="Stop sharing with ${esc(g.user)}">Remove</button></div>`).join('')
+    || '<span class="muted small">Not shared with anyone by name.</span>';
+  const free = sharePeople.filter(n => !shareDraft.grants.some(g => g.user === n));
+  $('pSharePerson').innerHTML = free.map(n => `<option>${esc(n)}</option>`).join('') || '<option value="">No one else to add</option>';
+  $('pShareAdd').disabled = !free.length;
+}
+async function loadShare(projectId) {
+  $('pShare').hidden = true;
+  shareDraft = null;
+  if (!sync.on || !sync.canShare || !projectId) return;
+  try {
+    const [mine, people] = await Promise.all([sync.api('/shares').then(r => r.json()), sync.api('/shares/people').then(r => r.json())]);
+    if (editingProject?.id !== projectId) return;
+    const rows = mine.mine.filter(r => r.project_id === projectId);
+    shareDraft = { everyone: rows.find(r => r.grantee === '*')?.role || '', grants: rows.filter(r => r.grantee !== '*').map(r => ({ user: r.grantee, role: r.role })) };
+    shareOrig = shareJson(shareDraft);
+    sharePeople = people.people || [];
+    drawShare();
+    $('pShare').hidden = false;
+  } catch { /* sharing stays hidden if the server can't be asked */ }
+}
+$('pShareAll').addEventListener('change', () => { shareDraft.everyone = $('pShareAll').value; });
+$('pShareAdd').addEventListener('click', () => {
+  const user = $('pSharePerson').value;
+  if (!user || !shareDraft) return;
+  shareDraft.grants.push({ user, role: $('pShareRole').value });
+  drawShare();
+});
+$('pShareList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-unshare]');
+  if (!b) return;
+  shareDraft.grants = shareDraft.grants.filter(g => g.user !== b.dataset.unshare);
+  drawShare();
+});
+$('pShareList').addEventListener('change', (e) => {
+  const row = e.target.closest('.share-row');
+  const g = row && shareDraft.grants.find(x => x.user === row.dataset.user);
+  if (g && e.target.matches('[data-role]')) g.role = e.target.value;
+});
+
 function openProjectDialog(id) {
-  editingProject = projects.find(p => p.id === id) || null;
+  editingProject = projects.find(p => p.id === id) || sharedProjects.find(p => p.id === id) || null;
   const p = editingProject || {};
-  $('projectDialogTitle').textContent = editingProject ? 'Project settings' : 'New project';
+  const theirs = Boolean(editingProject?.owner); // someone else's project, shared with edit
+  if (theirs && editingProject.role !== 'edit') return toast(`${editingProject.owner} shared this project for viewing only.`);
+  for (const el of $('projectDialog').querySelectorAll('.own-only')) el.hidden = theirs || (el.id === 'pShare');
+  $('projectDialogTitle').textContent = theirs ? `Shared by ${p.owner}` : editingProject ? 'Project settings' : 'New project';
+  shareDraft = null;
+  if (!theirs) loadShare(editingProject?.id);
   $('pName').value = p.name || '';
   $('pInstructions').value = p.instructions || '';
   $('pRepo').value = p.repo?.path || '';
@@ -3739,9 +3856,9 @@ function openProjectDialog(id) {
   const on = new Set(p.skills || []);
   $('pSkills').innerHTML = skills.map(k => `<label class="check"><input type="checkbox" value="${k.id}"${on.has(k.id) ? ' checked' : ''}> ${esc(k.name)}</label>`).join('')
     || '<span class="muted small">No skills yet. Add them from the composer’s skills button.</span>';
-  $('pDelete').hidden = !editingProject;
-  drawProjectAgents(p.id);
-  if (editingProject) {
+  $('pDelete').hidden = theirs || !editingProject;
+  if (!theirs) drawProjectAgents(p.id);
+  if (editingProject && !theirs) {
     const u = projectUsage(p.id);
     $('pUsage').innerHTML = `${u.chats} chat${u.chats === 1 ? '' : 's'} · ${fmtTok(u.input + u.output)} tokens (${fmtTok(u.input)} in, ${fmtTok(u.output)} out) · ${u.usd ? fmtUsd(u.usd) : 'free'}${u.priced ? '' : '+'}`;
   } else $('pUsage').textContent = '';
@@ -3792,6 +3909,26 @@ $('projectForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('pName').value.trim();
   if (!name) return $('pName').focus();
+  if (editingProject?.owner) { // someone else's project: only its name, colour and instructions can change
+    const p = editingProject;
+    try {
+      const r = await sync.api(`/shared/${encodeURIComponent(p.owner)}/projects/${p.id}`, { method: 'PUT', body: { name, color: projectColor, instructions: $('pInstructions').value } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      Object.assign(p, j.project);
+    } catch (err) { return toast(`Could not save the shared project: ${err.message}`); }
+    $('projectDialog').close();
+    drawSide(); drawHint();
+    return;
+  }
+  if (shareDraft && shareJson(shareDraft) !== shareOrig) {
+    try {
+      const r = await sync.api(`/shares/${editingProject.id}`, { method: 'PUT', body: { grants: shareDraft.grants, everyone: shareDraft.everyone } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(r.status === 404 ? 'this project has not reached the server yet, try again in a moment' : (j.error || `HTTP ${r.status}`));
+      toast('Sharing saved.');
+    } catch (err) { return toast(`Could not save sharing: ${err.message}`); }
+  }
   const p = editingProject || { id: uid(), created: Date.now() };
   const path = $('pRepo').value.trim();
   if (path !== (p.repo?.path || '')) {

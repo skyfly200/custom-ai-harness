@@ -105,3 +105,15 @@ test('invites: duplicates and bad addresses are refused; removing one works', ()
     users.removeInvite('a@b.co');
     assert.equal(users.forEmail('zzz@b.co'), null);
 });
+
+test('when Neon refuses the address, the message names it and Neon\'s reason', async () => {
+    const app = express();
+    const refuse = async () => new Response(JSON.stringify({ error: 'Invalid callbackURL', code: 'INVALID_CALLBACKURL' }), { status: 403 });
+    app.use(createOAuth({ users: newUsers(), env: { ...env, HARNESS_PUBLIC_URL: 'https://old.example' }, fetchFn: refuse, safeNext: (n) => n, startSession() {} }));
+    const server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    try {
+        const html = await (await fetch(`http://127.0.0.1:${server.address().port}/auth/google`)).text();
+        assert.match(html, /https:\/\/old\.example/);
+        assert.match(html, /INVALID_CALLBACKURL/);
+    } finally { server.close(); }
+});

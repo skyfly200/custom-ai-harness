@@ -85,7 +85,7 @@ if (typeof document !== 'undefined') (() => {
     clearTimeout(timer);
     try {
       const run = await (await fetch(api(`runs/${id}`))).json();
-      const link = `<a href="${esc(new URL('agents.html', script?.src || location.href).href)}#${esc(id)}" target="_blank" rel="noopener">Review it on the Agents page</a>`;
+      const link = `<a href="${esc(new URL('agents', script?.src || location.href).href)}#${esc(id)}" target="_blank" rel="noopener">Review it on the Agents page</a>`;
       if (['queued', 'running', 'waiting'].includes(run.status)) {
         q('.aw-note').innerHTML = `${esc(run.status === 'waiting' ? 'Waiting for your OK on the Agents page' : `Working${run.stage ? ` (${run.stage})` : ''}…`)} ${link}`;
         timer = setTimeout(() => poll(id), 3000);

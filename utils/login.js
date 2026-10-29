@@ -18,7 +18,8 @@ const SESSION_MS = 7 * 24 * 3600 * 1000;
 const MAX_SESSIONS = 500;
 const MAX_FAILS = 5;
 const WINDOW_MS = 15 * 60 * 1000;
-const ADMIN_ONLY_PAGES = new Set(['/ui/settings.html', '/settings.html', '/ui/usage-users.html', '/usage-users.html']);
+const ADMIN_ONLY_PAGES = new Set(['/ui/settings', '/settings', '/ui/usage-users', '/usage-users']);
+const pageOf = (p) => p.replace(/\.html$/, '');
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const safeNext = (next) => (typeof next === 'string' && /^\/(?!\/|\\)/.test(next) ? next : '/');
@@ -214,7 +215,7 @@ function createLogin({ users, legacyPassword = '', sessionStore = null, guests =
         req.harnessUser = found.user;
         req.harnessAuthenticated = found.user.role === 'admin';
         const admin = found.user.role === 'admin';
-        if (!admin && (ADMIN_ONLY_PAGES.has(pathOf(req)) || pathOf(req).startsWith('/ui/api/users'))) {
+        if (!admin && (ADMIN_ONLY_PAGES.has(pageOf(pathOf(req))) || pathOf(req).startsWith('/ui/api/users'))) {
             if (wantsHtml(req)) return res.status(403).type('html').send('<p style="font:16px system-ui;padding:24px">Only admins can open this page. <a href="/">Back to the dashboard</a></p>');
             return res.status(403).json({ error: 'admins only' });
         }

@@ -27,6 +27,9 @@ test('every page takes its bar from the shared script, with no copy of the links
 test('the current page is marked in place, and sub-pages light their parent', () => {
   assert.strictEqual(nav.currentId('/ui/'), 'dashboard');
   assert.strictEqual(nav.currentId('/ui/index.html'), 'dashboard');
+  assert.strictEqual(nav.currentId('/chat'), 'chat');
+  assert.strictEqual(nav.currentId('/ui/usage-users'), 'usage');
+  assert.strictEqual(nav.currentId('/'), 'dashboard');
   assert.strictEqual(nav.currentId('/ui/usage-users.html'), 'usage');
   assert.strictEqual(nav.currentId('/ui/runs.html'), 'agents');
   assert.strictEqual(nav.currentId('/ui/users.html'), 'users');

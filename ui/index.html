@@ -60,7 +60,7 @@
 
   <div class="two home">
     <section>
-      <h2 data-hint="Your latest chats on this browser, newest first"><a href="chat.html">Recent chats</a></h2>
+      <h2 data-hint="Your latest chats on this browser, newest first"><a href="chat">Recent chats</a></h2>
       <div class="card list" id="chats"><div class="sub muted">Loading…</div></div>
     </section>
     <section>
@@ -207,15 +207,15 @@ function renderChats() {
   const index = readStore('harness-chats', []);
   const projects = readStore('harness-projects', []);
   if (!Array.isArray(index) || !index.length) {
-    $('chats').innerHTML = '<div class="sub muted">No chats yet on this browser.</div><a class="more" href="chat.html">Start a chat →</a>';
+    $('chats').innerHTML = '<div class="sub muted">No chats yet on this browser.</div><a class="more" href="chat">Start a chat →</a>';
     return;
   }
   const rows = [...index].sort((a, b) => (b.updated || 0) - (a.updated || 0)).slice(0, 8).map(e => {
     const p = e.project && projects.find(x => x.id === e.project);
     const proj = p ? `<span class="proj"><i class="pdot" style="background:${esc(p.color)}"></i>${esc(p.name)}</span>` : '';
-    return `<a class="row" href="chat.html#chat=${encodeURIComponent(e.id)}"><span class="title">${esc(e.title || 'New chat')}</span>${proj}<span class="meta">${e.count || 0} msg · ${ago(e.updated)}</span></a>`;
+    return `<a class="row" href="chat#c=${encodeURIComponent(e.id)}"><span class="title">${esc(e.title || 'New chat')}</span>${proj}<span class="meta">${e.count || 0} msg · ${ago(e.updated)}</span></a>`;
   });
-  $('chats').innerHTML = rows.join('') + `<a class="more" href="chat.html">All ${index.length} chat${index.length === 1 ? '' : 's'} →</a>`;
+  $('chats').innerHTML = rows.join('') + `<a class="more" href="chat">All ${index.length} chat${index.length === 1 ? '' : 's'} →</a>`;
 }
 
 // ---- usage summary -------------------------------------------------------------

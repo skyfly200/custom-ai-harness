@@ -83,5 +83,9 @@ test('the pages are served at the site root as well as under /ui, behind the sam
     assert.match(await root.text(), /<html/);
     assert.equal((await fetch(`${base}/chat.html`, auth)).status, 200);
     assert.equal((await fetch(`${base}/ui/chat.html`, auth)).status, 200);
+    // a page also answers without .html
+    assert.equal((await fetch(`${base}/chat`, { headers: auth.headers })).status, 200);
+    assert.equal((await fetch(`${base}/ui/routing`, auth)).status, 200);
+    assert.equal((await fetch(`${base}/chat`)).status, 401);
     assert.equal((await fetch(`${base}/manifest.webmanifest`, auth)).status, 200);
 });

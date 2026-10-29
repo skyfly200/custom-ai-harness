@@ -5,7 +5,7 @@
 // that isn't a plain GET: chats, answers and keys are never stored here.
 'use strict';
 
-const CACHE = 'bright-chat-v5';
+const CACHE = 'bright-chat-v6';
 
 function keepable(request) {
   if (request.method !== 'GET') return false;
@@ -16,13 +16,13 @@ function keepable(request) {
   if (!url.pathname.startsWith(base)) return false;
   const rel = url.pathname.slice(base.length);
   if (/(^|\/)api\//.test(rel) || /^(v1|openrouter-proxy|auth|login|logout|admin|healthz)(\/|$)/.test(rel)) return false;
-  return rel === '' || rel === 'ui/' || /\.(html|js|css|svg|png|webmanifest)$/.test(rel);
+  return rel === '' || rel === 'ui/' || /^(index|chat|usage|usage-users|routing|agents|runs|tools|settings|users)$/.test(rel) || /\.(html|js|css|svg|png|webmanifest)$/.test(rel);
 }
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   // Fetched with the page's credentials, so a harness behind HARNESS_PASSWORD still works
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'mobile.css', 'dialogs.js', 'bright.js', 'nav.js', 'nav.css', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'dictation.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat', 'chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'mobile.css', 'dialogs.js', 'bright.js', 'nav.js', 'nav.css', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'dictation.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
 });
 
 self.addEventListener('activate', (event) => {
@@ -53,7 +53,7 @@ self.addEventListener('fetch', (event) => {
 // Tapping a "waiting for you" notification brings the app forward (or opens it)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || './chat.html', self.location).href;
+  const target = new URL(event.notification.data?.url || './chat', self.location).href;
   event.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const mine = all.find((c) => c.url.split('#')[0] === target.split('#')[0]) || all[0];

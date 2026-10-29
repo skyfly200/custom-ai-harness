@@ -28,21 +28,22 @@
   // The fixed order of the bar. `files` are the pages that count as being on that link.
   const PAGES = [
     { id: 'dashboard', label: 'Dashboard', href: './', files: ['', 'index.html'], hint: 'Health of each part, recent chats, usage and requests' },
-    { id: 'chat', label: 'Chat', href: 'chat.html', files: ['chat.html'], hint: 'Talk to the models through the harness' },
-    { id: 'usage', label: 'Usage', href: 'usage.html', files: ['usage.html', 'usage-users.html'], hint: 'Tokens used, by client, model and service' },
-    { id: 'routing', label: 'Routing', href: 'routing.html', files: ['routing.html'], hint: 'Where requests go, as connected boxes you can edit' },
-    { id: 'agents', label: 'Agents', href: 'agents.html', files: ['agents.html', 'runs.html'], hint: 'Named agents that keep working on your repos, and one-off runs' },
-    { id: 'tools', label: 'Tools', href: 'tools.html', files: ['tools.html'], hint: 'The MCP servers the chat page can use' },
-    { id: 'settings', label: 'Settings', href: 'settings.html', files: ['settings.html'], admin: true, hint: 'Interceptor and Router settings' },
+    { id: 'chat', label: 'Chat', href: 'chat', files: ['chat.html'], hint: 'Talk to the models through the harness' },
+    { id: 'usage', label: 'Usage', href: 'usage', files: ['usage.html', 'usage-users.html'], hint: 'Tokens used, by client, model and service' },
+    { id: 'routing', label: 'Routing', href: 'routing', files: ['routing.html'], hint: 'Where requests go, as connected boxes you can edit' },
+    { id: 'agents', label: 'Agents', href: 'agents', files: ['agents.html', 'runs.html'], hint: 'Named agents that keep working on your repos, and one-off runs' },
+    { id: 'tools', label: 'Tools', href: 'tools', files: ['tools.html'], hint: 'The MCP servers the chat page can use' },
+    { id: 'settings', label: 'Settings', href: 'settings', files: ['settings.html'], admin: true, hint: 'Interceptor and Router settings' },
   ];
-  const USERS = { id: 'users', href: 'users.html', files: ['users.html'] };
+  const USERS = { id: 'users', href: 'users', files: ['users.html'] };
 
   // `me` is /ui/api/me, or null when logins are off (then it is your own machine: everything shows).
   const isAdmin = (me) => !me || me.role === 'admin';
   const linksFor = (me) => PAGES.filter((p) => !p.admin || isAdmin(me));
   const currentId = (pathname) => {
-    const file = String(pathname || '').split('/').pop();
-    const hit = [...PAGES, USERS].find((p) => p.files.includes(file));
+    const file = String(pathname || '').split('/').pop().replace(/\.html$/, '');
+    const named = file === '' ? file : `${file}.html`;
+    const hit = [...PAGES, USERS].find((p) => p.files.includes(named));
     return hit ? hit.id : null;
   };
   // What the account menu offers; `state` = { me, canInstall }

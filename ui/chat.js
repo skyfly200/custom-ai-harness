@@ -2178,12 +2178,10 @@ function subagentCommand(text) {
   const typed = (m[2] || '').trim();
   const c = chat;
   return (async () => {
-    // a hosted chat has no folders: its repo is the GitHub one attached under Options > Tools
-    const repo = hostedNoFolders() ? (ghOf(c)?.full ? { path: ghOf(c).full } : null) : repoOf(c);
+    // a git folder on this computer, else the chat's GitHub repo (the runner clones it)
+    const repo = repoOf(c) || (ghOf(c)?.full ? { path: ghOf(c).full } : null);
     if (!repo) {
-      toast(hostedNoFolders()
-        ? `Attach a GitHub repo first (Options → Tools): a ${plan ? 'plan' : 'subagent'} works in a copy of it.`
-        : `Link a git repo first (Options → Context): a ${plan ? 'plan' : 'subagent'} works in a copy of it.`);
+      toast(`A ${plan ? 'plan' : 'subagent'} works in a copy of your code. ${hostedNoFolders() ? 'Attach a GitHub repo (Options → Tools → GitHub)' : 'Link a git folder (Options → Tools → Git repo) or attach a GitHub repo (Options → Tools → GitHub)'}, then try again.`);
       return;
     }
     if (!typed) {
@@ -2827,8 +2825,8 @@ function drawRepo() {
   $('repoLink').disabled = hosted && !chat?.repo;
   if (hosted) {
     $('repoInfo').innerHTML = chat?.repo
-      ? `This chat's repo is a folder on your own computer (<code>${esc(chat.repo.path)}</code>), which this hosted server cannot read. Unlink it, then attach a GitHub repo below.`
-      : 'Folders on your computer cannot be read from this hosted server. Attach a GitHub repo below instead.';
+      ? `Your computer's folder <code>${esc(chat.repo.path)}</code> can't be read here. Unlink it and attach a GitHub repo.`
+      : "This server can't read folders on your computer. Attach a GitHub repo instead.";
     $('repoPath').value = chat?.repo ? chat.repo.path : '';
     $('repoPath').readOnly = !!chat?.repo;
     $('repoLink').textContent = chat?.repo ? 'Unlink' : 'Link';
@@ -2839,9 +2837,9 @@ function drawRepo() {
   $('repoPath').readOnly = !!r;
   $('repoLink').textContent = r ? 'Unlink' : 'Link';
   $('repoInfo').innerHTML = r
-    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · last commit ${esc(r.head)}` : ''}. The model uses this chat's private worktree to read its files and history${$('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length ? ', and run guarded commands' : ''}.`
+    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · ${esc(r.head)}` : ''}. ${$('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length ? 'Read and guarded commands.' : 'Read-only.'}`
     : projectOf(chat)?.repo
-      ? `Using the project's repo <b>${esc(projectOf(chat).repo.name)}</b>. Link another folder here to use that instead.`
+      ? `Using the project's repo <b>${esc(projectOf(chat).repo.name)}</b>.`
       : 'Read-only for the model.';
 }
 
@@ -2915,8 +2913,8 @@ function drawGithub() {
   $('ghInfo').innerHTML = !st.connected
     ? `${connect || esc(st.note || 'GitHub is not connected.')} to let the model read your repos.`
     : g
-      ? `Attached <b>${esc(g.full)}</b>${g.branch ? ` (<code>${esc(g.branch)}</code>)` : ''} as <b>${esc(st.login || '')}</b>. The model reads files, commits, issues and pull requests; opening an issue, comment or pull request waits for your Allow. ${connect}${install}`
-      : `Connected as <b>${esc(st.login || '')}</b>${st.via === 'env' ? ' (GITHUB_TOKEN)' : ''}. Pick one of your repos or type owner/name. ${connect}${install}`;
+      ? `Attached <b>${esc(g.full)}</b>${g.branch ? ` (<code>${esc(g.branch)}</code>)` : ''} as <b>${esc(st.login || '')}</b>. Writes wait for your Allow. ${connect}${install}`
+      : `Connected as <b>${esc(st.login || '')}</b>${st.via === 'env' ? ' (GITHUB_TOKEN)' : ''}. Pick a repo or type owner/name. ${connect}${install}`;
 }
 $('ghRepo').addEventListener('input', () => { $('ghRepo').dataset.typed = $('ghRepo').value; });
 $('ghRepo').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('ghAttach').click(); } });

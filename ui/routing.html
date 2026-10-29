@@ -134,7 +134,7 @@
         <small>Leave empty for a provider LiteLLM already knows.</small></label>
       <label class="field" id="keyField"><span>API key variable</span>
         <input type="text" name="api_key_env" placeholder="MY_PROVIDER_API_KEY">
-        <small>The name of the variable in .env that holds the key, not the key itself. Empty if none.</small></label>
+        <small>Variable name in .env, not the key. Empty if none.</small></label>
     </div>
     <div class="catalog" id="catalog" hidden>
       <div class="catalog-filters">
@@ -216,7 +216,7 @@
       <label class="field"><span>Coding (0 to 100)</span><input type="number" name="coding" min="0" max="100" step="0.1"></label>
       <label class="field"><span>Speed (tokens a second)</span><input type="number" name="speed" min="0" step="1"></label>
       <label class="field" id="benchField"><span>Benchmark model</span><select name="benchmark"></select>
-        <small>Pick the Artificial Analysis entry if the automatic match is wrong or missing.</small></label>
+        <small>Override the automatic benchmark match.</small></label>
     </div>
     <div class="field"><span>Strengths</span><div class="strength-picks" id="statsTags"></div>
       <input type="text" name="more" placeholder="Other strengths, comma separated (e.g. long documents, Spanish)"></div>

@@ -76,10 +76,10 @@
             <small>Caps what clients ask for. Groq rejects more than 65,536.</small></label>
           <label class="field"><span data-hint="How long a reply may take to start before it fails">Gateway timeout (ms)</span>
             <input type="number" name="gatewayTimeoutMs" min="1000" step="1000">
-            <small>How long the Gateway may take to start answering, all fallbacks included, before the request fails instead of hanging.</small></label>
+            <small>Max wait for an answer, fallbacks included.</small></label>
           <label class="field"><span data-hint="How long a streaming reply may pause before it is ended">Stalled reply timeout (ms)</span>
             <input type="number" name="streamIdleTimeoutMs" min="1000" step="1000">
-            <small>A reply that goes quiet this long mid-stream is ended with an error.</small></label>
+            <small>A reply silent this long is ended.</small></label>
         </div>
       </div>
 
@@ -99,7 +99,7 @@
         <h3 class="group-title" id="gAuto">Auto strategy</h3>
         <div class="group-grid switches">
           <label class="field check"><input type="checkbox" name="autoJev">
-            <span>Auto strategy asks Jev<br><small>When no strategy's rules fit a request, Jev rates each strategy's description. Off: only the rules apply.</small></span></label>
+            <span>Auto strategy asks Jev<br><small>Off: only the rules apply.</small></span></label>
           <label class="field"><span data-hint="Which Auto tries first. Jev first: it rates every strategy's description right away and the rules only apply if it finds no fit. Rules first: Jev is asked only when no rule holds">Auto tries first</span>
             <select name="autoFirst"><option value="jev">Jev</option><option value="rules">Rules</option></select></label>
           <label class="field"><span data-hint="How sure Jev must be that a strategy's description fits before Auto picks it">Auto: pick a strategy from</span>
@@ -120,9 +120,9 @@
         <h3 class="group-title" id="gGuard">Command guard</h3>
         <div class="group-grid switches">
           <label class="field check"><input type="checkbox" name="guardJev">
-            <span>Command guard asks Jev<br><small>Commands the guard rules don't cover are rated by Jev. Off: only the rules apply.</small></span></label>
+            <span>Command guard asks Jev<br><small>Off: only the rules apply.</small></span></label>
           <label class="field check"><input type="checkbox" name="shellInRepo">
-            <span>Shell in a chat's linked repo<br><small>Lets a chat linked to a git repo run commands there. Each command goes past the guard, and a risky one waits in the chat for Allow. Off: chats only read the repo.</small></span></label>
+            <span data-hint="Lets a chat linked to a git repo run commands there. Each command goes past the guard, and a risky one waits in the chat for Allow. Off: chats only read the repo.">Shell in a chat's linked repo<br><small>Risky commands wait for your Allow. Off: read-only.</small></span></label>
           <label class="field"><span data-hint="How sure Jev must be that a command is risky before the agent has to ask you">Guard: ask you from</span>
             <input type="number" name="guardAskAt" min="0" max="1" step="0.05">
             <small>0.5: a command Jev rates 50% likely risky needs your OK.</small></label>
@@ -136,7 +136,7 @@
         <h3 class="group-title" id="gLangfuse">Langfuse</h3>
         <div class="group-grid switches">
           <label class="field check"><input type="checkbox" name="langfuseContent">
-            <span>Also log prompts and replies<br><small>Off: Langfuse gets the model, tokens, cost, timing and tags only. On: it also keeps the text of every prompt and reply (code, file contents). Only matters once Langfuse is set up (see above).</small></span></label>
+            <span data-hint="Off: Langfuse gets the model, tokens, cost, timing and tags only. On: it also keeps the text of every prompt and reply (code, file contents). Only matters once Langfuse is set up.">Also log prompts and replies<br><small>Off: metadata only. On: also prompt and reply text. Needs Langfuse (see above).</small></span></label>
         </div>
       </div>
     </form>
@@ -162,7 +162,7 @@
             <small>When the strong model's win rate reaches the threshold.</small></label>
           <label class="field"><span data-hint="For easy requests without tools">Weak model</span><input type="text" name="weak_model" list="models"></label>
           <label class="field"><span data-hint="For easy requests that carry tools">Weak model for tool requests</span><input type="text" name="weak_model_tools" list="models">
-            <small>Claude Code requests always carry tools. Empty uses the weak model.</small></label>
+            <small>Empty uses the weak model.</small></label>
           <label class="field"><span data-hint="Easy requests bigger than this go to the overflow model">Weak model size limit (tokens)</span><input type="number" name="weak_model_max_tokens" min="1">
             <small>Bigger weak requests go to the overflow model. Empty for no limit.</small></label>
           <label class="field"><span data-hint="For easy requests over the size limit">Overflow model</span><input type="text" name="weak_model_overflow" list="models"></label>

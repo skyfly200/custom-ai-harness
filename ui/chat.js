@@ -3201,6 +3201,8 @@ const dictation = {
   quietSince: 0,
   discard: false,    // the next stop is a pause or a cancel: drop the audio
   segmentStart: 0,
+  listening: false,  // the browser recogniser has the microphone open
+  heard: false, quiet: 0, startedAt: 0,
 
   // Which engine to use now: the browser's own unless it has none, or the
   // user picked the server
@@ -3235,22 +3237,23 @@ const dictation = {
   listen() {
     if (this.rec) return;
     const rec = new SR();
-    rec.continuous = true;
+    rec.continuous = DictationText.wantsContinuous(navigator.userAgent);
     rec.interimResults = true;
     rec.lang = $('sttLang').value.trim() || navigator.language || 'en-US';
     const box = $('input');
     this.base = box.value ? box.value.replace(/\s*$/, ' ') : '';
+    this.heard = false; this.startedAt = Date.now();
+    rec.onstart = () => { this.listening = true; this.draw(); };
     rec.onresult = (e) => {
-      let finalText = '', interim = '';
-      for (let k = e.resultIndex; k < e.results.length; k++) {
-        const r = e.results[k];
-        if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
-      }
-      if (finalText) this.base += finalText.trim() + ' ';
-      box.value = this.base + interim;
+      // rebuilt from every result each time: Android resends cumulative text
+      const all = [];
+      for (let k = 0; k < e.results.length; k++) all.push({ transcript: e.results[k][0].transcript, isFinal: e.results[k].isFinal });
+      const text = DictationText.sessionText(all);
+      if (text.final || text.interim) { this.heard = true; this.quiet = 0; }
+      box.value = DictationText.compose(this.base, text);
       autoGrow();
       clearTimeout(this.silence);
-      if ($('autoSend').checked && this.base.trim() && !interim) {
+      if ($('autoSend').checked && text.final && !text.interim) {
         this.silence = setTimeout(() => {
           if (!this.want || running.has(chat.id)) return;
           this.base = '';
@@ -3262,30 +3265,37 @@ const dictation = {
       }
     };
     rec.onerror = (e) => {
-      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      const info = DictationText.describeError(e.error);
       // No speech service in this browser (Brave, some Chromium builds): the
       // harness's speech model does the same job, so carry on with that
       if ((e.error === 'network' || e.error === 'service-not-allowed') && !browserBroken && serverSTT.ok) {
         browserBroken = true;
-        this.rec = null;
+        this.rec = null; this.listening = false;
         toast('This browser has no speech service. Dictating through the harness instead.');
         this.draw();
         this.begin();
         return;
       }
-      this.want = false;
+      console.warn('Dictation error:', e.error, e.message || '');
+      if (!info.stop) return;
+      this.want = false; this.listening = false;
       this.rec = null;
-      toast(e.error === 'not-allowed' || e.error === 'service-not-allowed'
-        ? 'The microphone is blocked. Allow it for this page (it needs http://localhost or https).'
-        : e.error === 'network'
-          ? 'This browser has no speech service. Pick “Speech model” under Options → Voice, or set OPENROUTER_API_KEY or STT_URL in .env.'
-          : `Dictation stopped: ${e.error}`);
+      toast(info.text);
       this.draw();
     };
     rec.onend = () => {
-      this.rec = null;
-      // browsers end recognition after a pause; keep going while the mic is on
-      if (this.want && !this.paused) setTimeout(() => this.begin(), 150);
+      this.rec = null; this.listening = false;
+      // browsers end recognition after a pause; keep going while the mic is on,
+      // but give up when it keeps ending with nothing heard (denied, no mic)
+      if (this.want && !this.paused) {
+        this.quiet = this.heard ? 0 : (this.quiet || 0) + 1;
+        if (this.quiet >= (Date.now() - this.startedAt < 800 ? 4 : 3)) {
+          this.want = false; this.quiet = 0;
+          toast(this.startedAt && Date.now() - this.startedAt < 800
+            ? 'Dictation keeps stopping at once. Check the microphone is allowed for this page and not in use by another app.'
+            : 'Dictation heard nothing. Check the right microphone is selected, then click the mic to try again.');
+        } else setTimeout(() => this.begin(), 150);
+      }
       this.draw();
     };
     try { rec.start(); this.rec = rec; } catch (err) { toast(`Dictation: ${err.message}`); this.want = false; }
@@ -3452,6 +3462,9 @@ const dictation = {
     const engine = this.engine;
     const on = this.want && !this.paused;
     $('mic').classList.toggle('listening', on);
+    // say plainly whether the microphone is open
+    const open = on && (engine === 'server' ? !!this.media : this.listening);
+    $('input').placeholder = on ? (open ? 'Listening… speak now' : 'Starting the microphone…') : 'Message';
     $('mic').disabled = engine === 'none';
     $('mic').title = engine === 'none' ? 'Dictation needs Chrome, Edge, or a speech model'
       : on ? 'Stop dictating (Ctrl+M)'

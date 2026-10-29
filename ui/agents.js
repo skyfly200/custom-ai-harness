@@ -67,14 +67,24 @@ const agentSpend = (id) => {
 };
 const shown = () => (agentSel ? runs.filter((r) => r.agent === agentSel) : runs);
 
+// Redraw only when the markup changed, so the refresh every 1.5 s doesn't replay the newest line's animation
+// or restart the orb and scroll position when nothing is new
+const lastHtml = new Map();
+function setHtml(id, html) {
+  if (lastHtml.get(id) === html) return false;
+  lastHtml.set(id, html);
+  $(id).innerHTML = html;
+  return true;
+}
+
 function renderList() {
   const list = shown();
   $('listTitle').textContent = agentSel ? `${agentOf(agentSel)?.name || 'Agent'}: tasks` : 'Runs';
-  if (!list.length) { $('list').innerHTML = `<p class="muted">${agentSel ? 'No tasks yet. Give it one above.' : 'No runs yet.'}</p>`; return; }
-  $('list').innerHTML = list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
+  if (!list.length) { setHtml('list', `<p class="muted">${agentSel ? 'No tasks yet. Give it one above.' : 'No runs yet.'}</p>`); return; }
+  setHtml('list', list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <i class="sdot ${TAGS[r.status] || 'live'}${ACTIVE.has(r.status) ? ' pulse' : ''}" title="${esc(statusWord(r))}"></i>
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join('');
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
 }
 
 function eventHtml(e) {
@@ -97,11 +107,11 @@ function eventHtml(e) {
 }
 
 function renderDetail(run) {
-  if (!run) { $('detail').innerHTML = `<p class="muted">Pick a ${agentSel ? 'task' : 'run'} to see what the agent did.</p>`; return; }
+  if (!run) { setHtml('detail', `<p class="muted">Pick a ${agentSel ? 'task' : 'run'} to see what the agent did.</p>`); return; }
   const active = ACTIVE.has(run.status);
   const r = run.result;
   const diffOpen = openDetails.has('diff');
-  $('detail').innerHTML = `
+  const changed = setHtml('detail', `
     <h3 class="detail-head"><span class="orb${active ? ' live' : ''}${run.status === 'waiting' ? ' wait' : ''}"><i></i><i></i><i></i></span><span class="tag ${TAGS[run.status] || ''}">${esc(run.status === 'incomplete' && run.outOfBudget ? 'cost limit' : run.status)}</span> ${esc(run.goal.split('\n')[0].slice(0, 120))}</h3>
     ${run.goal.includes('\n') || run.goal.length > 120 ? `<div class="goal-full">${esc(run.goal)}</div>` : ''}
     <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span>Steps ${run.steps}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
@@ -124,8 +134,8 @@ function renderDetail(run) {
     <div class="actions">${active
       ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
       : `${hosted && r?.commit && !run.parent ? `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button>` : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
-    <div class="timeline">${run.events.map(eventHtml).join('')}</div>`;
-  if (r?.commit && diffOpen) loadDiff(run.id);
+    <div class="timeline">${run.events.map(eventHtml).join('')}</div>`);
+  if (changed && r?.commit && diffOpen) loadDiff(run.id);
 }
 
 async function loadDiff(id) {

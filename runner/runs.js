@@ -371,6 +371,10 @@ class RunManager {
             const c = this.pricer.cost(e.usage, e.model);
             run.cost = (run.cost || 0) + c.cost;
             if (c.unpriced) run.unpricedCalls = (run.unpricedCalls || 0) + 1;
+            // what answered, so the run page can say which models did the work and what they cost
+            const key = e.model || 'unknown';
+            const m = (run.models ||= {})[key] ||= { calls: 0, in: 0, out: 0, cost: 0 };
+            m.calls += 1; m.in += e.usage.prompt_tokens || 0; m.out += e.usage.completion_tokens || 0; m.cost += c.cost;
         }
         this.save(run);
     }
@@ -388,6 +392,8 @@ class RunManager {
         const effort = run.bumps ? escalation.effortAfter(baseEffort, run.bumps) : baseEffort;
         if (effort) h['x-harness-effort'] = effort;
         if (run.maxTier) h['x-harness-max-tier'] = run.maxTier;
+        // every step sends the whole history again: let the harness mark it cacheable (Claude models only)
+        h['x-harness-cache'] = 'auto';
         return h;
     }
 
@@ -973,7 +979,7 @@ class RunManager {
         const leg = {
             ...run, continues, carriesOn: run.id, briefGiven: false, resumeNote,
             result: null, error: null, pending: null, events: [], steps: 0,
-            tokens: { in: run.tokens.in, out: run.tokens.out }, cost: run.cost || 0, unpricedCalls: run.unpricedCalls || 0,
+            tokens: { in: run.tokens.in, out: run.tokens.out }, cost: run.cost || 0, unpricedCalls: run.unpricedCalls || 0, models: run.models || {},
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
             outOfSteps: null, partialText: null, partialSummary: run.partialSummary || null,
         };

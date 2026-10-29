@@ -1,5 +1,7 @@
 # Working in this repo
 
+For how the parts fit together and where each concern lives, read [ARCHITECTURE.md](ARCHITECTURE.md) first.
+
 ## Tests
 
 - While developing, run `npm run test:for`. It runs only the Node tests that mention the files you changed (vs origin/master), or name files: `npm run test:for -- utils/guard.js`.

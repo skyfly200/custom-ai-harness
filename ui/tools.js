@@ -208,10 +208,13 @@
     box.replaceChildren();
     for (const c of data.catalog) {
       const added = have.has(c.id);
-      const go = el('button', { type: 'button', className: `go${c.ready && !added ? ' primary' : ''}`, disabled: added }, added ? 'Added' : c.ready ? 'Add' : 'Set up…');
+      // a one-click entry still opens the guide when its program is missing, so the fix is shown
+      const blockedNow = TS.blocked(TS.checkPrograms(c, data.programs)).length > 0;
+      const oneClick = c.ready && !blockedNow;
+      const go = el('button', { type: 'button', className: `go${oneClick && !added ? ' primary' : ''}`, disabled: added }, added ? 'Added' : oneClick ? 'Add' : 'Set up…');
       const fail = el('small', { className: 'fail', role: 'alert', hidden: true });
       go.addEventListener('click', act(async () => {
-        if (!c.ready) return open(null, c);
+        if (!oneClick) return wizard(c);
         fail.hidden = true;
         go.disabled = true; go.textContent = 'Adding…';
         try {
@@ -224,9 +227,123 @@
           throw e;
         }
       }));
-      box.append(el('div', { className: 'card' }, el('b', {}, c.name), el('p', {}, c.description), c.needs ? el('small', {}, c.needs) : null, go, fail));
+      box.append(el('div', { className: 'card' }, el('b', {}, c.name), el('p', {}, c.description), c.needs && !(c.inputs || []).length ? el('small', {}, c.needs) : (c.inputs || []).length ? el('small', {}, `You'll need: ${c.inputs.map((i) => i.label).join(', ')}.`) : null, go, fail));
     }
   }
+
+  // ---- the setup wizard -------------------------------------------------------
+  // Three steps: what must be installed, what to fill in (with where to get it), then test and add.
+  const TS = window.ToolSetup;
+  const w = $('#wizard');
+  const STEPS = ['What it needs', 'Your details', 'Test and add'];
+  let wz = null; // { item, step, values, result }
+
+  const where = () => (data.own ? 'It runs on the harness server, called by address.' : data.hosted ? 'It runs on the server hosting the harness, not on your computer. Folder paths are paths on that server.' : 'It runs on this computer.');
+
+  function wizard(item) {
+    wz = { item, step: 0, values: {}, result: null };
+    for (const i of item.inputs || []) wz.values[i.id] = i.value || '';
+    if (!TS.blocked(TS.checkPrograms(item, data.programs)).length && !(item.inputs || []).length) wz.step = 2;
+    w.hidden = false;
+    f.hidden = true;
+    wizDraw();
+    w.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function wizDraw() {
+    const { item, step } = wz;
+    $('#wizTitle').textContent = `Set up ${item.name}`;
+    $('#wizSteps').replaceChildren(...STEPS.map((t, i) => el('li', { className: i === step ? 'now' : i < step ? 'done' : '' }, t)));
+    const body = $('#wizBody');
+    const acts = $('#wizActions');
+    body.replaceChildren();
+    acts.replaceChildren();
+    const btn = (label, fn, cls = '') => { const b = el('button', { type: 'button', className: cls }, label); b.addEventListener('click', act(fn)); acts.append(b); return b; };
+    const advanced = el('button', { type: 'button', className: 'quiet' }, 'Edit every field instead');
+    advanced.addEventListener('click', () => { w.hidden = true; open(null, item); });
+
+    if (step === 0) {
+      body.append(el('p', {}, item.description), el('p', { className: 'muted' }, where()));
+      const checks = TS.checkPrograms(item, data.programs);
+      const list = el('ul', { className: 'checks' });
+      for (const c of checks) {
+        list.append(el('li', { className: c.found === false ? 'bad' : c.found ? 'ok' : '' },
+          el('b', {}, c.found === false ? `✗ ${c.name} is not installed` : c.found ? `✓ ${c.name} is installed` : `${c.name}: can't be checked here`),
+          c.found === false && c.hint ? el('small', {}, `Fix: ${c.hint}. Then press Check again; no restart needed.`) : null));
+      }
+      if (!checks.length) list.append(el('li', { className: 'ok' }, el('b', {}, item.spec.url ? '✓ Nothing to install: it is a web address.' : '✓ Nothing extra to install.')));
+      body.append(list);
+      if (item.needs && !(item.inputs || []).length) body.append(el('p', { className: 'muted' }, item.needs));
+      const stuck = TS.blocked(checks).length > 0;
+      btn('Check again', async () => { data = await api('GET', '/ui/api/mcp'); drawCatalog(); wizDraw(); });
+      btn('Next', async () => { wz.step = (item.inputs || []).length ? 1 : 2; wizDraw(); }, stuck ? '' : 'primary').title = stuck ? 'You can continue, but the test will fail until this is installed' : '';
+    } else if (step === 1) {
+      for (const i of item.inputs) {
+        const inp = el('input', { type: i.kind === 'secret' ? 'password' : 'text', value: wz.values[i.id] || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'none', placeholder: i.kind === 'secret' ? 'Paste it here' : '' });
+        inp.addEventListener('input', () => { wz.values[i.id] = inp.value; });
+        const field = el('label', { className: 'wfield' }, el('span', {}, i.label), inp);
+        if (i.help) field.append(el('small', {}, i.help));
+        if (i.kind === 'secret') field.append(el('small', {}, data.own ? 'Saved encrypted on your account and never shown again.' : 'Saved in mcp-servers.json on the machine running the harness, and never shown again.'));
+        body.append(field);
+        if (i.get) {
+          const g = el('details', { className: 'getkey', open: !wz.values[i.id] }, el('summary', {}, 'Where do I get this?'),
+            el('a', { href: i.get.url, target: '_blank', rel: 'noopener noreferrer' }, `${i.get.label} ↗`),
+            el('ol', {}, ...i.get.steps.map((t) => el('li', {}, t))));
+          body.append(g);
+        }
+      }
+      btn('Back', async () => { wz.step = 0; wizDraw(); });
+      btn('Next', async () => {
+        for (const i of item.inputs) if (i.kind === 'secret') wz.values[i.id] = TS.cleanSecret(wz.values[i.id], i.into.prefix);
+        const missing = TS.missingInputs(item, wz.values);
+        if (missing.length) return ui.toast(`Fill in: ${missing.map((m) => m.label).join(', ')}`);
+        wz.step = 2; wizDraw();
+      }, 'primary');
+    } else {
+      body.append(el('div', { id: 'wizResult', className: 'test', role: 'status' }));
+      btn('Back', async () => { wz.step = (item.inputs || []).length ? 1 : 0; wizDraw(); });
+      btn('Test again', async () => runWizTest()).id = 'wizAgain';
+      btn(`Add ${item.name}`, async () => wizAdd(), 'primary').id = 'wizAdd';
+      runWizTest();
+    }
+    acts.append(advanced);
+  }
+
+  async function runWizTest() {
+    const box = $('#wizResult');
+    const mine = wz;
+    box.className = 'test';
+    box.textContent = 'Connecting… the first start of an npx or uvx server can take a minute.';
+    for (const id of ['#wizAgain', '#wizAdd']) { const b = $(id); if (b) b.disabled = true; }
+    let r;
+    try { r = await api('POST', '/ui/api/mcp/test', { spec: TS.buildEntry(mine.item, mine.values) }); } catch (e) { r = { ok: false, error: e.message }; }
+    if (wz !== mine || wz.step !== 2) return;
+    mine.result = r;
+    box.className = `test ${r.ok ? 'ok' : 'bad'}`;
+    const tip = r.ok ? '' : TS.nextStep(r.error, mine.item);
+    box.replaceChildren(r.ok
+      ? el('div', {}, `✓ Connected in ${(r.ms / 1000).toFixed(1)} s. It offers ${r.tools.length} tool${r.tools.length === 1 ? '' : 's'}:`, el('ul', {}, ...r.tools.map((t) => el('li', {}, t.name))))
+      : el('div', {}, `✗ ${r.error || 'It did not connect.'}`, tip ? el('p', { className: 'tip' }, tip) : null));
+    for (const id of ['#wizAgain', '#wizAdd']) { const b = $(id); if (b) b.disabled = false; }
+    $('#wizAdd').textContent = r.ok ? `Add ${mine.item.name}` : 'Add anyway';
+    $('#wizAdd').classList.toggle('primary', !!r.ok);
+  }
+
+  async function wizAdd() {
+    const { item, values } = wz;
+    const b = $('#wizAdd');
+    b.disabled = true; b.textContent = 'Adding…';
+    try {
+      data = await api('POST', '/ui/api/mcp/save', { name: item.id, spec: TS.buildEntry(item, values) });
+    } catch (e) {
+      b.disabled = false; b.textContent = `Add ${item.name}`;
+      throw e;
+    }
+    w.hidden = true; wz = null;
+    draw();
+    result(item.id, item.name, data.servers.find((x) => x.name === item.id));
+  }
+  $('#wizClose').addEventListener('click', () => { w.hidden = true; wz = null; });
 
   $('#reload').addEventListener('click', act(async () => {
     say('Reconnecting…');
@@ -238,6 +355,11 @@
   async function load() {
     data = await api('GET', '/ui/api/mcp');
     draw();
+    // chat links here with #setup=<catalog id>
+    const want = /^#setup=([\w.-]+)$/.exec(location.hash);
+    const item = want && data.catalog.find((c) => c.id === want[1]);
+    if (item && !data.servers.some((s) => s.name === item.id)) wizard(item);
+    else if (location.hash === '#add') $('#catalog').scrollIntoView({ block: 'start' });
   }
   load().catch((e) => say(/admins only|controls work only/.test(e.message) ? `${e.message}. Sign in as an admin, or open this page on the computer running the harness.` : e.message, true));
 })();

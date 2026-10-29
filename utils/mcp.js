@@ -470,4 +470,4 @@ function askFirst(spec, tool) {
 }
 
 module.exports = {
-    crashSummary, McpManager, readConfig, writeConfig, transportType, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };
+    onPath, INSTALL_HINTS, crashSummary, McpManager, readConfig, writeConfig, transportType, expand, toolName, resultText, connectPolicy, describeFailure, CONFIG_FILE };

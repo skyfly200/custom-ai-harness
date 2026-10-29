@@ -32,6 +32,13 @@
 
   <section id="list" class="list"></section>
 
+  <section id="wizard" class="card wizard" hidden>
+    <div class="panel-head"><h2 id="wizTitle">Set up</h2><button type="button" id="wizClose" class="quiet" aria-label="Close">Close</button></div>
+    <ol class="steps" id="wizSteps"></ol>
+    <div id="wizBody"></div>
+    <div class="actions" id="wizActions"></div>
+  </section>
+
   <form id="editor" class="card editor" autocomplete="off" hidden>
     <div class="panel-head"><h2 id="editorTitle">Add a server</h2><button type="button" id="close" class="quiet" aria-label="Close">Close</button></div>
     <div class="form">
@@ -71,10 +78,11 @@
   </form>
 
   <h2>Popular servers</h2>
-  <p class="muted lead">One click adds the ones that need nothing from you. The others open the form with what to change.</p>
+  <p class="muted lead">One click adds the ones that need nothing from you. The others open a short guide: what to install, what to fill in and where to get it, then a test.</p>
   <section id="catalog" class="catalog"></section>
 </main>
 <script src="dialogs.js"></script>
+<script src="toolsetup.js"></script>
 <script src="tools.js"></script>
 <script src="bright.js"></script>
 <script src="agent-widget.js" data-app-name="Harness UI" defer></script>

@@ -102,3 +102,11 @@ test('a request from a proxy or without JSON is refused', async () => {
     assert.equal((await fetch(`${base}/ui/api/mcp/save`, { method: 'POST', body: 'x' })).status, 415);
     assert.equal((await fetch(`${base}/ui/api/mcp`, { headers: { 'cf-connecting-ip': '1.2.3.4' } })).status, 403);
 });
+
+test('the Tools page is told which programs are installed, for the setup wizard', async () => {
+    const j = await (await fetch(`${base}/ui/api/mcp`)).json();
+    assert.deepEqual(Object.keys(j.programs).sort(), ['node', 'npx', 'uvx']);
+    assert.equal(typeof j.programs.node.found, 'boolean');
+    assert.equal(j.programs.node.found, true, 'node runs this test');
+    assert.equal(typeof j.hosted, 'boolean');
+});

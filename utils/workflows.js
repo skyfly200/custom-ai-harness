@@ -46,7 +46,12 @@ function clean(raw, file) {
             canWait: Boolean(s.canWait), diff: Boolean(s.diff), maxWaitMinutes: Math.min(1440, Math.max(1, Math.floor(Number(s.maxWaitMinutes)) || 120)),
         };
     });
-    for (const s of stages) if (s.retryTo && !stages.some((t) => t.id === s.retryTo)) throw new Error(`${file}: stage ${s.id} retryTo names no stage`);
+    stages.forEach((s, i) => {
+        if (!s.retryTo) return;
+        const at = stages.findIndex((t) => t.id === s.retryTo);
+        if (at < 0) throw new Error(`${file}: stage ${s.id} retryTo names no stage`);
+        if (at > i) throw new Error(`${file}: stage ${s.id} retryTo must name this stage or an earlier one`);
+    });
     return { id, name: String(raw.name || id), when: String(raw.when || ''), fallback: Boolean(raw.fallback), stages };
 }
 
@@ -63,6 +68,71 @@ function load(dir = DIR) {
 }
 
 const get = (id, dir) => load(dir).list.find((w) => w.id === id) || null;
+
+// The file form of a workflow: only the fields that differ from the defaults, in a fixed order, so a saved file reads like the shipped ones.
+function toFile(w) {
+    const stages = w.stages.map((s) => {
+        const o = { id: s.id, role: s.role };
+        if (s.tools !== 'all') o.tools = s.tools;
+        if (s.effort) o.effort = s.effort;
+        if (s.model) o.model = s.model;
+        if (s.canWait) o.canWait = true;
+        if (s.canWait && s.maxWaitMinutes !== 120) o.maxWaitMinutes = s.maxWaitMinutes;
+        if (s.diff) o.diff = true;
+        if (s.maxSteps) o.maxSteps = s.maxSteps;
+        if (s.verdict) o.verdict = true;
+        if (s.retryTo) o.retryTo = s.retryTo;
+        if (s.maxRetries) o.maxRetries = s.maxRetries;
+        o.prompt = s.prompt;
+        return o;
+    });
+    const o = { id: w.id, name: w.name };
+    if (w.when) o.when = w.when;
+    if (w.fallback) o.fallback = true;
+    o.stages = stages;
+    return o;
+}
+
+// Errors from save and remove carry a status: 400 for a bad workflow, 404 for a missing one, 409 for a name taken or a fallback removed.
+function fail(status, message) {
+    const err = new Error(message);
+    err.status = status;
+    return err;
+}
+const fileOf = (id, dir) => path.join(dir || DIR, `${id}.json`);
+const checkId = (id) => {
+    if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(String(id || ''))) throw fail(400, 'id must be lowercase letters, digits and dashes');
+    return String(id);
+};
+
+function write(file, data) {
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(data, null, 4)}\n`);
+    fs.renameSync(tmp, file);
+}
+
+/** Create (isNew) or replace a workflow file. Returns the saved workflow in file form. */
+function save(raw, { id, isNew = false, dir } = {}) {
+    const wanted = checkId(id);
+    const file = fileOf(wanted, dir);
+    if (isNew && fs.existsSync(file)) throw fail(409, `a workflow named ${wanted} already exists`);
+    if (!isNew && !fs.existsSync(file)) throw fail(404, `no workflow named ${wanted}`);
+    if (String(raw?.id || '') !== wanted) throw fail(400, `the id must stay ${wanted}`);
+    let w;
+    try { w = clean(raw, `${wanted}.json`); } catch (err) { throw fail(400, err.message); }
+    const data = toFile(w);
+    write(file, data);
+    return data;
+}
+
+/** Delete a workflow file. The fallback can't go: a goal Jev doesn't place needs somewhere to run. */
+function remove(id, dir) {
+    const wanted = checkId(id);
+    const file = fileOf(wanted, dir);
+    if (!fs.existsSync(file)) throw fail(404, `no workflow named ${wanted}`);
+    if (get(wanted, dir)?.fallback) throw fail(409, 'the fallback workflow is needed for goals Jev does not place, so it cannot be deleted');
+    fs.unlinkSync(file);
+}
 const question = (w) => `Is this task ${w.when}?`;
 
 /**
@@ -88,4 +158,4 @@ async function pick(goal, { ask, askAt = 0.5, dir } = {}) {
     return { id: fallback.id, by: 'default', p: best?.p ?? 0, scores, note: `No workflow reached ${Math.round(askAt * 100)}%` };
 }
 
-module.exports = { load, get, pick, question, clean, DIR, FALLBACK };
+module.exports = { load, get, pick, question, clean, toFile, save, remove, DIR, FALLBACK };

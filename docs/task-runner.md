@@ -20,6 +20,8 @@ How it keeps your work safe:
 
 To use it, run `npm run all` (it starts the runner as a fourth part), put a git repo in the `repos` folder or set `RUNNER_ROOTS`, open **Agents** from the top bar, describe the task and press **Start run**. Routing and Effort work as in chat: pick a routing, or **Jev picks (auto)**. Type or paste the repo's path (the field suggests git repos it finds on this computer), pick a recent one, or press **Browse…** to walk through the allowed folders (repos are marked ◆). The agent runs the project's tests itself when the task calls for it.
 
+**Preview a run.** **Preview** on a local run starts the app's dev server inside the run's worktree, so you can look at what the agent changed while it is still a branch: it picks a free port from 5200, shows the `http://localhost:PORT` link, and stops the server when you press **Stop preview** or the run is removed (a cloud sandbox will get its own public URL later). Starting a preview runs a command, so it goes through the guard first. A run makes one preview at a time, and the app's dev command is used when the task gives none.
+
 **Terminal.** A **Terminal** panel under the task list (opens when the selected run has run a command) shows what the agent ran and what came back, in [xterm.js](https://xtermjs.org) (vendored in `ui/vendor/xterm/`, so it needs no install or internet): `$ command`, its output, and a red `[exit code N]` on failure, with stage names, approvals and file reads as dim one-liners. It follows the run live as the page refreshes. It is a replay of the run's record, not a shell: typing in it does nothing, and output is cut to the length the run's record keeps. A live interactive shell in the sandbox is not built.
 
 ### Sandbox lifetime

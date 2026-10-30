@@ -128,7 +128,7 @@ function renderDetail(run) {
   const r = run.result;
   const diffOpen = openDetails.has('diff');
   const changed = setHtml('detail', `
-    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
+    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
@@ -613,6 +613,7 @@ $('newRun').addEventListener('submit', async (e) => {
   body.autoDebug = f.elements.autoDebug?.checked ? '1' : '0';
   body.plan = f.elements.plan?.checked ? '1' : '0';
   body.auditParts = f.elements.auditParts?.checked ? '1' : '0';
+  if (body.model) delete body.profile; // one model directly replaces the routing
   body.escalate = f.elements.escalate?.checked ? '1' : '0';
   body.autoContinue = f.elements.autoContinue?.checked ? '1' : '0';
   try {
@@ -623,7 +624,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -915,6 +916,7 @@ async function init() {
     const { profiles } = await (await fetch('api/profiles')).json();
     $('newRun').elements.profile.insertAdjacentHTML('beforeend', profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('') + '<option value="auto">Jev picks (auto)</option>');
   } catch { /* the default routing is enough */ }
+  fetch('api/models').then((r) => r.json()).then(({ models }) => { $('runModels').innerHTML = (models || []).map((m) => `<option value="${esc(m)}">`).join(''); }).catch(() => {});
   await initAgentDialog();
   const first = location.hash.slice(1);
   if (first === 'settings') { selected = null; inSettings = true; }
@@ -974,7 +976,7 @@ function renderAgents() {
   renderLive();
   const a = agentOf(agentSel);
   if (a) {
-    $('agentInfo').innerHTML = `<h3>${AgentIcon.icon(a, 'lg')}${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+    $('agentInfo').innerHTML = `<h3>${AgentIcon.icon(a, 'lg')}${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.model ? `<span>Model ${esc(a.model)}</span>` : a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" class="primary" data-aact="newrun">New run</button><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
   } else if (inAgent) {
@@ -1023,9 +1025,15 @@ function goHome() {
 }
 
 // the form is for one-off runs, or for a task of the selected agent
+let lastModeAgent;
 function applyMode() {
   const f = $('newRun');
   const a = agentOf(agentSel);
+  // routing fields stay on for a task, and start from the agent's own
+  if (a !== lastModeAgent) {
+    f.elements.profile.value = a?.profile || ''; f.elements.model.value = a?.model || ''; f.elements.effort.value = a?.effort || ''; f.elements.maxTier.value = a?.maxTier || '';
+    lastModeAgent = a;
+  }
   for (const el of f.querySelectorAll('.oneoff')) {
     el.hidden = Boolean(a) || (['ticketsField', 'auditField'].includes(el.id) && $('workflow').value !== 'swarm');
     for (const input of el.querySelectorAll('input, select, textarea')) input.disabled = Boolean(a);
@@ -1152,6 +1160,7 @@ async function initAgentDialog() {
     }
     if (!body.repo.trim()) { $('agentMsg').textContent = 'Give the agent a repo, or link a project that has repos.'; return; }
     body.moreRepos = agentExtras.filter((r) => r !== body.repo.trim());
+    if (body.model) body.profile = '';
     body.escalate = f.elements.escalate.checked;
     body.autoContinue = f.elements.autoContinue.checked;
     body.autoContinueMax = body.autoContinueMax === '' ? null : body.autoContinueMax;
@@ -1198,6 +1207,7 @@ function openAgentDialog(agent) {
   f.elements.instructions.value = v.instructions || '';
   f.elements.workflow.value = v.workflow || 'general';
   f.elements.profile.value = v.profile || '';
+  f.elements.model.value = v.model || '';
   f.elements.effort.value = v.effort || '';
   f.elements.sandbox.value = v.sandbox || '';
   f.elements.maxSteps.value = v.maxSteps ?? '';

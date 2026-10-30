@@ -47,6 +47,16 @@ const AGENT_HISTORY = 6;      // how many of an agent's earlier tasks a new one 
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const escalation = require('./escalate');
 const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
+/** Routing for an agent's task: what the task sets replaces the agent's own. One model directly and a routing exclude each other. */
+function taskRouting(cfg, agent) {
+    const set = (k) => cfg?.[k] !== undefined && cfg[k] !== null && cfg[k] !== '';
+    const picked = set('model') || set('profile');
+    const model = picked ? (set('model') ? cfg.model : null) : agent.model;
+    return {
+        model: model || undefined, profile: model ? undefined : (picked ? cfg.profile : agent.profile) || undefined,
+        effort: set('effort') ? cfg.effort : agent.effort, maxTier: (set('maxTier') ? cfg.maxTier : agent.maxTier) || undefined,
+    };
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** What the agent is told about the repos connected beside the one it works in. */
 function moreReposBrief(run) {
@@ -941,7 +951,7 @@ class RunManager {
         const source = cfg?.source && typeof cfg.source === 'object'
             ? { chat: cfg.source.chat ? { id: String(cfg.source.chat.id || '').slice(0, 80), title: String(cfg.source.chat.title || '').slice(0, 120) } : null } : null;
         return this.create({
-            owner: agent.owner, goal: cfg?.goal, repo: agent.repo, moreRepos: agent.moreRepos, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
+            owner: agent.owner, goal: cfg?.goal, repo: agent.repo, moreRepos: agent.moreRepos, workflow: agent.workflow, ...taskRouting(cfg, agent), escalate: agent.escalate, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
             autoContinue: cfg?.autoContinue ?? agent.autoContinue ?? undefined, autoContinueMax: cfg?.autoContinueMax ?? agent.autoContinueMax ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,

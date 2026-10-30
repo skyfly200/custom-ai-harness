@@ -123,7 +123,7 @@ With a database set, the chat page tells the server which chat and message a rep
 
 **What stays on the volume and what goes to Neon.** Users, sessions and chats are in Neon. The volume holds `config.yaml`, `routellm-config.yaml`, the Settings and routing files, usage totals and `mcp-servers.json`.
 
-**Limits to know about.** One Machine means no failover: a deploy or restart interrupts any reply in progress. Chat repo linking, the PC shell and stdio MCP servers (the image has `node`, `npx` and `uvx`; admins add them on the Tools page) run inside the Machine, so keep them to people you trust (a limit for other users comes with the per-user settings PR).
+**Limits to know about.** One Machine means no failover: a deploy or restart interrupts any reply in progress. There are no folders of your own on a hosted server, so chat folder repos and the PC shell are off (the path field is hidden; attach a GitHub repo instead), and stdio MCP servers (the image has `node`, `npx` and `uvx`; admins add them on the Tools page) run inside the Machine, so keep them to people you trust. `HARNESS_LOCAL_REPOS=1` turns folder repos and the shell back on where the harness runs on your own computer.
 
 ## Scheduled messages on the server
 

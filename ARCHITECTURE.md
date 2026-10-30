@@ -35,16 +35,16 @@ A request arrives as OpenAI (`/v1/chat/completions`) or Anthropic (`/v1/messages
 
 ## Web UI
 
-Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Every page loads `ui/dialogs.js` first and `ui/bright.css` / `ui/bright.js` for the shared look. The pages bar is built by `ui/nav.js` (styles in `ui/nav.css`) from a `<nav data-site-nav>` placeholder, so the links, active page, account menu and phone menu live in one place; add a page there, not in each HTML file.
+Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Every page loads `ui/dialogs.js` first and `ui/bright.css` / `ui/bright.js` for the shared look, and `ui/mobile.css` last for phones. The pages bar is built by `ui/nav.js` (styles in `ui/nav.css`) from a `<nav data-site-nav>` placeholder, so the links, active page, account menu and phone menu live in one place; add a page there, not in each HTML file.
 
 | Page | Files | Purpose |
 |---|---|---|
-| Bright Chat | `chat.html`, `chat.js`, `chat.css`, `markdown.js`, `chatmerge.js`, `schedule.js` | Chats, projects, skills, tools, voice, schedules, cache timers (`cachetimer.js`) |
+| Bright Chat | `chat.html`, `chat.js`, `chat.css`, `markdown.js`, `chatmerge.js`, `schedule.js` | Chats, projects, skills, tools, voice, schedules, cache timers (`cachetimer.js`), imports from Claude Code (`utils/claudeKit.js`) |
 | Dashboard | `index.html` | Health, routing log, recent chats, usage summary, command guard |
-| Routing | `routing.html`, `routing.js`, `autoroute.js` | Node editor for routings, models, fallbacks, Auto-route |
-| Settings | `settings.html` | Interceptor and Router settings, notifications |
+| Routing | `routing.html`, `routing.js`, `autoroute.js`, `touch.js` | Node editor for routings, models, fallbacks, Auto-route (touch: `touch.js`) |
+| Settings | `settings.html` | Interceptor and Router settings, notifications (`notify.js`) |
 | Usage | `usage.html`, `usage.js`, `costs.js`; admins: `usage-users.html`, `usage-users.js`, `userUsage.js` | Cost and savings per layer; your own requests with logins on, everyone's per person for admins |
-| Tools | `tools.html`, `tools.js` | MCP servers |
+| Tools | `tools.html`, `tools.js` | MCP servers, with a guided setup for catalog entries that need a key or folder |
 | Runs, Agents | `runs.html`, `agents.html`, `agents.js`, `agentBoard.js`, `apps.js` | Task runner, agents, in-app apps (`agent-widget.js`) |
 | Users | `users.html`, `users.js` | Logins, invites, guests, credentials |
 

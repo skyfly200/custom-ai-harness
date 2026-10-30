@@ -126,7 +126,7 @@ Everything past the quick start lives in `docs/`. Each page starts with a one-li
 | [Configuration](docs/configuration.md) | `.env` keys, `config.yaml`, `routellm-config.yaml`, and the Router classifier (Jev, Laya, RouteLLM) |
 | [Running the stack by hand](docs/running-the-stack.md) | Start the local engine, Gateway, Router and Interceptor one at a time |
 | [Claude Code and agent tools](docs/claude-code.md) | Connect Claude Code, `/wayfinder`, the command guard, `ask_jev_file` tools |
-| [Chat page](docs/chat.md) | Projects, skills, commands, MCP tools and git repos, voice and read-aloud |
+| [Chat page](docs/chat.md) | Projects, skills, commands, MCP tools and git repos, voice, read-aloud and notifications, and imports from Claude Code |
 | [Dashboard, settings and usage](docs/control-ui.md) | The dashboard, the Settings page, the Usage page |
 | [Routing](docs/routing.md) | The routing editor, named strategies, tiers, effort, and how a request gets its model |
 | [Task runner](docs/task-runner.md) | Agents that do a whole task: workflows, swarm, E2B cloud sandboxes |

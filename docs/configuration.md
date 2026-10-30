@@ -16,6 +16,7 @@ ANTHROPIC_API_KEY=your_anthropic_key   # optional
 
 `HARNESS_PASSWORD` is optional on your own PC and required by the Docker setup. When set, every page and API asks for it: browsers show a login box (any user name), and agents send it as their API key (`Authorization: Bearer`, `x-api-key`) or in an `x-harness-password` header. The harness doesn't pass it on to the Gateway. It also lets the Settings page's controls work from other machines, which otherwise answer only on the machine the harness runs on.
 
+`HARNESS_SERVER=1` marks the harness as hosted (Fly, or Docker with a database). Chat stdio MCP servers then start lazily on the first call and stop after five idle minutes, since the Machine can't hold everything at boot. A hosted server has no folders of your own and no shell, so the chat's folder-repo tools and the PC shell are off; `HARNESS_LOCAL_REPOS=1` turns them back on where the harness runs on your own computer.
 
 ## OpenRouter without a long-lived key (workload identity federation)
 

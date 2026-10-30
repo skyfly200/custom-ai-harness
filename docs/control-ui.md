@@ -18,6 +18,10 @@ With the Interceptor running, open <http://localhost:3000/> (the pages are also 
 
 - **Interceptor settings**: pin every request to one model (skipping the Router), replace the keyword threshold with a fixed one, the output-token cap, the Router timeout, the Gateway timeout and the stalled-reply timeout (after which a request fails with an error instead of hanging), the models used when the Router is down, and switches for the caveman prompt, Headroom and the context anchor. They apply on the next request and are saved to `harness-settings.json` (gitignored); delete it or press "Reset to defaults" to go back.
 - **Router settings**: the strong, weak, tool and overflow models, the weak model's size limit, the classifier backend and its settings (base URL, model, API key variable name, timeout, and so on). **Apply** lasts until the Router restarts; **Apply and save to file** also writes them to `routellm-config.yaml`, editing only those lines and keeping your comments (a cleared setting is commented out); **Reload from file** picks up edits you made by hand. A change that fails to build the classifier leaves the running one in place.
+- **Chat on this device**: the reply defaults the chat page starts from (max tokens, temperature, start and stall limits, streaming, auto-naming and follow-the-reply), kept in this browser only under the same key the chat page's settings drawer uses, so the two always agree; **Reset to defaults** clears them.
+- **Notifications**: the per-device, per-kind switches for the "it's waiting for you" browser notifications (see [Chat](chat.md)); they are the same switches the chat page's Options → Tools tab shows.
+
+Jump links at the top of the page move to each panel, and the search box filters every panel.
 
 Model fields suggest the names from the Gateway's `/v1/models` (or `config.yaml` when the Gateway is down). The Gateway's own fallback chain still lives in `config.yaml`.
 

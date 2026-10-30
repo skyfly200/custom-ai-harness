@@ -1776,14 +1776,6 @@ function wireBasic(r, lead) {
   return true;
 }
 
-// ---- the guide ---------------------------------------------------------------
-
-// Open until the reader closes it once
-try { $('guide').open = localStorage.getItem('harness-routing-guide') === 'open'; } catch { $('guide').open = false; }
-$('guide').addEventListener('toggle', () => {
-  try { localStorage.setItem('harness-routing-guide', $('guide').open ? 'open' : 'closed'); } catch {}
-});
-
 // ---- loading and live requests -------------------------------------------
 
 async function load() {

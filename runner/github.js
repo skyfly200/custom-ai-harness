@@ -94,6 +94,30 @@ async function openPullRequest({ dir, branch, token, title, body = '', base = ''
     throw new Error(`GitHub answered ${made.status}: ${String(made.data.message || '').slice(0, 200)}`);
 }
 
+/**
+ * Land a hosted run's branch on GitHub. 'main' pushes its commit onto `into` (fast-forward only, so a
+ * branch that moved on is refused, not overwritten). 'merge' pushes the branch, opens a pull request
+ * for it and merges that. Resolves { sha, url }. `fetchImpl` and `apiUrl` are injectable for tests.
+ */
+async function landRemote({ dir, branch, into, mode, title, token, git = run, fetchImpl = fetch, apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com' }) {
+    if (!BRANCH.test(branch)) throw new Error('only harness/ branches are landed');
+    if (!token) throw new Error('connect GitHub first: landing a change needs your GitHub connection');
+    const { owner, name } = parse((await git(['remote', 'get-url', 'origin'], { cwd: dir })).trim());
+    if (mode === 'main') {
+        const sha = (await git(['rev-parse', `refs/heads/${branch}`], { cwd: dir })).trim();
+        await git(['push', '--quiet', 'origin', `${sha}:refs/heads/${into}`], { cwd: dir, token });
+        return { sha, url: `https://github.com/${owner}/${name}/commits/${into}` };
+    }
+    const pr = await openPullRequest({ dir, branch, token, title, base: into, git, fetchImpl, apiUrl });
+    const res = await fetchImpl(`${apiUrl.replace(/\/$/, '')}/repos/${owner}/${name}/pulls/${pr.number}/merge`, {
+        method: 'PUT', headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'harness-runner' },
+        body: JSON.stringify({ merge_method: 'merge' }), signal: AbortSignal.timeout(30000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.merged) throw new Error(`GitHub did not merge pull request ${pr.number}: ${String(data.message || res.status).slice(0, 200)}`);
+    return { sha: data.sha, url: pr.url, pr: pr.number };
+}
+
 /** The person's clones, as paths, for the repo picker. */
 function listClones(base, person) {
     const dir = personDir(base, person);
@@ -131,4 +155,4 @@ async function updatePullBranch({ dir, branch, pr, token = '', git = run, fetchI
     return { number: pr.number, url: data.html_url || `https://github.com/${want}/pull/${pr.number}`, branch: head.ref, head: headSha };
 }
 
-module.exports = { parse, ensureClone, pushBranch, openPullRequest, updatePullBranch, listClones, personDir, cloneDir, BRANCH };
+module.exports = { parse, ensureClone, pushBranch, openPullRequest, landRemote, updatePullBranch, listClones, personDir, cloneDir, BRANCH };

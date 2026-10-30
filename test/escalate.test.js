@@ -73,6 +73,19 @@ test('effort climbs one rung per bump and stops at max or after two', () => {
     assert.equal(canClimb({ bumps: 0, effort: 'max' }), false);
 });
 
+test('a strong model picked for the run is sent with every call, and not sent when blank', async () => {
+    script = [[['finish', { summary: 'done' }]], [['finish', { summary: 'done' }]]];
+    calls = [];
+    const picked = await settle(manager.create({ goal: 'x', repo, workflow: 'quick-answer', strongModel: ' gpt-strong ' }).id);
+    assert.equal(picked.status, 'done', picked.error);
+    assert.equal(picked.strongModel, 'gpt-strong');
+    assert.ok(calls.every((c) => c.headers['x-harness-strong-model'] === 'gpt-strong'));
+    calls = [];
+    const plain = await settle(manager.create({ goal: 'x', repo, workflow: 'quick-answer', strongModel: '  ' }).id);
+    assert.equal(plain.strongModel, null);
+    assert.ok(calls.every((c) => c.headers['x-harness-strong-model'] === undefined));
+});
+
 test('an empty reply is asked again with more effort, under the same max tier', async () => {
     script = [[], [['finish', { summary: 'done' }]]];
     calls = [];

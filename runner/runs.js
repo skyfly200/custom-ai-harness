@@ -55,6 +55,7 @@ function taskRouting(cfg, agent) {
     return {
         model: model || undefined, profile: model ? undefined : (picked ? cfg.profile : agent.profile) || undefined,
         effort: set('effort') ? cfg.effort : agent.effort, maxTier: (set('maxTier') ? cfg.maxTier : agent.maxTier) || undefined,
+        strongModel: set('strongModel') ? String(cfg.strongModel).trim().slice(0, 120) : undefined,
     };
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -373,6 +374,8 @@ class RunManager {
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             // escalate: on a failure, ask for more effort (up to two rungs); maxTier caps the tier it can reach
             escalate: !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false'), bumps: 0, maxTier: cfg.maxTier ? String(cfg.maxTier).trim().slice(0, 40) : null,
+            // the model for the Strong tier, picked for this run (x-harness-strong-model); blank uses the routing's
+            strongModel: cfg.strongModel ? String(cfg.strongModel).trim().slice(0, 120) || null : null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
             // Plan mode: the agent may read and search, but changes nothing. It
             // finishes with a plan instead of an edit, and the branch gets no commit.
@@ -460,6 +463,7 @@ class RunManager {
         const effort = run.bumps ? escalation.effortAfter(baseEffort, run.bumps) : baseEffort;
         if (effort) h['x-harness-effort'] = effort;
         if (run.maxTier) h['x-harness-max-tier'] = run.maxTier;
+        if (run.strongModel) h['x-harness-strong-model'] = run.strongModel;
         // every step sends the whole history again: let the harness mark it cacheable (Claude models only)
         h['x-harness-cache'] = 'auto';
         return h;
@@ -1155,7 +1159,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             owner: from.owner, goal: from.goal, repo: from.repo, moreRepos: from.moreRepos, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax,
+            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };

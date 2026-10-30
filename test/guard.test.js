@@ -66,6 +66,33 @@ test('Jev’s confidence gates the rest', async () => {
     assert.equal((await guard.check({ tool: 'WebFetch' }, { ask: never })).decision, 'allow');
 });
 
+test('cloud sandbox runs skip Jev by default; a run can choose; the rules still apply', async () => {
+    const jev = (p) => async (text, qs) => Object.fromEntries(Object.keys(qs).map(k => [k, k === 'destructive' ? p : 0.01]));
+    const cloud = { sandbox: 'cloud' };
+    const local = { sandbox: 'local' };
+    // the default: a cloud run is not asked about, a local run is
+    assert.equal(guard.jevOn({ ...cloud }, { guardJev: true, guardJevCloud: false }), false);
+    assert.equal(guard.jevOn({ ...local }, { guardJev: true, guardJevCloud: false }), true);
+    assert.equal(guard.jevOn({}, { guardJev: true, guardJevCloud: false }), true);
+    // the settings switch turns cloud asking back on
+    assert.equal(guard.jevOn({ ...cloud }, { guardJev: true, guardJevCloud: true }), true);
+    // a run's own choice wins over the default, in both directions
+    assert.equal(guard.jevOn({ ...cloud, jev: 'on' }, { guardJev: true, guardJevCloud: false }), true);
+    assert.equal(guard.jevOn({ ...local, jev: 'off' }, { guardJev: true, guardJevCloud: true }), false);
+    // the master switch turns Jev off everywhere, whatever the run says
+    assert.equal(guard.jevOn({ ...cloud, jev: 'on' }, { guardJev: false, guardJevCloud: true }), false);
+
+    // in a cloud run with Jev off, a command Jev would have asked about goes through
+    const r = await guard.check({ tool: 'Bash', command: 'make deploy', sandbox: 'cloud' }, { ask: never, jev: guard.jevOn({ sandbox: 'cloud' }, { guardJev: true, guardJevCloud: false }) });
+    assert.equal(r.decision, 'allow');
+    assert.equal(r.reason, 'No rule matches; Jev check is off');
+    // ...but the rules still deny and ask
+    assert.equal((await guard.check({ tool: 'Bash', command: 'rm -rf /', sandbox: 'cloud' }, { ask: never, jev: false })).decision, 'deny');
+    assert.equal((await guard.check({ tool: 'Bash', command: 'rm -rf build', sandbox: 'cloud' }, { ask: never, jev: false })).decision, 'ask');
+    // and with Jev on in a cloud run, it still asks
+    assert.equal((await guard.check({ tool: 'Bash', command: 'psql -c "delete from users"' }, { ask: jev(0.8), jev: true })).decision, 'ask');
+});
+
 let lastAsk = null;
 const router = http.createServer((req, res) => {
     let data = '';

@@ -395,6 +395,8 @@ class RunManager {
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             // escalate: on a failure, ask for more effort (up to two rungs); maxTier caps the tier it can reach
             escalate: !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false'), bumps: 0, maxTier: cfg.maxTier ? String(cfg.maxTier).trim().slice(0, 40) : null,
+            // the command guard's Jev check for this run: 'on', 'off', or null for the settings' default (cloud or local)
+            jev: cfg.jev === 'on' || cfg.jev === 'off' ? cfg.jev : null,
             // the model for the Strong tier, picked for this run (x-harness-strong-model); blank uses the routing's
             strongModel: cfg.strongModel ? String(cfg.strongModel).trim().slice(0, 120) || null : null,
             test: cfg.test ? String(cfg.test).slice(0, 500) : null,
@@ -563,9 +565,12 @@ class RunManager {
         } catch { return null; }
     }
 
-    async guard(kind, text, owner = null) {
+    /** Ask the Interceptor's guard about one command or write. `run` says whose it is, where it runs and whether Jev is asked (run.jev). */
+    async guard(kind, text, run = {}) {
         const body = kind === 'write' ? { tool: 'Write', path: text } : { tool: 'Bash', command: text };
-        const headers = { 'content-type': 'application/json', ...this.authHeaders(owner) };
+        body.sandbox = isCloud(run.sandbox) ? 'cloud' : 'local';
+        if (run.jev) body.jev = run.jev;
+        const headers = { 'content-type': 'application/json', ...this.authHeaders(run.owner) };
         const res = await fetch(`${this.harnessUrl}/v1/guard`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -1009,7 +1014,7 @@ class RunManager {
             owner: agent.owner, goal: cfg?.goal, repo: agent.repo, moreRepos: agent.moreRepos, workflow: agent.workflow, ...taskRouting(cfg, agent), escalate: agent.escalate, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
             autoContinue: cfg?.autoContinue ?? agent.autoContinue ?? undefined, autoContinueMax: cfg?.autoContinueMax ?? agent.autoContinueMax ?? undefined,
-            plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null, landing: agent.landing || undefined,
+            plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null, landing: agent.landing || undefined, jev: cfg?.jev ?? agent.jev ?? undefined,
         });
     }
 
@@ -1159,7 +1164,7 @@ class RunManager {
             this.event(run, { type: 'stage', stage: stage.id, role: stage.role, text: `Stage ${i + 1} of ${workflow.stages.length}: ${stage.role}` });
             const tools = makeTools({
                 sandbox, toolset: run.plan ? 'read' : stage.tools,
-                check: (kind, text) => this.guard(kind, text, run.owner),
+                check: (kind, text) => this.guard(kind, text, run),
                 approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
                 editable: run.editable ? editableMatcher(run.editable) : null,
             });
@@ -1210,7 +1215,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             owner: from.owner, goal: from.goal, repo: from.repo, moreRepos: from.moreRepos, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax,
+            model: from.model, effort: from.effort, escalate: from.escalate, jev: from.jev, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };
@@ -1353,7 +1358,7 @@ class RunManager {
         if (!fs.existsSync(dir)) throw new Error('this run has no workspace to preview');
         const app = run.app && this.apps.get(run.app);
         if (!command && app?.devCommand) { command = app.devCommand; port = port || app.previewPort || undefined; }
-        const verdict = await this.guard('bash', String(command || '').replaceAll('{port}', '0'), run.owner);
+        const verdict = await this.guard('bash', String(command || '').replaceAll('{port}', '0'), run);
         if (verdict.decision === 'deny') throw new Error(`the command guard blocked it: ${verdict.reason || 'not allowed'}`);
         if (verdict.decision === 'ask' && approved !== true) throw Object.assign(new Error(`the command guard asks for your OK: ${verdict.reason || 'risky'}`), { needsApproval: true });
         return this.previews.start(id, dir, command, { port });

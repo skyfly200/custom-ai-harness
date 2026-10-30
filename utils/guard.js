@@ -107,6 +107,21 @@ async function check(input, { ask, jev = true, askAt = 0.5, denyAt = null } = {}
     return done({ decision: 'allow', reason: `Jev: ${Math.round(p * 100)}% likely to be risky`, jev: jevNote });
 }
 
+/**
+ * Whether Jev is asked about this action. The master switch (guardJev) turns
+ * it off everywhere. Inside that, a run's own choice (`jev`: 'on' or 'off')
+ * wins; without one, a cloud sandbox run follows guardJevCloud (off by
+ * default: the sandbox is the boundary) and everything else is asked.
+ * `input.sandbox` is 'cloud' or 'local', sent by the runner.
+ */
+function jevOn(input, { guardJev = true, guardJevCloud = false } = {}) {
+    if (!guardJev) return false;
+    if (input?.jev === 'on') return true;
+    if (input?.jev === 'off') return false;
+    if (input?.sandbox === 'cloud') return !!guardJevCloud;
+    return true;
+}
+
 function record(entry) {
     const e = { time: new Date().toISOString(), ...entry };
     log.push(e);
@@ -119,4 +134,4 @@ const counts = () => ({ bash: rules.bash.length, write: rules.write.length, safe
 
 load();
 
-module.exports = { check, load, recent, counts, isSafe, matchRule, kindOf, QUESTIONS, FILE };
+module.exports = { check, jevOn, load, recent, counts, isSafe, matchRule, kindOf, QUESTIONS, FILE };

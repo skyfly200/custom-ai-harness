@@ -30,6 +30,7 @@ const DEFAULTS = Object.freeze({
     autoFirst: 'jev',         // which Auto tries first: 'jev' (rules only if Jev finds no fit) or 'rules'
     autoAskAt: 0.5,           // Jev's confidence that a routing fits at which Auto picks it
     guardJev: true,           // command guard (utils/guard.js): ask Jev about commands the rules don't cover
+    guardJevCloud: false,     // ...for runs in a cloud sandbox (E2B, Sprites) that don't say otherwise: off, the sandbox is the boundary
     guardAskAt: 0.5,          // Jev's confidence that a command is risky at which the agent must ask you
     guardDenyAt: null,        // ...at which it is blocked outright; null: Jev alone never blocks
     shellInRepo: true,        // a chat linked to a git repo may run commands in it (guarded; the chat page asks you)
@@ -87,6 +88,7 @@ const VALIDATORS = {
     },
     langfuseContent: bool('langfuseContent'),
     guardJev: bool('guardJev'),
+    guardJevCloud: bool('guardJevCloud'),
     guardAskAt: (v) => {
         const n = Number(v);
         if (v === null || v === '' || !Number.isFinite(n) || n < 0 || n > 1) throw new Error('guardAskAt must be from 0 to 1');

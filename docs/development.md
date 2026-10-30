@@ -78,7 +78,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | Routing, tiers, profiles, Auto | `interceptor`, `profiles`, `tiers`, `autoStrategy`, `autoroute`, `escalate`, `jevQuestions` |
 | Command guard, Jev file tools | `guard`, `gatewayGuard`, `jevFiles` |
 | Gateway config and model info | `gateway`, `gatewayConfig`, `modelInfo`, `modelInfoApi`, `modelStats`, `openrouterCatalog` |
-| Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `e2bSandbox`, `spritesSandbox` |
+| Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `runview`, `e2bSandbox`, `spritesSandbox` |
 | MCP tools | `mcp`, `mcpAdmin`, `toolsApi`, `mcpAskFirst` (ask-first approval, Vercel entry) |
 | Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands`, `repos` |
 | Connect OpenRouter (OAuth PKCE) | `openrouterOAuth` |

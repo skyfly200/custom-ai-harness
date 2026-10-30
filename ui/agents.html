@@ -103,6 +103,7 @@
     <div class="picker-head"><h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2><button type="button" id="runClose" aria-label="Close">×</button></div>
     <label class="field wide goal"><span class="sr">What should it do?</span>
       <textarea name="goal" rows="3" required placeholder="Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI"></textarea></label>
+    <div class="promptbar"><button type="button" id="usePrompt" data-hint="Choose a saved prompt, fill in its variables, and put it here">Use a saved prompt…</button><button type="button" id="savePrompt" data-hint="Keep this prompt in your prompt library so you can reuse it, improve it and see its versions on the Prompts page">Save as a prompt</button><a href="prompts" class="fine">Prompts page</a></div>
     <div class="row oneoff pickrow">
       <!-- The repo field is one self-contained block (#repoField). Swap it for another picker by keeping an input named "repo" (id "repo") inside it. -->
       <div class="field repo-field" id="repoField"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
@@ -192,6 +193,7 @@
     <section id="promptsBox">
       <h2 id="promptsTitle" data-hint="Prompts you can start a run from. Click one to open it in the new run window">Prompts</h2>
       <div class="card list" id="promptList"><p class="muted">No prompts yet.</p></div>
+      <p class="fine muted"><a href="prompts">Write and manage prompts</a></p>
     </section>
   </div>
 
@@ -250,6 +252,7 @@
   </div>
 </main>
 <script src="dialogs.js"></script>
+<script src="promptlib.js"></script>
 <script src="githubconnect.js"></script>
 <script src="ownerScope.js"></script>
 <script src="hints.js"></script>

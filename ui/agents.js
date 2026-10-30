@@ -92,7 +92,7 @@ function setHtml(id, html) {
 
 function renderList() {
   const list = shown();
-  if (!Array.isArray(savedPrompts)) renderPrompts();
+  renderPrompts();
   $('listTitle').textContent = agentSel ? `${agentOf(agentSel)?.name || 'Agent'}: tasks` : 'Runs';
   if (!list.length) { setHtml('list', `<p class="muted">${agentSel ? 'No tasks yet. Press New run to give it one.' : 'No runs yet.'}</p>`); return; }
   setHtml('list', list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
@@ -822,28 +822,46 @@ function openRunDialog(goal) {
 }
 $('runClose').addEventListener('click', () => $('runDialog').close());
 
-// Prompts on the agent page: the saved ones (the prompt library) when the server has it, else the prompts of recent runs
-let savedPrompts = null;
+// Prompts on the agent page: the saved ones (the prompt library, ui/promptlib.js) and, below them, the prompts of recent runs
+let savedPrompts = [];
 async function loadPrompts() {
-  try {
-    const res = await fetch('api/prompts');
-    savedPrompts = res.ok ? ((await res.json()).prompts || []) : null;
-  } catch { savedPrompts = null; }
+  try { savedPrompts = await window.Prompts.list(); } catch { savedPrompts = []; }
   renderPrompts();
 }
 function renderPrompts() {
-  const saved = Array.isArray(savedPrompts);
-  const items = saved
-    ? savedPrompts.map((p) => ({ title: p.title || nameLine(p.text || p.body || p.prompt), text: p.text || p.body || p.prompt || '' }))
-    : [...new Map(shown().map((r) => [r.goal.trim(), { title: nameLine(r.goal), text: r.goal, ago: ago(r.created) }])).values()].slice(0, 12);
-  $('promptsTitle').textContent = saved ? 'Prompts' : 'Recent prompts';
-  setHtml('promptList', items.length ? items.map((p, i) => `<button class="run-item prompt-item" data-pi="${i}" title="Start a run with this prompt"><span class="goal">${esc(p.title)}</span><span class="meta">${p.ago ? `${esc(p.ago)} · ` : ''}use in a new run</span></button>`).join('')
-    : '<p class="muted">No prompts yet. Prompts you run show up here.</p>');
+  const saved = savedPrompts.map((p) => ({ title: p.name, text: p.text, saved: true }));
+  const seen = new Set(saved.map((p) => p.text.trim()));
+  const recent = [...new Map(shown().map((r) => [r.goal.trim(), { title: nameLine(r.goal), text: r.goal, ago: ago(r.created) }])).values()].filter((p) => !seen.has(p.text.trim())).slice(0, 8);
+  const items = [...saved, ...recent];
+  const row = (p, i) => `<button class="run-item prompt-item" data-pi="${i}" title="Start a run with this prompt"><span class="goal">${esc(p.title)}</span><span class="meta">${p.saved ? '<span class="tag ok">saved</span> ' : `${esc(p.ago)} · `}${esc((p.text || '').replace(/\s+/g, ' ').slice(0, 70))}</span></button>`;
+  setHtml('promptList', items.length ? items.map(row).join('') : '<p class="muted">No prompts yet. Save one from the New run window, or write one on the Prompts page.</p>');
   $('promptList')._items = items;
 }
-$('promptList').addEventListener('click', (e) => {
+$('promptList').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-pi]');
-  if (b) openRunDialog($('promptList')._items[Number(b.dataset.pi)]?.text || '');
+  const p = b && $('promptList')._items[Number(b.dataset.pi)];
+  if (!p) return;
+  let text = p.text;
+  if (p.saved && window.Prompts.variables(text).length) { text = await window.Prompts.fill(p.title, text); if (text == null) return; }
+  openRunDialog(text);
+});
+$('usePrompt').addEventListener('click', async () => {
+  try {
+    const got = await window.Prompts.pick({ agent: agentSel || undefined, workflow: $('workflow').value !== 'auto' ? $('workflow').value : undefined });
+    if (got) { $('newRun').elements.goal.value = got.text; schedulePick(); $('newRun').elements.goal.focus(); }
+  } catch (err) { ui.toast(err.message, { kind: 'error' }); }
+});
+$('savePrompt').addEventListener('click', async () => {
+  const text = $('newRun').elements.goal.value.trim();
+  if (!text) { ui.toast('Write the prompt first.'); return; }
+  const name = await ui.prompt('Name this prompt', { value: window.Prompts.nameFrom(text) });
+  if (!name) return;
+  const wf = $('workflow').value;
+  try {
+    await window.Prompts.save({ name, text, tags: [], suits: { ...(agentSel ? { agent: agentSel } : {}), ...(wf !== 'auto' ? { workflow: wf } : {}) } });
+    ui.toast('Saved. Find it on the Prompts page.');
+    loadPrompts();
+  } catch (err) { ui.toast(err.message, { kind: 'error' }); }
 });
 
 async function init() {
@@ -913,7 +931,6 @@ function renderAgents() {
   setHtml('agentChips', [bubble(null, 0), ...agents.map((a, i) => bubble(a, i + 1)), addB].join(''));
   renderLive();
   const a = agentOf(agentSel);
-  $('agentInfo').hidden = !inAgent;
   if (a) {
     $('agentInfo').innerHTML = `<h3>${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}

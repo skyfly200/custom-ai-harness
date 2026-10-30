@@ -92,5 +92,6 @@
     const text = await fillDialog(chosen.name, chosen.text);
     return text == null ? null : { prompt: chosen, text };
   };
+  api.fill = fillDialog;
   root.Prompts = api;
 })(typeof window !== 'undefined' ? window : globalThis);

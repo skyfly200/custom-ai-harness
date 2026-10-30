@@ -306,3 +306,7 @@ body.has-full { overflow: hidden; }
 .gearlink { margin-left: auto; }
 ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .follow[hidden], .statuscard[hidden] { display: none !important; }
+.promptbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.promptbar button { margin: 0; padding: 3px 12px; font-size: 13px; border-radius: 999px; }
+.promptbar .fine { margin-left: auto; font-size: 12px; }
+.prompt-item { padding-left: 10px; }

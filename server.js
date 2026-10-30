@@ -1007,8 +1007,9 @@ app.get('/v1/batch/:id', async (req, res) => {
     } catch (err) { res.status(502).json({ error: err.message }); }
 });
 app.post('/v1/guard', async (req, res) => {
-    const { guardJev, guardAskAt, guardDenyAt } = settings.get();
-    const result = await guard.check(req.body || {}, { ask: askRouter, jev: guardJev, askAt: guardAskAt, denyAt: guardDenyAt });
+    const { guardJev, guardJevCloud, guardAskAt, guardDenyAt } = settings.get();
+    const body = req.body || {};
+    const result = await guard.check(body, { ask: askRouter, jev: guard.jevOn(body, { guardJev, guardJevCloud }), askAt: guardAskAt, denyAt: guardDenyAt });
     monitor.live.emit('update', { type: 'guard', event: result });
     res.json(result);
 });

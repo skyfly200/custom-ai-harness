@@ -121,6 +121,8 @@
         <div class="group-grid switches">
           <label class="field check"><input type="checkbox" name="guardJev">
             <span>Command guard asks Jev<br><small>Off: only the rules apply.</small></span></label>
+          <label class="field check"><input type="checkbox" name="guardJevCloud">
+            <span data-hint="Runs in a cloud sandbox (E2B or Sprite) skip Jev's check unless the agent says otherwise. The sandbox is the boundary, so rules still apply. Turn on to ask Jev there too">Command guard asks Jev in cloud sandboxes<br><small>Off: cloud runs use the rules only.</small></span></label>
           <label class="field check"><input type="checkbox" name="shellInRepo">
             <span data-hint="Lets a chat linked to a git repo run commands there. Each command goes past the guard, and a risky one waits in the chat for Allow. Off: chats only read the repo.">Shell in a chat's linked repo<br><small>Risky commands wait for your Allow. Off: read-only.</small></span></label>
           <label class="field"><span data-hint="How sure Jev must be that a command is risky before the agent has to ask you">Guard: ask you from</span>

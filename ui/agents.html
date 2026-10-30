@@ -128,6 +128,13 @@
         <input type="checkbox" name="plan" value="1"><span>Plan only</span></label>
       <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so the harness picks a stronger model. Up to two steps up, never above Highest tier">
         <input type="checkbox" name="escalate" value="1" checked><span>Stronger model on failure</span></label>
+      <label class="field" data-hint="Whether the command guard asks Jev about this run's commands and file writes. Settings default: cloud sandboxes follow the Command guard setting in Settings (off), local runs ask Jev. Rules always apply">
+        <span>Jev check on commands</span>
+        <select name="jev">
+          <option value="">Settings default</option>
+          <option value="on">Always ask Jev</option>
+          <option value="off">Never ask Jev (rules only)</option>
+        </select></label>
       <label class="check" data-hint="If the runner restarts (a deploy, a crash) or the cloud sandbox ends while this is working, pick it up again by itself from its last saved commit, up to the attempts below, and not past one more cost limit. A run you stop yourself is never resumed">
         <input type="checkbox" name="autoContinue" value="1"><span>Auto-continue if interrupted</span></label>
       <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
@@ -187,6 +194,13 @@
         <label class="field"><span data-hint="A chat project this agent belongs to. Chats in that project can hand it work with /agent, and the project lists it">Chat project</span><select name="project" id="agentProject"><option value="">None</option></select></label>
       </div>
       <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so a stronger model answers"><input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
+      <label class="field" data-hint="Whether the command guard asks Jev about this agent's commands and file writes. Settings default: cloud sandboxes follow the Command guard setting in Settings (off), local runs ask Jev. Rules always apply">
+        <span>Jev check on commands</span>
+        <select name="jev">
+          <option value="">Settings default</option>
+          <option value="on">Always ask Jev</option>
+          <option value="off">Never ask Jev (rules only)</option>
+        </select></label>
       <div class="row">
         <label class="check" data-hint="If the runner restarts (a deploy, a crash) or the cloud sandbox ends while one of its tasks is working, the task picks itself up again from its last saved commit. Never after you press Stop. Each task can still be changed when you start it"><input type="checkbox" name="autoContinue" value="1"><span>Auto-continue tasks that are interrupted</span></label>
         <label class="field"><span data-hint="How many times one task may resume itself. Blank: 3. Together the resumes may not spend more than one more Max cost">Tries</span><input type="number" name="autoContinueMax" min="1" max="10" placeholder="3"></label>

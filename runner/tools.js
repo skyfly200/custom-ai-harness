@@ -13,6 +13,12 @@ const TOOLSETS = {
     all: ['list_files', 'read_file', 'write_file', 'edit_file', 'run_command', 'finish'],
 };
 
+// Every tool but finish takes `why`: a few words, shown live on the run page so a person can tell what
+// the agent is trying to do. It is not needed to run the tool, so a model that leaves it out still works.
+const WHY = { type: 'string', description: 'Under 15 words: what you are trying to find out or do with this call' };
+const withWhy = (def) => def.function.name === 'finish' ? def
+    : { ...def, function: { ...def.function, parameters: { ...def.function.parameters, properties: { why: WHY, ...def.function.parameters.properties }, required: ['why', ...(def.function.parameters.required || [])] } } };
+
 const definitions = [
     { type: 'function', function: { name: 'list_files', description: 'List the files and folders in a directory of the workspace (not recursive).',
         parameters: { type: 'object', properties: { path: { type: 'string', description: 'Directory, default the workspace root' } } } } },
@@ -26,7 +32,7 @@ const definitions = [
         parameters: { type: 'object', properties: { command: { type: 'string' }, timeout_seconds: { type: 'integer', description: 'Default 120' } }, required: ['command'] } } },
     { type: 'function', function: { name: 'finish', description: 'Say the task is done, or cannot be done, and summarise what you did and anything the person should check.',
         parameters: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } } },
-];
+].map(withWhy);
 
 /**
  * `sandbox` is a LocalSandbox or an E2BSandbox (both: resolve, readFile,

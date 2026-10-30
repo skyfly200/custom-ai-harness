@@ -18,15 +18,17 @@
     switch (e.type) {
       case 'stage': return `${C.bold}${C.cyan}== ${e.text} ==${C.off}\r\n`;
       case 'note': return `${C.dim}# ${crlf(e.text)}${C.off}\r\n`;
+      case 'warning': return `${C.yellow}! ${crlf(e.text)}${C.off}\r\n`;
       case 'plan': return `${C.dim}# plan${C.off}\r\n${crlf(e.text)}\r\n`;
       case 'approval_needed': return `${C.yellow}? waiting for you: ${crlf(e.text)} (${e.reason || 'risky'})${C.off}\r\n`;
       case 'approval': return `${e.allowed ? C.green : C.red}${e.allowed ? 'allowed' : 'declined'}: ${crlf(e.text)}${C.off}\r\n`;
       case 'tool': {
         ctx.tool = e.name;
         const a = e.args || {};
-        if (e.name === 'run_command') return `${C.green}$ ${crlf(a.command ?? '')}${C.off}\r\n`;
+        const why = e.why ? `${C.dim}# ${crlf(e.why)}${C.off}\r\n` : '';
+        if (e.name === 'run_command') return `${why}${C.green}$ ${crlf(a.command ?? '')}${C.off}\r\n`;
         if (e.name === 'finish') return '';
-        return `${C.dim}> ${e.name} ${crlf(a.path ?? '')}${C.off}\r\n`;
+        return `${why}${C.dim}> ${e.name} ${crlf(a.path ?? '')}${C.off}\r\n`;
       }
       case 'result': {
         const tool = ctx.tool;

@@ -30,6 +30,8 @@
     if (ACTIVE.has(run.status)) {
       for (let i = ev.length - 1; i >= 0; i--) {
         const e = ev[i], a = e.args || {};
+        // what the agent said it is doing beats a description made from the tool's arguments
+        if (e.type === 'tool' && e.why) return cut(first(e.why), 100);
         if (e.type === 'tool' && e.name === 'run_command') return `Running ${cut(first(a.command), 80)}`;
         if (e.type === 'tool' && e.name === 'read_file') return `Reading ${cut(first(a.path), 80)}`;
         if (e.type === 'tool' && (e.name === 'write_file' || e.name === 'edit_file')) return `Editing ${cut(first(a.path), 80)}`;
@@ -68,6 +70,7 @@
       const done = workers.filter((w) => w.status === 'done').length;
       out.push(`${plural(workers.length, 'worker')} on separate branches; ${done} finished.`);
     }
+    if (run.warning) out.push(`Warning: ${first(run.warning.text)}`);
     if (errors) out.push(`${plural(errors, 'step')} hit a problem${run.status === 'done' ? ', but it carried on' : ''}.`);
     const r = run.result;
     if (r && !run.plan) {
@@ -91,7 +94,7 @@
     });
   }
 
-  const GROUPS = { model: ['model'], tool: ['tool', 'result'], stage: ['stage', 'plan', 'note'], approval: ['approval', 'approval_needed'] };
+  const GROUPS = { model: ['model'], tool: ['tool', 'result'], stage: ['stage', 'plan', 'note', 'warning'], approval: ['approval', 'approval_needed'] };
 
   /** f = { type: 'all'|group, tool, stage, errors } */
   function filterEvents(items, f = {}) {

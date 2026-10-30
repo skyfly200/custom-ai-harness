@@ -26,8 +26,8 @@
 .skills-page .source { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .skills-page .source[hidden] { display: none; }
 .skills-page .source a { overflow-wrap: anywhere; }
-.skills-page .remote { width: min(620px, calc(100vw - 32px)); max-height: 85vh; padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
-.skills-page .remote[open] { display: flex; }
+.skills-page .remote { width: min(620px, calc(100vw - 32px)); max-height: 85vh; padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+.skills-page .remote[open] { display: flex; flex-direction: column; gap: 6px; }
 .skills-page .remote::backdrop { background: rgba(10, 8, 25, .5); }
 .skills-page .remote h2 { margin: 0; font-size: 16px; text-transform: none; letter-spacing: 0; color: var(--text); }
 .skills-page .remote p { margin: 0; }

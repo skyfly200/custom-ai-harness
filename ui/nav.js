@@ -30,10 +30,10 @@
   const PAGES = [
     { id: 'dashboard', label: 'Dashboard', href: './', files: ['', 'index.html'], hint: 'Health of each part, recent chats, usage and requests' },
     { id: 'chat', label: 'Chat', href: 'chat', files: ['chat.html'], hint: 'Talk to the models through the harness' },
-    { id: 'usage', label: 'Usage', href: 'usage', files: ['usage.html', 'usage-users.html'], hint: 'Tokens used, by client, model and service' },
-    { id: 'routing', label: 'Routing', href: 'routing', files: ['routing.html'], hint: 'Where requests go, as connected boxes you can edit' },
     { id: 'agents', label: 'Agents', href: 'agents', files: ['agents.html', 'runs.html'], hint: 'Named agents that keep working on your repos, and one-off runs' },
     { id: 'prompts', label: 'Prompts', href: 'prompts', files: ['prompts.html'], hint: 'Saved prompts for agents: write, improve and reuse them' },
+    { id: 'usage', label: 'Usage', href: 'usage', files: ['usage.html', 'usage-users.html'], hint: 'Tokens used, by client, model and service' },
+    { id: 'routing', label: 'Routing', href: 'routing', files: ['routing.html'], hint: 'Where requests go, as connected boxes you can edit' },
     { id: 'tools', label: 'Tools', href: 'tools', files: ['tools.html'], hint: 'The MCP servers the chat page can use' },
     { id: 'settings', label: 'Settings', href: 'settings', files: ['settings.html'], admin: true, hint: 'Interceptor and Router settings' },
   ];

@@ -107,6 +107,17 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         manager.save(run);
         res.json(run.pr);
     }));
+    // Put the run's commit on the pull request its task named: that PR's branch moves forward (fast-forward only)
+    app.post('/runs/:id/update-pr', wrap(async (req, res) => {
+        const run = manager.get(req.params.id);
+        if (!run) return fail(res, new Error('no such run'), 404);
+        if (!run.prTarget) return fail(res, new Error('this run was not asked to update a pull request'), 409);
+        if (!run.result?.commit || ['queued', 'running', 'waiting'].includes(run.status)) return fail(res, new Error('this run has no finished changes to put on the pull request'), 409);
+        const out = await git.updatePullBranch({ dir: run.repo, branch: run.branch, pr: run.prTarget, token: req.githubToken || '' });
+        run.prUpdated = { ...out, at: new Date().toISOString() };
+        manager.save(run);
+        res.json(out);
+    }));
     // Write a ticket draft as wayfinder markdown files in the repo. Without confirm: true it
     // only says what would be written, so a page can show it and ask first.
     app.post('/tickets/files', (req, res) => {

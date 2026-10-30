@@ -230,7 +230,8 @@ test('a cloud sandbox has no remote: the pull request is fetched by URL and judg
     const notes = [];
     const run = { goal: `fix ${GITHUB}/pull/195`, repo, branch: 'harness/x' };
     const brief = await require('../runner/prBrief').prepare({ sandbox, run, local: false, note: (t) => notes.push(t) });
-    assert.match(brief, /git merge --ff-only refs\/remotes\/pr\/195/);
+    assert.match(brief, /on your branch, so the work you do is on top of it/);
+    assert.equal(git(box, 'rev-parse', 'HEAD').trim(), git(repo, 'rev-parse', 'refs/remotes/pr/195').trim());
     assert.match(brief, /git merge refs\/remotes\/pr\/base/);
     assert.match(brief, /no GitHub login, token or gh/);
     assert.equal(git(box, 'rev-parse', 'refs/remotes/pr/base').trim(), git(repo, 'rev-parse', 'origin/main').trim());
@@ -240,4 +241,68 @@ test('a cloud sandbox has no remote: the pull request is fetched by URL and judg
     assert.match(other, /^STOP\./);
     assert.match(other, /skyfly200\/VirtuaHost selected/);
     assert.match(notes.at(-1), /names a pull request in skyfly200\/VirtuaHost/);
+});
+
+test('the run page offers only the buttons that fit the run\'s state', () => {
+    const { actionsFor } = require('../ui/runview');
+    const acts = (run, ctx = {}) => actionsFor(run, ctx).map((a) => a.act || a.href);
+    const done = { status: 'done', kind: 'run', result: { commit: 'abc' }, branch: 'harness/x' };
+    // running: only Stop
+    assert.deepEqual(acts({ status: 'running', kind: 'run' }, { hosted: true }), ['stop']);
+    // finished with changes, locally: the patch, the named PR and delete; no GitHub actions
+    const named = { ...done, prTarget: { owner: 'a', name: 'b', number: 195 } };
+    assert.deepEqual(acts(named), ['update-pr', 'patch', 'remove']);
+    // hosted with GitHub connected: push and PR come too
+    assert.deepEqual(acts(named, { hosted: true, githubOn: true }), ['update-pr', 'push', 'pr', 'patch', 'remove']);
+    // hosted without GitHub: a link to connect it instead
+    assert.deepEqual(acts(named, { hosted: true, githubOn: false }), ['update-pr', '#settings', 'patch', 'remove']);
+    // a run that was not asked to touch a PR has no Update PR branch
+    assert.deepEqual(acts(done), ['patch', 'remove']);
+    // a plan or a failed run with no commit offers no change actions
+    assert.deepEqual(acts({ status: 'failed', kind: 'run', prTarget: named.prTarget, result: null }, { canRetry: true }), ['retry', 'remove']);
+    // a swarm child is only ever deleted
+    assert.deepEqual(acts({ ...done, parent: 'p', prTarget: named.prTarget }, { hosted: true, githubOn: true }), ['remove']);
+    // the primary action for a task that named a PR is Update PR branch
+    assert.equal(actionsFor(named)[0].primary, true);
+    // interrupted: Continue is primary
+    assert.equal(actionsFor({ status: 'interrupted', kind: 'run', result: null }, { canContinue: true }).find((a) => a.act === 'continue').primary, true);
+});
+
+test('Update PR branch moves the PR forward, fast-forward only, and refuses forks, closed PRs and moved PRs', async () => {
+    const gh = require('../runner/github');
+    const pr = { owner: 'skyfly200', name: 'custom-ai-harness', number: 195 };
+    git(repo, 'fetch', '-q', 'origin', 'pull/195/head:refs/remotes/pr/195');
+    git(repo, 'checkout', '-q', '-B', 'harness/upd', 'refs/remotes/pr/195');
+    fs.writeFileSync(path.join(repo, 'extra.txt'), 'added by the run\n');
+    git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'the run adds a file');
+    const apiPr = (over = {}) => ({ state: 'open', html_url: `${GITHUB}/pull/195`, head: { ref: 'feature', repo: { full_name: 'skyfly200/custom-ai-harness' } }, ...over });
+    const reply = (body, status = 200) => async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+    const out = await gh.updatePullBranch({ dir: repo, branch: 'harness/upd', pr, fetchImpl: reply(apiPr()) });
+    assert.deepEqual([out.branch, out.number], ['feature', 195]);
+    assert.equal(out.head, git(repo, 'rev-parse', 'harness/upd').trim());
+    assert.equal(git(bare, 'rev-parse', 'refs/heads/feature').trim(), out.head);
+
+    await assert.rejects(gh.updatePullBranch({ dir: repo, branch: 'harness/upd', pr, fetchImpl: reply(apiPr({ head: { ref: 'x', repo: { full_name: 'someone/fork' } } })) }), /comes from a fork/);
+    await assert.rejects(gh.updatePullBranch({ dir: repo, branch: 'harness/upd', pr, fetchImpl: reply(apiPr({ state: 'closed' })) }), /is closed/);
+    await assert.rejects(gh.updatePullBranch({ dir: repo, branch: 'harness/upd', pr, fetchImpl: reply({ message: 'Not Found' }, 404) }), /GitHub answered 404/);
+    await assert.rejects(gh.updatePullBranch({ dir: repo, branch: 'harness/upd', pr: { ...pr, name: 'other' }, fetchImpl: reply(apiPr()) }), /not in this run's repo/);
+
+    // the PR moves on, to a commit the run does not have: nothing is pushed
+    git(repo, 'checkout', '-q', '-B', 'tmp-pr', 'refs/remotes/pr/195');
+    fs.writeFileSync(path.join(repo, 'moved.txt'), 'someone else\n');
+    git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'someone pushed to the PR');
+    git(repo, 'push', '-q', '--force', bare, 'tmp-pr:refs/pull/195/head');
+    const before = git(bare, 'rev-parse', 'refs/heads/feature').trim();
+    await assert.rejects(gh.updatePullBranch({ dir: repo, branch: 'harness/upd', pr, fetchImpl: reply(apiPr()) }), /commits this run does not include/);
+    assert.equal(git(bare, 'rev-parse', 'refs/heads/feature').trim(), before);
+});
+
+test('the update-pr route refuses a run that was not asked to update a pull request', async () => {
+    script = [{ calls: [['finish', { summary: 'nothing to do' }]] }];
+    const { id } = manager.create({ goal: 'tidy the readme', repo });
+    await settle(id);
+    const res = await fetch(`${base}/runs/${id}/update-pr`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(res.status, 409);
+    assert.match((await res.json()).error, /not asked to update a pull request/);
 });

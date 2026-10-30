@@ -50,11 +50,16 @@ async function prepare({ sandbox, run, local, note = () => {} }) {
         await sandbox.git(['fetch', '--quiet', remote, `HEAD:${baseRef}`]).catch(() => {});
         const hasBase = await sandbox.git(['rev-parse', '--verify', '--quiet', baseRef]).then(() => true, () => false);
         const sha = (await sandbox.git(['rev-parse', ref])).trim();
-        let where = `The pull request's code is fetched as ${ref} (commit ${sha.slice(0, 10)}), but your branch is still the default branch. Start with \`git merge --ff-only ${ref}\` so you are on the pull request's code.`;
+        let where;
         if (local && sandbox.dir) {
             await sandbox.git(['reset', '--hard', '--quiet', sha]);
             sandbox.base = sha;
             run.base = sha;
+            where = `The pull request's head (commit ${sha.slice(0, 10)}) is already checked out on your branch, so the work you do is on top of it.`;
+        } else {
+            // a cloud sandbox's branch starts from the default branch; moving it onto the PR's head keeps the base
+            // the host knows, so the run's commits still travel back, and the pull request's history is included
+            await sandbox.git(['checkout', '-q', '-B', run.branch, sha]);
             where = `The pull request's head (commit ${sha.slice(0, 10)}) is already checked out on your branch, so the work you do is on top of it.`;
         }
         note(`Fetched ${label} (${sha.slice(0, 10)})${local ? ' and checked it out on the run branch' : ''}.`);

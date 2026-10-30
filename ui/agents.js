@@ -122,6 +122,21 @@ function eventHtml(e) {
   return '';
 }
 
+/** The run page's action buttons: which ones, decided by RunView.actionsFor from the run's state. */
+function actionButtons(run, { hosted, githubOn }) {
+  const acts = RunView.actionsFor(run, {
+    hosted, githubOn,
+    canContinue: canContinue(run),
+    canRetry: RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm',
+    canDebug: DEBUGGABLE.has(run.status) && !run.parent,
+  });
+  const carrying = ACTIVE.has(run.status) && (run.legs || run.carriesOn) ? '<span class="muted">Carrying on…</span> ' : '';
+  const button = (a) => (a.href
+    ? `<a class="btn${a.primary ? ' primary' : ''}" href="${a.href}" data-hint="${esc(a.hint)}">${esc(a.label)}</a>`
+    : `<button data-act="${a.act}"${a.primary ? ' class="primary"' : ''} data-hint="${esc(a.hint)}">${esc(a.label)}</button>`);
+  return carrying + acts.map(button).join('');
+}
+
 function renderDetail(run) {
   if (!run) { setHtml('detail', `<p class="muted">Pick a ${agentSel ? 'task' : 'run'} to see what the agent did.</p>`); return; }
   const active = ACTIVE.has(run.status);
@@ -147,9 +162,7 @@ function renderDetail(run) {
       ${r.commit ? `<p class="muted">${r.salvaged ? 'The run stopped early; its unfinished work was saved as a commit. ' : ''}Saved on ${hosted ? 'this server' : 'your repo'} as branch <code>${esc(run.branch)}</code>, so it is kept after the sandbox ends.</p>` : ''}
       ${run.pr ? `<p>Pull request: <a href="${esc(run.pr.url)}" target="_blank" rel="noopener">#${esc(run.pr.number)} into ${esc(run.pr.base)}</a></p>` : ''}
       ${r.commit && hosted ? `<p class="muted">${run.pushed ? `Pushed to GitHub: <a href="${esc(run.pushed.url)}" target="_blank" rel="noopener">${esc(run.branch)}</a> · <a href="${esc(run.pushed.compare)}" target="_blank" rel="noopener">open a pull request</a>` : 'The branch is only on this server so far. Push it to your GitHub repo to review it there.'}</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
-    <div class="actions">${active
-      ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
-      : `${hosted && r?.commit && !run.parent ? `${githubOn === false ? `<a class="btn primary" href="#settings" data-hint="Pushing and pull requests need your GitHub connection. Connect it in Agent settings">Connect GitHub to push</a>` : `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>`}` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${canContinue(run) ? `<button data-act="continue"${run.status === 'interrupted' ? ' class="primary"' : ''} data-hint="${run.status === 'interrupted' ? 'The run was cut off. This carries it on in the same branch from its last saved commit, told what was interrupted' : run.status === 'stopped' ? 'Carries the stopped run on in the same branch, from what it had committed, with a full set of steps and minutes again' : 'Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again'}">Continue</button>` : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}<span class="export-btns"><button data-act="export" data-hint="Downloads everything about this run as one JSON file: the prompt, settings, every step with the model's words, tool calls and results, tokens, cost, routing and the outcome. Secrets are blanked">Export run</button><button data-act="export-md" data-hint="The same as a readable Markdown transcript">Export as text</button><button data-act="export-copy" data-hint="Copies the readable transcript so you can paste it into a chat to ask what went wrong">Copy for debugging</button></span></div>`);
+    <div class="actions">${actionButtons(run, { hosted, githubOn })}<span class="export-btns"><button data-act="export" data-hint="Downloads everything about this run as one JSON file: the prompt, settings, every step with the model's words, tool calls and results, tokens, cost, routing and the outcome. Secrets are blanked">Export run</button><button data-act="export-md" data-hint="The same as a readable Markdown transcript">Export as text</button><button data-act="export-copy" data-hint="Copies the readable transcript so you can paste it into a chat to ask what went wrong">Copy for debugging</button></span></div>`);
   if (changed && r?.commit && diffOpen) loadDiff(run.id);
 }
 
@@ -492,6 +505,12 @@ $('detail').addEventListener('click', async (e) => {
       ui.toast(`Pull request #${pr.number} is open.`);
     }
     if (act === 'patch') await downloadPatch(selected);
+    if (act === 'update-pr') {
+      const n = runById(selected)?.prTarget?.number;
+      if (!await ui.confirm(`Move pull request #${n} onto this run's commit? Its branch moves forward; the pull request is never merged for you.`)) return;
+      const out = await post(`/${selected}/update-pr`);
+      ui.toast(`Pull request #${out.number} now has this work on ${out.branch}.`);
+    }
     if (act === 'export' || act === 'export-md') await downloadExport(selected, act === 'export-md');
     if (act === 'export-copy') {
       await navigator.clipboard.writeText(await fetchExport(selected, true));

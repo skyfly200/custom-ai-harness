@@ -57,6 +57,30 @@ async function ensureClone({ base, person, spec, token, git = run }) {
     return dir;
 }
 
+/** Make a repo on the person's GitHub account (private unless isPrivate is false). Resolves { owner, name, url }. */
+async function createRepo({ name, token, isPrivate = true, fetchImpl = fetch, apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com' }) {
+    if (!token) throw new Error('connect GitHub first: making a repo needs your GitHub connection');
+    if (!/^[\w.-]{1,100}$/.test(name) || name === '.' || name === '..') throw new Error('a repo name can use letters, digits, dots, dashes and underscores');
+    const made = await fetchImpl(`${apiUrl}/user/repos`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'harness-runner' },
+        body: JSON.stringify({ name, private: isPrivate, auto_init: false }),
+    });
+    const data = await made.json().catch(() => ({}));
+    if (made.status === 422) throw new Error(`GitHub already has a repo called ${name} on your account: pick it as an existing repo, or choose another name`);
+    if (!made.ok) throw new Error(`GitHub would not create ${name} (HTTP ${made.status}): the token needs permission to create repositories`);
+    return { owner: data.owner.login, name: data.name, url: data.html_url || `https://github.com/${data.owner.login}/${data.name}` };
+}
+
+/** Clone a GitHub repo into dir (an empty repo clones to an empty folder with a .git). */
+async function cloneRepo({ owner, name, dir, token, git = run }) {
+    await git(['clone', '--quiet', `https://github.com/${owner}/${name}.git`, dir], { token, timeoutMs: 600000 });
+}
+
+/** Push the default branch (main) of a new local repo to its origin, with the person's token. */
+async function pushDefault({ dir, token, git = run }) {
+    await git(['push', '--quiet', '-u', 'origin', 'main'], { cwd: dir, token, timeoutMs: 600000 });
+}
+
 /** Push a run's branch (harness/<id>) from the clone to GitHub. Resolves { branch, url }. */
 async function pushBranch({ dir, branch, token, git = run }) {
     if (!BRANCH.test(branch)) throw new Error('only harness/ branches are pushed');
@@ -155,4 +179,4 @@ async function updatePullBranch({ dir, branch, pr, token = '', git = run, fetchI
     return { number: pr.number, url: data.html_url || `https://github.com/${want}/pull/${pr.number}`, branch: head.ref, head: headSha };
 }
 
-module.exports = { parse, ensureClone, pushBranch, openPullRequest, landRemote, updatePullBranch, listClones, personDir, cloneDir, BRANCH };
+module.exports = { parse, ensureClone, createRepo, cloneRepo, pushDefault, pushBranch, openPullRequest, landRemote, updatePullBranch, listClones, personDir, cloneDir, BRANCH };

@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { RunManager } = require('./runs');
 const templates = require('./templates');
+const hosting = require('./hosting');
 const { listDrivers } = require('./sandbox');
 const ticketFiles = require('./ticketFiles');
 const github = require('./github');
@@ -160,9 +161,8 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     app.get('/apps', (req, res) => res.json({ apps: manager.listApps() }));
     // New apps from a template (templates/<id>/): the list, then the builder. Registered before /apps/:id.
     app.get('/apps/templates', (req, res) => res.json(templates.listTemplates()));
-    app.post('/apps/new', (req, res) => {
-        try { res.status(201).json(manager.newApp(req.body || {})); } catch (err) { fail(res, err); }
-    });
+    app.get('/apps/hosting', (req, res) => res.json(hosting.catalog()));
+    app.post('/apps/new', wrap(async (req, res) => res.status(201).json(await manager.newApp({ ...(req.body || {}), token: req.githubToken || '' }))));
     app.post('/apps', (req, res) => {
         try { res.status(201).json(manager.createApp(req.body)); } catch (err) { fail(res, err); }
     });

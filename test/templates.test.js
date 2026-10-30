@@ -65,11 +65,11 @@ test('scaffold writes the folder and refuses one that already has files', () => 
   assert.throws(() => templates.scaffold(t, { name: 'Out', audience: 'me' }, folder), /not empty/);
 });
 
-test('newApp builds a repo from a template and registers it as an app', () => {
+test('newApp builds a repo from a template and registers it as an app', async () => {
   const reposDir = path.join(dir, 'repos');
   fs.mkdirSync(reposDir, { recursive: true });
   const manager = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposDir] });
-  const { app, run } = manager.newApp({ template: 'web-app', name: 'Note Board', description: 'Keep notes', answers: { audience: 'the team' }, build: false });
+  const { app, run } = await manager.newApp({ template: 'web-app', name: 'Note Board', description: 'Keep notes', answers: { audience: 'the team' }, build: false });
   assert.equal(run, null);
   assert.equal(app.repo, path.join(reposDir, 'note-board'));
   assert.equal(app.name, 'Note Board');
@@ -81,12 +81,12 @@ test('newApp builds a repo from a template and registers it as an app', () => {
   assert.match(fs.readFileSync(path.join(app.repo, 'README.md'), 'utf8'), /Audience: the team/);
 });
 
-test('newApp refuses folders outside the allowed roots and unknown templates', () => {
+test('newApp refuses folders outside the allowed roots and unknown templates', async () => {
   const reposDir = path.join(dir, 'roots-check');
   fs.mkdirSync(reposDir, { recursive: true });
   const manager = new RunManager({ dir: path.join(dir, 'runs-2'), roots: [reposDir] });
-  assert.throws(() => manager.newApp({ template: 'web-app', name: 'Outside', answers: { audience: 'x' }, parent: os.tmpdir(), build: false }), /not inside an allowed folder/);
-  assert.throws(() => manager.newApp({ template: 'nope', name: 'X', build: false }), /no template called nope/);
+  await assert.rejects(manager.newApp({ template: 'web-app', name: 'Outside', answers: { audience: 'x' }, parent: os.tmpdir(), build: false }), /not inside an allowed folder/);
+  await assert.rejects(manager.newApp({ template: 'nope', name: 'X', build: false }), /no template called nope/);
   assert.equal(fs.existsSync(path.join(reposDir, 'outside')), false);
 });
 
@@ -94,7 +94,7 @@ test('the built web app passes its own test', async () => {
   const reposDir = path.join(dir, 'repos-run');
   fs.mkdirSync(reposDir, { recursive: true });
   const manager = new RunManager({ dir: path.join(dir, 'runs-3'), roots: [reposDir] });
-  const { app } = manager.newApp({ template: 'web-app', name: 'Check Me', answers: { audience: 'me' }, build: false });
+  const { app } = await manager.newApp({ template: 'web-app', name: 'Check Me', answers: { audience: 'me' }, build: false });
   const run = spawnSync(process.execPath, ['--test', 'test/server.test.js'], { cwd: app.repo, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });

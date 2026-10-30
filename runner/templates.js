@@ -104,10 +104,15 @@ function render(template, values) {
     return template.files.map((f) => ({ path: f.path, text: f.text.replace(PLACEHOLDER, (_, key) => all[key] ?? '') }));
 }
 
-/** Write the filled-in files into a new folder. The folder must not exist yet or must be empty. */
-function scaffold(template, values, folder) {
-    const files = render(template, values);
-    if (fs.existsSync(folder) && fs.readdirSync(folder).length) throw new Error(`${folder} is not empty`);
+/**
+ * Write the filled-in files into a folder, plus any `extra` files ({ path, text }) such as the CI workflow. The folder
+ * may hold only a .git folder (a cloned empty repo); any other file in it stops the write.
+ */
+function scaffold(template, values, folder, extra = []) {
+    const files = [...render(template, values), ...extra];
+    const taken = new Set(template.files.map((f) => f.path));
+    for (const f of extra) if (taken.has(f.path)) throw new Error(`${f.path} is already in the template`);
+    if (fs.existsSync(folder) && fs.readdirSync(folder).some((f) => f !== '.git')) throw new Error(`${folder} is not empty`);
     for (const f of files) {
         const target = path.join(folder, f.path);
         fs.mkdirSync(path.dirname(target), { recursive: true });

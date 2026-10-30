@@ -1135,15 +1135,27 @@ async function initAgentDialog() {
     if (link) setAgentRepos(projectRepoEntries(link));
   });
   const f = $('agentForm');
-  $('iconShuffle').addEventListener('click', () => setIconSeed(AgentIcon.randomSeed()));
-  $('iconReset').addEventListener('click', () => setIconSeed(''));
+  $('iconShuffle').addEventListener('click', () => { f.elements.iconImage.value = ''; f.elements.iconText.value = ''; setIconSeed(AgentIcon.randomSeed()); });
+  $('iconReset').addEventListener('click', () => { f.elements.iconImage.value = ''; f.elements.iconText.value = ''; setIconSeed(''); });
+  $('iconText').addEventListener('input', () => { if ($('iconText').value) f.elements.iconImage.value = ''; setIconSeed(f.elements.iconSeed.value); });
+  $('iconUpload').addEventListener('click', () => $('iconFile').click());
+  $('iconFile').addEventListener('change', async () => {
+    const file = $('iconFile').files[0];
+    $('iconFile').value = '';
+    if (!file) return;
+    try {
+      f.elements.iconImage.value = await shrinkImage(file);
+      f.elements.iconText.value = '';
+      setIconSeed(f.elements.iconSeed.value);
+    } catch (err) { $('agentMsg').textContent = err.message; }
+  });
   $('agentClose').addEventListener('click', () => $('agentDialog').close());
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(f));
     const link = chatProjects().find((p) => p.id === body.project);
     body.project = link ? { id: link.id, name: link.name } : (body.project && editingAgent?.project?.id === body.project ? editingAgent.project : null);
-    for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier', 'iconSeed']) if (body[k] === '') body[k] = null;
+    for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier', 'iconSeed', 'iconImage', 'iconText']) if (body[k] === '') body[k] = null;
     // The repo field is the default repo; the others are listed below it. With none of its own, the agent takes its project's.
     if (!body.repo.trim() && !agentExtras.length && link) {
       const inherited = Repos.toSpecs(projectRepoEntries(link));
@@ -1179,8 +1191,30 @@ async function initAgentDialog() {
 function setIconSeed(seed) {
   const f = $('agentForm');
   f.elements.iconSeed.value = seed;
-  $('iconPreview').innerHTML = AgentIcon.orb(seed || editingAgent?.id || '');
-  $('iconReset').hidden = !seed || !editingAgent;
+  const custom = { iconImage: f.elements.iconImage.value, iconText: f.elements.iconText.value };
+  $('iconPreview').innerHTML = AgentIcon.orb({ id: seed || editingAgent?.id || 'new', ...custom });
+  $('iconReset').hidden = !(seed || custom.iconImage || custom.iconText) || !editingAgent;
+}
+// a picked picture, cropped square and scaled to 128 px so it stays a few KB
+function shrinkImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const c = document.createElement('canvas');
+      c.width = c.height = 128;
+      const side = Math.min(img.width, img.height);
+      c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 128, 128);
+      for (const q of [0.85, 0.7, 0.5]) {
+        const out = c.toDataURL('image/jpeg', q);
+        if (out.length <= 24000) return resolve(out);
+      }
+      reject(new Error('that picture is too detailed to shrink; try another'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('that file is not a picture the browser can read')); };
+    img.src = url;
+  });
 }
 function openAgentDialog(agent) {
   editingAgent = agent;
@@ -1208,6 +1242,8 @@ function openAgentDialog(agent) {
   f.elements.autoContinue.checked = !!v.autoContinue;
   f.elements.autoContinueMax.value = v.autoContinueMax ?? '';
   f.elements.project.value = v.project?.id || '';
+  f.elements.iconImage.value = agent?.iconImage || '';
+  f.elements.iconText.value = agent?.iconText || '';
   setIconSeed(agent ? agent.iconSeed || '' : AgentIcon.randomSeed());
   drawAgentRepos();
   $('agentDialog').showModal();

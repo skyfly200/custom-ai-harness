@@ -56,12 +56,12 @@ button.danger { color: var(--bad); }
 .wf-explain ul { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; color: var(--text); }
 .wf-explain li { line-height: 1.45; }
 
-#newDialog { width: min(460px, 92vw); border: 1px solid var(--border); border-radius: 12px; padding: 18px; background: var(--panel); color: var(--text); }
-#newDialog::backdrop { background: rgba(10, 8, 20, .45); }
-#newDialog h2 { margin: 0 0 10px; font-size: 17px; }
-#newDialog form { display: flex; flex-direction: column; gap: 10px; }
-#newDialog label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
-#newDialog input[type="text"] { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--field-border); background: var(--bg); color: var(--text); font-weight: 400; }
+#newDialog, #stageDialog { width: min(460px, 92vw); border: 1px solid var(--border); border-radius: 12px; padding: 18px; background: var(--panel); color: var(--text); }
+#newDialog::backdrop, #stageDialog::backdrop { background: rgba(10, 8, 20, .45); }
+#newDialog h2, #stageDialog h2 { margin: 0 0 10px; font-size: 17px; }
+#newDialog form, #stageDialog form { display: flex; flex-direction: column; gap: 10px; }
+#newDialog label, #stageDialog label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+#newDialog input[type="text"], #stageDialog input[type="text"] { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--field-border); background: var(--bg); color: var(--text); font-weight: 400; }
 .wf-start { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 0; }
 .wf-start legend { font-size: 12.5px; font-weight: 600; color: var(--muted); padding: 0 4px; }
 .wf-start-opt { flex-direction: row !important; align-items: flex-start; gap: 8px !important; padding: 6px 0; font-weight: 400 !important; color: var(--text) !important; }
@@ -76,3 +76,4 @@ button.danger { color: var(--bad); }
   .wf-verdict { grid-template-columns: 1fr; }
   .track { padding-top: 116px; }
 }
+#stageDialog { max-height: calc(100vh - 32px); overflow: auto; }

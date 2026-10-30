@@ -336,6 +336,53 @@
     msg('New workflow: press Save to write it.');
   }
 
+  // Add stage: ready-made stages, plus the ones the person saved in this browser
+  const TPL_KEY = 'harness-stage-templates';
+  function savedTemplates() {
+    try {
+      const list = JSON.parse(localStorage.getItem(TPL_KEY) || '[]');
+      return Array.isArray(list) ? list.filter((t) => t && t.stage && t.label) : [];
+    } catch { return []; }
+  }
+  function storeTemplates(list) {
+    try { localStorage.setItem(TPL_KEY, JSON.stringify(list)); return true; } catch { return false; }
+  }
+  function openStageDialog() {
+    readForm();
+    const all = [...M.STAGE_TEMPLATES, ...savedTemplates()];
+    $('stageChoices').innerHTML = all.map((t, i) => `<label class="wf-start-opt"><input type="radio" name="tpl" value="${esc(t.key)}"${i === 0 ? ' checked' : ''}>
+      <span><b>${esc(t.label)}</b><small>${esc(t.text)}</small></span></label>`).join('');
+    $('stageAt').innerHTML = ['<option value="0">At the start of the run</option>',
+      ...wf.stages.map((t, i) => `<option value="${i + 1}">After ${esc(t.role)}</option>`)].join('');
+    $('stageAt').value = String(sel + 1);
+    $('stageDialog').showModal();
+  }
+  $('stAdd').addEventListener('click', openStageDialog);
+  $('stageCancel').addEventListener('click', () => $('stageDialog').close());
+  $('stageForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const key = document.querySelector('input[name="tpl"]:checked')?.value;
+    const template = [...M.STAGE_TEMPLATES, ...savedTemplates()].find((t) => t.key === key);
+    $('stageDialog').close();
+    if (!template) return;
+    const at = Number($('stageAt').value) || 0;
+    mutate(() => {
+      wf.stages = M.insertStage(wf.stages, at, M.fromTemplate(template, wf.stages, at));
+      sel = at;
+    });
+    msg(`Added ${template.label}. Its settings can be changed in the editor.`, 'ok');
+  });
+  $('stSaveTpl').addEventListener('click', async () => {
+    readForm();
+    const s = wf.stages[sel];
+    const label = await window.ui.prompt('Name for this stage template', { value: s.role, ok: 'Save' });
+    if (label === null) return;
+    const list = savedTemplates();
+    list.push(M.toTemplate(s, label.trim() || s.role));
+    if (!storeTemplates(list)) { window.ui.toast('Could not save the template in this browser', { kind: 'error' }); return; }
+    window.ui.toast('Saved as a template. It is in the Add stage list in this browser.');
+  });
+
   // Gateway models for the Model box
   fetch('api/gateway', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((g) => {
     models = [...new Set((g?.deployments || []).map((d) => d.name))];

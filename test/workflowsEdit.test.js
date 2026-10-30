@@ -117,3 +117,48 @@ test('the checks name what must be fixed before a save', () => {
   assert.match(text, /B: pick this stage or an earlier one/);
   assert.match(text, /C: only a stage that says PASS or FAIL can send work back/);
 });
+
+test('every ready-made stage is a valid stage, and inserting one wires its FAIL to the stage that does the work', () => {
+  const stages = [M.stage({ id: 'plan', role: 'Planner', tools: 'read', prompt: 'Plan it.' })];
+  const names = M.STAGE_TEMPLATES.map((t) => t.label);
+  assert.equal(new Set(names).size, names.length, 'labels are unique');
+  for (const t of M.STAGE_TEMPLATES) {
+    const s = M.fromTemplate(t, stages, stages.length);
+    assert.match(s.id, M.ID_RE, t.key);
+    assert.ok(s.prompt.trim(), t.key);
+    assert.deepEqual(M.problems({ id: 'x', name: 'x', stages: [...stages, s] }).filter((p) => !p.includes('model')), [], t.key);
+  }
+  const build = M.stage({ id: 'build', role: 'Programmer', tools: 'all', prompt: 'Build.' });
+  const withBuild = [...stages, build];
+  const tester = M.fromTemplate(M.STAGE_TEMPLATES.find((t) => t.key === 'tester'), withBuild, withBuild.length);
+  assert.equal(tester.retryTo, 'build', 'FAIL goes to the nearest earlier stage that does the work');
+  assert.equal(tester.maxRetries, 2);
+  const writer = M.fromTemplate(M.STAGE_TEMPLATES.find((t) => t.key === 'writer'), withBuild, 0);
+  assert.equal(writer.canWait, true);
+  assert.equal(writer.tools, 'none');
+  assert.ok(writer.model);
+});
+
+test('a template gets an id nobody else uses, and a checking stage inserted first has nothing to send FAIL to', () => {
+  const existing = [M.stage({ id: 'tester', role: 'Tester', tools: 'check', prompt: 'Test.' })];
+  const again = M.fromTemplate(M.STAGE_TEMPLATES.find((t) => t.key === 'tester'), existing, 0);
+  assert.equal(again.id, 'tester-2');
+  assert.equal(again.retryTo, null, 'nothing before position 0');
+  const list = M.insertStage(existing, 0, again);
+  assert.equal(list[0].id, 'tester-2');
+  assert.equal(list.length, 2);
+  assert.equal(existing.length, 1, 'insertStage returns a new list');
+});
+
+test('a saved stage becomes a template without its place in a run, and its prompt is shortened for the menu', () => {
+  const s = M.stage({ id: 'check', role: 'Checker', tools: 'check', verdict: true, retryTo: 'build', maxRetries: 2, prompt: 'x '.repeat(200) });
+  const t = M.toTemplate(s, 'My checker');
+  assert.equal(t.label, 'My checker');
+  assert.equal(t.stage.retryTo, undefined);
+  assert.equal(t.stage.verdict, true);
+  assert.ok(t.text.length <= 140);
+  assert.match(t.key, /^u:/);
+  const back = M.fromTemplate(t, [M.stage({ id: 'build', role: 'B', tools: 'all', prompt: 'b' })], 1);
+  assert.equal(back.retryTo, 'build');
+  assert.equal(back.maxRetries, 2);
+});

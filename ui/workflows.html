@@ -34,6 +34,7 @@
       <ol>
         <li><b>Pick a workflow</b> from the list, or press <b>New workflow</b> and start from a blank one or the ChatDev dev team (a CEO plans, a Programmer writes, a Reviewer and a Tester check the work).</li>
         <li><b>Click a box</b> to edit that stage below: what it is called, what it is told to do, which tools it may use and which model it runs on. <b>Earlier</b> and <b>Later</b> move it along the line.</li>
+        <li><b>Add stage</b> puts a ready-made stage in the line: a Planner, a Programmer, a Tester that sends FAIL back to the stage that does the work, a batch Writer and more. Its settings can be changed afterward. <b>Save as template</b> keeps a stage you built for the next workflow, in this browser.</li>
         <li><b>A stage that checks</b> ticks <i>Says PASS or FAIL</i>. Its summary must begin with one of those words. On FAIL the run goes back to the stage you pick under <i>Send FAIL back to</i>, with what was wrong, and this can happen only so many times before the run stops for a person.</li>
         <li><b>Describe the workflow</b> in <i>When Jev picks it</i>. Jev reads that sentence to decide whether a new goal fits, so write it the way you would describe the task to a colleague.</li>
         <li><b>Save</b> writes the file to the server. The next run uses it; nothing needs restarting. Problems are listed above the editor and stop the save until they are fixed.</li>
@@ -85,10 +86,12 @@
     <div class="wf-edit-head">
       <h2 id="editTitle">Stage</h2>
       <div class="wf-move">
+        <button id="stAdd" data-hint="Add a ready-made stage, such as a Planner, Programmer or Tester, at a place you choose">Add stage</button>
         <button id="stEarlier" data-hint="Move this stage one place earlier in the run">Earlier</button>
         <button id="stLater" data-hint="Move this stage one place later in the run">Later</button>
         <button id="stCopy" data-hint="Add a copy of this stage after it">Duplicate</button>
         <button id="stDelete" class="danger" data-hint="Remove this stage from the workflow">Remove stage</button>
+        <button id="stSaveTpl" data-hint="Keep this stage's settings as a template in this browser, to add to other workflows">Save as template</button>
       </div>
     </div>
 
@@ -156,6 +159,22 @@
     <div class="wf-dialog-actions">
       <button type="button" id="newCancel">Cancel</button>
       <button type="submit" class="primary">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="stageDialog" class="card">
+  <form id="stageForm" autocomplete="off">
+    <h2>Add a stage</h2>
+    <fieldset class="wf-start">
+      <legend>Stage</legend>
+      <div id="stageChoices"></div>
+    </fieldset>
+    <label>Put it
+      <select id="stageAt"></select></label>
+    <div class="wf-dialog-actions">
+      <button type="button" id="stageCancel">Cancel</button>
+      <button type="submit" class="primary">Add stage</button>
     </div>
   </form>
 </dialog>

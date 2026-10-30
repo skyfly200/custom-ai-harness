@@ -58,6 +58,60 @@
     },
   };
 
+  /** Ready-made stages for the Add stage menu. A stage made from one gets a fresh id, and the rest of its settings can be changed afterward. */
+  const STAGE_TEMPLATES = [
+    { key: 'explorer', label: 'Explorer', text: 'Looks through the files and code the task touches, and reports what is there. Reads only.',
+      stage: { id: 'explorer', role: 'Explorer', tools: 'read', prompt: 'Find the code and files this task touches, and the conventions around them. Change nothing and run nothing. Call finish with what is there, the files that matter and anything the next stage must know.' } },
+    { key: 'planner', label: 'Planner', text: 'Turns the task into a numbered plan: the files to change, what changes in each and how to test it. Reads only.',
+      stage: { id: 'planner', role: 'Planner', tools: 'read', effort: 'high', prompt: 'Plan the change. Read the code it touches and the conventions around it. Do not change any file. Call finish with a numbered plan: the files to change, what changes in each, how to test it, and anything ambiguous with the choice you made.' } },
+    { key: 'architect', label: 'CEO / Architect', text: 'Decides the shape of the change before code is written: the parts, the interfaces and what must not change. Reads only.',
+      stage: { id: 'architect', role: 'Architect', tools: 'read', effort: 'high', prompt: 'Turn the goal into a short spec: what the change must do, what it must not change, the parts it touches and the risks. Do not write code. Call finish with the spec and the reasons for it.' } },
+    { key: 'programmer', label: 'Programmer', text: 'Makes the change the plan or spec asks for, runs the tests and fixes what fails. Has every tool.',
+      stage: { id: 'programmer', role: 'Programmer', tools: 'all', prompt: 'Make the change the plan or spec asks for, in the style of the code around it. Run the tests and fix what fails. If a checking stage sent back problems, fix exactly those. Call finish with what you changed.' } },
+    { key: 'reviewer', label: 'Reviewer', text: 'Reads the diff against the task and says PASS or FAIL. FAIL sends the work back to the stage that made it.',
+      stage: { id: 'reviewer', role: 'Reviewer', tools: 'check', verdict: true, maxRetries: 2, diff: true, prompt: 'Review the diff against the task: wrong behaviour, missing error handling, code that does not fit the code around it. Start your finish summary with PASS if it is right, or FAIL followed by a numbered list of the real problems, each with its file.' } },
+    { key: 'tester', label: 'Tester', text: 'Runs the tests and tries the change as a user would. Says PASS or FAIL. FAIL sends the work back to the stage that made it.',
+      stage: { id: 'tester', role: 'Tester', tools: 'check', verdict: true, maxRetries: 2, prompt: 'Run the project’s tests, and try what the task asks for as a user would. Start your finish summary with PASS if it works, or FAIL followed by exactly what failed.' } },
+    { key: 'security', label: 'Security check', text: 'Reads the diff for security problems such as unchecked input, secrets in code or unsafe paths. Says PASS or FAIL.',
+      stage: { id: 'security', role: 'Security check', tools: 'check', effort: 'high', verdict: true, maxRetries: 1, diff: true, prompt: 'Review the diff for security problems: input that is not checked, secrets in code, unsafe commands or file paths, and weakened access checks. Start your finish summary with PASS if there is nothing real, or FAIL followed by a numbered list of the problems, each with its file.' } },
+    { key: 'writer', label: 'Writer', text: 'Writes words from the text it is given, such as a summary or a message. No tools, and sent as a half-price batch.',
+      stage: { id: 'writer', role: 'Writer', tools: 'none', canWait: true, model: 'anthropic/claude-sonnet-5.5', prompt: 'Write the text the task asks for from the material you are given. Call finish with the text, and say plainly anything you could not tell from the material.' } },
+    { key: 'docs', label: 'Docs writer', text: 'Updates the README, docs and help text that the change affects, in the existing wording.',
+      stage: { id: 'docs', role: 'Docs writer', tools: 'all', prompt: 'Update the README, docs and help text that the change affects. Match the wording already there. Do not change code. Call finish with the files you changed.' } },
+    { key: 'summarizer', label: 'Summarizer', text: 'Reads what the earlier stages handed on and writes a short summary for the person: what changed, what was tested and what is left. No tools.',
+      stage: { id: 'summarizer', role: 'Summarizer', tools: 'none', prompt: 'Summarize what the earlier stages did as a short list for the person: what changed, what was tested and what is left. Call finish with the summary.' } },
+  ];
+
+  /** The stage a checking stage inserted at position `at` sends FAIL to: the nearest earlier stage that does the work, else the one just before it. */
+  function retryTarget(stages, at) {
+    const before = stages.slice(0, at);
+    const worker = before.slice().reverse().find((t) => t.tools === 'all');
+    return (worker || before[before.length - 1] || {}).id || null;
+  }
+
+  /** A new stage from a template (built-in or saved), with an id unused in the list and FAIL wired up if it checks. */
+  function fromTemplate(template, stages, at) {
+    const over = template.stage;
+    const s = stage({ ...over, retryTo: null, maxRetries: over.verdict ? over.maxRetries || 1 : 0 });
+    s.id = uniqueId(stages, over.id);
+    if (s.verdict) s.retryTo = retryTarget(stages, at);
+    return s;
+  }
+
+  /** The stage list with stage s put at position `at`. Returns a new list. */
+  function insertStage(stages, at, s) {
+    const next = stages.slice();
+    next.splice(at, 0, s);
+    return next;
+  }
+
+  /** A saved template from a stage: its settings without its place in a run. */
+  function toTemplate(s, label) {
+    const { retryTo, ...rest } = s;
+    const text = String(s.prompt || '').replace(/\s+/g, ' ').trim();
+    return { key: `u:${Date.now().toString(36)}`, label, text: text.length > 140 ? `${text.slice(0, 137)}...` : text, stage: { ...rest, maxSteps: rest.maxSteps || 0, model: rest.model || null, effort: rest.effort || null } };
+  }
+
   /** Plain-English lines about one stage, in its place in the list. */
   function explain(stages, i) {
     const s = stages[i];
@@ -122,7 +176,7 @@
     return out;
   }
 
-  const api = { TOOLS, EFFORTS, TEMPLATES, stage, uniqueId, slug, explain, retryChoices, moveStage, renameStage, problems, ID_RE };
+  const api = { TOOLS, EFFORTS, TEMPLATES, STAGE_TEMPLATES, retryTarget, fromTemplate, insertStage, toTemplate, stage, uniqueId, slug, explain, retryChoices, moveStage, renameStage, problems, ID_RE };
   if (typeof module === 'object' && module.exports) module.exports = api;
   root.WorkflowsModel = api;
 })(typeof window !== 'undefined' ? window : globalThis);

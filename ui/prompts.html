@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bright Chat · Prompts</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
+<link rel="stylesheet" href="prompts.css">
+</head>
+<body>
+<main class="prompts-page">
+  <header>
+    <nav data-site-nav></nav>
+    <div class="bar"><button id="new" class="primary" type="button">New prompt</button></div>
+  </header>
+  <script src="nav.js"></script>
+
+  <p class="muted lead">Prompts are the instructions you give an agent. Write one once, save it, and reuse it from the Agents page. Put <code>{{name}}</code> in the text where something changes each time (like <code>{{repo}}</code>); you fill those in when you use it.</p>
+
+  <div class="split">
+    <aside class="card lib" aria-label="Your prompts">
+      <input id="search" type="search" placeholder="Search names, tags, text" autocomplete="off">
+      <div id="tags" class="tagbar"></div>
+      <div id="list" class="plist"></div>
+      <h3 class="sub">Starters</h3>
+      <div id="starters" class="plist"></div>
+    </aside>
+
+    <form id="editor" class="card editor" autocomplete="off">
+      <div class="row2">
+        <label class="field"><span>Name</span><input name="name" maxlength="80" placeholder="Fix a bug with a test first"></label>
+        <label class="field"><span>Tags</span><input name="tags" placeholder="fix, tests (comma separated)"></label>
+      </div>
+      <div class="row2">
+        <label class="field"><span>Suits agent (optional)</span><input name="agent" list="agentNames" placeholder="any"></label>
+        <label class="field"><span>Suits workflow (optional)</span><input name="workflow" list="workflowNames" placeholder="any"></label>
+      </div>
+      <datalist id="agentNames"></datalist><datalist id="workflowNames"></datalist>
+      <label class="field"><span>Prompt</span><textarea name="text" rows="14" spellcheck="true" placeholder="Say what you want done, and how you will know it is done."></textarea></label>
+      <div class="meter muted" id="meter" role="status"></div>
+      <div id="vars" class="vars"></div>
+
+      <div class="actions">
+        <button type="button" id="improve" title="A model rewrites the prompt to be clearer, with checks for when it is done">Improve with a model</button>
+        <input id="improveNotes" class="notes" placeholder="What should be better? (optional)">
+      </div>
+      <div id="suggest" class="suggest" hidden>
+        <div class="muted">Suggested rewrite</div>
+        <textarea id="suggestText" rows="10" readonly></textarea>
+        <div class="actions"><button type="button" id="accept" class="primary">Use this</button><button type="button" id="discard" class="quiet">Discard</button></div>
+      </div>
+
+      <div class="actions end">
+        <label class="note"><input name="note" placeholder="What changed? (optional)"></label>
+        <button type="submit" class="primary" id="save">Save</button>
+        <button type="button" id="saveCopy" class="quiet">Save as new</button>
+        <button type="button" id="copy" class="quiet">Copy filled in</button>
+        <button type="button" id="delete" class="quiet danger">Delete</button>
+      </div>
+      <details id="historyBox" class="history" hidden><summary>History</summary><div id="history"></div></details>
+    </form>
+  </div>
+</main>
+<script src="dialogs.js"></script>
+<script src="hints.js"></script>
+<script src="bright.js"></script>
+<script src="promptlib.js"></script>
+<script src="prompts.js"></script>
+</body>
+</html>

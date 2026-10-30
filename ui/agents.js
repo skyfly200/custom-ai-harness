@@ -516,7 +516,11 @@ $('detail').addEventListener('click', async (e) => {
 const runById = (id) => runs.find((r) => r.id === id);
 async function fetchExport(id, md) {
   const res = await fetch(`api/runs/${id}/export${md ? '?format=md' : ''}`);
-  if (!res.ok) throw new Error(`could not export the run (HTTP ${res.status})`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    // a runner started before the export existed answers 404 with no JSON error
+    throw new Error(body?.error || (res.status === 404 ? 'the task runner does not know the export yet: restart it (npm run all) and try again' : `could not export the run (HTTP ${res.status})`));
+  }
   return res.text();
 }
 async function downloadExport(id, md) {

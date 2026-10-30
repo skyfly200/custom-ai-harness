@@ -119,6 +119,10 @@
     <label class="field wide oneoff" id="ticketsField" hidden><span data-hint="Optional. Paste the JSON that /wayfinder returned. The swarm then skips its planner and works the build tickets instead, a wave at a time: a ticket starts once the tickets it depends on are merged">Ticket draft (JSON from /wayfinder)</span>
       <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea>
       <span class="fine muted"><button type="button" id="fileTickets" data-hint="Write this draft into the repo above as markdown files (wayfinder/<map>/map.md and one file per ticket) you can read, edit and commit. Shows what it will write and asks first">Save as markdown files…</button> <button type="button" id="loadTickets" data-hint="Read a folder of wayfinder markdown files in the repo above back into this box">Load from a folder…</button> <span id="ticketsMsg" role="status"></span></span></label>
+    <div class="row oneoff landing-row">
+      <label class="field landing-field"><span data-hint="When it is done. Its own branch leaves the change for you to review. Merge puts it into the branch the run started from when it passes. Straight onto puts it there with no review, so use it only for work you trust">When it is done</span><select name="landing" class="landing-select"><option value="branch">Its own branch, for review</option><option value="merge">Merge it into the branch it starts from</option><option value="main">Straight onto that branch, no review</option></select></label>
+    </div>
+    <p class="fine muted landing-note oneoff" id="landingNote" role="status"></p>
     <div class="toggles">
       <label class="check" data-hint="Plan mode: the agent reads the code and writes down what it would change, in order, without touching a file. Nothing is committed and no branch is made; you read the plan and decide">
         <input type="checkbox" name="plan" value="1"><span>Plan only</span></label>
@@ -172,6 +176,7 @@
         <label class="field"><span data-hint="Send every call to this one model instead of a routing. Blank uses the routing">One model directly</span><input type="text" name="model" list="runModels" maxlength="120" placeholder="use the routing" spellcheck="false" autocomplete="off"></label>
         <label class="field"><span>Effort</span><select name="effort"><option value="">Auto</option><option>min</option><option>low</option><option>medium</option><option>high</option><option>max</option></select></label>
         <label class="field"><span data-hint="Where the agent's commands run. This machine is a git worktree; E2B and Sprites are throwaway cloud machines (their key goes in .env)">Sandbox</span><select name="sandbox" class="sandbox-select"><option value="">Default</option></select></label>
+        <label class="field landing-field"><span data-hint="When it is done. Its own branch leaves the change for you to review. Merge puts it into the branch the run started from when it passes. Straight onto puts it there with no review, so use it only for work you trust">When it is done</span><select name="landing" class="landing-select"><option value="branch">Its own branch, for review</option><option value="merge">Merge it into the branch it starts from</option><option value="main">Straight onto that branch, no review</option></select></label>
       </div>
       <div class="row">
         <label class="field"><span data-hint="Most model calls a task may use. Blank or 0: no limit besides the minutes">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>

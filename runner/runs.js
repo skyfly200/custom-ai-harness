@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const { createSandbox, attachSandbox, destroySandboxById, driverFor, normalizeKind, isCloud, LocalSandbox } = require('./sandbox');
 const { makeTools } = require('./tools');
 const { runAgent, systemFor } = require('./agent');
@@ -22,6 +22,8 @@ const { AppStore, editableMatcher } = require('./apps');
 const prBrief = require('./prBrief');
 const runExport = require('./runExport');
 const { Shipper, verdict: shipVerdict } = require('./ship');
+const landings = require('./landing');
+const gitHub = require('./github');
 
 const MAX_EVENTS = 2000;
 const EVENT_TEXT = 3000;
@@ -166,6 +168,14 @@ function followUpNote(run, message) {
 /** Only a plain run can be carried on after a cut: a swarm, its workers and a ChatDev run start over instead. */
 const canInterrupt = (run) => !run.parent && (run.kind || 'run') === 'run';
 
+/** The branch a repo has checked out, or null when HEAD is detached. */
+function currentBranch(repo) {
+    try {
+        const b = execFileSync('git', ['-C', repo, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
+        return b && b !== 'HEAD' ? b : null;
+    } catch { return null; }
+}
+
 class RunManager {
     /**
      * dir: where runs are kept. roots: folders repos may be in.
@@ -182,6 +192,8 @@ class RunManager {
         // hosted: several people share this runner. Runs, agents and repos belong to an owner, every call to the
         // Interceptor says whose run it is (utils/runnerAuth.js), and only cloud sandboxes are allowed.
         this.hosted = Boolean(hosted);
+        // a hosted run's GitHub token, kept only in memory for the landing (never saved with the run)
+        this.landTokens = new Map();
         this.token = token;
         this.limits = { perUser: 2, monthlyMinutes: 0, maxMinutes: 30, defaultCost: 2, ...limits };
         this.maxRuns = maxRuns;
@@ -368,6 +380,15 @@ class RunManager {
         // a swarm's workers belong to the swarm, which has already been counted
         const hosted = this.hosted ? (cfg.parent ? { maxMinutes: cfg.maxMinutes, maxCost: cfg.maxCost } : this.hostedLimits(cfg, owner)) : null;
         if (hosted) cfg = { ...cfg, ...hosted };
+        // where the change goes when it is done: left on its own branch, or landed on the branch it starts from
+        const landing = landings.cleanLanding(cfg.landing);
+        let landOn = null;
+        if (landing !== 'branch') {
+            if (isFlag(cfg.plan) || cfg.plan === 'plan') throw new Error('a plan changes nothing, so there is nothing to land: leave it on its own branch');
+            if (this.hosted && !cfg.landToken) throw new Error('connect GitHub to land a change: landing needs your GitHub connection');
+            landOn = currentBranch(repo);
+            if (!landOn) throw new Error('check out a branch in the repo first: the change lands on the branch it starts from');
+        }
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
             id, owner, goal, repo, moreRepos: cleanMoreRepos(cfg.moreRepos, repo), prTarget: isSwarm || isChatDev ? null : (prBrief.findPulls(goal)[0] || null), agent: cfg.agent ? String(cfg.agent) : null, app: cfg.app ? String(cfg.app) : null, proposal: cfg.proposal && typeof cfg.proposal === 'object' ? { kind: String(cfg.proposal.kind || 'feedback').slice(0, 20), fingerprint: String(cfg.proposal.fingerprint || '').slice(0, 64), pr: null } : null, editable: Array.isArray(cfg.editable) ? cfg.editable.map(String).slice(0, 50) : null, source: cfg.source || null, auditParts: isSwarm && (cfg.auditParts === true || cfg.auditParts === 1 || cfg.auditParts === '1' || cfg.auditParts === 'true'), kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
@@ -389,6 +410,7 @@ class RunManager {
             // auto-continue: pick the run up again by itself when the runner or its sandbox cuts it off (never after a Stop),
             // at most autoMax times; autoCostFrom is what it had spent when the first automatic resume began
             autoContinue: isFlag(cfg.autoContinue), autoMax: num(cfg.autoContinueMax, 1, MAX_AUTO_ATTEMPTS, DEFAULT_AUTO_ATTEMPTS), autoAttempts: 0, autoCostFrom: null, resumedAuto: null, interrupted: null, checkpoint: null,
+            landing, landOn, landed: null,
             sandbox, sandboxId: null,
             // ChatDev runs: the most the sandbox's model key may spend, in dollars
             maxUsd: isChatDev ? Math.min(1000, Math.max(0.01, Number(cfg.maxUsd) || Number(process.env.CHATDEV_MAX_USD) || 2)) : null,
@@ -402,6 +424,7 @@ class RunManager {
             steps: 0, tokens: { in: 0, out: 0 }, cost: 0, unpricedCalls: 0, pending: null, events: [], result: null, error: null,
         };
         this.runs.set(id, run);
+        if (landing !== 'branch' && this.hosted) this.landTokens.set(id, String(cfg.landToken));
         this.save(run);
         this.queue.push(id);
         this.pump();
@@ -657,6 +680,9 @@ class RunManager {
             if (run.proposal && run.status === 'done') this.openProposal(run);
             // a leg of a continued run hands its record back to the run itself
             if (run.carriesOn) this.foldLeg(run);
+            // the change lands once its run is done (a part carried on lands on the run's record)
+            const record = run.carriesOn ? this.runs.get(run.carriesOn) : run;
+            if (record && !record.parent && record.status === 'done' && record.landing && record.landing !== 'branch') await this.land(record);
             // a cloud sandbox is billed by the minute, so it goes as soon as the run does; a local
             // worktree stays, so the run page keeps working and its branch can still be inspected
             if (isCloud(live.sandbox?.kind)) live.sandbox.destroy().catch(() => {});
@@ -667,6 +693,31 @@ class RunManager {
             // a sandbox that ended under it is picked up again at once (a restart is picked up when the runner is back: resumeInterrupted)
             if (run.status === 'interrupted' && run.interrupted?.reason === 'sandbox') this.scheduleAutoContinue(this.runs.get(run.carriesOn || run.id), this.autoResumeMs);
         }
+    }
+
+    /** Land a finished run's change as it asked: merged into the branch it started from, or put straight onto it. Never throws; the outcome is kept on the run and noted. */
+    async land(run) {
+        const stamp = new Date().toISOString();
+        const block = landings.landingBlock(run);
+        if (block) {
+            run.landed = { ok: false, mode: run.landing, reason: block, at: stamp };
+            this.event(run, { type: 'note', text: `Not landed on ${run.landOn}: ${block}. The change is still on ${run.branch}.` });
+            return this.save(run);
+        }
+        const message = `Merge ${run.branch}: ${run.goal.split('\n')[0].slice(0, 60)}`;
+        try {
+            const out = this.hosted
+                ? await gitHub.landRemote({ dir: run.repo, branch: run.branch, into: run.landOn, mode: run.landing, title: message, token: this.landTokens.get(run.id) })
+                : { sha: await landings.landLocal({ repo: run.repo, branch: run.branch, into: run.landOn, mode: run.landing, message }) };
+            run.landed = { ok: true, mode: run.landing, into: run.landOn, sha: out.sha, url: out.url || null, pr: out.pr || null, at: stamp };
+            this.event(run, { type: 'note', text: `${run.landing === 'main' ? 'Put straight onto' : 'Merged into'} ${run.landOn} (${out.sha.slice(0, 10)}).${out.url ? ` ${out.url}` : ''}` });
+        } catch (err) {
+            run.landed = { ok: false, mode: run.landing, reason: err.message, at: stamp };
+            this.event(run, { type: 'note', text: `Could not land on ${run.landOn}: ${err.message}. The change is still on ${run.branch}.` });
+        } finally {
+            this.landTokens.delete(run.id);
+        }
+        this.save(run);
     }
 
     /** The run is cut off, not failed: it can be continued from its branch. */
@@ -958,7 +1009,7 @@ class RunManager {
             owner: agent.owner, goal: cfg?.goal, repo: agent.repo, moreRepos: agent.moreRepos, workflow: agent.workflow, ...taskRouting(cfg, agent), escalate: agent.escalate, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
             autoContinue: cfg?.autoContinue ?? agent.autoContinue ?? undefined, autoContinueMax: cfg?.autoContinueMax ?? agent.autoContinueMax ?? undefined,
-            plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
+            plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null, landing: agent.landing || undefined,
         });
     }
 

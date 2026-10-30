@@ -143,7 +143,7 @@ function renderDetail(run) {
   const r = run.result;
   const diffOpen = openDetails.has('diff');
   const changed = setHtml('detail', `
-    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.strongModel ? `<span>Strong model ${esc(run.strongModel)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
+    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.landing && run.landing !== 'branch' && run.landOn ? `<span title="${run.landing === 'main' ? 'The commit goes straight onto this branch when it passes' : 'Merged into this branch when it passes'}">${run.landing === 'main' ? 'Straight onto' : 'Merge into'} <code>${esc(run.landOn)}</code></span>` : ''}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.strongModel ? `<span>Strong model ${esc(run.strongModel)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
@@ -156,7 +156,7 @@ function renderDetail(run) {
     }).join('')}</div></div>` : ''}
     ${run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
     ${run.error ? `<div class="result"><span class="tag bad">error</span> ${esc(run.error)}</div>` : ''}
-    ${r ? `<div class="result">${run.plan ? '<p class="muted">Plan only: nothing was changed, so there is no branch to review.</p>' : ''}<p class="summary">${esc(r.summary)}</p>
+    ${r ? `<div class="result">${run.plan ? '<p class="muted">Plan only: nothing was changed, so there is no branch to review.</p>' : ''}<p class="summary">${esc(r.summary)}</p>${run.landed ? `<p class="muted">${run.landed.ok ? `${run.landed.mode === 'main' ? 'Put straight onto' : 'Merged into'} <code>${esc(run.landed.into)}</code> (${esc(String(run.landed.sha || '').slice(0, 10))})${run.landed.url ? ` · <a href="${esc(run.landed.url)}" target="_blank" rel="noopener">view on GitHub</a>` : ''}.` : `Not landed: ${esc(run.landed.reason)}. The change is still on <code>${esc(run.branch)}</code>.`}</p>` : ''}
       ${run.plan ? '' : r.diffStat ? `<pre>${esc(r.diffStat)}</pre>` : '<p class="muted">No files changed.</p>'}
       ${r.tests ? `<p>${r.tests.passed ? '<span class="tag ok">tests pass</span>' : `<span class="tag bad">tests fail${r.tests.timedOut ? ' (timed out)' : ''}</span>`} <code>${esc(r.tests.command)}</code></p><details data-k="tests"${openDetails.has('tests') ? ' open' : ''}><summary>Test output</summary><pre>${esc(r.tests.output)}</pre></details>` : ''}
       ${r.commit ? `<p class="muted">${r.salvaged ? 'The run stopped early; its unfinished work was saved as a commit. ' : ''}Saved on ${hosted ? 'this server' : 'your repo'} as branch <code>${esc(run.branch)}</code>, so it is kept after the sandbox ends.</p>` : ''}
@@ -623,6 +623,18 @@ $('loadTickets').addEventListener('click', async () => {
   } catch (err) { msg.textContent = err.message; }
 });
 
+// Where a finished run's change goes; the note under the run form says it in plain words
+const LANDING_NOTE = {
+  branch: 'Nothing is merged. You look at the branch, then merge or push it yourself.',
+  merge: 'When the run finishes and its tests pass, its change is merged into the branch it started from. Nothing is pushed from your own checkout.',
+  main: 'No review: when the run finishes and its tests pass, its commit goes straight onto that branch. Only for work you trust.',
+};
+for (const sel of document.querySelectorAll('.landing-select')) {
+  const show = () => { if (sel.closest('#newRun')) $('landingNote').textContent = LANDING_NOTE[sel.value] || ''; };
+  sel.addEventListener('change', show);
+  show();
+}
+
 $('newRun').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
@@ -635,6 +647,7 @@ $('newRun').addEventListener('submit', async (e) => {
   if (body.model) { delete body.profile; delete body.strongModel; } // one model directly replaces the routing
   body.escalate = f.elements.escalate?.checked ? '1' : '0';
   body.autoContinue = f.elements.autoContinue?.checked ? '1' : '0';
+  if (!agentSel && body.landing === 'main' && !await ui.confirm(`Work straight on the branch checked out in ${body.repo}, with no review? When this run finishes and its tests pass, its commit goes onto that branch by itself.`)) return;
   try {
     $('startMsg').textContent = 'Starting…';
     if (body.workflow === 'auto') {
@@ -1194,6 +1207,7 @@ async function initAgentDialog() {
     body.escalate = f.elements.escalate.checked;
     body.autoContinue = f.elements.autoContinue.checked;
     body.autoContinueMax = body.autoContinueMax === '' ? null : body.autoContinueMax;
+    if (body.landing === 'main' && !await ui.confirm(`Every finished task of ${body.name || 'this agent'} goes straight onto the branch checked out in ${body.repo}, with no review, when it passes. Keep it that way?`)) return;
     $('agentMsg').textContent = 'Saving…';
     try {
       const saved = editingAgent ? await sendAgent('PATCH', `/${editingAgent.id}`, body) : await sendAgent('POST', '', body);
@@ -1262,6 +1276,7 @@ function openAgentDialog(agent) {
   f.elements.model.value = v.model || '';
   f.elements.effort.value = v.effort || '';
   f.elements.sandbox.value = v.sandbox || '';
+  f.elements.landing.value = v.landing || 'branch';
   f.elements.maxSteps.value = v.maxSteps ?? '';
   f.elements.maxMinutes.value = v.maxMinutes ?? '';
   f.elements.maxCost.value = v.maxCost ?? '';

@@ -23,4 +23,26 @@
 .skills-page .kit-item small { grid-column: 1; }
 .skills-page .kit-item button { grid-row: 1 / span 2; grid-column: 2; }
 .skills-page .actions #status { margin-right: auto; }
+.skills-page .source { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.skills-page .source[hidden] { display: none; }
+.skills-page .source a { overflow-wrap: anywhere; }
+.skills-page .remote { width: min(620px, calc(100vw - 32px)); max-height: 85vh; padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
+.skills-page .remote[open] { display: flex; }
+.skills-page .remote::backdrop { background: rgba(10, 8, 25, .5); }
+.skills-page .remote h2 { margin: 0; font-size: 16px; text-transform: none; letter-spacing: 0; color: var(--text); }
+.skills-page .remote p { margin: 0; }
+.skills-page #remoteStatus.bad { color: var(--bad, #cf222e); }
+.skills-page .remote[open] form[hidden] { display: none; }
+.skills-page .remote-row { display: flex; gap: 8px; margin-top: 8px; }
+.skills-page .remote-row input { flex: 1; min-width: 0; }
+.skills-page .remote-list { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; }
+.skills-page .remote-list:empty { display: none; }
+.skills-page .remote-item { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+.skills-page .remote-item small, .skills-page .remote-item a { overflow-wrap: anywhere; }
+.skills-page .remote-item .check { display: flex; align-items: flex-start; gap: 8px; }
+.skills-page .remote-item .check span { min-width: 0; }
+.skills-page .remote-item .bad { color: var(--bad, #cf222e); }
+.skills-page .remote-item pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12.5px; background: var(--bg); border-radius: 8px; padding: 8px; margin: 6px 0 0; }
+.skills-page .remote-warn { font-size: 12.5px; color: var(--muted); border-left: 3px solid var(--accent); padding-left: 8px; margin-top: 6px; }
+.skills-page .remote .actions { margin-top: 6px; }
 @media (max-width: 800px) { .skills-page .used { grid-template-columns: 1fr; } }

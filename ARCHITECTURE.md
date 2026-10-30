@@ -39,7 +39,7 @@ Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Ev
 
 | Page | Files | Purpose |
 |---|---|---|
-| Bright Chat | `chat.html`, `chat.js`, `chat.css`, `markdown.js`, `chatmerge.js`, `schedule.js` | Chats, projects, skills, tools, voice, schedules, cache timers (`cachetimer.js`), imports from Claude Code (`utils/claudeKit.js`) |
+| Bright Chat | `chat.html`, `chat.js`, `chat.css`, `markdown.js`, `chatmerge.js`, `schedule.js` | Chats, projects, skills, tools, voice, schedules, cache timers (`cachetimer.js`), imports from Claude Code (`utils/claudeKit.js`), skills from a link (`utils/remoteSkills.js`) |
 | Dashboard | `index.html` | Health, routing log, recent chats, usage summary, command guard |
 | Routing | `routing.html`, `routing.js`, `autoroute.js`, `touch.js` | Node editor for routings, models, fallbacks, Auto-route (touch: `touch.js`) |
 | Settings | `settings.html` | Interceptor and Router settings, notifications (`notify.js`) |

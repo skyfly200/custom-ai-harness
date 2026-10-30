@@ -52,6 +52,7 @@ const credentialTicket = require('./utils/credentialTicket');
 const secrets = require('./utils/secrets');
 const openrouterOAuth = require('./utils/openrouterOAuth');
 const claudeKit = require('./utils/claudeKit');
+const remoteSkills = require('./utils/remoteSkills');
 const localRepoScan = require('./utils/localRepos');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
@@ -1506,6 +1507,15 @@ app.post('/ui/api/mcp/test', memberOrLocalJson, async (req, res) => {
 
 // Claude Code's commands and skills (.claude in this repo and in the home folder), to import into the chat page
 app.get('/ui/api/claude-kit', localOnly, (req, res) => res.json({ items: claudeKit.list() }));
+
+// Skills from a link (utils/remoteSkills.js): a file, a GitHub repo or folder, or a gist. The page shows them and saves what is picked.
+app.post('/ui/api/skills/remote', memberOrLocalJson, async (req, res) => {
+    try {
+        res.json(await remoteSkills.fetchSkills(req.body?.url));
+    } catch (err) {
+        res.status(err.status || 502).json({ error: err.message });
+    }
+});
 
 // Git repos found on this machine (utils/localRepos.js), for the repo fields. A hosted server answers with none.
 app.get('/ui/api/local-repos', localOnly, (req, res) => res.json(localRepoScan.list(process.env, { fresh: req.query.fresh === '1' })));

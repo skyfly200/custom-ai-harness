@@ -124,7 +124,7 @@ test('every tool but finish asks for a reason, which the agent loop strips befor
 
 test('a task naming a pull request starts on the PR, and the export holds the whole run', async () => {
     script = [
-        { say: 'Plan: merge main, resolve app.js, test, commit.', calls: [['run_command', { why: 'Bring in main to see the conflict', command: 'git merge origin/main' }]] },
+        { say: 'Plan: merge main, resolve app.js, test, commit.', calls: [['run_command', { why: 'Bring in main to see the conflict', command: 'git merge refs/remotes/pr/base' }]] },
         { calls: [['run_command', { why: 'Check for leftover secrets in env', command: 'echo OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwx' }]] },
         { calls: [['write_file', { why: 'Keep both sides', path: 'app.js', content: "const name = 'from main and the pr';\n" }]] },
         { calls: [['run_command', { why: 'Commit the merge', command: 'git add -A && git commit --no-edit -q' }]] },
@@ -137,7 +137,8 @@ test('a task naming a pull request starts on the PR, and the export holds the wh
     // the agent was told where the PR is before its first call, and the branch started on the PR's commit
     const first = modelCalls[0].body.messages[1].content;
     assert.match(first, /pull request skyfly200\/custom-ai-harness#195/);
-    assert.match(first, /git merge origin\/main/);
+    assert.match(first, /git merge refs\/remotes\/pr\/base/);
+    assert.equal(git(repo, 'rev-parse', 'refs/remotes/pr/base').trim(), git(repo, 'rev-parse', 'origin/main').trim());
     assert.equal(run.base, git(repo, 'rev-parse', 'refs/remotes/pr/195').trim());
     // the run's diff is the resolution on top of the PR, not the whole PR
     assert.match(await manager.diff(id), /-const name = 'from the pr'/);
@@ -189,7 +190,7 @@ test('a pull request in another repository is named as unreachable, not searched
     modelCalls = [];
     const { id } = manager.create({ goal: 'fix https://github.com/someone/else/pull/7', repo });
     await settle(id);
-    assert.match(modelCalls[0].body.messages[1].content, /different repository/);
+    assert.match(modelCalls[0].body.messages[1].content, /STOP\..*different repository[\s\S]*Call finish right now/);
 });
 
 test('past the soft step budget the run goes on, with a warning on the run and a nudge to the model', async () => {
@@ -218,4 +219,25 @@ test('the run page says what the agent said it is doing', () => {
 test('a markdown export of an empty run still renders', () => {
     const x = { run: { id: 'r1', goal: 'g', status: 'queued', repo: '/r', branch: 'harness/r1', settings: {}, totals: {} }, insights: { toolCalls: 0, callsByTool: {}, failedCalls: 0, callsWithoutWhy: 0, repeatedCalls: [], promptTokens: {}, costliestSteps: [] }, steps: [], result: null };
     assert.match(toMarkdown(x), /# Run r1: g/);
+});
+
+test('a cloud sandbox has no remote: the pull request is fetched by URL and judged against the run\'s own repo', async () => {
+    const box = path.join(dir, 'cloud-box');
+    git(dir, 'clone', '-q', '--no-hardlinks', repo, box);
+    git(box, 'remote', 'remove', 'origin');
+    git(box, 'config', `url.${bare}.insteadOf`, `${GITHUB}.git`);
+    const sandbox = { git: async (args) => git(box, ...args) };
+    const notes = [];
+    const run = { goal: `fix ${GITHUB}/pull/195`, repo, branch: 'harness/x' };
+    const brief = await require('../runner/prBrief').prepare({ sandbox, run, local: false, note: (t) => notes.push(t) });
+    assert.match(brief, /git merge --ff-only refs\/remotes\/pr\/195/);
+    assert.match(brief, /git merge refs\/remotes\/pr\/base/);
+    assert.match(brief, /no GitHub login, token or gh/);
+    assert.equal(git(box, 'rev-parse', 'refs/remotes/pr/base').trim(), git(repo, 'rev-parse', 'origin/main').trim());
+    assert.equal(run.base, undefined); // a cloud branch keeps its own base
+    // a run whose repository is another one is told to stop at once
+    const other = await require('../runner/prBrief').prepare({ sandbox, run: { ...run, goal: 'fix https://github.com/skyfly200/VirtuaHost/pull/4' }, local: false, note: (t) => notes.push(t) });
+    assert.match(other, /^STOP\./);
+    assert.match(other, /skyfly200\/VirtuaHost selected/);
+    assert.match(notes.at(-1), /names a pull request in skyfly200\/VirtuaHost/);
 });

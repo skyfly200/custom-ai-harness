@@ -1,0 +1,26 @@
+/* Skills page (after prompts.css, which it reuses for the list and the editor) */
+.skills-page .item { display: flex; align-items: center; gap: 6px; }
+/* prompts.css makes every list button a full-width block; a row holds two buttons, so these size to their text */
+.skills-page .item button { width: auto; display: inline-block; }
+.skills-page .item .pick { flex: 1 1 0; min-width: 0; text-align: left; background: transparent; padding: 7px 10px; }
+.skills-page .item .pick small { white-space: normal; }
+.skills-page .item .switch-btn { flex: none; font-size: 11.5px; padding: 3px 8px; }
+.skills-page .item.on .pick { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.skills-page .item.off b { color: var(--muted); }
+.skills-page .tag { margin-left: 6px; font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); vertical-align: 1px; }
+.skills-page .switch { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.skills-page .editor[hidden], .skills-page #empty[hidden] { display: none; }
+.skills-page #empty { margin-top: 14px; }
+.skills-page .used { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; }
+.skills-page .used legend { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 0 4px; }
+.skills-page .used-col .sub { margin-top: 4px; }
+.skills-page .checks { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.skills-page .checks .check { display: flex; align-items: center; gap: 8px; }
+.skills-page .checks .check span { min-width: 0; overflow-wrap: anywhere; }
+.skills-page .kit { margin-top: 14px; font-size: 13px; }
+.skills-page .kit summary { cursor: pointer; color: var(--muted); }
+.skills-page .kit-item { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); list-style: none; }
+.skills-page .kit-item small { grid-column: 1; }
+.skills-page .kit-item button { grid-row: 1 / span 2; grid-column: 2; }
+.skills-page .actions #status { margin-right: auto; }
+@media (max-width: 800px) { .skills-page .used { grid-template-columns: 1fr; } }

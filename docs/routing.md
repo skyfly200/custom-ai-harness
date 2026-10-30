@@ -4,7 +4,7 @@ The routing editor, named strategies, tiers, effort and how a request gets its m
 
 #### Routing editor
 
-<http://localhost:3000/ui/routing.html> draws the strategy as connected boxes: the Interceptor (pin, Router down), the Router (classifier, threshold, and its Strong / Weak / Weak with tools / Weak over N tokens outputs), and every model the Gateway serves. Each model box lists the provider models that answer for it ("Served by") and its fallback chain. A **How to use this page** guide sits at the top, and every part of the page shows a hint on hover.
+<http://localhost:3000/ui/routing.html> draws the strategy as connected boxes: the Interceptor (pin, Router down), the Router (classifier, threshold, and its Strong / Weak / Weak with tools / Weak over N tokens outputs), and every model the Gateway serves. Each model box lists the provider models that answer for it ("Served by") and its fallback chain. A book button beside the menu opens **How to use this page**, the guide, in a dialog, and every part of the page shows a hint on hover.
 
 - **Routes:** drag from a dot on the right of a box to a model to connect it; click a line and press **Remove connection** (or Delete) to unset it. On a touch screen, drag with one finger, pan with two, pinch to zoom, and tap a dot then tap a model (**tap-to-connect**) to draw the line.
 - **Fallbacks:** drag a model's "If it fails" dot to another model; reorder with the arrows in its box. Hover a model to see its fallback lines in full.

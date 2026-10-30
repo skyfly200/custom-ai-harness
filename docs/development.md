@@ -78,11 +78,12 @@ python -m pytest test/                     # Router: contract tests and every ba
 | Routing, tiers, profiles, Auto | `interceptor`, `profiles`, `tiers`, `autoStrategy`, `autoroute`, `escalate`, `jevQuestions`, `routingDelete`, `routingSimplified`, `touch` (routing editor on a touch screen) |
 | Command guard, Jev file tools | `guard`, `gatewayGuard`, `jevFiles` |
 | Gateway config and model info | `gateway`, `gatewayConfig`, `modelInfo`, `modelInfoApi`, `modelStats`, `openrouterCatalog` |
-| Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `runview`, `e2bSandbox`, `spritesSandbox`, `agentBoard`, `agentWidget`, `runnerHosted`, `runsOff` (the no-task-runner note) |
+| Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `templates`, `preview`, `terminal`, `runview`, `e2bSandbox`, `spritesSandbox`, `agentBoard`, `agentWidget`, `runnerHosted`, `runsOff` (the no-task-runner note) |
 | MCP tools | `mcp`, `mcpAdmin`, `toolsApi`, `mcpAskFirst` (ask-first approval, Vercel entry), `toolSetup` (guided setup wizard), `toolApproval` |
 | Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands`, `chatReplies`, `chatMerge`, `chatPriceRetry`, `emptyReply`, `modelAlias` (`/model` names and model suggestions), `repos` |
 | Chat sidebar: imports, dictation, audio, notifications | `claudeKit` (import Claude Code commands and skills), `dictation`, `stt`, `audio`, `notify` (waiting-for-you browser notifications) |
 | Settings page and its panels | `settings`, `navOrder` (the shared pages bar) |
+| Skills page (skills, projects and agents' copies) | `skillsModel` (`ui/skillsModel.js`, and `AgentStore.fields` skills in `runner/agents.js`) |
 | Site root and page URLs | `rootApi` (relative `api/...` at the site root), `pwa`, `oldHosts` |
 | Connect OpenRouter (OAuth PKCE) | `openrouterOAuth` |
 | Repo field suggestions (local scan) | `localRepos`, `repoTools` (read-only tools), `hostedRepoTools` (folder repos off on a hosted server) |

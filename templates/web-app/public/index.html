@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{name}}</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fbfbfd; --fg: #1d1d22; --muted: #66667a; --line: #d8d8e2; --accent: #6a4cff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15141c; --fg: #ecebf5; --muted: #9a98ad; --line: #34323f; --accent: #9c8cff; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.6rem; margin: 12px 0 4px; }
+  .muted { color: var(--muted); }
+  textarea { width: 100%; box-sizing: border-box; min-height: 88px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: inherit; font: inherit; }
+  button { margin-top: 8px; padding: 8px 16px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #reply { white-space: pre-wrap; margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; min-height: 2em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>{{name}}</h1>
+  <p class="muted">{{description}}</p>
+
+  <form id="ask">
+    <label for="message">Ask the chat</label>
+    <textarea id="message" name="message" placeholder="Say something"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+  <div id="reply" role="status" aria-live="polite"></div>
+</main>
+<script>
+  const form = document.getElementById('ask');
+  const reply = document.getElementById('reply');
+  const send = document.getElementById('send');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    send.disabled = true;
+    reply.textContent = 'Thinking…';
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: form.message.value }),
+      });
+      const data = await res.json();
+      reply.textContent = res.ok ? data.reply : data.error;
+    } catch (err) {
+      reply.textContent = err.message;
+    } finally {
+      send.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

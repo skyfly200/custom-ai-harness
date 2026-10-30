@@ -12,10 +12,13 @@
     chat: '<path d="M21 12a8 8 0 0 1-11.7 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
     usage: '<path d="M5 20V11M12 20V4M19 20v-6"/>',
     routing: '<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="12" r="2.2"/><path d="M8.2 6H12a3 3 0 0 1 3 3v0l1 1.5M8.2 18H12a3 3 0 0 0 3-3v0l1-1.5"/>',
+    apps: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><path d="M17 13.5v7M13.5 17h7"/>',
     agents: '<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V4.5M9 13v1M15 13v1"/><circle cx="12" cy="3.6" r="1"/>',
+    workflows: '<rect x="3" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="16" width="7" height="5" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/><path d="M10 5.5h2a2 2 0 0 1 2 2v7a2 2 0 0 0 2 2M6.5 8v8"/>',
     prompts: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
     tools: '<path d="M14.5 6.5a4 4 0 0 0 4.9 5.2L10 21l-3-3 9.3-9.4a4 4 0 0 0-1.8-2.1z"/>',
-    settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    skills: '<path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-6.1-5.1-1.9 5.1-1.9z"/><path d="M19 16.5v4M17 18.5h4"/>',
     user: '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>',
     bg: '<circle cx="5" cy="7" r="1.6"/><circle cx="17" cy="5" r="1.6"/><circle cx="12" cy="13" r="1.6"/><circle cx="19" cy="18" r="1.6"/><circle cx="6" cy="18" r="1.6"/><path d="M6.4 7.7 10.8 12M13.4 12.2l2.6-5.6M13.3 13.9l4.4 3.1M10.6 13.8 7.3 17"/>',
     install: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/>',
@@ -30,12 +33,16 @@
   const PAGES = [
     { id: 'dashboard', label: 'Dashboard', href: './', files: ['', 'index.html'], hint: 'Health of each part, recent chats, usage and requests' },
     { id: 'chat', label: 'Chat', href: 'chat', files: ['chat.html'], hint: 'Talk to the models through the harness' },
+    { id: 'apps', label: 'Apps', href: 'apps', files: ['apps.html'], hint: 'Apps you started from a template or registered: ask one for a change, or build a new one' },
     { id: 'agents', label: 'Agents', href: 'agents', files: ['agents.html', 'runs.html'], hint: 'Named agents that keep working on your repos, and one-off runs' },
+    { id: 'workflows', label: 'Workflows', href: 'workflows', files: ['workflows.html'], hint: 'The plan each agent follows, as stages you can edit' },
     { id: 'prompts', label: 'Prompts', href: 'prompts', files: ['prompts.html'], hint: 'Saved prompts for agents: write, improve and reuse them' },
+    { id: 'skills', label: 'Skills', href: 'skills', files: ['skills.html'], hint: 'Named instructions you switch on in chat: write, edit and import them' },
     { id: 'tools', label: 'Tools', href: 'tools', files: ['tools.html'], hint: 'The MCP servers the chat page can use' },
     { id: 'usage', label: 'Usage', href: 'usage', files: ['usage.html', 'usage-users.html'], hint: 'Tokens used, by client, model and service' },
     { id: 'routing', label: 'Routing', href: 'routing', files: ['routing.html'], hint: 'Where requests go, as connected boxes you can edit' },
-    { id: 'settings', label: 'Settings', href: 'settings', files: ['settings.html'], admin: true, hint: 'Interceptor and Router settings' },
+    // on desktop the gear stands alone (the label is its title and accessible name); phones keep the words
+    { id: 'settings', label: 'Settings', href: 'settings', files: ['settings.html'], admin: true, iconOnly: true, hint: 'Interceptor and Router settings' },
   ];
   const USERS = { id: 'users', href: 'users', files: ['users.html'] };
 
@@ -76,7 +83,9 @@
 
   function linkHtml(p, cls = '') {
     const cur = p.id === here;
-    return `<a class="${cls}${cur ? ' here' : ''}" href="${p.href}" data-hint="${esc(p.hint)}"${cur ? ' aria-current="page"' : ''}>${icon(p.id)}<span>${esc(p.label)}</span></a>`;
+    const iconOnly = p.iconOnly ? ' icon-only' : '';
+    const name = p.iconOnly ? ` aria-label="${esc(p.label)}" title="${esc(p.label)}"` : '';
+    return `<a class="${cls}${iconOnly}${cur ? ' here' : ''}" href="${p.href}" data-hint="${esc(p.hint)}"${name}${cur ? ' aria-current="page"' : ''}>${icon(p.id)}<span>${esc(p.label)}</span></a>`;
   }
   function itemHtml(it) {
     const role = it.kind === 'toggle' ? 'menuitemcheckbox' : 'menuitem';

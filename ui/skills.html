@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bright Chat · Skills</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
+<link rel="stylesheet" href="prompts.css">
+<link rel="stylesheet" href="skills.css">
+</head>
+<body>
+<main class="prompts-page skills-page">
+  <header>
+    <nav data-site-nav></nav>
+    <div class="bar">
+      <button id="new" class="primary" type="button">New skill</button>
+      <button id="import" type="button" class="quiet" title="Load a SKILL.md or .md file from this computer">Import file</button>
+      <input id="file" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" multiple hidden>
+    </div>
+  </header>
+  <script src="nav.js"></script>
+
+  <p class="muted lead">Skills are instructions the model follows when a request matches them. Turn one on or off here. Chats pick the skills they use from their own Skills button; projects and agents keep theirs below, in the editor.</p>
+
+  <div class="split">
+    <aside class="card lib" aria-label="Your skills">
+      <input id="search" type="search" placeholder="Search names and descriptions" autocomplete="off">
+      <div id="list" class="plist"></div>
+
+      <details id="kitBox" class="kit">
+        <summary>Import from .claude</summary>
+        <p class="muted small">Commands and skills in this repo's <code>.claude</code> folder or in your home folder. Only on your own computer.</p>
+        <ul id="kitList" class="plist"></ul>
+      </details>
+    </aside>
+
+    <form id="editor" class="card editor" autocomplete="off" hidden>
+      <div class="row2">
+        <label class="field"><span>Name</span><input name="name" maxlength="60" placeholder="write-tests-first"></label>
+        <label class="field"><span>Description</span><input name="description" maxlength="200" placeholder="When the model should pick this up"></label>
+      </div>
+      <label class="switch"><input name="enabled" type="checkbox"> <span>On: chats and agents can use it</span></label>
+      <label class="field"><span>Instructions</span><textarea name="body" rows="14" spellcheck="true" placeholder="Write what the model should do and how to check it."></textarea></label>
+      <div id="meter" class="meter muted" role="status"></div>
+
+      <fieldset class="used">
+        <legend>Used by</legend>
+        <div class="used-col">
+          <h3 class="sub">Projects</h3>
+          <div id="projects" class="checks"></div>
+        </div>
+        <div class="used-col">
+          <h3 class="sub">Agents</h3>
+          <div id="agents" class="checks"></div>
+        </div>
+      </fieldset>
+
+      <div class="actions end">
+        <span id="status" class="muted small" role="status"></span>
+        <button type="button" id="delete" class="quiet danger">Delete</button>
+        <button type="submit" class="primary" id="save">Save skill</button>
+      </div>
+    </form>
+    <div id="empty" class="card empty muted" hidden>No skills yet. Write one with New skill, or import a SKILL.md file.</div>
+  </div>
+</main>
+<script src="dialogs.js"></script>
+<script src="hints.js"></script>
+<script src="bright.js"></script>
+<script src="ownerScope.js"></script>
+<script src="skillsModel.js"></script>
+<script src="skills.js"></script>
+</body>
+</html>

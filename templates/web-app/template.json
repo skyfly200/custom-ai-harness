@@ -1,0 +1,16 @@
+{
+  "id": "web-app",
+  "version": "1.0.0",
+  "name": "Web app with an API",
+  "description": "A small Node web app: a page, a JSON health check, and a chat panel whose server route calls the harness, so the harness key never reaches the browser.",
+  "stack": ["Node 20 or newer", "no dependencies", "one HTML page"],
+  "questions": [
+    { "key": "audience", "label": "Who will use it?", "placeholder": "Me and two friends", "required": false }
+  ],
+  "installCommand": "npm install",
+  "devCommand": "npm start",
+  "testCommand": "npm test",
+  "previewPort": 3200,
+  "deploy": "merge",
+  "editablePaths": ["public/**", "server.js", "test/**", "README.md"]
+}

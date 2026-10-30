@@ -20,6 +20,7 @@ const usd = (n) => `$${(n >= 1 ? n.toFixed(2) : n.toFixed(n >= 0.1 ? 3 : 4))}`;
 const { PreviewManager } = require('./preview');
 const { AgentStore, cleanMoreRepos } = require('./agents');
 const { AppStore, editableMatcher } = require('./apps');
+const templates = require('./templates');
 const prBrief = require('./prBrief');
 const runExport = require('./runExport');
 const { Shipper, verdict: shipVerdict } = require('./ship');
@@ -1008,6 +1009,35 @@ class RunManager {
     listApps() { return this.apps.list(); }
     getApp(id) { return this.apps.get(id); }
     createApp(cfg) { return this.apps.create(cfg || {}, this.checkRepo(cfg?.repo)); }
+    /**
+     * A new app from a template: the folder is made inside an allowed root (`parent`, default the first
+     * root), filled in, made a git repo with one commit, registered, and (unless `build` is false) given
+     * its first version as a change run built from the description.
+     */
+    newApp({ template, name, description, answers = {}, parent, build = true } = {}) {
+        const t = templates.loadTemplate(String(template || ''));
+        const dir = String(parent || this.roots[0] || '');
+        let real;
+        try { real = fs.realpathSync(dir); } catch { throw new Error(`${dir || 'the folder'} does not exist`); }
+        if (!this.roots.some((r) => real === r || real.startsWith(r + path.sep))) {
+            throw new Error(`${dir} is not inside an allowed folder (${this.roots.join(', ') || 'none; set RUNNER_ROOTS'})`);
+        }
+        const slug = templates.slugify(name);
+        if (!slug) throw new Error('an app needs a name with letters or numbers');
+        const folder = path.join(real, slug);
+        templates.scaffold(t, { ...answers, name, description }, folder);
+        const git = (...args) => execFileSync('git', ['-C', folder, '-c', 'user.name=Harness', '-c', 'user.email=harness@localhost', ...args], { encoding: 'utf8' });
+        git('init', '-q', '-b', 'main');
+        git('add', '-A');
+        git('commit', '-q', '-m', `Start from the ${t.name} template`);
+        const app = this.createApp({
+            name: templates.cleanText(name, 60), repo: folder, editablePaths: t.editablePaths, installCommand: t.installCommand,
+            devCommand: t.devCommand, testCommand: t.testCommand, previewPort: t.previewPort, deploy: t.deploy,
+        });
+        const text = templates.cleanText(description, 300);
+        const run = build && text ? this.askChange(app.id, { request: `Build the first version: ${text}` }) : null;
+        return { app, run };
+    }
     updateApp(id, cfg) { return this.apps.update(id, cfg || {}, cfg?.repo !== undefined ? this.checkRepo(cfg.repo) : null); }
     removeApp(id) {
         if ([...this.runs.values()].some((r) => r.app === id && ['queued', 'running'].includes(r.status))) throw new Error('stop its changes first');
@@ -1205,6 +1235,7 @@ class RunManager {
         if (!agent) return '';
         const parts = [`You are ${agent.name}, a standing agent for this repo. Your work builds up over tasks: the workspace starts from what your earlier tasks committed, and you are told what they did.`];
         if (agent.instructions) parts.push(`Your standing instructions:\n${agent.instructions}`);
+        if (agent.skills?.length) parts.push(`Skills you follow (set up by the person, in this order):\n${agent.skills.map((k) => `## ${k.name}\n${k.body}`).join('\n\n')}`);
         const before = this.tasksOf(agent.id).filter((t) => t.id !== run.id && t.created < run.created && ['done', 'incomplete'].includes(t.status) && !t.plan).slice(0, AGENT_HISTORY).reverse();
         if (before.length) {
             parts.push(`Your earlier tasks, oldest first:\n${before.map((t) => `- ${short(t.goal.split('\n')[0], 200)} (${t.status}${t.result?.commit ? `, committed on ${t.branch}` : ''})${t.result?.summary ? `\n  ${short(t.result.summary, 500).replace(/\n/g, '\n  ')}` : ''}`).join('\n')}`);

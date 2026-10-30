@@ -211,3 +211,19 @@ test('an agent can name other repos beside its own; the first is the one it work
     await settle(run.id);
     assert.match(modelCalls[0].messages.map((m) => m.content).join('\n'), /connected: a\/b\./);
 });
+
+test('a task can set its own routing; one model directly replaces the agent\'s routing', async () => {
+    const agent = manager.listAgents()[0];
+    manager.agents.update(agent.id, { profile: 'cheap', effort: 'low', maxTier: 'Mid' });
+    script = [{ calls: [['finish', { summary: 'a' }]] }, { calls: [['finish', { summary: 'b' }]] }, { calls: [['finish', { summary: 'c' }]] }];
+    const plain = manager.get(manager.assign(agent.id, { goal: 'plain', plan: true }).id);
+    assert.deepEqual([plain.profile, plain.model, plain.effort, plain.maxTier], ['cheap', null, 'low', 'Mid']);
+    const pinned = manager.get(manager.assign(agent.id, { goal: 'pinned', plan: true, model: 'gpt-x', effort: 'high' }).id);
+    assert.deepEqual([pinned.profile, pinned.model, pinned.effort, pinned.maxTier], [null, 'gpt-x', 'high', 'Mid']);
+    const routed = manager.get(manager.assign(agent.id, { goal: 'routed', plan: true, profile: 'strong' }).id);
+    assert.deepEqual([routed.profile, routed.model], ['strong', null]);
+    for (const r of [plain, pinned, routed]) await settle(r.id);
+    manager.agents.update(agent.id, { model: 'agent-model' });
+    assert.equal(manager.agents.get(agent.id).model, 'agent-model');
+    manager.agents.update(agent.id, { model: '', profile: null, effort: null, maxTier: null });
+});

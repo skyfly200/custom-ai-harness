@@ -67,6 +67,7 @@ class AgentStore {
         }
         if (has('iconText')) out.iconText = cfg.iconText ? [...String(cfg.iconText).trim()].slice(0, 4).join('') || null : null;
         if (has('profile')) out.profile = cfg.profile ? clean(cfg.profile, 80) : null;
+        if (has('model')) out.model = cfg.model ? clean(cfg.model, 120) : null;
         if (has('effort')) {
             if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
             out.effort = cfg.effort || null;
@@ -109,7 +110,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', iconSeed: null, iconImage: null, iconText: null, moreRepos: [], profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, project: null,
+            instructions: '', iconSeed: null, iconImage: null, iconText: null, moreRepos: [], profile: null, model: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

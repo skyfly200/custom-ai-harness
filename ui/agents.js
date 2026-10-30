@@ -957,8 +957,7 @@ function lastRunOf(id) {
 function orbCard(a) {
   const def = !a;
   const doing = def ? 'One-off runs on any repo' : (a.instructions ? nameLine(a.instructions) : `Works on ${a.repo.split(/[\\/]/).filter(Boolean).pop() || a.repo}`);
-  const facts = [def ? 'Jev picks the steps' : nameOf(a.workflow), a && a.maxCost ? `cap $${a.maxCost}` : '', `last: ${lastRunOf(def ? '' : a.id)}`].filter(Boolean);
-  return `<span class="orbcard" role="tooltip"><span class="does">${esc(doing)}</span><span class="facts">${esc(facts.join(' · '))}</span></span>`;
+  return `<span class="orbcard" role="tooltip"><span class="does">${esc(doing)}</span><span class="facts">last: ${esc(lastRunOf(def ? '' : a.id))}</span></span>`;
 }
 function renderAgents() {
   renderHero();

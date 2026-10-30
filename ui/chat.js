@@ -4192,7 +4192,7 @@ async function drawProjectAgents(projectId) {
   }
   box.innerHTML = projectAgents.map(a => {
     const other = a.project && a.project.id !== projectId ? projects.find(x => x.id === a.project.id)?.name || a.project.name || 'another project' : '';
-    return `<label class="check" title="${esc(a.repo)}"><input type="checkbox" value="${esc(a.id)}"${projectId && a.project?.id === projectId ? ' checked' : ''}> ${esc(a.name)}${other ? ` <span class="muted small">(now in ${esc(other)})</span>` : ''}</label>`;
+    return `<label class="check" title="${esc(a.repo)}"><input type="checkbox" value="${esc(a.id)}"${projectId && a.project?.id === projectId ? ' checked' : ''}> ${window.AgentIcon ? AgentIcon.icon(a) : ''}${esc(a.name)}${other ? ` <span class="muted small">(now in ${esc(other)})</span>` : ''}</label>`;
   }).join('') || '<span class="muted small">No agents yet. Make one on the <a href="agents">Agents page</a>.</span>';
 }
 // link or unlink the agents ticked in the dialog (best effort: the project saves either way)

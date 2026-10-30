@@ -59,6 +59,7 @@ class AgentStore {
             if (cfg.sandbox && !normalizeKind(cfg.sandbox)) throw new Error(`no sandbox named ${cfg.sandbox}; use ${Object.keys(DRIVERS).join(', ')}`);
             out.sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : null;
         }
+        if (has('iconSeed')) out.iconSeed = cfg.iconSeed ? clean(cfg.iconSeed, 40) : null; // set by Shuffle; else the id seeds the icon
         if (has('profile')) out.profile = cfg.profile ? clean(cfg.profile, 80) : null;
         if (has('effort')) {
             if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
@@ -96,7 +97,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', moreRepos: [], profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, project: null,
+            instructions: '', iconSeed: null, moreRepos: [], profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

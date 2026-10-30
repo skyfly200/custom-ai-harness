@@ -98,7 +98,7 @@ function renderList() {
   setHtml('list', list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <i class="sdot ${TAGS[r.status] || 'live'}${ACTIVE.has(r.status) ? ' pulse' : ''}" title="${esc(statusWord(r))}"></i>
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${AgentIcon.icon(agentOf(r.agent))}${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
 }
 
 function eventHtml(e) {
@@ -307,7 +307,7 @@ function drawStatus(run) {
   const tag = run.status === 'incomplete' && run.outOfBudget ? 'cost limit' : run.status;
   const long = run.goal.length > 220 || run.goal.split('\n').length > 3;
   if (lastShown !== run.id) promptOpen = false;
-  setHtml('statusCard', `<div class="sc-top"><span class="orb${active ? ' live' : ''}${run.status === 'waiting' ? ' wait' : ''}"><i></i><i></i><i></i></span><span class="tag ${TAGS[run.status] || ''}">${esc(tag)}</span><span class="sc-quick">${esc(RunView.quickLine(run))}</span><span class="muted sc-when">started ${ago(run.created)}</span></div>
+  setHtml('statusCard', `<div class="sc-top">${AgentIcon.orb(agentOf(run.agent), `${active ? 'live' : ''}${run.status === 'waiting' ? ' wait' : ''}`.trim())}<span class="tag ${TAGS[run.status] || ''}">${esc(tag)}</span><span class="sc-quick">${esc(RunView.quickLine(run))}</span><span class="muted sc-when">started ${ago(run.created)}</span></div>
     <div class="sc-prompt${long && !promptOpen ? ' clip' : ''}" id="scPrompt" title="The prompt for this run">${esc(run.goal)}</div>${long ? `<button type="button" class="linklike" id="scMore">${promptOpen ? 'Show less' : 'Show all'}</button>` : ''}
     <p class="sc-summary">${esc(RunView.summarize(run, workers))}</p>`);
 }
@@ -942,14 +942,14 @@ function renderAgents() {
     const st = def ? (runs.some((r) => !r.agent && !r.parent && r.status === 'waiting') ? 'wait' : runs.some((r) => !r.agent && !r.parent && ACTIVE.has(r.status)) ? 'live' : '') : state(a);
     return `<div class="bubble${peekId === id ? ' peek' : ''}${def ? ' def' : ''}" role="listitem" style="--d:${(i * 1.7) % 7}s;--t:${9 + (i * 3) % 5}s;--dx:${(i % 2 ? -1 : 1) * (6 + (i * 5) % 8)}px">
       <button type="button" class="orbbtn" data-aid="${esc(def ? '' : a.id)}" data-bid="${esc(id)}" aria-label="${esc(def ? 'Default' : a.name)}${st === 'wait' ? ', needs you' : st === 'live' ? ', working' : ''}">
-        <span class="orb ${st}"><i></i><i></i><i></i></span><span class="nm">${esc(def ? 'Default' : a.name)}</span></button>${orbCard(a)}</div>`;
+        ${AgentIcon.orb(a, st)}<span class="nm">${esc(def ? 'Default' : a.name)}</span></button>${orbCard(a)}</div>`;
   };
   const addB = `<div class="bubble add" role="listitem" style="--d:3s;--t:11s;--dx:7px"><button type="button" class="orbbtn" id="newAgent" aria-label="New agent"><span class="orb plus"><span>+</span></span><span class="nm">New agent</span></button></div>`;
   setHtml('agentChips', [bubble(null, 0), ...agents.map((a, i) => bubble(a, i + 1)), addB].join(''));
   renderLive();
   const a = agentOf(agentSel);
   if (a) {
-    $('agentInfo').innerHTML = `<h3>${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+    $('agentInfo').innerHTML = `<h3>${AgentIcon.icon(a, 'lg')}${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" class="primary" data-aact="newrun">New run</button><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
   } else if (inAgent) {
@@ -1110,13 +1110,15 @@ async function initAgentDialog() {
     if (link) setAgentRepos(projectRepoEntries(link));
   });
   const f = $('agentForm');
+  $('iconShuffle').addEventListener('click', () => setIconSeed(AgentIcon.randomSeed()));
+  $('iconReset').addEventListener('click', () => setIconSeed(''));
   $('agentClose').addEventListener('click', () => $('agentDialog').close());
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(f));
     const link = chatProjects().find((p) => p.id === body.project);
     body.project = link ? { id: link.id, name: link.name } : (body.project && editingAgent?.project?.id === body.project ? editingAgent.project : null);
-    for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier']) if (body[k] === '') body[k] = null;
+    for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier', 'iconSeed']) if (body[k] === '') body[k] = null;
     // The repo field is the default repo; the others are listed below it. With none of its own, the agent takes its project's.
     if (!body.repo.trim() && !agentExtras.length && link) {
       const inherited = Repos.toSpecs(projectRepoEntries(link));
@@ -1146,6 +1148,13 @@ async function initAgentDialog() {
   } catch { /* the default routing is enough */ }
 }
 
+// the icon in the agent dialog: the seed in the form wins, else the agent's id; a new agent starts with a rolled one
+function setIconSeed(seed) {
+  const f = $('agentForm');
+  f.elements.iconSeed.value = seed;
+  $('iconPreview').innerHTML = AgentIcon.orb(seed || editingAgent?.id || '');
+  $('iconReset').hidden = !seed || !editingAgent;
+}
 function openAgentDialog(agent) {
   editingAgent = agent;
   const f = $('agentForm');
@@ -1170,6 +1179,7 @@ function openAgentDialog(agent) {
   f.elements.maxTier.value = v.maxTier || '';
   f.elements.escalate.checked = v.escalate !== false;
   f.elements.project.value = v.project?.id || '';
+  setIconSeed(agent ? agent.iconSeed || '' : AgentIcon.randomSeed());
   drawAgentRepos();
   $('agentDialog').showModal();
   f.elements.name.focus();

@@ -129,6 +129,16 @@ test('a change run writes inside the editable paths and is refused outside them'
     assert.equal(run.result.tests.passed, true);
 });
 
+test('a change can run on the workflow picked for it; Swarm is refused', async () => {
+    const [appRow] = (await call('GET', '/apps')).body.apps;
+    script = [{ calls: [['finish', { summary: 'Explained.' }]] }];
+    const made = await call('POST', `/apps/${appRow.id}/changes`, { request: 'explain the layout', workflow: 'one-shot' });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.workflow, 'one-shot');
+    await settle(made.body.id);
+    assert.equal((await call('POST', `/apps/${appRow.id}/changes`, { request: 'x', workflow: 'swarm' })).status, 400);
+});
+
 test('a command that writes outside the editable paths leaves the run incomplete', async () => {
     const [appRow] = (await call('GET', '/apps')).body.apps;
     script = [

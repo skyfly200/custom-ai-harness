@@ -687,7 +687,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.jev ? { jev: body.jev } : {}), ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.speed === 'batch' ? { speed: 'batch' } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}), ...(body.autoFixConflicts === '1' ? { autoFixConflicts: true, ...(body.autoFixMax ? { autoFixMax: body.autoFixMax } : {}) } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.workflow && body.workflow !== 'agent' ? { workflow: body.workflow } : {}), ...(body.jev ? { jev: body.jev } : {}), ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.speed === 'batch' ? { speed: 'batch' } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}), ...(body.autoFixConflicts === '1' ? { autoFixConflicts: true, ...(body.autoFixMax ? { autoFixMax: body.autoFixMax } : {}) } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -724,13 +724,25 @@ function schedulePick() {
   pickTimer = setTimeout(() => { if ($('workflow').value === 'auto') pickWorkflow(goal).catch(() => {}); }, 700);
 }
 
+// The How menu. A one-off run offers Jev's pick, every recipe, Swarm and ChatDev. A task of an agent starts on the
+// agent's own workflow ("Same as ..."), and may pick any recipe instead; Swarm and ChatDev are one-off only.
+function fillWorkflowOptions() {
+  const sel = $('workflow');
+  const keep = sel.value;
+  const a = agentOf(agentSel);
+  const head = a ? `<option value="agent">Same as ${esc(a.name)} (${esc(nameOf(a.workflow))})</option>` : '<option value="auto">Jev picks (auto)</option>';
+  const recipes = workflowList.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join('');
+  const extra = a ? '' : '<option value="swarm">Swarm (several agents at once)</option><option value="chatdev">ChatDev (in a cloud sandbox)</option>';
+  sel.innerHTML = head + recipes + extra;
+  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : sel.options[0].value;
+}
+
 async function initWorkflows() {
   try {
     const { workflows } = await (await fetch('api/workflows')).json();
     workflowList = workflows;
-    $('workflow').insertAdjacentHTML('beforeend', workflows.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join(''));
-    $('workflow').insertAdjacentHTML('beforeend', '<option value="swarm">Swarm (several agents at once)</option><option value="chatdev">ChatDev (in a cloud sandbox)</option>');
   } catch { /* auto still works without the list */ }
+  fillWorkflowOptions();
   $('newRun').elements.goal.addEventListener('input', schedulePick);
   $('workflow').addEventListener('change', () => { applyMode(); $('pickNote').textContent = ''; drawWorkflowHelp(); if ($('workflow').value === 'auto') schedulePick(); });
   $('suggestBtn').addEventListener('click', suggestWorkflow);
@@ -749,14 +761,18 @@ function wfEntries() {
   const known = workflowList.map((w) => ({ id: w.id, name: w.name, help: RunView.help(w), stages: w.stages.map((x) => x.role) }));
   const extra = [{ id: 'swarm', name: 'Swarm', help: RunView.help('swarm'), stages: ['Planner', 'Workers', 'Reviewer'] }, { id: 'chatdev', name: 'ChatDev', help: RunView.help('chatdev'), stages: [] }];
   const all = [{ id: 'auto', name: 'Jev picks (auto)', help: RunView.help('auto'), stages: [] }, ...known, ...extra];
-  return all.sort((a, b) => (WF_ORDER.indexOf(a.id) + 1 || 99) - (WF_ORDER.indexOf(b.id) + 1 || 99));
+  const sorted = all.sort((a, b) => (WF_ORDER.indexOf(a.id) + 1 || 99) - (WF_ORDER.indexOf(b.id) + 1 || 99));
+  return agentOf(agentSel) ? sorted.filter((w) => !['auto', 'swarm', 'chatdev'].includes(w.id)) : sorted;
 }
 function drawWorkflowHelp() {
   const entries = wfEntries();
-  const cur = entries.find((w) => w.id === $('workflow').value) || entries[0];
+  const agent = agentOf(agentSel);
+  const want = $('workflow').value === 'agent' ? agent?.workflow : $('workflow').value;
+  const cur = entries.find((w) => w.id === want) || entries[0];
   const h = cur.help;
   $('wfHelp').innerHTML = `<strong>${esc(cur.name)}</strong>${cur.stages.length ? ` <span class="muted">${esc(cur.stages.join(' → '))}</span>` : ''}
-    <p>${esc(h.what)}</p><p><span class="muted">Use it for:</span> ${esc(h.use)}</p>${h.feel ? `<p><span class="muted">Cost and time:</span> ${esc(h.feel)}</p>` : ''}`;
+    <p>${esc(h.what)}</p><p><span class="muted">Use it for:</span> ${esc(h.use)}</p>${h.feel ? `<p><span class="muted">Cost and time:</span> ${esc(h.feel)}</p>` : ''}
+    <p class="fine"><a href="workflows.html">Workflows page</a>: read, edit or add a way of working</p>`;
   $('wfTable').innerHTML = entries.map((w) => `<button type="button" class="wfrow${w.id === cur.id ? ' on' : ''}" data-wf="${esc(w.id)}"><strong>${esc(w.name)}</strong><span>${esc(w.help.what)}</span><span class="muted">${esc(w.help.feel || '')}</span></button>`).join('');
 }
 // Jev reads the prompt and the matching way of working is selected, with the reason in one line
@@ -1093,6 +1109,8 @@ function applyMode() {
   const a = agentOf(agentSel);
   // routing fields stay on for a task, and start from the agent's own
   if (a !== lastModeAgent) {
+    fillWorkflowOptions();
+    drawWorkflowHelp();
     f.elements.profile.value = a?.profile || ''; f.elements.model.value = a?.model || ''; f.elements.effort.value = a?.effort || ''; f.elements.maxTier.value = a?.maxTier || ''; f.elements.strongModel.value = '';
     lastModeAgent = a;
   }
@@ -1255,7 +1273,9 @@ async function initAgentDialog() {
   try {
     const { workflows } = await (await fetch('api/workflows')).json();
     $('agentWorkflow').innerHTML = workflows.map((w) => `<option value="${esc(w.id)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join('');
+    workflowList = workflows;
   } catch { $('agentWorkflow').innerHTML = '<option value="general">Do the task</option>'; }
+  $('agentWorkflow').addEventListener('change', drawAgentWorkflowHelp);
   try {
     const { profiles } = await (await fetch('api/profiles')).json();
     $('agentProfile').insertAdjacentHTML('beforeend', profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('') + '<option value="auto">Jev picks (auto)</option>');
@@ -1291,6 +1311,12 @@ function shrinkImage(file) {
     img.src = url;
   });
 }
+// What the agent's workflow does, in the form, with a way to compare or edit them
+function drawAgentWorkflowHelp() {
+  const w = workflowList.find((x) => x.id === $('agentForm').elements.workflow.value);
+  $('agentWfHelp').innerHTML = `${w ? `${esc(RunView.help(w).what)} ` : ''}<a href="workflows.html">Workflows page</a>`;
+}
+
 function openAgentDialog(agent) {
   editingAgent = agent;
   const f = $('agentForm');
@@ -1306,6 +1332,7 @@ function openAgentDialog(agent) {
   f.elements.repo.value = v.repo;
   f.elements.instructions.value = v.instructions || '';
   f.elements.workflow.value = v.workflow || 'general';
+  drawAgentWorkflowHelp();
   f.elements.profile.value = v.profile || '';
   f.elements.model.value = v.model || '';
   f.elements.effort.value = v.effort || '';

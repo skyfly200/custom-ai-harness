@@ -3,6 +3,9 @@
   --ok: #1a7f37; --bad: #cf222e; --warn: #9a6700; --off: #8c959f; --accent: #6a4cf5;
   /* text fields: same as --border in light; dark needs a rim that reads against the panel (3:1) */
   --field-border: var(--border);
+  /* text field fill: white in light; dark gets an inset fill darker than the panel */
+  --field-bg: #ffffff;
+  color-scheme: light;
   /* Bright Chat glow colours: amber, pink, violet, cyan */
   --glow-a: #f59e0b; --glow-b: #ec4899; --glow-c: #7c5cff; --glow-d: #06b6d4;
   --glass: rgba(255, 255, 255, .74); --glass-strong: rgba(255, 255, 255, .9);
@@ -14,12 +17,23 @@
     --bg: #08070f; --panel: #14131f; --text: #ecebf5; --muted: #9a97b0; --border: #2a2840;
     --ok: #3fb950; --bad: #f85149; --warn: #d29922; --off: #6e7681; --accent: #9b87ff;
     --glow-a: #ffb547; --glow-b: #ff5fa2; --glow-c: #8b6cff; --glow-d: #3fd0ff;
-    --field-border: #75729a; --placeholder: #aeabc4;
+    --field-border: #75729a; --placeholder: #aeabc4; --field-bg: #0b0a14;
+    /* dark native controls too: select popups, checkboxes, date pickers, spinners, scrollbars */
+    color-scheme: dark;
     --glass: rgba(20, 19, 31, .66); --glass-strong: rgba(20, 19, 31, .88);
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px -10px rgba(0, 0, 0, .6);
   }
 }
+/* Fields without their own fill (plain inputs, textareas, selects in dialogs) get the field
+   colour, so none stays the browser's white. :where() keeps specificity at zero, so any
+   page rule that sets a background still wins. */
+:where(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]):not([type=reset]):not([type=color]):not([type=file])), :where(textarea), :where(select) {
+  background-color: var(--field-bg); color: var(--text);
+}
 @media (prefers-color-scheme: dark) {
+  :where(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]):not([type=reset]):not([type=color]):not([type=file]), textarea, select) {
+    border-color: var(--field-border);
+  }
   ::placeholder { color: var(--placeholder); opacity: 1; }
   a:not([class]) { color: var(--accent); }
 }

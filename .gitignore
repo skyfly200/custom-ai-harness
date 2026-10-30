@@ -16,3 +16,4 @@ users.json
 .gateway-config.yaml
 .neon
 .env.local
+prompts.json

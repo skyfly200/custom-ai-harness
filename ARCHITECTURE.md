@@ -46,6 +46,7 @@ Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Ev
 | Usage | `usage.html`, `usage.js`, `costs.js`; admins: `usage-users.html`, `usage-users.js`, `userUsage.js` | Cost and savings per layer; your own requests with logins on, everyone's per person for admins |
 | Tools | `tools.html`, `tools.js` | MCP servers |
 | Runs, Agents | `runs.html`, `agents.html`, `agents.js`, `agentBoard.js`, `apps.js` | Task runner, agents, in-app apps (`agent-widget.js`) |
+| Prompts | `prompts.html`, `prompts.js`, `promptlib.js` (`window.Prompts`, also used by the Agents page) | Saved prompts for agents: variables, versions, starters, "improve" through a model; server side `utils/prompts.js` (`user_data` key `prompts`, or `prompts.json`) |
 | Users | `users.html`, `users.js` | Logins, invites, guests, credentials |
 
 `ui/manifest.webmanifest` and `ui/sw.js` make it an installable app ([Phone and app](docs/phone-and-app.md)). Page behaviour is in [Chat page](docs/chat.md) and [Dashboard, settings and usage](docs/control-ui.md).

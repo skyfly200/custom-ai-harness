@@ -45,6 +45,7 @@ const mcpAdmin = require('./utils/mcpAdmin');
 const mcpCatalog = require('./utils/mcpCatalog');
 const userMcpMod = require('./utils/userMcp');
 const userPrefs = require('./utils/userPrefs');
+const prompts = require('./utils/prompts');
 const credit = require('./utils/credit');
 const userCredentials = require('./utils/userCredentials');
 const credentialTicket = require('./utils/credentialTicket');
@@ -727,6 +728,37 @@ app.post('/ui/api/profiles', memberOrLocalJson, async (req, res) => {
     } catch (err) {
         res.status(err.status || 400).json({ error: err.message });
     }
+});
+
+// Saved prompts (utils/prompts.js): a person's library of task prompts, used by the Prompts page and the
+// Agents page's new-run form. Per person with logins on, else for this machine.
+const promptOwner = (req) => (req.harnessLogin ? ownerOf(req) : prompts.LOCAL);
+const promptError = (res, err) => res.status(err.status || 500).json({ error: err.message });
+app.get('/ui/api/prompts', async (req, res) => {
+    try {
+        res.json({ prompts: await prompts.list(promptOwner(req)), starters: prompts.STARTERS.map((s) => ({ ...s, variables: prompts.variables(s.text) })), maxChars: prompts.MAX_TEXT });
+    } catch (err) { promptError(res, err); }
+});
+app.get('/ui/api/prompts/:id', async (req, res) => {
+    try {
+        const p = await prompts.get(promptOwner(req), req.params.id);
+        if (!p) return res.status(404).json({ error: 'no such prompt' });
+        res.json(p);
+    } catch (err) { promptError(res, err); }
+});
+// {id?, name, text, tags, suits: {agent, workflow}, note}: no id makes a new prompt
+app.post('/ui/api/prompts', memberOrLocalJson, async (req, res) => {
+    try { res.json(await prompts.save(promptOwner(req), req.body)); } catch (err) { promptError(res, err); }
+});
+app.post('/ui/api/prompts/:id/restore', memberOrLocalJson, async (req, res) => {
+    try { res.json(await prompts.restore(promptOwner(req), req.params.id, req.body?.version)); } catch (err) { promptError(res, err); }
+});
+app.delete('/ui/api/prompts/:id', memberOrLocal, async (req, res) => {
+    try { await prompts.remove(promptOwner(req), req.params.id); res.json({ ok: true }); } catch (err) { promptError(res, err); }
+});
+// The messages to send a model (through /v1/chat/completions, billed to the person) to improve a prompt
+app.post('/ui/api/prompts-improve', memberOrLocalJson, (req, res) => {
+    try { res.json({ messages: prompts.improveMessages(req.body?.text, req.body?.notes) }); } catch (err) { promptError(res, err); }
 });
 
 // Who pays for the signed-in person's requests: the owner's key (admins), the owner's key under a hard cap

@@ -46,7 +46,8 @@
       byAgent.set(r.agent, t);
     }
     const names = new Map(agents.map((a) => [a.id, a.name]));
-    const withName = (r) => ({ ...r, spent: spend.get(r.id), agentName: r.agent ? names.get(r.agent) || null : null });
+    const seeds = new Map(agents.map((a) => [a.id, a.iconSeed || a.id]));
+    const withName = (r) => ({ ...r, spent: spend.get(r.id), agentName: r.agent ? names.get(r.agent) || null : null, agentSeed: r.agent ? seeds.get(r.agent) || null : null });
     return {
       // every run asking for a decision, workers included (they are the ones that ask)
       needs: runs.filter((r) => r.status === 'waiting' && r.pending).map(withName),

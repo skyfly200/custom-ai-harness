@@ -22,7 +22,7 @@ function keepable(request) {
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   // Fetched with the page's credentials, so a harness behind HARNESS_PASSWORD still works
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat', 'chat.html', 'bright.css', 'style.css', 'chat.css', 'repos.css', 'calm.css', 'mobile.css', 'dialogs.js', 'bright.js', 'nav.js', 'nav.css', 'chat.js', 'repos.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'dictation.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat', 'chat.html', 'bright.css', 'style.css', 'chat.css', 'repos.css', 'calm.css', 'mobile.css', 'dialogs.js', 'bright.js', 'nav.js', 'nav.css', 'chat.js', 'repos.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'dictation.js', 'markdown.js', 'agenticon.js', 'agenticon.css', 'favicon.svg'])).catch(() => {}));
 });
 
 self.addEventListener('activate', (event) => {

@@ -25,6 +25,7 @@ const runExport = require('./runExport');
 const { Shipper, verdict: shipVerdict } = require('./ship');
 const landings = require('./landing');
 const gitHub = require('./github');
+const prWatch = require('./prWatch');
 
 const MAX_EVENTS = 2000;
 const EVENT_TEXT = 3000;
@@ -38,6 +39,9 @@ const OUT_OF_LIMIT = new Set(['incomplete']);
 // What Continue picks up: ran out of a limit, was cut off by the runner or its sandbox, or was stopped by a person.
 const CONTINUABLE = new Set(['incomplete', 'interrupted', 'stopped']);
 const DEFAULT_AUTO_ATTEMPTS = 3;  // automatic resumes of one run before it waits for a person
+const DEFAULT_FIX_TRIES = 2;      // auto-fix tries for one pull request before it waits for a person
+const MAX_FIX_TRIES = 5;
+const FIX_MAX_USD = Math.max(0.01, Number(process.env.RUNNER_FIX_MAX_USD) || 2); // cost cap of a pull request's fixes, when the run has no Max cost
 const MAX_AUTO_ATTEMPTS = 10;
 // how often a cloud sandbox's work is committed and handed back to the repo while it runs, so a sandbox that dies loses little (0: never)
 const checkpointMs = () => (process.env.RUNNER_CHECKPOINT_MIN !== undefined && Number(process.env.RUNNER_CHECKPOINT_MIN) >= 0 ? Number(process.env.RUNNER_CHECKPOINT_MIN) : 10) * 60000;
@@ -209,6 +213,8 @@ class RunManager {
         this.active = new Map();    // id -> the part a continued run is working as now
         this.live = new Map();      // id -> { sandbox, stop, resolve }
         this.executing = new Map(); // id -> the promise of the part working now, for shutdown()
+        this.tokens = new Map();    // hosted: person -> their GitHub token, kept in memory for the background PR checks only
+        this.watching = false;
         this.previews = new PreviewManager(); // a run's dev server, for looking at its work
         this.queue = [];
         fs.mkdirSync(dir, { recursive: true });
@@ -418,6 +424,10 @@ class RunManager {
             // at most autoMax times; autoCostFrom is what it had spent when the first automatic resume began
             autoContinue: isFlag(cfg.autoContinue), autoMax: num(cfg.autoContinueMax, 1, MAX_AUTO_ATTEMPTS, DEFAULT_AUTO_ATTEMPTS), autoAttempts: 0, autoCostFrom: null, resumedAuto: null, interrupted: null, checkpoint: null,
             landing, landOn, landed: null,
+            // pull requests: the state GitHub last gave (prWatch.js), and auto-fix, which starts a run that resolves the PR's conflicts
+            // (fixOf: the run whose PR it is; autoPush: put its commit on that PR when it finishes)
+            prState: null, autoFixConflicts: isFlag(cfg.autoFixConflicts), autoFixMax: num(cfg.autoFixMax, 1, MAX_FIX_TRIES, DEFAULT_FIX_TRIES),
+            fixOf: cfg.fixOf && this.runs.has(String(cfg.fixOf)) ? String(cfg.fixOf) : null, autoPush: isFlag(cfg.autoPush, false),
             sandbox, sandboxId: null,
             // ChatDev runs: the most the sandbox's model key may spend, in dollars
             maxUsd: isChatDev ? Math.min(1000, Math.max(0.01, Number(cfg.maxUsd) || Number(process.env.CHATDEV_MAX_USD) || 2)) : null,
@@ -698,6 +708,7 @@ class RunManager {
             if (isCloud(live.sandbox?.kind)) live.sandbox.destroy().catch(() => {});
             else await live.sandbox?.close?.();
             this.noteAgent(run);
+            if (run.fixOf) await this.landFix(run);
             this.startAutoDebug(run);
             this.pump();
             // a sandbox that ended under it is picked up again at once (a restart is picked up when the runner is back: resumeInterrupted)
@@ -847,6 +858,133 @@ class RunManager {
         } catch (err) {
             this.event(run, { type: 'note', text: `Could not save the unfinished work (${err.message}).` });
         }
+    }
+
+    // --- pull requests: state from GitHub, merge conflicts, Fix conflicts and auto-fix ---------
+
+    /** The token that reaches GitHub for a run: the person's (kept from their last request), or GITHUB_TOKEN here. */
+    tokenFor(run) { return this.hosted ? (this.tokens.get(run?.owner) || '') : (process.env.GITHUB_TOKEN || ''); }
+
+    /** Keep a hosted person's GitHub token for the background checks. Memory only: it is never written to disk. */
+    rememberToken(owner, token) { if (this.hosted && owner && token) this.tokens.set(owner, token); }
+
+    /** Store a run's PR state on the run, and on the part of it working now (a continued run folds its part back). */
+    setPrState(id, next) {
+        const root = this.runs.get(id);
+        const live = this.active.get(id);
+        if (root) root.prState = next;
+        if (live) live.prState = next;
+        this.save(live || root);
+    }
+
+    /**
+     * Ask GitHub for a run's pull request and keep the answer on the run. When the PR has merge conflicts and the run is
+     * set to auto-fix them, a fix starts (if the tries and cost allow). Resolves the new state.
+     */
+    async refreshPr(id, { token = '' } = {}) {
+        const root = this.runs.get(id);
+        if (!root) throw new Error('no such run');
+        const ref = prWatch.prRefOf(root);
+        if (!ref) throw new Error('this run has no pull request');
+        if (token) this.rememberToken(root.owner, token);
+        const state = await prWatch.fetchPullState(ref, { token: token || this.tokenFor(root) });
+        this.setPrState(id, { ...state, fixRun: root.prState?.fixRun || null });
+        // auto-fix acts on the runs a person started, never on a fix run (a fix of a fix could go on for ever)
+        if (state.conflict === true && root.autoFixConflicts && !root.fixOf && !this.fixBlock(root, { manual: false })) {
+            this.event(root, { type: 'note', auto: true, text: `Pull request #${ref.number} has merge conflicts. Auto-fix is on, so a run is starting to resolve them.` });
+            this.startFix(id, { auto: true });
+        }
+        return root.prState;
+    }
+
+    /**
+     * Why a run's pull request may not get a fix right now, or null when it may. A fix waits while the run works, while
+     * the PR is closed or merged, and while another fix runs. Auto-fix also stops at its tries and its cost.
+     */
+    fixBlock(root, { manual = false } = {}) {
+        if (!root || root.parent || root.kind !== 'run') return 'it is not a single run';
+        if (['queued', 'running', 'waiting'].includes(root.status) || this.active.has(root.id)) return 'the run is still working';
+        if (['merged', 'closed'].includes(root.prState?.status)) return 'its pull request is closed';
+        const fixes = [...this.runs.values()].filter((r) => r.fixOf === root.id);
+        if (fixes.some((r) => ['queued', 'running', 'waiting'].includes(r.status))) return 'a fix is already running';
+        if (manual) return null;
+        if (fixes.length >= (root.autoFixMax || DEFAULT_FIX_TRIES)) return `it has already tried ${fixes.length} time${fixes.length === 1 ? '' : 's'}`;
+        const spent = fixes.reduce((n, r) => n + (r.cost || 0), 0);
+        const cap = root.maxCost > 0 ? root.maxCost : FIX_MAX_USD;
+        if (spent >= cap) return `its fixes have already spent ${usd(cap)}`;
+        return null;
+    }
+
+    /**
+     * Start a run that merges the PR's base into the PR's branch and resolves the conflicts. It starts from the PR's head
+     * (prBrief checks the PR out), so its commit goes back on the PR. With auto, its commit is put on the PR when it is done.
+     */
+    startFix(id, { auto = false } = {}) {
+        const root = this.runs.get(id);
+        if (!root) throw new Error('no such run');
+        const ref = prWatch.prRefOf(root);
+        if (!ref) throw new Error('this run has no pull request to fix');
+        const why = this.fixBlock(root, { manual: !auto });
+        if (why) throw new Error(`cannot fix its conflicts: ${why}`);
+        const url = `https://github.com/${ref.owner}/${ref.name}/pull/${ref.number}`;
+        const goal = `Resolve the merge conflicts in pull request ${url} (#${ref.number}). Its base branch has moved on, so the pull request no longer merges cleanly. Merge the base branch into this branch, resolve each conflict so the pull request keeps its own intent and the base's changes stay, run the tests, and commit the merge. Do not rebase, force-push, rewrite history or change code outside the conflict.`;
+        const fix = this.create({
+            owner: root.owner, goal, repo: root.repo, sandbox: root.sandbox || undefined, agent: root.agent || undefined,
+            maxMinutes: root.maxMinutes || undefined, maxCost: root.maxCost > 0 ? root.maxCost : FIX_MAX_USD, maxSteps: root.maxSteps || undefined,
+            autoContinue: root.autoContinue, autoFixConflicts: root.autoFixConflicts, autoFixMax: root.autoFixMax,
+            fixOf: root.id, autoPush: auto,
+        });
+        this.setPrState(id, { ...(root.prState || {}), fixRun: fix.id });
+        this.event(root, { type: 'note', text: `${auto ? 'Auto-fix' : 'Fix conflicts'}: run ${fix.id} is resolving the merge conflicts in pull request #${ref.number}.` });
+        return fix;
+    }
+
+    /** A fix run that finished with a commit puts it on the PR it was started for, when it was started by auto-fix. */
+    async landFix(run) {
+        if (!run.autoPush) return;
+        const root = this.runs.get(run.fixOf);
+        if (!root) return;
+        if (run.status !== 'done' || !run.result?.commit) {
+            this.event(run, { type: 'note', text: 'Not put on the pull request: the fix did not finish with a commit.' });
+            return;
+        }
+        try {
+            const out = await gitHub.updatePullBranch({ dir: run.repo, branch: run.branch, pr: prWatch.prRefOf(root), token: this.tokenFor(root) });
+            root.prUpdated = { ...out, at: new Date().toISOString() };
+            this.event(run, { type: 'note', text: `Put the fix on pull request #${out.number} (${out.branch}). It is not merged.` });
+            this.save(root);
+        } catch (err) {
+            this.event(run, { type: 'note', text: `Could not put the fix on the pull request: ${err.message}` });
+        }
+    }
+
+    /** Let a run's auto-fix be turned on or off, and set how many tries it gets. */
+    setAutoFix(id, { on, max } = {}) {
+        const run = this.runs.get(id);
+        if (!run) throw new Error('no such run');
+        run.autoFixConflicts = isFlag(on, false);
+        if (max !== undefined && max !== null && max !== '') run.autoFixMax = Math.min(MAX_FIX_TRIES, Math.max(1, Math.floor(Number(max)) || DEFAULT_FIX_TRIES));
+        const live = this.active.get(id);
+        if (live) { live.autoFixConflicts = run.autoFixConflicts; live.autoFixMax = run.autoFixMax; }
+        this.save(live || run);
+        return this.summary(run);
+    }
+
+    /** Refresh the PR state of the runs whose PR is not merged or closed yet (the runner calls this on a timer). */
+    async watchPrs(limit = 30) {
+        if (this.watching) return 0;
+        this.watching = true;
+        let n = 0;
+        try {
+            const runs = [...this.runs.values()]
+                .filter((r) => !r.parent && !r.fixOf && prWatch.prRefOf(r) && !['merged', 'closed'].includes(r.prState?.status) && (!this.hosted || this.tokenFor(r)))
+                .sort((a, b) => b.created.localeCompare(a.created)).slice(0, limit);
+            for (const r of runs) {
+                await this.refreshPr(r.id).catch(() => {});
+                n++;
+            }
+        } finally { this.watching = false; }
+        return n;
     }
 
     // --- apps: registered apps whose own agent changes them ---------------------------------
@@ -1020,6 +1158,7 @@ class RunManager {
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
             autoContinue: cfg?.autoContinue ?? agent.autoContinue ?? undefined, autoContinueMax: cfg?.autoContinueMax ?? agent.autoContinueMax ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null, landing: agent.landing || undefined, jev: cfg?.jev ?? agent.jev ?? undefined, speed: cfg?.speed,
+            autoFixConflicts: cfg?.autoFixConflicts ?? agent.autoFixConflicts ?? undefined, autoFixMax: cfg?.autoFixMax ?? agent.autoFixMax ?? undefined,
         });
     }
 
@@ -1237,7 +1376,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             owner: from.owner, goal: from.goal, repo: from.repo, moreRepos: from.moreRepos, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, speed: from.speed, escalate: from.escalate, jev: from.jev, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax,
+            model: from.model, effort: from.effort, speed: from.speed, escalate: from.escalate, jev: from.jev, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax, autoFixConflicts: from.autoFixConflicts, autoFixMax: from.autoFixMax,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };

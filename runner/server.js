@@ -68,6 +68,8 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         delete body.owner;
         if (hosted) {
             body.owner = req.owner;
+            // the person's GitHub token, for landing a change on GitHub (kept in memory by the runs, never saved)
+            body.landToken = req.githubToken;
             if (repo && body.repo !== undefined && body.repo !== null && body.repo !== '') body.repo = await git.ensureClone({ base: reposBase, person: req.owner, spec: body.repo, token: req.githubToken });
             else if (repo && body.repo !== undefined) delete body.repo;
             // repos connected beside the default are only named to the agent: each must still be a GitHub repo

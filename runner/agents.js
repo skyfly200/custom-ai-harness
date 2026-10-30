@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const workflows = require('../utils/workflows');
 const { DRIVERS, normalizeKind } = require('./sandbox');
+const { cleanLanding } = require('./landing');
 
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const clean = (v, n) => String(v ?? '').trim().slice(0, n);
@@ -66,6 +67,7 @@ class AgentStore {
             out.iconImage = v;
         }
         if (has('iconText')) out.iconText = cfg.iconText ? [...String(cfg.iconText).trim()].slice(0, 4).join('') || null : null;
+        if (has('landing')) out.landing = cleanLanding(cfg.landing);
         if (has('profile')) out.profile = cfg.profile ? clean(cfg.profile, 80) : null;
         if (has('model')) out.model = cfg.model ? clean(cfg.model, 120) : null;
         if (has('effort')) {
@@ -115,7 +117,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', iconSeed: null, iconImage: null, iconText: null, moreRepos: [], profile: null, model: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, project: null,
+            instructions: '', landing: 'branch', iconSeed: null, iconImage: null, iconText: null, moreRepos: [], profile: null, model: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

@@ -51,6 +51,19 @@
     paintChoices();
   }
 
+  /** What to connect for a host and database: the steps, the secrets to add, as HTML. `github` says the repo is on GitHub. */
+  function connectHtml(target, db, github) {
+    const steps = [target, db].filter((o) => o.account).map((o) => `<li><b>${esc(o.label)}:</b> ${esc(o.account)}</li>`);
+    const secrets = [...new Set([...target.secrets, ...db.secrets])];
+    const secretsText = secrets.length
+      ? `<p class="fine">${github ? 'Add these as secrets on the GitHub repo (Settings > Secrets and variables > Actions). The harness never sees their values:' : 'Once the app has a GitHub repo, add these as secrets on it (Settings > Secrets and variables > Actions):'}</p>
+         <p class="fine">${secrets.map((s) => `<code>${esc(s)}</code>`).join(' ')}</p>`
+      : '';
+    return steps.length || secrets.length
+      ? `<strong class="fine">What you need to connect</strong><ol>${steps.join('')}</ol>${secretsText}<p class="fine muted">The builder writes DEPLOY.md with these steps in the app's repo.</p>`
+      : '<p class="fine muted">Nothing to connect: the app runs on this computer, and tests run only when you push it to GitHub.</p>';
+  }
+
   /** The help under each choice, and the list of what to connect for the chosen host and database. */
   function paintChoices() {
     const f = $('#newForm');
@@ -59,31 +72,21 @@
     if (!target || !db) return;
     $('#targetHelp').textContent = target.help;
     $('#databaseHelp').textContent = db.help;
-    const github = f.elements.repoMode.value !== 'local';
-    const steps = [target, db].filter((o) => o.account).map((o) => `<li><b>${esc(o.label)}:</b> ${esc(o.account)}</li>`);
-    const secrets = [...new Set([...target.secrets, ...db.secrets])];
-    const secretsText = secrets.length
-      ? `<p class="fine">${github ? 'Add these as secrets on the GitHub repo (Settings > Secrets and variables > Actions). The harness never sees their values:' : 'Once the app has a GitHub repo, add these as secrets on it (Settings > Secrets and variables > Actions):'}</p>
-         <p class="fine">${secrets.map((s) => `<code>${esc(s)}</code>`).join(' ')}</p>`
-      : '';
-    $('#connectBox').innerHTML = steps.length || secrets.length
-      ? `<strong class="fine">What you need to connect</strong><ol>${steps.join('')}</ol>${secretsText}<p class="fine muted">The builder writes DEPLOY.md with these steps in the app's repo.</p>`
-      : '<p class="fine muted">Nothing to connect: the app runs on this computer, and tests run only when you push it to GitHub.</p>';
+    $('#connectBox').innerHTML = connectHtml(target, db, f.elements.repoMode.value !== 'local');
   }
 
   /** Repo picker: the GitHub repos this connection reaches, loaded the first time they are needed. */
-  async function loadRepos() {
-    const sel = $('#newForm').elements.existingRepo;
+  async function loadRepos(sel = $('#newForm').elements.existingRepo, note = $('#ghNote')) {
     if (repos) return paintRepos(sel);
     try {
       const r = await fetch('/ui/api/github/repos', { credentials: 'same-origin' });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       repos = data.repos || [];
-      $('#ghNote').textContent = repos.length ? '' : 'No repos are reachable with your GitHub connection.';
+      note.textContent = repos.length ? '' : 'No repos are reachable with your GitHub connection.';
     } catch (err) {
       repos = [];
-      $('#ghNote').innerHTML = `${esc(err.message)}. Connect GitHub on the <a href="settings.html">Settings</a> page to create or pick a repo.`;
+      note.innerHTML = `${esc(err.message)}. Connect GitHub on the <a href="settings.html">Settings</a> page to create or pick a repo.`;
     }
     paintRepos(sel);
   }
@@ -182,6 +185,125 @@
       if (run) { location.href = `agents.html#${run.id}`; return; }
       $('#newDialog').close();
       ui.toast(`${app.name} is ready${app.githubRepo ? `, and its GitHub repo is ${app.githubRepo}` : ` in ${app.repo}`}.`);
+      loadApps();
+    } catch (err) {
+      msg.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ---- Import an existing app: look first (read only), then fill the form and register it ----
+  let looked = null; // the detection for the folder or repo the person looked at
+
+  const importForm = () => $('#importForm');
+  const importSource = () => importForm().elements.source.value;
+
+  function paintImportSrc() {
+    const src = importSource();
+    for (const el of importForm().querySelectorAll('[data-src]')) el.hidden = el.dataset.src !== src;
+    if (src === 'github') loadRepos(importForm().elements.githubRepo, $('#importNote'));
+    else $('#importNote').textContent = '';
+    hideImportRest();
+  }
+
+  function hideImportRest() {
+    looked = null;
+    $('#importRest').hidden = true;
+    $('#importMsg').textContent = '';
+  }
+
+  /** The select options for host and database, with the detection's pick selected. */
+  function paintImportChoices() {
+    const f = importForm();
+    const target = hosting.targets.find((o) => o.id === f.elements.deployTarget.value) || hosting.targets[0];
+    const db = hosting.databases.find((o) => o.id === f.elements.database.value) || hosting.databases[0];
+    if (!target || !db) return;
+    $('#importTargetHelp').textContent = target.help;
+    $('#importDatabaseHelp').textContent = db.help;
+    $('#importConnect').innerHTML = connectHtml(target, db, importSource() === 'github' || Boolean(looked?.githubRepo));
+  }
+
+  function fillImport(d) {
+    const f = importForm();
+    f.elements.deployTarget.innerHTML = hosting.targets.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('');
+    f.elements.database.innerHTML = hosting.databases.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('');
+    f.elements.deployTarget.value = d.deployTarget;
+    f.elements.database.value = d.database;
+    f.elements.name.value = d.suggestedName || '';
+    f.elements.name.placeholder = d.suggestedName || 'Note board';
+    f.elements.editablePaths.value = d.editablePaths.join('\n');
+    f.elements.installCommand.value = d.installCommand || '';
+    f.elements.testCommand.value = d.testCommand || '';
+    f.elements.devCommand.value = d.devCommand || '';
+    $('#importFound').textContent = d.stack.length ? `Looks like ${d.stack.join(' · ')}.` : 'No known stack found. You can still register it and fill in the details.';
+    $('#importNotes').innerHTML = d.notes.map((n) => `<li>${esc(n)}</li>`).join('');
+    const present = [d.hasCi && 'a CI workflow', d.hasDeploy && 'a deploy workflow', d.hasDeployDoc && 'DEPLOY.md'].filter(Boolean);
+    if (present.length) $('#importNotes').insertAdjacentHTML('beforeend', `<li>Already has ${esc(present.join(', '))}; those files are kept.</li>`);
+    $('#importRest').hidden = false;
+    paintImportChoices();
+  }
+
+  $('#importApp').addEventListener('click', () => {
+    importForm().reset();
+    hideImportRest();
+    paintImportSrc();
+    $('#importDialog').showModal();
+  });
+  $('#importClose').addEventListener('click', () => $('#importDialog').close());
+
+  importForm().addEventListener('change', (e) => {
+    if (e.target.name === 'source') paintImportSrc();
+    else if (e.target.name === 'deployTarget' || e.target.name === 'database') paintImportChoices();
+  });
+
+  $('#importLook').addEventListener('click', async () => {
+    const f = importForm();
+    const body = importSource() === 'github'
+      ? { source: 'github', repo: f.elements.githubRepo.value }
+      : { source: 'local', folder: f.elements.folder.value.trim() };
+    if (body.source === 'github' && !body.repo) return ui.toast('Choose a repo first.', { kind: 'error' });
+    if (body.source === 'local' && !body.folder) return ui.toast('Type the folder first.', { kind: 'error' });
+    const btn = $('#importLook');
+    btn.disabled = true;
+    $('#importMsg').textContent = 'Looking…';
+    try {
+      looked = await api('POST', '/import/detect', body);
+      fillImport(looked);
+      $('#importMsg').textContent = '';
+    } catch (err) {
+      hideImportRest();
+      ui.toast(err.message, { kind: 'error' });
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  importForm().addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!looked) return;
+    const f = importForm();
+    const msg = $('#importMsg');
+    const btn = $('#importGo');
+    const body = {
+      source: looked.source,
+      ...(looked.source === 'github' ? { repo: looked.githubRepo } : { folder: looked.folder }),
+      name: f.elements.name.value.trim() || undefined,
+      deployTarget: f.elements.deployTarget.value,
+      database: f.elements.database.value,
+      editablePaths: f.elements.editablePaths.value.split('\n').map((s) => s.trim()).filter(Boolean),
+      installCommand: f.elements.installCommand.value.trim(),
+      testCommand: f.elements.testCommand.value.trim(),
+      devCommand: f.elements.devCommand.value.trim(),
+      previewPort: looked.previewPort,
+      addFiles: f.elements.addFiles.checked,
+    };
+    btn.disabled = true;
+    msg.textContent = 'Importing…';
+    try {
+      const { app, added } = await api('POST', '/import', body);
+      $('#importDialog').close();
+      ui.toast(`${app.name} is imported${added.length ? `, and ${added.length} file${added.length === 1 ? '' : 's'} were added for you to review` : ''}.`);
       loadApps();
     } catch (err) {
       msg.textContent = err.message;

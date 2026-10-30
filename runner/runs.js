@@ -22,6 +22,7 @@ const { AgentStore, cleanMoreRepos } = require('./agents');
 const { AppStore, editableMatcher } = require('./apps');
 const templates = require('./templates');
 const hosting = require('./hosting');
+const importDetect = require('./importDetect');
 const prBrief = require('./prBrief');
 const runExport = require('./runExport');
 const { Shipper, verdict: shipVerdict } = require('./ship');
@@ -1068,6 +1069,99 @@ class RunManager {
         const text = templates.cleanText(description, 300);
         const run = build && text ? this.askChange(app.id, { request: `Build the first version: ${text}` }) : null;
         return { app, run };
+    }
+    /**
+     * An existing app, read but not changed: the folder (or a shallow look at a GitHub repo's clone, removed again) and
+     * what it seems to be. `source` is 'local' (a git folder under an allowed root) or 'github' (owner/name).
+     */
+    async detectImport({ source = 'local', folder, repo, parent, token = '' } = {}) {
+        if (source === 'github') {
+            const spec = gitHub.parse(repo);
+            const scratch = path.join(this.dir, `_detect-${crypto.randomBytes(4).toString('hex')}`);
+            try {
+                await gitHub.cloneRepo({ owner: spec.owner, name: spec.name, dir: scratch, token: String(token || process.env.GITHUB_TOKEN || '') });
+                return { source, suggestedName: spec.name, ...importDetect.detectFolder(scratch), githubRepo: `${spec.owner}/${spec.name}` };
+            } finally {
+                fs.rmSync(scratch, { recursive: true, force: true });
+            }
+        }
+        if (source !== 'local') throw new Error('the source must be local or github');
+        const real = this.importFolder(folder);
+        return { source, folder: real, ...importDetect.detectFolder(real) };
+    }
+
+    /** A folder to import: inside an allowed root, a git repo, and not already an app. Returns its real path. */
+    importFolder(folder) {
+        const real = this.checkRepo(String(folder || ''));
+        if (!fs.statSync(real).isDirectory()) throw new Error(`${folder} is not a folder`);
+        if (!fs.existsSync(path.join(real, '.git'))) throw new Error(`${folder} is not a git repo: run git init and commit its files first`);
+        if (this.apps.list().some((a) => a.repo === real)) throw new Error(`${folder} is already an app`);
+        return real;
+    }
+
+    /**
+     * Register an existing repo as an app, without a template. A local folder is used where it is; a GitHub repo is
+     * cloned into `parent` (default: the first allowed folder) under a slug of the name. Whatever the form leaves blank
+     * comes from the detection. With `addFiles`, the CI workflow, the deploy workflow, fly.toml and DEPLOY.md are written
+     * for the chosen host and database, but only where the repo does not already have that file; nothing is committed.
+     */
+    async importApp({ source = 'local', folder, repo, parent, name, editablePaths, deployTarget, database, installCommand, testCommand, devCommand, previewPort, addFiles = true, token = '' } = {}) {
+        let real;
+        let cloned = null;
+        if (source === 'github') {
+            const spec = gitHub.parse(repo);
+            const dir = String(parent || this.roots[0] || '');
+            let base;
+            try { base = fs.realpathSync(dir); } catch { throw new Error(`${dir || 'the folder'} does not exist`); }
+            if (!this.roots.some((r) => base === r || base.startsWith(r + path.sep))) throw new Error(`${dir} is not inside an allowed folder (${this.roots.join(', ') || 'none; set RUNNER_ROOTS'})`);
+            const slug = templates.slugify(name || spec.name);
+            if (!slug) throw new Error('an app needs a name with letters or numbers');
+            cloned = path.join(base, slug);
+            if (fs.existsSync(cloned) && fs.readdirSync(cloned).length) throw new Error(`${cloned} is not empty`);
+            await gitHub.cloneRepo({ owner: spec.owner, name: spec.name, dir: cloned, token: String(token || process.env.GITHUB_TOKEN || '') });
+            real = cloned;
+        } else if (source === 'local') {
+            real = this.importFolder(folder);
+        } else {
+            throw new Error('the source must be local or github');
+        }
+
+        try {
+            const found = importDetect.detectFolder(real);
+            const githubRepo = found.githubRepo;
+            const slug = templates.slugify(name || found.suggestedName || path.basename(real));
+            const appName = templates.cleanText(name || found.suggestedName || path.basename(real), 60);
+            if (!appName) throw new Error('an app needs a name');
+            const choice = {
+                deployTarget: hosting.targetId(deployTarget ?? found.deployTarget),
+                database: hosting.databaseId(database ?? found.database),
+            };
+            const commands = {
+                installCommand: installCommand ?? found.installCommand,
+                testCommand: testCommand ?? found.testCommand,
+                devCommand: devCommand ?? found.devCommand,
+            };
+            const app = this.createApp({
+                name: appName, repo: real, editablePaths: editablePaths ?? found.editablePaths, ...commands, previewPort: previewPort ?? found.previewPort,
+                deploy: 'merge', githubRepo, ...choice,
+            });
+            const added = [];
+            const skipped = [];
+            if (addFiles) {
+                const files = hosting.hostingFiles({ name: appName, slug: slug || 'app', ...choice, installCommand: commands.installCommand, testCommand: commands.testCommand });
+                for (const f of files) {
+                    const target = path.join(real, f.path);
+                    if (fs.existsSync(target)) { skipped.push(f.path); continue; }
+                    fs.mkdirSync(path.dirname(target), { recursive: true });
+                    fs.writeFileSync(target, f.text);
+                    added.push(f.path);
+                }
+            }
+            return { app, detection: found, added, skipped };
+        } catch (err) {
+            if (cloned) fs.rmSync(cloned, { recursive: true, force: true });
+            throw err;
+        }
     }
     updateApp(id, cfg) { return this.apps.update(id, cfg || {}, cfg?.repo !== undefined ? this.checkRepo(cfg.repo) : null); }
     removeApp(id) {

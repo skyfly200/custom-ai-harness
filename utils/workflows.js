@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DIR = process.env.HARNESS_WORKFLOWS_DIR || path.join(__dirname, '..', 'workflows');
-const TOOLSETS = new Set(['read', 'check', 'all']);
+const TOOLSETS = new Set(['read', 'check', 'all', 'none']);
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const FALLBACK = 'general';
 const MAX_ASKED = 10;
@@ -31,7 +31,7 @@ function clean(raw, file) {
         if (!sid || seen.has(sid)) throw new Error(`${file}: stage ${i + 1} needs a unique id`);
         seen.add(sid);
         if (!s.prompt) throw new Error(`${file}: stage ${sid} needs a prompt`);
-        if (s.tools && !TOOLSETS.has(s.tools)) throw new Error(`${file}: stage ${sid} tools must be read, check or all`);
+        if (s.tools && !TOOLSETS.has(s.tools)) throw new Error(`${file}: stage ${sid} tools must be read, check, all or none`);
         if (s.effort && !EFFORTS.has(s.effort)) throw new Error(`${file}: stage ${sid} effort is not valid`);
         if (s.canWait && !s.model) throw new Error(`${file}: stage ${sid} has canWait, so it needs a "model" (an OpenRouter batch model id)`);
         if (s.model && !MODEL_RE.test(String(s.model))) throw new Error(`${file}: stage ${sid} model must be a model name`);
@@ -41,7 +41,8 @@ function clean(raw, file) {
             maxSteps: Math.min(10000, Math.max(0, Number.isFinite(Math.floor(Number(s.maxSteps))) ? Math.floor(Number(s.maxSteps)) : 0)), effort: s.effort || null,
             verdict: Boolean(s.verdict), retryTo: s.retryTo || null, maxRetries: Math.min(MAX_RETRIES, Math.max(0, Math.floor(Number(s.maxRetries)) || 0)),
             model: s.model ? String(s.model) : null,
-            // canWait: one request, no tools, sent as a half-price batch and waited for (maxWaitMinutes); diff: put the working diff in it
+            // canWait: one request, no tools, sent as a half-price batch and waited for (maxWaitMinutes); diff: put the working diff in it.
+            // tools "none" is a step with no tools but finish; in an overnight run such a step with a batch model is batched too (runner/runs.js waitsAsBatch)
             canWait: Boolean(s.canWait), diff: Boolean(s.diff), maxWaitMinutes: Math.min(1440, Math.max(1, Math.floor(Number(s.maxWaitMinutes)) || 120)),
         };
     });

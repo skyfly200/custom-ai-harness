@@ -30,13 +30,7 @@
 
   <div id="down" class="card notice" hidden></div>
 
-  <section id="githubBox" hidden>
-    <h2 data-hint="Agents work on your GitHub repos. Paste a fine-grained personal access token with Contents: read and write on the repos you want to use. It is kept encrypted and only used to clone, fetch and push your run branches">GitHub</h2>
-    <div class="card" id="githubCard">
-      <p class="muted" id="githubNote">Checking GitHub…</p>
-      <p><button type="button" id="githubManage" class="primary">Connect GitHub</button></p>
-    </div>
-  </section>
+
 
   <section class="hero" id="hero" aria-live="polite">
     <span class="orb big" id="heroOrb"><i></i><i></i><i></i></span>
@@ -44,6 +38,7 @@
   </section>
 
   <div class="bubbles" id="agentChips" role="list" aria-label="Agents"></div>
+  <p class="gear"><button type="button" id="agentsGear" data-hint="GitHub connection and sandboxes">⚙ Agent settings</button></p>
   <aside class="livepanel" id="livePanel" aria-label="Open runs" hidden></aside>
   <div class="backbar" id="backBar" hidden>
     <button type="button" id="backBtn">← All agents</button>
@@ -51,10 +46,25 @@
       <button type="button" role="tab" data-sub="start" id="tabStart">New run</button>
       <button type="button" role="tab" data-sub="runs" id="tabRuns">Runs</button>
     </span>
+    <button type="button" id="settingsLink" class="gearlink" data-hint="GitHub connection and sandboxes" aria-label="Agent settings">⚙</button>
     <span class="seg" id="layoutNav" aria-label="Run layout" hidden>
       <button type="button" data-layout="side" id="layoutSide" data-hint="Run and terminal next to each other">Side by side</button>
       <button type="button" data-layout="stack" id="layoutStack" data-hint="Run above, terminal below">Stacked</button>
     </span>
+  </div>
+  <div id="settingsBox" hidden>
+    <h2>Agent settings</h2>
+  <section id="githubBox" hidden>
+    <h2 data-hint="Agents work on your GitHub repos. Paste a fine-grained personal access token with Contents: read and write on the repos you want to use. It is kept encrypted and only used to clone, fetch and push your run branches">GitHub</h2>
+    <div class="card" id="githubCard">
+      <p class="muted" id="githubNote">Checking GitHub…</p>
+      <p><button type="button" id="githubManage" class="primary">Connect GitHub</button></p>
+    </div>
+  </section>
+    <section id="sandboxBox">
+      <h2 data-hint="Where an agent's commands run. Pick one per run or agent; the default comes from the server's .env">Sandboxes</h2>
+      <div class="card"><ul id="sandboxList" class="plain"><li class="muted">Loading…</li></ul></div>
+    </section>
   </div>
   <div id="agentInfo" class="card agent-info" hidden></div>
 

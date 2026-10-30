@@ -254,9 +254,18 @@ if (require.main === module) {
         // cloud sandbox (E2B_API_KEY). sprites: a Fly Sprite (SPRITES_TOKEN).
         sandbox: process.env.RUNNER_SANDBOX || (hosted ? (process.env.SPRITES_TOKEN ? 'sprites' : 'e2b') : 'local'),
     });
-    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { manager.previews.stopAll(); process.exit(0); });
+    // a deploy or restart: save what the running agents have done and mark them interrupted before going
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+        process.once(signal, async () => {
+            manager.previews.stopAll();
+            try { await manager.shutdown({ timeoutMs: Number(process.env.RUNNER_SHUTDOWN_MS) || 15000 }); } catch { /* going anyway */ }
+            process.exit(0);
+        });
+    }
     createApp(manager, { token: process.env.RUNNER_TOKEN || '', port, hosted, reposBase }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {
         console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}; sandbox: ${manager.sandboxKind}`);
+        const resuming = manager.resumeInterrupted({ delayMs: Number(process.env.RUNNER_RESUME_DELAY_MS) || 5000 });
+        if (resuming) console.log(`Resuming ${resuming} interrupted run(s) that are set to auto-continue.`);
     });
 }
 

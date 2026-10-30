@@ -1,6 +1,7 @@
 # Fly.io config. Steps are in docs/fly.md. Change `app` to a name nobody else has taken.
 app = "skyler-agents"
 primary_region = "dfw"   # Dallas: Fly has no Denver region
+kill_timeout = "30s"     # a deploy waits this long for the runner to commit running agents' work and mark them interrupted
 
 [build]
   dockerfile = "Dockerfile.fly"

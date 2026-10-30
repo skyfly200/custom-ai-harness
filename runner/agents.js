@@ -82,6 +82,12 @@ class AgentStore {
                 out.maxCost = Math.min(1000, Math.round(n * 100) / 100) || null;
             }
         }
+        if (has('autoContinue')) out.autoContinue = !(cfg.autoContinue === false || cfg.autoContinue === 0 || cfg.autoContinue === '0' || cfg.autoContinue === 'false' || cfg.autoContinue === '' || cfg.autoContinue === null);
+        if (has('autoContinueMax')) {
+            const n = cfg.autoContinueMax === null || cfg.autoContinueMax === '' ? null : Math.floor(Number(cfg.autoContinueMax));
+            if (n !== null && !Number.isFinite(n)) throw new Error('autoContinueMax must be a number');
+            out.autoContinueMax = n === null ? null : Math.min(10, Math.max(1, n));
+        }
         // the chat project (they live in the browser) this agent belongs to: its id and name
         if (has('moreRepos')) out.moreRepos = cleanMoreRepos(cfg.moreRepos);
         if (has('project')) {
@@ -97,7 +103,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', iconSeed: null, moreRepos: [], profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, project: null,
+            instructions: '', iconSeed: null, moreRepos: [], profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

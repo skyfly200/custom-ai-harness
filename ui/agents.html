@@ -124,6 +124,8 @@
         <input type="checkbox" name="plan" value="1"><span>Plan only</span></label>
       <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so the harness picks a stronger model. Up to two steps up, never above Highest tier">
         <input type="checkbox" name="escalate" value="1" checked><span>Stronger model on failure</span></label>
+      <label class="check" data-hint="If the runner restarts (a deploy, a crash) or the cloud sandbox ends while this is working, pick it up again by itself from its last saved commit, up to the attempts below, and not past one more cost limit. A run you stop yourself is never resumed">
+        <input type="checkbox" name="autoContinue" value="1"><span>Auto-continue if interrupted</span></label>
       <label class="check oneoff" data-hint="When a run fails or gives up, start it again straight away with what went wrong, up to 2 times">
         <input type="checkbox" name="autoDebug" value="1"><span>Auto debug</span></label>
       <label class="check oneoff" id="auditField" hidden data-hint="Swarm only: each worker's change is checked by an Auditor, who sends it back to the worker (up to 2 times) until nothing real is left. Slower and dearer, safer">
@@ -142,6 +144,7 @@
         <label class="field"><span data-hint="Most model calls before it stops. 0 means no limit: the run goes until the agent calls finish or Max minutes runs out">Max steps</span><input type="number" name="maxSteps" min="0" max="10000" placeholder="0"></label>
         <label class="field"><span data-hint="Most it may spend, in dollars, priced like the Usage page. It stops there and you can Continue it. Blank or 0: no limit. For a swarm, each worker gets this limit">Max cost ($)</span><input type="number" name="maxCost" min="0" max="1000" step="0.01" placeholder="no limit"></label>
         <label class="field"><span data-hint="Longest it may run">Max minutes</span><input type="number" name="maxMinutes" min="1" max="240" placeholder="30"></label>
+        <label class="field"><span data-hint="With Auto-continue on: how many times it may resume itself after being cut off. Blank: 3">Auto-continue tries</span><input type="number" name="autoContinueMax" min="1" max="10" placeholder="3"></label>
       </div>
     </details>
     <div class="actions"><button class="primary" type="submit" id="startBtn">Start run</button><span class="note" id="startMsg"></span><span class="fine muted">Risky commands wait here for your OK. Nothing is pushed; the result is a branch.</span></div>
@@ -175,6 +178,10 @@
         <label class="field"><span data-hint="A chat project this agent belongs to. Chats in that project can hand it work with /agent, and the project lists it">Chat project</span><select name="project" id="agentProject"><option value="">None</option></select></label>
       </div>
       <label class="check" data-hint="When a model call fails or comes back empty, or a Verifier says FAIL, ask for more effort so a stronger model answers"><input type="checkbox" name="escalate" value="1" checked><span>Try a stronger model when something fails</span></label>
+      <div class="row">
+        <label class="check" data-hint="If the runner restarts (a deploy, a crash) or the cloud sandbox ends while one of its tasks is working, the task picks itself up again from its last saved commit. Never after you press Stop. Each task can still be changed when you start it"><input type="checkbox" name="autoContinue" value="1"><span>Auto-continue tasks that are interrupted</span></label>
+        <label class="field"><span data-hint="How many times one task may resume itself. Blank: 3. Together the resumes may not spend more than one more Max cost">Tries</span><input type="number" name="autoContinueMax" min="1" max="10" placeholder="3"></label>
+      </div>
       <div class="picker-foot"><span class="note" id="agentMsg"></span><button type="submit" class="primary" id="agentSave">Save agent</button></div>
     </form>
   </dialog>

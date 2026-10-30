@@ -109,7 +109,7 @@ function eventHtml(e) {
   if (e.type === 'tool') {
     const a = e.args || {};
     const brief = a.command ?? a.path ?? (typeof a.summary === 'string' ? a.summary : '') ?? '';
-    return `<div class="ev tool">${time}<strong>${esc(e.name)}</strong> <code>${esc(String(brief).slice(0, 200))}</code></div>`;
+    return `<div class="ev tool">${time}<strong>${esc(e.name)}</strong> <code>${esc(String(brief).slice(0, 200))}</code>${e.why ? ` <span class="why">${esc(e.why)}</span>` : ''}</div>`;
   }
   if (e.type === 'result') return `<div class="ev"><details data-k="${esc(key)}"${open(key)}><summary>${time}result: ${esc((e.text || '').split('\n')[0].slice(0, 120))}</summary><pre>${esc(e.text)}</pre></details></div>`;
   if (e.type === 'approval_needed') return `<div class="ev approval_needed">${time}Waiting for you: <code>${esc(e.text)}</code> (${esc(e.reason)})</div>`;
@@ -117,6 +117,7 @@ function eventHtml(e) {
   if (e.type === 'plan') return `<div class="ev stage">${time}<strong>Plan</strong><pre>${esc(e.text)}</pre></div>`;
   if (e.type === 'stage') return `<div class="ev stage">${time}<strong>${esc(e.text)}</strong></div>`;
   if (e.type === 'note') return `<div class="ev">${time}${esc(e.text)}</div>`;
+  if (e.type === 'warning') return `<div class="ev warning">${time}<strong>⚠ ${esc(e.text)}</strong></div>`;
   return '';
 }
 
@@ -147,7 +148,7 @@ function renderDetail(run) {
       ${r.commit && hosted ? `<p class="muted">${run.pushed ? `Pushed to GitHub: <a href="${esc(run.pushed.url)}" target="_blank" rel="noopener">${esc(run.branch)}</a> · <a href="${esc(run.pushed.compare)}" target="_blank" rel="noopener">open a pull request</a>` : 'The branch is only on this server so far. Push it to your GitHub repo to review it there.'}</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
     <div class="actions">${active
       ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
-      : `${hosted && r?.commit && !run.parent ? `${githubOn === false ? `<a class="btn primary" href="#settings" data-hint="Pushing and pull requests need your GitHub connection. Connect it in Agent settings">Connect GitHub to push</a>` : `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>`}` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>`);
+      : `${hosted && r?.commit && !run.parent ? `${githubOn === false ? `<a class="btn primary" href="#settings" data-hint="Pushing and pull requests need your GitHub connection. Connect it in Agent settings">Connect GitHub to push</a>` : `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>`}` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}<span class="export-btns"><button data-act="export" data-hint="Downloads everything about this run as one JSON file: the prompt, settings, every step with the model's words, tool calls and results, tokens, cost, routing and the outcome. Secrets are blanked">Export run</button><button data-act="export-md" data-hint="The same as a readable Markdown transcript">Export as text</button><button data-act="export-copy" data-hint="Copies the readable transcript so you can paste it into a chat to ask what went wrong">Copy for debugging</button></span></div>`);
   if (changed && r?.commit && diffOpen) loadDiff(run.id);
 }
 
@@ -471,6 +472,11 @@ $('detail').addEventListener('click', async (e) => {
       ui.toast(`Pull request #${pr.number} is open.`);
     }
     if (act === 'patch') await downloadPatch(selected);
+    if (act === 'export' || act === 'export-md') await downloadExport(selected, act === 'export-md');
+    if (act === 'export-copy') {
+      await navigator.clipboard.writeText(await fetchExport(selected, true));
+      ui.toast('Copied. Paste it wherever you want the run looked at.');
+    }
     if (act === 'retry' || act === 'debug') {
       const made = await post(`/${selected}/retry`, { debug: act === 'debug' });
       selected = made.id; location.hash = made.id; openDetails = new Set();
@@ -488,6 +494,17 @@ $('detail').addEventListener('click', async (e) => {
 });
 
 const runById = (id) => runs.find((r) => r.id === id);
+async function fetchExport(id, md) {
+  const res = await fetch(`api/runs/${id}/export${md ? '?format=md' : ''}`);
+  if (!res.ok) throw new Error(`could not export the run (HTTP ${res.status})`);
+  return res.text();
+}
+async function downloadExport(id, md) {
+  const url = URL.createObjectURL(new Blob([await fetchExport(id, md)], { type: md ? 'text/markdown' : 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `run-${id}.${md ? 'md' : 'json'}` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 async function downloadPatch(id) {
   const res = await fetch(`api/runs/${id}/patch`);
   if (!res.ok) throw new Error(`could not get the patch (HTTP ${res.status})`);

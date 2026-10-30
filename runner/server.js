@@ -182,6 +182,14 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         if (!run) return fail(res, new Error('no such run'), 404);
         res.type('text/plain').send(await manager.patch(req.params.id));
     });
+    // Everything needed to debug a run: ?format=md for a readable transcript, otherwise JSON. ?download=1 sends it as a file.
+    app.get('/runs/:id/export', wrap(async (req, res) => {
+        const x = await manager.exportRun(req.params.id);
+        const md = req.query.format === 'md' || req.query.format === 'markdown';
+        if (req.query.download) res.set('content-disposition', `attachment; filename="run-${x.run.id}.${md ? 'md' : 'json'}"`);
+        if (md) return res.type('text/markdown').send(require('./runExport').toMarkdown(x));
+        res.type('application/json').send(JSON.stringify(x, null, 2));
+    }));
     app.get('/runs/:id/diff', async (req, res) => {
         if (!manager.get(req.params.id)) return fail(res, new Error('no such run'), 404);
         res.type('text/plain').send(await manager.diff(req.params.id));

@@ -22,7 +22,9 @@
 .ev { font-size: 13px; padding-left: 10px; border-left: 3px solid var(--border); }
 .ev.model { border-color: var(--accent); }
 .ev.tool { border-color: var(--ok); }
-.ev.decided, .ev.approval_needed { border-color: var(--warn); }
+.ev.decided, .ev.approval_needed, .ev.warning { border-color: var(--warn); }
+.ev .why { color: var(--muted); font-style: italic; margin-left: 6px; }
+.export-btns { margin-left: auto; display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .ev .t { color: var(--muted); font-size: 11px; margin-right: 6px; }
 .ev details summary { cursor: pointer; }
 .pick-note { align-self: end; padding-bottom: 6px; font-size: 13px; }

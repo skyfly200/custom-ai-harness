@@ -54,14 +54,19 @@
       return body;
     }).join('');
     const core = r1(4 + rnd() * 5);
-    const ring = rnd() < 0.6 ? `<circle r="${r1(core + 4 + rnd() * 4)}" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="1.4"/>` : '';
+    const ring = rnd() < 0.6 ? `<circle r="${r1(core + 4 + rnd() * 4)}" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.4"/>` : '';
     const svg = `<svg class="glyph" viewBox="-50 -50 100 100" aria-hidden="true" focusable="false">`
       + layers.map((l) => (l.ring
         ? `<g fill="none" stroke="#fff" stroke-width="1.6" stroke-opacity="${l.op}">${arms(l)}</g>`
         : `<g fill="#fff" fill-opacity="${l.op}">${arms(l)}</g>`)).join('')
-      + `${ring}<circle r="${core}" fill="#fff" fill-opacity=".85"/></svg>`;
+      + `${ring}<circle r="${core}" fill="#fff" fill-opacity=".7"/></svg>`;
     return { hue, colors, svg, arms: n };
   }
+
+  // A custom icon the person set: a small uploaded picture (data URL) or a few characters such as an emoji
+  const IMG = /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+  const customOf = (agent) => (agent && typeof agent === 'object' ? { image: IMG.test(agent.iconImage || '') ? agent.iconImage : '', text: String(agent.iconText || '').slice(0, 8) } : { image: '', text: '' });
+  const escText = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   const styleOf = (c) => `--glow-a:${c.a};--glow-b:${c.b};--glow-c:${c.c};--glow-d:${c.d}`;
 
@@ -75,6 +80,9 @@
     const cls = `orb${extra ? ` ${extra}` : ''}${state ? ` ${state}` : ''}`;
     if (!seed) return `<span class="${cls}"><i></i><i></i><i></i></span>`;
     const m = make(seed);
+    const cu = customOf(agent);
+    if (cu.image) return `<span class="${cls} gen img" style="${styleOf(m.colors)};background-image:url(${cu.image})"><i></i><i></i><i></i></span>`;
+    if (cu.text) return `<span class="${cls} gen" style="${styleOf(m.colors)}"><span class="mark">${escText(cu.text)}</span><i></i><i></i><i></i></span>`;
     return `<span class="${cls} gen" style="${styleOf(m.colors)}">${m.svg}<i></i><i></i><i></i></span>`;
   }
 
@@ -84,13 +92,16 @@
     const cls = `aicon${extra ? ` ${extra}` : ''}`;
     if (!seed) return `<span class="${cls}" aria-hidden="true"></span>`;
     const m = make(seed);
+    const cu = customOf(agent);
+    if (cu.image) return `<span class="${cls} img" style="${styleOf(m.colors)};background-image:url(${cu.image})" aria-hidden="true"></span>`;
+    if (cu.text) return `<span class="${cls}" style="${styleOf(m.colors)}" aria-hidden="true"><span class="mark">${escText(cu.text)}</span></span>`;
     return `<span class="${cls}" style="${styleOf(m.colors)}" aria-hidden="true">${m.svg}</span>`;
   }
 
   /** A fresh random seed for the Shuffle button. */
   const randomSeed = () => Math.random().toString(36).slice(2, 10);
 
-  const api = { hash, make, orb, icon, seedOf, styleOf, randomSeed };
+  const api = { IMG, hash, make, orb, icon, seedOf, styleOf, randomSeed };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AgentIcon = api;
 })(typeof window !== 'undefined' ? window : globalThis);

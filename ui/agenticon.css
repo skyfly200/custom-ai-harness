@@ -7,5 +7,25 @@
   box-shadow: 0 0 8px -3px var(--glow-b, #ec4899); }
 .aicon.lg { width: 2em; height: 2em; }
 .icon-pick { display: flex; align-items: center; gap: 12px; }
-.icon-pick .orb { width: 44px; height: 44px; }
-.icon-pick .orb i { display: none; }
+.icon-pick .orb { width: 44px; height: 44px; margin: 0 8px; }
+
+/* Generated orbs: a softer highlight so the pattern shows, and the three dots orbit outside the orb, like the logo's, all the time */
+.orb.gen { background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .28) 0 6%, var(--glow-a) 26%, var(--glow-b) 54%, var(--glow-c) 80%); }
+.orb.gen i { animation-play-state: running; --r: 17px; }
+.orb.gen.big i { --r: 30px; }
+.orbbtn .orb.gen i { --r: 56px; }
+.agent-card .orb.gen i { --r: 21px; }
+.detail-head .orb.gen i, .sc-top .orb.gen i { --r: 14px; }
+.icon-pick .orb.gen i { --r: 30px; }
+@media (max-width: 760px) { .orbbtn .orb.gen i { --r: 46px; } }
+
+/* custom icons: a picture fills the orb; letters or an emoji sit on it */
+.orb.img, .aicon.img { background-size: cover; background-position: center; }
+.orb .mark, .aicon .mark { position: absolute; inset: 0; display: grid; place-items: center; font-size: 1.1em; line-height: 1; color: #fff; font-weight: 700; text-shadow: 0 1px 3px rgba(0, 0, 0, .35); overflow: hidden; }
+.orbbtn .orb .mark { font-size: 36px; } .orb.big .mark { font-size: 20px; } .icon-pick .orb .mark { font-size: 20px; }
+.agent-card .orb .mark { font-size: 14px; } .detail-head .orb .mark, .sc-top .orb .mark { font-size: 10px; }
+.aicon .mark { font-size: .8em; }
+.icon-pick { flex-wrap: wrap; }
+.icon-pick .icon-text { width: 4.2em; text-align: center; }
+.orbbtn .orb.gen i { width: 7px; height: 7px; margin: -3.5px; }
+.orbbtn .orb.gen i:nth-child(3) { width: 5px; height: 5px; margin: -2.5px; }

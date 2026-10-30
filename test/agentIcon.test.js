@@ -28,3 +28,13 @@ test('markup is safe and well formed', () => {
     assert.match(html, /^<span class="orb gen" style="--glow-a:hsl\(/);
     assert.equal((html.match(/<svg/g) || []).length, 1);
 });
+
+test('a custom picture or text replaces the glyph; unsafe pictures are ignored', () => {
+    const img = orb({ id: 'a1', iconImage: 'data:image/png;base64,iVBORw0KGgo=' });
+    assert.match(img, /background-image:url\(data:image\/png;base64,iVBORw0KGgo=\)/);
+    assert.ok(!img.includes('<svg'));
+    const txt = orb({ id: 'a1', iconText: '<b>' });
+    assert.match(txt, /<span class="mark">&lt;b&gt;<\/span>/);
+    const bad = orb({ id: 'a1', iconImage: 'javascript:alert(1)' });
+    assert.ok(!bad.includes('javascript') && bad.includes('<svg'));
+});

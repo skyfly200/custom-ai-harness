@@ -6,10 +6,10 @@ const nav = require('../ui/nav.js');
 
 const ui = path.join(__dirname, '..', 'ui');
 const read = (f) => fs.readFileSync(path.join(ui, f), 'utf8');
-const pages = ['index', 'chat', 'apps', 'usage', 'usage-users', 'routing', 'agents', 'prompts', 'tools', 'settings', 'users'];
+const pages = ['index', 'chat', 'apps', 'usage', 'usage-users', 'routing', 'agents', 'workflows', 'prompts', 'tools', 'settings', 'users'];
 
 test('the bar keeps one fixed order, with Settings last', () => {
-  assert.deepStrictEqual(nav.PAGES.map((p) => p.label), ['Dashboard', 'Chat', 'Apps', 'Agents', 'Prompts', 'Tools', 'Usage', 'Routing', 'Settings']);
+  assert.deepStrictEqual(nav.PAGES.map((p) => p.label), ['Dashboard', 'Chat', 'Apps', 'Agents', 'Workflows', 'Prompts', 'Tools', 'Usage', 'Routing', 'Settings']);
   for (const p of nav.PAGES) assert.ok(nav.ICONS[p.id], `icon for ${p.id}`);
 });
 

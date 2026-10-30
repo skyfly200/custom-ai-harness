@@ -23,18 +23,25 @@
   </header>
   <script src="nav.js"></script>
 
-  <p class="muted lead">An app is a repo the harness can change for you. Ask one for a change and the change runs on Agents, with a preview and a diff to ship or undo. Start a new one from a template below: the builder makes the folder with its starting files, commits them, and can run a first build from your description.</p>
+  <p class="muted lead">An app is a repo the harness can change for you. Ask one for a change and the change runs on Agents, with a preview and a diff to ship or undo. Start a new one from a template: the builder makes the folder with its starting files, can make or link its GitHub repo, and adds the CI and deploy files for the host and database you pick.</p>
 
   <section class="card" aria-labelledby="mineTitle">
-    <h2 id="mineTitle">Your apps</h2>
+    <div class="card-head">
+      <h2 id="mineTitle">Your apps</h2>
+      <button type="button" class="primary" id="newApp">New app</button>
+    </div>
     <div id="appList" class="app-list"><p class="muted">Loading…</p></div>
   </section>
 
-  <section class="card" aria-labelledby="newTitle">
-    <h2 id="newTitle">New app</h2>
-    <div id="tpls" class="tpls" role="radiogroup" aria-label="Template"><p class="muted">Loading templates…</p></div>
-
+  <dialog id="newDialog" class="picker newdlg" aria-labelledby="newTitle">
     <form id="newForm" class="new-form" autocomplete="off">
+      <div class="picker-head"><strong id="newTitle">Start a new app</strong><button type="button" id="newClose" aria-label="Close">×</button></div>
+
+      <fieldset class="group">
+        <legend>Template</legend>
+        <div id="tpls" class="tpls" role="radiogroup" aria-label="Template"><p class="muted">Loading templates…</p></div>
+      </fieldset>
+
       <div class="row2">
         <label class="field"><span>Name</span><input name="name" maxlength="60" required placeholder="Note board"></label>
         <label class="field"><span>Folder it goes in</span><input name="parent" list="roots" placeholder="the first allowed folder"></label>
@@ -42,13 +49,36 @@
       <datalist id="roots"></datalist>
       <label class="field"><span>What should it do?</span><textarea name="description" rows="3" placeholder="A board where the team pins short notes, newest first"></textarea></label>
       <div id="questions" class="row2"></div>
+
+      <fieldset class="group">
+        <legend>GitHub repo</legend>
+        <p class="fine muted">The repo holds the code, runs the CI tests and deploys the app. It is private unless you say otherwise on GitHub.</p>
+        <label class="check"><input type="radio" name="repoMode" value="local" checked> Only a folder on this computer for now</label>
+        <label class="check"><input type="radio" name="repoMode" value="create"> Create a new GitHub repo</label>
+        <label class="field indent" data-for="create"><span>New repo name</span><input name="newRepo" maxlength="100" placeholder="note-board" spellcheck="false"></label>
+        <label class="check"><input type="radio" name="repoMode" value="existing"> Use an existing GitHub repo (it must be empty)</label>
+        <label class="field indent" data-for="existing"><span>Repo</span><select name="existingRepo"><option value="">Loading your repos…</option></select></label>
+        <p id="ghNote" class="fine muted" role="status"></p>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Hosting and database</legend>
+        <div class="row2">
+          <label class="field"><span>Where it runs</span><select name="deployTarget" id="deployTarget"></select></label>
+          <label class="field"><span>Database</span><select name="database" id="database"></select></label>
+        </div>
+        <p id="targetHelp" class="fine muted"></p>
+        <p id="databaseHelp" class="fine muted"></p>
+        <div id="connectBox" class="connect-box" aria-live="polite"></div>
+      </fieldset>
+
       <label class="check"><input type="checkbox" name="build" checked> Build the first version from the description now</label>
       <div class="actions">
         <button type="submit" class="primary" id="create">Create app</button>
         <span id="newMsg" class="muted" role="status"></span>
       </div>
     </form>
-  </section>
+  </dialog>
 </main>
 <script src="dialogs.js"></script>
 <script src="hints.js"></script>

@@ -21,6 +21,7 @@ const { PreviewManager } = require('./preview');
 const { AgentStore, cleanMoreRepos } = require('./agents');
 const { AppStore, editableMatcher } = require('./apps');
 const templates = require('./templates');
+const hosting = require('./hosting');
 const prBrief = require('./prBrief');
 const runExport = require('./runExport');
 const { Shipper, verdict: shipVerdict } = require('./ship');
@@ -993,12 +994,18 @@ class RunManager {
     getApp(id) { return this.apps.get(id); }
     createApp(cfg) { return this.apps.create(cfg || {}, this.checkRepo(cfg?.repo)); }
     /**
-     * A new app from a template: the folder is made inside an allowed root (`parent`, default the first
-     * root), filled in, made a git repo with one commit, registered, and (unless `build` is false) given
-     * its first version as a change run built from the description.
+     * A new app from a template: the folder is made inside an allowed root (`parent`, default the first root), filled in
+     * with the template and the CI and deploy files for the chosen host and database, made a git repo with one commit,
+     * registered, and (unless `build` is false) given its first version as a change run built from the description.
+     * `github` says where its GitHub repo comes from: { mode: 'local' } (default, a repo in the folder only),
+     * { mode: 'create', repo: 'name' } (a new private repo on the person's account) or { mode: 'existing', repo:
+     * 'owner/name' } (an empty repo on GitHub, cloned into the folder). `token` is the person's GitHub token here.
      */
-    newApp({ template, name, description, answers = {}, parent, build = true } = {}) {
+    async newApp({ template, name, description, answers = {}, parent, build = true, github = {}, deployTarget, database, token = '' } = {}) {
         const t = templates.loadTemplate(String(template || ''));
+        const mode = String(github?.mode || 'local');
+        if (!['local', 'create', 'existing'].includes(mode)) throw new Error('the repo must be local, create or existing');
+        const hostingChoice = { deployTarget: hosting.targetId(deployTarget), database: hosting.databaseId(database) };
         const dir = String(parent || this.roots[0] || '');
         let real;
         try { real = fs.realpathSync(dir); } catch { throw new Error(`${dir || 'the folder'} does not exist`); }
@@ -1008,14 +1015,38 @@ class RunManager {
         const slug = templates.slugify(name);
         if (!slug) throw new Error('an app needs a name with letters or numbers');
         const folder = path.join(real, slug);
-        templates.scaffold(t, { ...answers, name, description }, folder);
+        const gitToken = String(token || (this.hosted ? '' : process.env.GITHUB_TOKEN || ''));
         const git = (...args) => execFileSync('git', ['-C', folder, '-c', 'user.name=Harness', '-c', 'user.email=harness@localhost', ...args], { encoding: 'utf8' });
-        git('init', '-q', '-b', 'main');
+
+        let githubRepo = null;
+        let remote = null;
+        if (mode === 'existing') {
+            const repo = gitHub.parse(github.repo);
+            if (fs.existsSync(folder) && fs.readdirSync(folder).length) throw new Error(`${folder} is not empty`);
+            await gitHub.cloneRepo({ owner: repo.owner, name: repo.name, dir: folder, token: gitToken });
+            if (fs.readdirSync(folder).some((f) => f !== '.git')) {
+                fs.rmSync(folder, { recursive: true, force: true });
+                throw new Error(`${repo.owner}/${repo.name} already has files: use an empty repo, or create a new one`);
+            }
+            githubRepo = `${repo.owner}/${repo.name}`;
+            git('symbolic-ref', 'HEAD', 'refs/heads/main');
+        } else if (mode === 'create') {
+            const made = await gitHub.createRepo({ name: String(github.repo || slug), token: gitToken });
+            githubRepo = `${made.owner}/${made.name}`;
+            remote = `https://github.com/${githubRepo}.git`;
+        }
+
+        const hostFiles = hosting.hostingFiles({ name: templates.cleanText(name, 60), slug, ...hostingChoice, installCommand: t.installCommand, testCommand: t.testCommand });
+        templates.scaffold(t, { ...answers, name, description }, folder, hostFiles);
+        if (mode !== 'existing') git('init', '-q', '-b', 'main');
+        if (remote) git('remote', 'add', 'origin', remote);
         git('add', '-A');
         git('commit', '-q', '-m', `Start from the ${t.name} template`);
+        if (githubRepo) await gitHub.pushDefault({ dir: folder, token: gitToken });
         const app = this.createApp({
             name: templates.cleanText(name, 60), repo: folder, editablePaths: t.editablePaths, installCommand: t.installCommand,
             devCommand: t.devCommand, testCommand: t.testCommand, previewPort: t.previewPort, deploy: t.deploy,
+            githubRepo, ...hostingChoice,
         });
         const text = templates.cleanText(description, 300);
         const run = build && text ? this.askChange(app.id, { request: `Build the first version: ${text}` }) : null;

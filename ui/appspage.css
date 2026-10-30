@@ -20,3 +20,20 @@ main.apps-page { max-width: 880px; }
 .new-form .check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .new-form .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 @media (max-width: 600px) { .new-form .row2 { grid-template-columns: 1fr; } }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.card-head h2 { margin: 0; }
+.newdlg { width: min(680px, calc(100vw - 32px)); max-height: 88vh; overflow: auto; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text); }
+.newdlg[open] { display: block; }
+.newdlg::backdrop { background: rgba(0, 0, 0, .45); }
+.newdlg .picker-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.new-form [hidden] { display: none !important; }
+.new-form .group { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.new-form .group legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
+.new-form .group select { width: 100%; box-sizing: border-box; font: inherit; }
+.new-form .field.indent { margin-left: 24px; }
+.new-form .fine { margin: 0; }
+.connect-box { border: 1px dashed var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.connect-box ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.connect-box code { font-size: 12px; overflow-wrap: anywhere; }
+.connect-box p { margin: 0; }
+.newdlg input:not([type=radio]):not([type=checkbox]) { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--field-border); background: var(--bg); color: var(--text); width: 100%; min-width: 0; box-sizing: border-box; }

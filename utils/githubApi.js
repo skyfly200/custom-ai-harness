@@ -6,6 +6,7 @@
 
 const { globToRegExp } = require('./repoTools');
 
+const { withRepoArg } = require('./repoArg');
 const API = () => String(process.env.GITHUB_API_URL || 'https://api.github.com').replace(/\/+$/, '');
 const MAX_OUTPUT = 60000;
 const MAX_LINES = 2000;
@@ -317,4 +318,4 @@ async function call({ token, repo, name, args = {}, confirmed = false, fetchFn =
     }
 }
 
-module.exports = { parseRepo, listRepos, call, describe, definitions: () => [...READ, ...WRITE], isGithubTool: (n) => NAMES.has(n), isWrite: (n) => WRITES.has(n) };
+module.exports = { parseRepo, listRepos, call, describe, definitions: () => withRepoArg([...READ, ...WRITE], 'owner/name of one of the attached GitHub repos'), isGithubTool: (n) => NAMES.has(n), isWrite: (n) => WRITES.has(n) };

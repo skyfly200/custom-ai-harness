@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="chat.css">
+<link rel="stylesheet" href="repos.css">
 <link rel="stylesheet" href="calm.css">
 <link rel="stylesheet" href="mobile.css">
 </head>
@@ -159,7 +160,10 @@
         </fieldset>
         <fieldset data-tab="tools">
           <legend>Tools</legend>
-          <label title="Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).">Git repo
+          <div class="tools-head"><span title="The first repo is the default the model works in; the others are there to read and to use when you name them">Repos</span></div>
+          <ul class="repo-chips" id="repoChips"></ul>
+          <div class="muted small" id="repoNote"></div>
+          <label title="Link a folder inside a git repo on this computer. The model can then read its files and history (read-only).">Add a git folder
             <span class="repo-row">
               <input type="text" id="repoPath" list="localRepos" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false">
               <button type="button" id="repoLink" class="mini">Link</button>
@@ -247,8 +251,10 @@
     <div class="swatches" id="pColors" role="radiogroup" aria-label="Colour"></div>
     <label>Instructions for every chat in this project
       <textarea id="pInstructions" rows="5" placeholder="Who the model is helping, house style, facts it should always know…"></textarea></label>
-    <label class="own-only" title="Chats in the project can read it (read-only) unless they link their own.">Git repo <span class="repo-row"><input type="text" id="pRepo" list="localRepos" placeholder="C:\Users\you\code\project" autocomplete="off" spellcheck="false"></span>
-      <small class="muted note-clamp">Chats in the project can read it (read-only) unless they link their own.</small></label>
+    <div class="own-only" id="pRepoBox"><span class="small"><b>Repos</b></span>
+      <ul class="repo-chips" id="pRepoChips"></ul>
+      <span class="repo-row"><input type="text" id="pRepo" list="localRepos" placeholder="owner/name on GitHub, or C:\Users\you\code\project" autocomplete="off" spellcheck="false" aria-label="Add a repo"><button type="button" id="pRepoAdd" class="mini">Add</button></span>
+      <small class="muted note-clamp">The first repo is the default. Chats in the project use these (the folders read-only) unless they set their own.</small></div>
     <div class="pair own-only">
       <label title="Where chats in this project send their messages, unless a chat picks its own">Routing <select id="pRoute"></select></label>
       <label id="pModelRow" hidden>Model <input type="text" id="pModel" list="models" placeholder="e.g. fast-openrouter" autocomplete="off"></label>
@@ -363,6 +369,7 @@
 <script src="schedule.js"></script>
 <script src="notify.js"></script>
 <script src="dictation.js"></script>
+<script src="repos.js"></script>
 <script src="chat.js"></script>
 <script src="bright.js"></script>
 <script src="agent-widget.js" data-app-name="Harness UI" defer></script>

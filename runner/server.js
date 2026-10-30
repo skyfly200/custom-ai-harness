@@ -70,6 +70,8 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
             body.owner = req.owner;
             if (repo && body.repo !== undefined && body.repo !== null && body.repo !== '') body.repo = await git.ensureClone({ base: reposBase, person: req.owner, spec: body.repo, token: req.githubToken });
             else if (repo && body.repo !== undefined) delete body.repo;
+            // repos connected beside the default are only named to the agent: each must still be a GitHub repo
+            if (Array.isArray(body.moreRepos)) body.moreRepos = body.moreRepos.map((spec) => { const r = git.parse(spec); return `${r.owner}/${r.name}`; });
         }
         return body;
     };
@@ -91,6 +93,19 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         run.pushed = { ...out, at: new Date().toISOString() };
         manager.save(run);
         res.json(out);
+    }));
+    // Push the branch (if it is not yet) and open a pull request for it (hosted only)
+    app.post('/runs/:id/pr', wrap(async (req, res) => {
+        if (!hosted) return fail(res, new Error('open the pull request from your own checkout'), 404);
+        const run = manager.get(req.params.id);
+        if (!run.result?.commit || ['queued', 'running', 'waiting'].includes(run.status)) return fail(res, new Error('this run has no finished changes to open a pull request for'), 409);
+        const title = String(req.body?.title || '').trim() || run.goal.split('\n')[0].slice(0, 100);
+        const body = `${String(req.body?.body || '').trim() || (run.result.summary || '').slice(0, 3000)}\n\n_Written by an agent (run ${run.id}) and opened by its owner._`;
+        const out = await git.openPullRequest({ dir: run.repo, branch: run.branch, token: req.githubToken, title, body, base: String(req.body?.base || ''), draft: req.body?.draft === true });
+        run.pushed = { ...out.pushed, at: new Date().toISOString() };
+        run.pr = { number: out.number, url: out.url, base: out.base, at: run.pushed.at };
+        manager.save(run);
+        res.json(run.pr);
     }));
     // Write a ticket draft as wayfinder markdown files in the repo. Without confirm: true it
     // only says what would be written, so a page can show it and ask first.
@@ -161,6 +176,12 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         const run = manager.get(req.params.id);
         return run ? res.json(run) : fail(res, new Error('no such run'), 404);
     });
+    // The change as a patch file: git apply it, or open it in an editor
+    app.get('/runs/:id/patch', async (req, res) => {
+        const run = manager.get(req.params.id);
+        if (!run) return fail(res, new Error('no such run'), 404);
+        res.type('text/plain').send(await manager.patch(req.params.id));
+    });
     app.get('/runs/:id/diff', async (req, res) => {
         if (!manager.get(req.params.id)) return fail(res, new Error('no such run'), 404);
         res.type('text/plain').send(await manager.diff(req.params.id));
@@ -189,7 +210,7 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     // The same run carried on after it ran out of steps or time: same id, same branch,
     // not a new run (Retry is for a run that failed)
     app.post('/runs/:id/continue', (req, res) => {
-        try { res.status(201).json(manager.continueRun(req.params.id)); } catch (err) {
+        try { res.status(201).json(manager.continueRun(req.params.id, { message: req.body?.message })); } catch (err) {
             fail(res, err, /no such run/.test(err.message) ? 404 : 409);
         }
     });

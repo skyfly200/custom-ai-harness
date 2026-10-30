@@ -13,6 +13,7 @@
     usage: '<path d="M5 20V11M12 20V4M19 20v-6"/>',
     routing: '<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="12" r="2.2"/><path d="M8.2 6H12a3 3 0 0 1 3 3v0l1 1.5M8.2 18H12a3 3 0 0 0 3-3v0l1-1.5"/>',
     agents: '<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V4.5M9 13v1M15 13v1"/><circle cx="12" cy="3.6" r="1"/>',
+    prompts: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
     tools: '<path d="M14.5 6.5a4 4 0 0 0 4.9 5.2L10 21l-3-3 9.3-9.4a4 4 0 0 0-1.8-2.1z"/>',
     settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
     user: '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>',
@@ -29,10 +30,11 @@
   const PAGES = [
     { id: 'dashboard', label: 'Dashboard', href: './', files: ['', 'index.html'], hint: 'Health of each part, recent chats, usage and requests' },
     { id: 'chat', label: 'Chat', href: 'chat', files: ['chat.html'], hint: 'Talk to the models through the harness' },
+    { id: 'agents', label: 'Agents', href: 'agents', files: ['agents.html', 'runs.html'], hint: 'Named agents that keep working on your repos, and one-off runs' },
+    { id: 'prompts', label: 'Prompts', href: 'prompts', files: ['prompts.html'], hint: 'Saved prompts for agents: write, improve and reuse them' },
+    { id: 'tools', label: 'Tools', href: 'tools', files: ['tools.html'], hint: 'The MCP servers the chat page can use' },
     { id: 'usage', label: 'Usage', href: 'usage', files: ['usage.html', 'usage-users.html'], hint: 'Tokens used, by client, model and service' },
     { id: 'routing', label: 'Routing', href: 'routing', files: ['routing.html'], hint: 'Where requests go, as connected boxes you can edit' },
-    { id: 'agents', label: 'Agents', href: 'agents', files: ['agents.html', 'runs.html'], hint: 'Named agents that keep working on your repos, and one-off runs' },
-    { id: 'tools', label: 'Tools', href: 'tools', files: ['tools.html'], hint: 'The MCP servers the chat page can use' },
     { id: 'settings', label: 'Settings', href: 'settings', files: ['settings.html'], admin: true, hint: 'Interceptor and Router settings' },
   ];
   const USERS = { id: 'users', href: 'users', files: ['users.html'] };

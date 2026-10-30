@@ -111,7 +111,10 @@ const sync = {
     if (!c.sharedFrom) await this.uploadAttachments(c);
     const { upserts, order, fingerprints } = ChatMerge.delta(this.wire(c.messages), snap.known);
     // The linked folder belongs to the device it was linked on: it is not sent, so another device or a hosted server never sees it
-    const { messages, syncVersion, repo: _folder, ...chatMeta } = c;
+    // a folder on this computer means nothing on another one, so only the GitHub repos sync
+    const { messages, syncVersion, repo: _folder, repos: _repos, ...chatMeta } = c;
+    const synced = Repos.list(c).filter(Repos.isGithub);
+    if (synced.length) chatMeta.repos = synced;
     const r = await this.api(`${base}/delta`, { method: 'PUT', body: { chat: chatMeta, order, upserts, base: snap.version } });
     if (r.status === 409 && attempt < 2) {
       const got = await this.api(base);
@@ -120,9 +123,10 @@ const sync = {
       const remote = await got.json();
       const merged = ChatMerge.mergeChats(c, remote);
       const { messages: joined, ...rest } = merged;
-      const keepRepo = c.repo;
+      const keepRepos = Repos.list(c);
       Object.assign(c, rest);
-      if (keepRepo) c.repo = keepRepo;
+      // folders never leave this computer: keep ours, and take the GitHub repos from whichever copy is newer
+      if (keepRepos.length) Repos.set(c, Repos.mergeKeepingFolders(keepRepos, Repos.list(rest)));
       c.messages.splice(0, c.messages.length, ...joined);
       this.noteSaved(c.id, remote.syncVersion, remote.messages);
       return this.saveChat(id, attempt + 1);
@@ -371,7 +375,7 @@ function saveChat(c, { touch = true } = {}) {
   if (touch) c.updated = Date.now();
   cache.set(c.id, c);
   // an empty chat isn't listed until something is in it
-  if (!c.messages.length && !c.system && !c.notes && !c.repo && !c.github && !c.skills?.length) return;
+  if (!c.messages.length && !c.system && !c.notes && !Repos.list(c).length && !c.skills?.length) return;
   store.set(CHAT_KEY(c.id), c);
   const entry = { id: c.id, title: chatTitle(c), updated: c.updated, count: c.messages.length, project: c.project || undefined, caches: c.caches, ...(c.sharedFrom ? { sharedFrom: c.sharedFrom, sharedRole: c.sharedRole } : {}) };
   const i = index.findIndex(e => e.id === c.id);
@@ -1390,9 +1394,22 @@ $('log').addEventListener('click', async (e) => {
 // The chat's own repo, else its project's
 // A folder on someone's own computer means nothing to a hosted server, which says so with localRepos: false
 const hostedNoFolders = () => toolInfo?.localRepos === false;
-const repoOf = (c) => (hostedNoFolders() ? null : c?.repo || projectOf(c)?.repo || null);
-// The chat's GitHub repo ({ full: "owner/name", branch, private }), attached under Options > Tools
-const ghOf = (c) => c?.github || null;
+// The repos a chat works with, the first one the default (ui/repos.js): its own list, else its project's.
+// Folders on someone's computer are left out on a hosted server.
+const reposOf = (c) => {
+  const all = Repos.effective(c, projectOf(c));
+  return hostedNoFolders() ? all.filter(Repos.isGithub) : all;
+};
+// The default git folder, and the default GitHub repo ({ full: "owner/name", branch, private }), attached under Options > Tools
+const repoOf = (c) => Repos.defaultOf(reposOf(c), 'local');
+const ghOf = (c) => Repos.defaultOf(reposOf(c), 'github');
+// The repo a tool call is for: the one it names with its repo argument (any case, owner/name or just the name),
+// else the default. { repo } or { error } for the model.
+function repoFor(c, toolName, args) {
+  const kind = String(toolName).startsWith('github_') ? 'github' : 'local';
+  const named = typeof args?.repo === 'string' ? args.repo : '';
+  return Repos.find(reposOf(c), named, kind);
+}
 // Skills on for this chat: its own and its project's
 function skillsOf(c) {
   const ids = new Set([...(c?.skills || []), ...(projectOf(c)?.skills || [])]);
@@ -1426,6 +1443,9 @@ function contextText(c) {
       + 'Use the github_ tools to list, read and search its files, look at its commits, branches, issues, pull requests and GitHub Actions runs and logs before answering questions about it. Paths are relative to the repository root. '
       + 'github_create_issue, github_comment, github_create_pull_request, github_run_workflow, github_rerun and github_cancel_run change GitHub: the user is asked to approve each one first, so say what you intend to post and why. You cannot push code or edit files in this repository.');
   }
+  // Several repos: say which is the default and how to reach the others
+  const manyRepos = Repos.promptText(reposOf(c));
+  if (manyRepos) parts.push(manyRepos);
   return parts.join('\n\n');
 }
 
@@ -1911,9 +1931,18 @@ async function runTool(call, c, signal, onChange) {
   let confirmed = false;
   call.approval = null;
   try {
+    // Which attached repo this call is for (its repo argument, else the default)
+    const target = /^(github_|repo_)/.test(call.name) || call.name === 'run_command' ? repoFor(c, call.name, args) : { repo: null };
+    if (target.error && (reposOf(c).length || /^github_/.test(call.name))) {
+      call.result = `Error: ${target.error}. Leave out the repo argument to use the default repo.`;
+      call.isError = true;
+      call.ms = Date.now() - started;
+      return onChange();
+    }
+    const targetRepo = target.repo;
     if (GITHUB_WRITES.has(call.name)) {
       // These change GitHub: the person sees exactly what would be posted and allows or declines it
-      const allow = await askApproval(call, githubChange(call.name, args, ghOf(c)?.full), onChange, signal);
+      const allow = await askApproval(call, githubChange(call.name, args, targetRepo?.full), onChange, signal);
       if (!allow) {
         call.result = 'Error: the user declined this GitHub change. Do not try it again; ask what they want instead.';
         call.isError = true;
@@ -1941,7 +1970,7 @@ async function runTool(call, c, signal, onChange) {
       const check = await fetch('api/tools/shell/check', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ command: String(args.command || ''), chatId: c.id, repo: repoOf(c)?.path }),
+        body: JSON.stringify({ command: String(args.command || ''), chatId: c.id, repo: targetRepo?.path }),
         signal,
       });
       const v = await check.json().catch(() => ({}));
@@ -1968,7 +1997,7 @@ async function runTool(call, c, signal, onChange) {
     const res = await fetch('api/tools/call', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: call.name, arguments: args, repo: repoOf(c)?.path, githubRepo: ghOf(c)?.full, chatId: c.id, confirmed }),
+      body: JSON.stringify({ name: call.name, arguments: args, repo: targetRepo?.path, githubRepo: targetRepo?.full, chatId: c.id, confirmed }),
       signal,
     });
     const j = await res.json().catch(() => ({ text: `Error: HTTP ${res.status}`, isError: true }));
@@ -2182,27 +2211,37 @@ function subagentCommand(text) {
   const c = chat;
   return (async () => {
     // a git folder on this computer, else the chat's GitHub repo (the runner clones it)
-    const repo = repoOf(c) || (ghOf(c)?.full ? { path: ghOf(c).full } : null);
+    // "repo:NAME" (anywhere before the task) picks one of the attached repos; the first is the default
+    const named = /(?:^|\s)repo:(\S+)/i.exec(typed);
+    const all = reposOf(c);
+    let pick = null;
+    if (named) {
+      pick = Repos.find(all, named[1]);
+      if (pick.error) { toast(pick.error); return; }
+    } else pick = { repo: all[0] || null };
+    const repo = pick.repo ? { path: Repos.specOf(pick.repo) } : null;
     if (!repo) {
       toast(`A ${plan ? 'plan' : 'subagent'} works in a copy of your code. ${hostedNoFolders() ? 'Attach a GitHub repo (Options → Tools → GitHub)' : 'Link a git folder (Options → Tools → Git repo) or attach a GitHub repo (Options → Tools → GitHub)'}, then try again.`);
       return;
     }
-    if (!typed) {
+    if (!typed.replace(/(?:^|\s)repo:\S+/i, '').trim()) {
       toast(plan
-        ? 'Type /plan TASK: an agent reads the repo and writes down what it would change, touching nothing.'
+        ? 'Type /plan TASK: an agent reads the repo and writes down what it would change, touching nothing. Add repo:NAME to use an attached repo other than the first.'
         : 'Type /subagent TASK, or /subagent MODEL TASK to give it a cheaper model, e.g. /subagent haiku find the config loader');
       return;
     }
     // a first word that names a model is the subagent's model; otherwise it is the task
-    let model = null, goal = typed;
+    let model = null, goal = typed.replace(/(?:^|\s)repo:\S+/i, ' ').trim();
     if (!plan) {
-      const [first, ...rest] = typed.split(/\s+/);
+      const [first, ...rest] = goal.split(/\s+/);
       const pick = rest.length ? resolveModelName(first) : { model: null };
       if (pick.model) { model = pick.model; goal = rest.join(' '); }
     }
     const r = routeOf(c);
     const body = {
       goal, repo: repo.path, plan: plan ? '1' : '0',
+      // the other attached repos are named in the task, not checked out
+      ...(all.length > 1 ? { moreRepos: all.filter(e => e !== pick.repo).map(Repos.specOf) } : {}),
       // the chat's own routing, so the subagent follows the same rules
       ...(r.model ? { model: r.model } : r.profile ? { profile: r.profile.id } : {}),
       ...(c.effort && c.effort !== 'auto' ? { effort: c.effort } : {}),
@@ -2605,6 +2644,7 @@ function drawHint() {
   else if (route?.profile) bits.push(`strategy: ${esc(route.profile.name)}`);
   if (repoOf(chat)) bits.push(`linked to ${esc(repoOf(chat).name)}`);
   if (ghOf(chat)) bits.push(`GitHub ${esc(ghOf(chat).full)}`);
+  if (reposOf(chat).length > 1) bits.push(`${reposOf(chat).length} repos, ${esc(Repos.labelOf(reposOf(chat)[0]))} first`);
   if (repoOf(chat) && $('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length) bits.push('shell in the repo');
   const on = chat ? skillsOf(chat) : [];
   if (on.length) bits.push(`skill${on.length === 1 ? '' : 's'}: ${on.map(k => esc(k.name)).join(', ')}`);
@@ -2823,39 +2863,51 @@ $('mcpReload').addEventListener('click', async () => {
   loadTools();
 });
 
+// The chat's repos: its own list, or its project's until it sets one. The first is the default; controls
+// (make default, up, down, remove) act on the chat's own list, which starts as a copy of the project's.
+function chatRepoList(c) { return Repos.effective(c, projectOf(c)); }
+function setChatRepos(c, list) {
+  Repos.set(c, list);
+  saveChat(c, { touch: false });
+}
+function drawRepoChips() {
+  const own = Repos.isOwn(chat);
+  const shown = chatRepoList(chat || {});
+  $('repoChips').innerHTML = Repos.chipsHtml(shown, { controls: own || shown.length > 0, esc });
+  $('repoNote').textContent = !shown.length ? 'No repos attached. The first one you add is the default to work in.'
+    : !own ? `From the project “${projectOf(chat)?.name || ''}”. Changing the list here makes it this chat's own.`
+      : shown.length > 1 ? 'The first repo is the default; the model works in it unless you name another ("in repo X, …").' : '';
+}
+Repos.bind($('repoChips'), () => chatRepoList(chat), (next) => {
+  const c = chat;
+  setChatRepos(c, next);
+  drawRepo(); drawGithub(); drawHint(); drawContextSize(); drawKit();
+});
+
 function drawRepo() {
   const hosted = hostedNoFolders();
-  $('repoLink').disabled = hosted && !chat?.repo;
+  drawRepoChips();
+  const hiddenFolders = Repos.effective(chat, projectOf(chat)).filter(Repos.isLocal);
+  $('repoLink').disabled = hosted;
+  $('repoLink').textContent = 'Add';
+  $('repoPath').readOnly = hosted;
   if (hosted) {
-    $('repoInfo').innerHTML = chat?.repo
-      ? `Your computer's folder <code>${esc(chat.repo.path)}</code> can't be read here. Unlink it and attach a GitHub repo.`
+    $('repoInfo').innerHTML = hiddenFolders.length
+      ? `This server can't read folders on your computer (${hiddenFolders.map(r => `<code>${esc(r.path)}</code>`).join(', ')} stay in the list but are not used here). Attach GitHub repos instead.`
       : "This server can't read folders on your computer. Attach a GitHub repo instead.";
-    $('repoPath').value = chat?.repo ? chat.repo.path : '';
-    $('repoPath').readOnly = !!chat?.repo;
-    $('repoLink').textContent = chat?.repo ? 'Unlink' : 'Link';
     return;
   }
-  const r = chat?.repo;
-  $('repoPath').value = r ? r.path : $('repoPath').dataset.typed || '';
-  $('repoPath').readOnly = !!r;
-  $('repoLink').textContent = r ? 'Unlink' : 'Link';
+  $('repoPath').value = $('repoPath').dataset.typed || '';
+  const r = repoOf(chat);
   $('repoInfo').innerHTML = r
-    ? `Linked to <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · ${esc(r.head)}` : ''}. ${$('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length ? 'Read and guarded commands.' : 'Read-only.'}`
-    : projectOf(chat)?.repo
-      ? `Using the project's repo <b>${esc(projectOf(chat).repo.name)}</b>.`
-      : 'Read-only for the model.';
+    ? `Default folder <b>${esc(r.name)}</b>${r.branch ? ` on <code>${esc(r.branch)}</code>` : ''}${r.head ? ` · ${esc(r.head)}` : ''}. ${$('shellInRepo').checked && (toolInfo?.shellDefinitions || []).length ? 'Read and guarded commands.' : 'Read-only.'}`
+    : 'Link a folder inside a git repo. Read-only for the model.';
 }
 
 $('repoPath').addEventListener('input', () => { $('repoPath').dataset.typed = $('repoPath').value; });
 $('repoPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('repoLink').click(); } });
 $('repoLink').addEventListener('click', async () => {
   const c = chat;
-  if (c.repo) {
-    delete c.repo;
-    saveChat(c, { touch: false });
-    drawRepo(); drawHint(); drawContextSize();
-    return;
-  }
   const path = $('repoPath').value.trim();
   if (!path) return toast('Type the path of a folder inside a git repo.');
   $('repoLink').disabled = true;
@@ -2863,16 +2915,16 @@ $('repoLink').addEventListener('click', async () => {
     const res = await fetch('api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path, chatId: c.id }) });
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-    c.repo = { path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote, ...(j.workspacePath ? { workspacePath: j.workspacePath, workspaceBranch: j.workspaceBranch } : {}) };
+    const entry = { kind: 'local', path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote, ...(j.workspacePath ? { workspacePath: j.workspacePath, workspaceBranch: j.workspaceBranch } : {}) };
+    setChatRepos(c, Repos.add(chatRepoList(c), entry));
     $('repoPath').dataset.typed = '';
-    saveChat(c, { touch: false });
-    if (chat === c) toast(`Linked to ${j.name}.`);
+    if (chat === c) toast(`Added ${j.name}.`);
   } catch (err) {
     toast(`Could not link: ${err.message}`);
   } finally {
     $('repoLink').disabled = false;
   }
-  if (chat === c) { drawRepo(); drawHint(); drawContextSize(); }
+  if (chat === c) { drawRepo(); drawGithub(); drawHint(); drawContextSize(); drawKit(); }
 });
 
 // Folder repos found on this computer fill the Git repo fields (chat and project). Typing a path still works.
@@ -2903,12 +2955,12 @@ async function loadGithub() {
 function drawGithub() {
   const st = ghStatus;
   const box = $('ghBox');
-  const g = ghOf(chat);
+  const attached = chatRepoList(chat || {}).filter(Repos.isGithub);
+  const g = attached[0];
   box.hidden = !st || !(st.connected || st.canConnect || g);
   if (box.hidden) return;
-  $('ghRepo').value = g ? g.full : $('ghRepo').dataset.typed || '';
-  $('ghRepo').readOnly = !!g;
-  $('ghAttach').textContent = g ? 'Detach' : 'Attach';
+  $('ghRepo').value = $('ghRepo').dataset.typed || '';
+  $('ghAttach').textContent = 'Add';
   $('ghRepo').hidden = $('ghAttach').hidden = !st.connected;
   $('ghBox').querySelector('label').hidden = !st.connected;
   // Connecting, reconnecting, choosing repos and disconnecting live in a dialog (githubconnect.js), opened from here
@@ -2916,7 +2968,7 @@ function drawGithub() {
   $('ghInfo').innerHTML = !st.connected
     ? `${st.canConnect ? manage('Connect GitHub') : esc(st.note || 'GitHub is not connected.')} to let the model read your repos.`
     : g
-      ? `Attached <b>${esc(g.full)}</b>${g.branch ? ` (<code>${esc(g.branch)}</code>)` : ''} as <b>${esc(st.login || '')}</b>. Writes wait for your Allow. ${manage('Manage')}`
+      ? `${attached.length} GitHub repo${attached.length === 1 ? '' : 's'}, default <b>${esc(g.full)}</b>${g.branch ? ` (<code>${esc(g.branch)}</code>)` : ''}, as <b>${esc(st.login || '')}</b>. Writes wait for your Allow. ${manage('Manage')}`
       : `Connected as <b>${esc(st.login || '')}</b>${st.via === 'env' ? ' (GITHUB_TOKEN)' : ''}. Pick a repo or type owner/name. ${manage('Manage')}`;
 }
 $('ghInfo').addEventListener('click', async (e) => {
@@ -2929,12 +2981,6 @@ $('ghRepo').addEventListener('input', () => { $('ghRepo').dataset.typed = $('ghR
 $('ghRepo').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('ghAttach').click(); } });
 $('ghAttach').addEventListener('click', async () => {
   const c = chat;
-  if (c.github) {
-    delete c.github;
-    saveChat(c, { touch: false });
-    drawGithub(); drawHint(); drawContextSize();
-    return;
-  }
   const repo = $('ghRepo').value.trim();
   if (!repo) return toast('Pick a repo or type owner/name.');
   $('ghAttach').disabled = true;
@@ -2942,16 +2988,15 @@ $('ghAttach').addEventListener('click', async () => {
     const res = await fetch('api/github/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repo }) });
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-    c.github = { full: j.full, branch: j.branch, private: j.private };
+    setChatRepos(c, Repos.add(chatRepoList(c), { kind: 'github', full: j.full, branch: j.branch, private: j.private }));
     $('ghRepo').dataset.typed = '';
-    saveChat(c, { touch: false });
     if (chat === c) toast(`Attached ${j.full}.`);
   } catch (err) {
     toast(`Could not attach: ${err.message}`);
   } finally {
     $('ghAttach').disabled = false;
   }
-  if (chat === c) { drawGithub(); drawHint(); drawContextSize(); }
+  if (chat === c) { drawRepo(); drawGithub(); drawHint(); drawContextSize(); drawKit(); }
 });
 // Back from GitHub (/auth/github/callback): ?github=connected, or the reason it did not work
 {
@@ -2973,8 +3018,8 @@ function chatMarkdown(c) {
   if (skillsOf(c).length) out.push(`_Skills: ${skillsOf(c).map(k => k.name).join(', ')}_`, '');
   if (c.system?.trim()) out.push('## System prompt', '', c.system.trim(), '');
   if (c.notes?.trim()) out.push('## Context notes', '', c.notes.trim(), '');
-  if (c.repo) out.push(`_Linked to the git repo ${c.repo.name} (${c.repo.path})_`, '');
-  if (c.github) out.push(`_Linked to the GitHub repo ${c.github.full}_`, '');
+  const attachedRepos = Repos.effective(c, p);
+  if (attachedRepos.length) out.push(`_Repos: ${attachedRepos.map((r, i) => `${Repos.isGithub(r) ? `GitHub ${r.full}` : `git folder ${r.name} (${r.path})`}${i === 0 && attachedRepos.length > 1 ? ' (default)' : ''}`).join(', ')}_`, '');
   for (const m of c.messages) {
     if (m.role === 'user') {
       out.push('## You', '');
@@ -4068,6 +4113,36 @@ $('pShareList').addEventListener('change', (e) => {
   if (g && e.target.matches('[data-role]')) g.role = e.target.value;
 });
 
+// The repos being edited in the project dialog (saved with Save). Add checks a repo before it is listed.
+let projectRepos = [];
+function drawProjectRepos() {
+  $('pRepoChips').innerHTML = Repos.chipsHtml(projectRepos, { controls: true, esc });
+}
+Repos.bind($('pRepoChips'), () => projectRepos, (next) => { projectRepos = next; drawProjectRepos(); });
+// owner/name is a GitHub repo; anything else is a folder on this computer
+async function addProjectRepo() {
+  const typed = $('pRepo').value.trim();
+  if (!typed) return true;
+  const github = /^[\w.-]+\/[\w.-]+$/.test(typed) && !/^[a-z]:/i.test(typed) && !typed.startsWith('./');
+  $('pRepoAdd').disabled = true;
+  try {
+    const res = await fetch(github ? 'api/github/repo' : 'api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(github ? { repo: typed } : { path: typed }) });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+    projectRepos = Repos.add(projectRepos, github ? { kind: 'github', full: j.full, branch: j.branch, private: j.private } : { kind: 'local', path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote });
+    $('pRepo').value = '';
+    drawProjectRepos();
+    return true;
+  } catch (err) {
+    toast(`Could not add the repo: ${err.message}`);
+    return false;
+  } finally {
+    $('pRepoAdd').disabled = false;
+  }
+}
+$('pRepoAdd').addEventListener('click', addProjectRepo);
+$('pRepo').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addProjectRepo(); } });
+
 function openProjectDialog(id) {
   editingProject = projects.find(p => p.id === id) || sharedProjects.find(p => p.id === id) || null;
   const p = editingProject || {};
@@ -4079,7 +4154,9 @@ function openProjectDialog(id) {
   if (!theirs) loadShare(editingProject?.id);
   $('pName').value = p.name || '';
   $('pInstructions').value = p.instructions || '';
-  $('pRepo').value = p.repo?.path || '';
+  projectRepos = Repos.list(p);
+  $('pRepo').value = '';
+  drawProjectRepos();
   drawProjectRoute(editingProject);
   projectColor = p.color || COLORS[projects.length % COLORS.length];
   drawSwatches();
@@ -4160,24 +4237,11 @@ $('projectForm').addEventListener('submit', async (e) => {
     } catch (err) { return toast(`Could not save sharing: ${err.message}`); }
   }
   const p = editingProject || { id: uid(), created: Date.now() };
-  const path = $('pRepo').value.trim();
-  if (path !== (p.repo?.path || '')) {
-    if (!path) delete p.repo;
-    else {
-      $('pSave').disabled = true;
-      try {
-        const res = await fetch('api/repo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-        p.repo = { path: j.path, name: j.name, branch: j.branch, head: j.head, remote: j.remote };
-      } catch (err) {
-        toast(`Could not link the repo: ${err.message}`);
-        return;
-      } finally {
-        $('pSave').disabled = false;
-      }
-    }
+  if ($('pRepo').value.trim()) {
+    // typed but not added yet: add it now, so it is not lost
+    if (!await addProjectRepo()) return;
   }
+  Repos.set(p, projectRepos);
   Object.assign(p, { name, color: projectColor, instructions: $('pInstructions').value, skills: [...$('pSkills').querySelectorAll('input:checked')].map(i => i.value) });
   const route = $('pRoute').value;
   if (route === 'default') delete p.route; else p.route = route;
@@ -4235,7 +4299,7 @@ function drawKit() {
   $('kitShell').checked = shellOn;
   $('kitShell').disabled = !repo || !(toolInfo?.shellDefinitions || []).length;
   $('kitRepo').innerHTML = repo
-    ? `Git repo <b>${esc(repo.name)}</b> is linked${chat.repo ? '' : ' through the project'}: the model can ${shellOn ? 'read it and run commands in it' : 'read it'}.`
+    ? `Git repo <b>${esc(repo.name)}</b> is linked${Repos.isOwn(chat) ? '' : ' through the project'}${reposOf(chat).length > 1 ? ` (the default of ${reposOf(chat).length} repos)` : ''}: the model can ${shellOn ? 'read it and run commands in it' : 'read it'}.`
     : 'Link a git repo under Options to let the model read it.';
   $('kitBtn').classList.toggle('on', skillsOf(chat).length > 0);
 }

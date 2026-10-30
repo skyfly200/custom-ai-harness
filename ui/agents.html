@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="agents.css">
+<link rel="stylesheet" href="repos.css">
 <link rel="stylesheet" href="vendor/xterm/xterm.css">
 <link rel="stylesheet" href="calm.css">
 <link rel="stylesheet" href="mobile.css">
@@ -30,13 +31,7 @@
 
   <div id="down" class="card notice" hidden></div>
 
-  <section id="githubBox" hidden>
-    <h2 data-hint="Agents work on your GitHub repos. Paste a fine-grained personal access token with Contents: read and write on the repos you want to use. It is kept encrypted and only used to clone, fetch and push your run branches">GitHub</h2>
-    <div class="card" id="githubCard">
-      <p class="muted" id="githubNote">Checking GitHub…</p>
-      <p><button type="button" id="githubManage" class="primary">Connect GitHub</button></p>
-    </div>
-  </section>
+
 
   <section class="hero" id="hero" aria-live="polite">
     <span class="orb big" id="heroOrb"><i></i><i></i><i></i></span>
@@ -44,8 +39,30 @@
   </section>
 
   <div class="bubbles" id="agentChips" role="list" aria-label="Agents"></div>
+  <p class="gear"><button type="button" id="agentsGear" data-hint="GitHub connection and sandboxes">⚙ Agent settings</button></p>
   <aside class="livepanel" id="livePanel" aria-label="Open runs" hidden></aside>
-  <p class="backbar" id="backBar" hidden><button type="button" id="backBtn">← All agents</button></p>
+  <div class="backbar" id="backBar" hidden>
+    <button type="button" id="backBtn">← All agents</button>
+    <button type="button" id="settingsLink" class="gearlink" data-hint="GitHub connection and sandboxes" aria-label="Agent settings">⚙</button>
+    <span class="seg" id="layoutNav" aria-label="Run layout" hidden>
+      <button type="button" data-layout="side" id="layoutSide" data-hint="Run and terminal next to each other">Side by side</button>
+      <button type="button" data-layout="stack" id="layoutStack" data-hint="Run above, terminal below">Stacked</button>
+    </span>
+  </div>
+  <div id="settingsBox" hidden>
+    <h2>Agent settings</h2>
+  <section id="githubBox" hidden>
+    <h2 data-hint="Agents work on your GitHub repos. Paste a fine-grained personal access token with Contents: read and write on the repos you want to use. It is kept encrypted and only used to clone, fetch and push your run branches">GitHub</h2>
+    <div class="card" id="githubCard">
+      <p class="muted" id="githubNote">Checking GitHub…</p>
+      <p><button type="button" id="githubManage" class="primary">Connect GitHub</button></p>
+    </div>
+  </section>
+    <section id="sandboxBox">
+      <h2 data-hint="Where an agent's commands run. Pick one per run or agent; the default comes from the server's .env">Sandboxes</h2>
+      <div class="card"><ul id="sandboxList" class="plain"><li class="muted">Loading…</li></ul></div>
+    </section>
+  </div>
   <div id="agentInfo" class="card agent-info" hidden></div>
 
   <div id="appsBox">
@@ -80,19 +97,24 @@
     </form>
   </dialog>
 
-  <form class="card composer" id="newRun" autocomplete="off">
-    <h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2>
+
+  <dialog id="runDialog" class="picker agentdlg rundlg" aria-label="Start a run">
+  <form class="composer" id="newRun" autocomplete="off">
+    <div class="picker-head"><h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2><button type="button" id="runClose" aria-label="Close">×</button></div>
     <label class="field wide goal"><span class="sr">What should it do?</span>
       <textarea name="goal" rows="3" required placeholder="Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI"></textarea></label>
+    <div class="promptbar"><button type="button" id="usePrompt" data-hint="Choose a saved prompt, fill in its variables, and put it here">Use a saved prompt…</button><button type="button" id="savePrompt" data-hint="Keep this prompt in your prompt library so you can reuse it, improve it and see its versions on the Prompts page">Save as a prompt</button><a href="prompts" class="fine">Prompts page</a></div>
     <div class="row oneoff pickrow">
       <!-- The repo field is one self-contained block (#repoField). Swap it for another picker by keeping an input named "repo" (id "repo") inside it. -->
       <div class="field repo-field" id="repoField"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
         <div class="repo-input"><input type="text" name="repo" id="repo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
         <div class="recent" id="recent"></div><datalist id="repoList"></datalist></div>
-      <label class="field"><span data-hint="The steps the agent follows. Auto asks Jev which recipe fits your goal, and shows its pick before you start. Swarm runs several agents at once">How</span>
-        <select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select>
-        <span class="pick-note muted" id="pickNote"></span></label>
+      <div class="field wfield"><label for="workflow"><span data-hint="The steps the agent follows. Pick one below, or let Jev choose from your prompt">How</span></label>
+        <div class="wf-pick"><select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select><button type="button" id="suggestBtn" data-hint="Sends your prompt to Jev, which picks the way of working that fits it and selects it here">Suggest with Jev</button></div>
+        <span class="pick-note muted" id="pickNote" role="status"></span></div>
     </div>
+    <div class="wfhelp oneoff" id="wfHelp" aria-live="polite"></div>
+    <details class="more oneoff" id="wfCompare"><summary>Compare the ways of working</summary><div id="wfTable" class="wftable"></div></details>
     <label class="field wide oneoff" id="ticketsField" hidden><span data-hint="Optional. Paste the JSON that /wayfinder returned. The swarm then skips its planner and works the build tickets instead, a wave at a time: a ticket starts once the tickets it depends on are merged">Ticket draft (JSON from /wayfinder)</span>
       <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea>
       <span class="fine muted"><button type="button" id="fileTickets" data-hint="Write this draft into the repo above as markdown files (wayfinder/<map>/map.md and one file per ticket) you can read, edit and commit. Shows what it will write and asks first">Save as markdown files…</button> <button type="button" id="loadTickets" data-hint="Read a folder of wayfinder markdown files in the repo above back into this box">Load from a folder…</button> <span id="ticketsMsg" role="status"></span></span></label>
@@ -123,13 +145,18 @@
     </details>
     <div class="actions"><button class="primary" type="submit" id="startBtn">Start run</button><span class="note" id="startMsg"></span><span class="fine muted">Risky commands wait here for your OK. Nothing is pushed; the result is a branch.</span></div>
   </form>
+  </dialog>
 
   <dialog id="agentDialog" class="picker agentdlg" aria-label="Agent">
     <form id="agentForm" autocomplete="off">
       <div class="picker-head"><strong id="agentDialogTitle">New agent</strong><button type="button" id="agentClose" aria-label="Close">×</button></div>
       <label class="field"><span>Name</span><input type="text" name="name" required maxlength="60" placeholder="Docs keeper"></label>
       <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use. Changing it starts the agent's work over from that repo">Repo</span>
-        <div class="repo-input"><input type="text" name="repo" id="agentRepo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
+        <div class="repo-input"><input type="text" name="repo" id="agentRepo" list="repoList" placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
+      <div class="field repo-field" id="agentMoreField"><span data-hint="More repos this agent knows about. The Repo above, the first one, is the one it works in; the others are named in every task and used only when the task asks. They are not checked out">More repos (the first is the default)</span>
+        <ul class="repo-chips" id="agentMoreChips"></ul>
+        <div class="repo-input"><input type="text" id="agentMoreInput" list="repoList" placeholder="Add another repo" spellcheck="false" aria-label="Add another repo"><button type="button" id="agentMoreAdd">Add</button></div>
+        <div class="fine muted" id="agentInherit" hidden></div></div>
       <label class="field"><span data-hint="Told to the agent at the start of every task">Standing instructions</span>
         <textarea name="instructions" rows="4" placeholder="Keep changes small. Update the docs when behaviour changes. Run npm test before finishing."></textarea></label>
       <div class="row">
@@ -158,30 +185,74 @@
     <div class="picker-foot"><span class="muted" id="pickHint"></span><button type="button" class="primary" id="pickUse" disabled>Use this repo</button></div>
   </dialog>
 
-  <h2 id="listTitle">Runs</h2>
-  <div class="split">
-    <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
-    <div class="card detail" id="detail"><p class="muted">Pick a run to see what the agent did.</p></div>
+  <div class="agentgrid" id="agentGrid">
+    <section>
+      <h2 id="listTitle">Runs</h2>
+      <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
+    </section>
+    <section id="promptsBox">
+      <h2 id="promptsTitle" data-hint="Prompts you can start a run from. Click one to open it in the new run window">Prompts</h2>
+      <div class="card list" id="promptList"><p class="muted">No prompts yet.</p></div>
+      <p class="fine muted"><a href="prompts">Write and manage prompts</a></p>
+    </section>
   </div>
-  <details class="card termpanel" id="termPanel" hidden>
-    <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
-    <div id="termHost" class="termhost"></div>
-  </details>
-  <div class="card" id="shipPanel" hidden>
-    <strong data-hint="Merges the change into the app through a GitHub pull request, so its normal pipeline deploys it. Needs GITHUB_TOKEN in .env. Approve stays off while tests fail or files outside the editable paths changed">Ship this change</strong>
-    <div id="shipInfo"></div>
-    <div class="actions"><button type="button" class="primary" id="shipBtn" disabled>Approve and merge</button><button type="button" id="undoBtn" hidden>Undo (revert)</button><span class="note" id="shipMsg"></span></div>
+
+  <div id="runPage" hidden>
+    <section class="card statuscard" id="statusCard" aria-label="Status of this run"></section>
+    <div class="card follow" id="followPanel" hidden>
+      <strong data-hint="Starts the run again on the same branch (harness/&lt;id&gt;), from the last commit, with everything it did so far as context. It gets a new sandbox, since the old one is gone. Whatever it changes is committed and kept on the branch">Ask the agent</strong>
+      <span class="muted" id="followSaved"></span>
+      <form id="followForm" autocomplete="off">
+        <textarea id="followText" rows="2" maxlength="4000" placeholder="Save the work, fix the failing test, add a test for it, push it…" aria-label="Message to the agent"></textarea>
+        <div class="chips" id="followChips"><button type="button" data-say="Save the work: commit everything that is useful on this branch and tell me what is in it.">Save the work</button><button type="button" data-say="Run the tests and fix anything that fails, then commit.">Fix the tests</button><button type="button" data-say="Explain what you changed and why, and list anything left unfinished.">Explain the changes</button></div>
+        <div class="actions"><button type="submit" class="primary" id="followSend">Send to the agent</button><span class="note" id="followMsg" role="status"></span></div>
+      </form>
+    </div>
+    <div class="runview side" id="runView">
+      <div class="leftcol" id="leftCol">
+        <div class="card detail" id="detail"><p class="muted">Pick a run to see what the agent did.</p></div>
+        <div class="card" id="shipPanel" hidden>
+          <strong data-hint="Merges the change into the app through a GitHub pull request, so its normal pipeline deploys it. Needs GITHUB_TOKEN in .env. Approve stays off while tests fail or files outside the editable paths changed">Ship this change</strong>
+          <div id="shipInfo"></div>
+          <div class="actions"><button type="button" class="primary" id="shipBtn" disabled>Approve and merge</button><button type="button" id="undoBtn" hidden>Undo (revert)</button><span class="note" id="shipMsg"></span></div>
+        </div>
+        <details class="card termpanel" id="previewPanel" hidden>
+          <summary data-hint="Start the app's dev server inside this run's workspace and open it, to look at what the agent changed before you merge anything. Local runs only">Preview</summary>
+          <form id="previewForm" class="row" autocomplete="off">
+            <label class="field wide"><span data-hint="The command that starts the app. {port} becomes a free port (also set as PORT)">Dev server command</span><input type="text" name="command" id="previewCmd" placeholder="npm run dev -- --port {port}" spellcheck="false" maxlength="500"></label>
+            <div class="actions"><button class="primary" type="submit" id="previewStart">Start preview</button><button type="button" id="previewStop" hidden>Stop preview</button><span class="note" id="previewMsg" role="status"></span></div>
+          </form>
+          <div id="previewInfo"></div>
+        </details>
+      </div>
+      <div class="card rightcol" id="rightCol">
+        <div class="rtabs" role="tablist" aria-label="Terminal and trace">
+          <button type="button" role="tab" data-rtab="term" id="rtabTerm" data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</button>
+          <button type="button" role="tab" data-rtab="trace" id="rtabTrace" data-hint="Everything the agent did, step by step: what it said, each tool it used and what came back">Trace</button>
+          <span class="grow"></span>
+          <label class="check auto" data-hint="Keep the view at the newest line as the run goes on. Scrolling up pauses it"><input type="checkbox" id="autoScroll" checked><span>Auto-scroll</span></label>
+          <button type="button" id="toBottom" data-hint="Jump to the newest line" aria-label="Scroll to bottom">↓ Bottom</button>
+          <button type="button" id="fullBtn" data-hint="Fill the screen with this view. Esc closes it" aria-label="Full screen">⛶</button>
+        </div>
+        <div class="pane" id="termPanel">
+          <div id="termHost" class="termhost"></div>
+        </div>
+        <div class="pane" id="tracePane" hidden>
+          <div class="tracetools">
+            <select id="tfType" aria-label="Show only"><option value="all">All events</option><option value="model">Agent messages</option><option value="tool">Tools and results</option><option value="stage">Stages and notes</option><option value="approval">Approvals</option></select>
+            <select id="tfTool" aria-label="Tool"><option value="">Any tool</option></select>
+            <select id="tfStage" aria-label="Stage"><option value="">Any stage</option></select>
+            <label class="check"><input type="checkbox" id="tfErrors"><span>Errors only</span></label>
+            <span class="tsearch"><input type="search" id="tfSearch" placeholder="Search the trace" autocomplete="off" spellcheck="false" aria-label="Search the trace"><span class="muted" id="tfCount" role="status"></span><button type="button" id="tfPrev" aria-label="Previous match">↑</button><button type="button" id="tfNext" aria-label="Next match">↓</button></span>
+          </div>
+          <div class="trace" id="traceList"></div>
+        </div>
+      </div>
+    </div>
   </div>
-  <details class="card termpanel" id="previewPanel" hidden>
-    <summary data-hint="Start the app's dev server inside this run's workspace and open it, to look at what the agent changed before you merge anything. Local runs only">Preview</summary>
-    <form id="previewForm" class="row" autocomplete="off">
-      <label class="field wide"><span data-hint="The command that starts the app. {port} becomes a free port (also set as PORT)">Dev server command</span><input type="text" name="command" id="previewCmd" placeholder="npm run dev -- --port {port}" spellcheck="false" maxlength="500"></label>
-      <div class="actions"><button class="primary" type="submit" id="previewStart">Start preview</button><button type="button" id="previewStop" hidden>Stop preview</button><span class="note" id="previewMsg" role="status"></span></div>
-    </form>
-    <div id="previewInfo"></div>
-  </details>
 </main>
 <script src="dialogs.js"></script>
+<script src="promptlib.js"></script>
 <script src="githubconnect.js"></script>
 <script src="ownerScope.js"></script>
 <script src="hints.js"></script>
@@ -192,6 +263,8 @@
 <script src="terminal.js"></script>
 <script src="costs.js"></script>
 <script src="notify.js"></script>
+<script src="repos.js"></script>
+<script src="runview.js"></script>
 <script src="agents.js"></script>
 <script src="apps.js"></script>
 </body>

@@ -3,11 +3,11 @@
   "name": "Build a feature",
   "when": "a request for new behaviour: add a feature, an option, an endpoint or a page that spans one or more files",
   "stages": [
-    { "id": "plan", "role": "Planner", "tools": "read", "maxSteps": 15, "effort": "high",
+    { "id": "plan", "role": "Planner", "tools": "read", "effort": "high",
       "prompt": "Plan the change. Read the code the feature touches and the conventions around it. Do not change any file. Call finish with a numbered plan: the files to change, what changes in each, how to test it, and anything ambiguous with the choice you made." },
-    { "id": "implement", "role": "Implementer", "tools": "all", "maxSteps": 40,
+    { "id": "implement", "role": "Implementer", "tools": "all",
       "prompt": "Implement the plan, step by step, in the style of the code around it. Write or extend tests for the new behaviour. Run the tests and fix what fails. Call finish with what you built." },
-    { "id": "verify", "role": "Verifier", "tools": "check", "maxSteps": 10, "effort": "low", "verdict": true, "retryTo": "implement", "maxRetries": 1,
+    { "id": "verify", "role": "Verifier", "tools": "check", "effort": "low", "verdict": true, "retryTo": "implement", "maxRetries": 1,
       "prompt": "Check the work against the original task and the plan. Run the tests and read the diff (`git diff HEAD`). Start your finish summary with PASS if the feature does what was asked and the tests pass, or FAIL followed by exactly what is missing or broken." }
   ]
 }

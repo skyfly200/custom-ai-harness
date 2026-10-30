@@ -15,16 +15,19 @@
   try { const v = localStorage.getItem(BG_KEY); if (v) enabled = v !== 'off'; } catch {}
 
   // Word clusters: things that mean similar things sit close together
+  // The first two words of each cluster are labelled by default; the rest
+  // show their word when the pointer lights them up
   const CLUSTERS = [
-    ['king', 'queen', 'prince', 'throne', 'crown', 'empire'],
-    ['cat', 'dog', 'fox', 'wolf', 'kitten', 'puppy'],
-    ['async', 'await', 'function', 'return', 'null', 'promise', 'lambda'],
-    ['star', 'orbit', 'planet', 'comet', 'nebula', 'galaxy'],
-    ['happy', 'joy', 'delight', 'calm', 'hope', 'glad'],
-    ['bread', 'pasta', 'mango', 'coffee', 'honey', 'salt'],
-    ['token', 'vector', 'embedding', 'attention', 'logit', 'context'],
-    ['piano', 'rhythm', 'melody', 'chord', 'jazz', 'violin'],
+    ['king', 'queen', 'prince', 'throne', 'crown', 'empire', 'duke', 'realm', 'scepter', 'castle', 'knight', 'court', 'regent'],
+    ['cat', 'dog', 'fox', 'wolf', 'kitten', 'puppy', 'lynx', 'hound', 'tiger', 'otter', 'badger', 'coyote', 'pony'],
+    ['async', 'await', 'function', 'return', 'null', 'promise', 'lambda', 'array', 'class', 'import', 'loop', 'string', 'regex'],
+    ['star', 'orbit', 'planet', 'comet', 'nebula', 'galaxy', 'moon', 'quasar', 'pulsar', 'meteor', 'eclipse', 'cosmos', 'aurora'],
+    ['happy', 'joy', 'delight', 'calm', 'hope', 'glad', 'cheer', 'bliss', 'warm', 'kind', 'gentle', 'bright', 'peace'],
+    ['bread', 'pasta', 'mango', 'coffee', 'honey', 'salt', 'olive', 'basil', 'butter', 'cocoa', 'lemon', 'rice', 'plum'],
+    ['token', 'vector', 'embedding', 'attention', 'logit', 'context', 'prompt', 'layer', 'weights', 'softmax', 'cache', 'decoder', 'tensor'],
+    ['piano', 'rhythm', 'melody', 'chord', 'jazz', 'violin', 'tempo', 'cello', 'octave', 'drum', 'flute', 'harp', 'scale'],
   ];
+  const LABELLED = 2;
 
   // ---- the background switch (the button lives in the account menu, ui/nav.js) ----
   function setEnabled(on) {
@@ -72,11 +75,11 @@
     CLUSTERS.forEach((words, ci) => {
       const a = (ci / CLUSTERS.length) * Math.PI * 2;
       const center = [Math.cos(a) * 0.62, (rand() - 0.5) * 0.9, Math.sin(a) * 0.62];
-      const extra = small ? 4 : 9; // unlabelled neighbours fill each cluster out
-      for (let i = 0; i < words.length + extra; i++) {
+      const count = small ? 9 : words.length;
+      for (let i = 0; i < count; i++) {
         const spread = 0.2;
         const p = [center[0] + (rand() - 0.5) * spread * 2, center[1] + (rand() - 0.5) * spread * 2, center[2] + (rand() - 0.5) * spread * 2];
-        points.push({ base: p, pos: p.slice(), phase: rand() * 6.28, speed: 0.3 + rand() * 0.5, word: words[i] || '', cluster: ci, color: palette[ci % palette.length], glow: 0, sx: 0, sy: 0, z: 0 });
+        points.push({ base: p, pos: p.slice(), phase: rand() * 6.28, speed: 0.3 + rand() * 0.5, word: words[i], shown: i < LABELLED, cluster: ci, color: palette[ci % palette.length], glow: 0, sx: 0, sy: 0, z: 0 });
       }
     });
   }
@@ -168,7 +171,7 @@
       }
     }
 
-    // points, far ones first; nearest few show their word
+    // points, far ones first; a few are always labelled, the pointer's nearest show theirs
     const sorted = [...points].sort((a, b) => b.z - a.z);
     ctx.font = '600 11px system-ui, -apple-system, "Segoe UI", sans-serif';
     ctx.textBaseline = 'middle';
@@ -179,9 +182,9 @@
       if (p.glow > 0.05) { ctx.shadowColor = p.color; ctx.shadowBlur = 12 * p.glow; }
       ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.fill();
       ctx.shadowBlur = 0;
-      const showWord = p.word && (p.glow > 0.15 || (p.depth > 1.18 && W > 900));
+      const showWord = p.glow > 0.15 || p.shown;
       if (showWord) {
-        ctx.globalAlpha = Math.max(0.12, p.glow * 0.85);
+        ctx.globalAlpha = Math.max(p.shown ? 0.35 : 0.12, p.glow * 0.85);
         ctx.fillStyle = p.glow > 0.15 ? p.color : ink;
         ctx.fillText(p.word, p.sx + r + 4, p.sy);
       }

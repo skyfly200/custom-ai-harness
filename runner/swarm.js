@@ -11,13 +11,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const WORKFLOWS = new Set(['general', 'fix-bug', 'build-feature', 'refactor']);
 
 const PLANNER = {
-    id: 'plan', role: 'Planner', tools: 'read', maxSteps: 15, effort: 'high', verdict: false, retryTo: null, maxRetries: 0,
+    id: 'plan', role: 'Planner', tools: 'read', maxSteps: 0, effort: 'high', verdict: false, retryTo: null, maxRetries: 0,
     prompt: `Split the task into independent parts that several engineers can work on at the same time, each on its own branch. Read the code first. Parts must touch different files, so their changes merge cleanly; if the task is small or cannot be split safely, return one part. At most ${MAX_PARTS} parts. Do not change any file.
 Call finish with ONLY a JSON object, no other text: {"parts":[{"title":"short name","task":"what this engineer must do, with the files involved and how to check it","workflow":"general"}]}. "workflow" is one of general, fix-bug, build-feature, refactor.`,
 };
 
 const REVIEWER = {
-    id: 'review', role: 'Reviewer', tools: 'check', maxSteps: 15, effort: 'medium', verdict: true, retryTo: null, maxRetries: 0,
+    id: 'review', role: 'Reviewer', tools: 'check', maxSteps: 0, effort: 'medium', verdict: true, retryTo: null, maxRetries: 0,
     prompt: 'The parts of the task were done by separate engineers and merged into this workspace. Check that the combined result does the whole task and the parts fit together: run the project\'s tests and read the diff (`git diff HEAD~0` is empty after a merge, so use `git diff <base>..HEAD` with the base given in the context). Do not change any file. Start your finish summary with PASS if the whole task is done and the tests pass, or FAIL followed by exactly what is missing or broken.',
 };
 

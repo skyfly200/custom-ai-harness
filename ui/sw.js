@@ -16,13 +16,13 @@ function keepable(request) {
   if (!url.pathname.startsWith(base)) return false;
   const rel = url.pathname.slice(base.length);
   if (/(^|\/)api\//.test(rel) || /^(v1|openrouter-proxy|auth|login|logout|admin|healthz)(\/|$)/.test(rel)) return false;
-  return rel === '' || rel === 'ui/' || /^(index|chat|usage|usage-users|routing|agents|runs|tools|settings|users)$/.test(rel) || /\.(html|js|css|svg|png|webmanifest)$/.test(rel);
+  return rel === '' || rel === 'ui/' || /^(index|chat|usage|usage-users|routing|agents|runs|prompts|tools|settings|users)$/.test(rel) || /\.(html|js|css|svg|png|webmanifest)$/.test(rel);
 }
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   // Fetched with the page's credentials, so a harness behind HARNESS_PASSWORD still works
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat', 'chat.html', 'bright.css', 'style.css', 'chat.css', 'calm.css', 'mobile.css', 'dialogs.js', 'bright.js', 'nav.js', 'nav.css', 'chat.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'dictation.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['chat', 'chat.html', 'bright.css', 'style.css', 'chat.css', 'repos.css', 'calm.css', 'mobile.css', 'dialogs.js', 'bright.js', 'nav.js', 'nav.css', 'chat.js', 'repos.js', 'chatmerge.js', 'modelAlias.js', 'tokens.js', 'costs.js', 'cachetimer.js', 'notify.js', 'dictation.js', 'markdown.js', 'favicon.svg'])).catch(() => {}));
 });
 
 self.addEventListener('activate', (event) => {

@@ -41,6 +41,7 @@ const fakeGit = {
         }
         return d;
     },
+    openPullRequest: async ({ dir: d, branch, token, title, body, base }) => { calls.push({ what: 'pr', dir: d, branch, token, title, body, base }); return { number: 7, url: 'https://github.com/o/r/pull/7', base: base || 'main', pushed: { branch, url: 'u', compare: 'c' } }; },
     pushBranch: async ({ dir: d, branch, token }) => { calls.push({ what: 'push', dir: d, branch, token }); return { branch, url: `https://github.com/o/r/tree/${branch}`, compare: 'c' }; },
 };
 
@@ -171,6 +172,42 @@ test('push: a finished run goes to GitHub with the person\'s token', async () =>
     assert.equal(calls[0].branch, rec.branch);
     assert.equal(calls[0].token, 'ghp_TOKEN0123456789abcdefgh');
     assert.ok(rec.pushed.url);
+});
+
+test('open pull request: pushes and opens it with the person\'s token, and the run remembers it', async () => {
+    const run = await (await mk('ivy', { repo: 'o/r3' })).json();
+    const rec = manager.runs.get(run.id);
+    assert.equal((await call('ivy', 'POST', `/runs/${run.id}/pr`, {}, { 'x-runner-github-token': 't' })).status, 409);
+    Object.assign(rec, { status: 'done', result: { commit: 'abc', summary: 'did it' } });
+    calls.length = 0;
+    const res = await call('ivy', 'POST', `/runs/${run.id}/pr`, { title: 'Add it' }, { 'x-runner-github-token': 'ghp_TOKEN0123456789abcdefgh' });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).url, 'https://github.com/o/r/pull/7');
+    assert.equal(calls[0].token, 'ghp_TOKEN0123456789abcdefgh');
+    assert.equal(calls[0].title, 'Add it');
+    assert.match(calls[0].body, /did it/);
+    assert.equal(rec.pr.number, 7);
+    assert.ok(rec.pushed);
+    assert.equal((await call('ann', 'POST', `/runs/${run.id}/pr`, {})).status, 404, 'not someone else\'s run');
+});
+
+test('github.openPullRequest: pushes, uses the default branch, and finds an open one', async () => {
+    const seen = [];
+    const git = async (args) => { seen.push(args[0]); return 'https://github.com/o/r.git\n'; };
+    let pulls = 0;
+    const fetchImpl = async (u, opts) => {
+        seen.push(`${opts.method} ${new URL(u).pathname}`);
+        const reply = (status, data) => ({ ok: status < 300, status, json: async () => data });
+        if (opts.method === 'GET' && u.endsWith('/repos/o/r')) return reply(200, { default_branch: 'trunk' });
+        if (opts.method === 'POST') { pulls++; return pulls === 1 ? reply(201, { number: 3, html_url: 'https://github.com/o/r/pull/3' }) : reply(422, { message: 'exists' }); }
+        return reply(200, [{ number: 3, html_url: 'https://github.com/o/r/pull/3', base: { ref: 'trunk' } }]);
+    };
+    const first = await github.openPullRequest({ dir: '/x', branch: 'harness/r1', token: 't', title: 'T', git, fetchImpl, apiUrl: 'https://api.github.com' });
+    assert.deepEqual([first.number, first.base, first.existed], [3, 'trunk', false]);
+    assert.ok(seen.includes('push'));
+    const again = await github.openPullRequest({ dir: '/x', branch: 'harness/r1', token: 't', title: 'T', git, fetchImpl, base: 'trunk', apiUrl: 'https://api.github.com' });
+    assert.equal(again.existed, true);
+    await assert.rejects(github.openPullRequest({ dir: '/x', branch: 'main', token: 't', title: 'T', git, fetchImpl }), /only harness/);
 });
 
 test('monthly minutes: a person who has used them cannot start another', () => {

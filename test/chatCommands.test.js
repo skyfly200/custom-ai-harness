@@ -11,6 +11,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'ui', 'chat.js'), 'utf8');
 const modelAlias = require('../utils/modelAlias');
+const Repos = require('../ui/repos');
 
 const between = (from, to) => {
   const a = source.indexOf(from);
@@ -51,9 +52,12 @@ function subagentContext({ hosted = false, noFolder = false, github = null, mode
   const chat = { id: 'c1', messages: [] };
   const ctx = {
     chat, gatewayModels: models, modelAlias, console, JSON, Date,
+    Repos,
     repoOf: () => (hosted || noFolder ? null : { path: 'C:\\repos\\demo', name: 'demo' }),
     hostedNoFolders: () => hosted,
     ghOf: () => github,
+    // the attached repos, the folder first (when there is one), then the GitHub repo
+    reposOf: () => [...(hosted || noFolder ? [] : [{ kind: 'local', path: 'C:\\repos\\demo', name: 'demo' }]), ...(github ? [{ kind: 'github', ...github }] : [])],
     routeOf: () => ({ model: 'auto' }),
     toast: (t) => toasts.push(t),
     saveChat: (c) => saved.push(c),

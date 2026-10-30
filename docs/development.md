@@ -83,6 +83,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands`, `chatReplies`, `chatMerge`, `chatPriceRetry`, `emptyReply`, `modelAlias` (`/model` names and model suggestions), `repos` |
 | Chat sidebar: imports, dictation, audio, notifications | `claudeKit` (import Claude Code commands and skills), `dictation`, `stt`, `audio`, `notify` (waiting-for-you browser notifications) |
 | Settings page and its panels | `settings`, `navOrder` (the shared pages bar) |
+| Skills page (skills, projects and agents' copies) | `skillsModel` (`ui/skillsModel.js`, and `AgentStore.fields` skills in `runner/agents.js`) |
 | Site root and page URLs | `rootApi` (relative `api/...` at the site root), `pwa`, `oldHosts` |
 | Connect OpenRouter (OAuth PKCE) | `openrouterOAuth` |
 | Repo field suggestions (local scan) | `localRepos`, `repoTools` (read-only tools), `hostedRepoTools` (folder repos off on a hosted server) |

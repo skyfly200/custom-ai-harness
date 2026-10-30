@@ -1218,6 +1218,7 @@ class RunManager {
         if (!agent) return '';
         const parts = [`You are ${agent.name}, a standing agent for this repo. Your work builds up over tasks: the workspace starts from what your earlier tasks committed, and you are told what they did.`];
         if (agent.instructions) parts.push(`Your standing instructions:\n${agent.instructions}`);
+        if (agent.skills?.length) parts.push(`Skills you follow (set up by the person, in this order):\n${agent.skills.map((k) => `## ${k.name}\n${k.body}`).join('\n\n')}`);
         const before = this.tasksOf(agent.id).filter((t) => t.id !== run.id && t.created < run.created && ['done', 'incomplete'].includes(t.status) && !t.plan).slice(0, AGENT_HISTORY).reverse();
         if (before.length) {
             parts.push(`Your earlier tasks, oldest first:\n${before.map((t) => `- ${short(t.goal.split('\n')[0], 200)} (${t.status}${t.result?.commit ? `, committed on ${t.branch}` : ''})${t.result?.summary ? `\n  ${short(t.result.summary, 500).replace(/\n/g, '\n  ')}` : ''}`).join('\n')}`);

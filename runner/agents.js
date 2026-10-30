@@ -74,6 +74,11 @@ class AgentStore {
         }
         if (has('maxTier')) out.maxTier = cfg.maxTier ? clean(cfg.maxTier, 40) : null;
         if (has('escalate')) out.escalate = !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false');
+        // the command guard's Jev check for this agent's runs: 'on', 'off', or blank for the settings' default
+        if (has('jev')) {
+            if (cfg.jev && cfg.jev !== 'on' && cfg.jev !== 'off') throw new Error('jev must be on, off or blank');
+            out.jev = cfg.jev === 'on' || cfg.jev === 'off' ? cfg.jev : null;
+        }
         for (const [k, lo, hi] of [['maxSteps', 0, 10000], ['maxMinutes', 1, 240]]) {
             if (!has(k)) continue;
             if (cfg[k] === null || cfg[k] === '') { out[k] = null; continue; }

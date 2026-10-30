@@ -643,7 +643,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.jev ? { jev: body.jev } : {}), ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -1192,6 +1192,7 @@ async function initAgentDialog() {
     body.moreRepos = agentExtras.filter((r) => r !== body.repo.trim());
     if (body.model) body.profile = '';
     body.escalate = f.elements.escalate.checked;
+    body.jev = f.elements.jev.value || null;
     body.autoContinue = f.elements.autoContinue.checked;
     body.autoContinueMax = body.autoContinueMax === '' ? null : body.autoContinueMax;
     $('agentMsg').textContent = 'Saving…';
@@ -1267,6 +1268,7 @@ function openAgentDialog(agent) {
   f.elements.maxCost.value = v.maxCost ?? '';
   f.elements.maxTier.value = v.maxTier || '';
   f.elements.escalate.checked = v.escalate !== false;
+  f.elements.jev.value = v.jev || '';
   f.elements.autoContinue.checked = !!v.autoContinue;
   f.elements.autoContinueMax.value = v.autoContinueMax ?? '';
   f.elements.project.value = v.project?.id || '';

@@ -154,11 +154,18 @@ RUNNER_SANDBOX=e2b            # the compose default for this container
 
 The runner comes up beside the Interceptor (`http://runner:3100`, no ports published) and the Interceptor sends it the Agents page's requests with the same `RUNNER_TOKEN`, so nothing else on the network can drive it. Runs and their branches land in the `runs` and `repos` folders on the server, so **Continue**, **Retry** and `git diff` work as they do on your PC, and the branch is pushed from the server. Local mode is possible too but pointless there: the worktree is made from the copy of the repo in `repos`, and commands run inside the runner's image, which has only Node and git.
 
+### Headroom: shorter tool output
+
+Long command output and file reads are the biggest share of an agent's input tokens: a test log or a grep can run to tens of thousands of tokens, and every later step sends it again. With **Headroom in agent runs** on (Settings, Prompt transforms; on by default), the runner sends each output over 4,000 characters through Headroom's MCP server (`headroom mcp serve`, [headroom-ai](https://pypi.org/project/headroom-ai/)), which keeps the lines that matter and stores the original. The model gets the shorter text, marked with a hash, and can call `headroom_retrieve` for the full output. Outputs that Headroom cannot shorten (most code, which it leaves whole) are passed on unchanged. Compression runs on the runner's machine; nothing is sent to a model for it.
+
+Install it in the repo's `.venv` (`pip install "headroom-ai[mcp]"`) or set `HEADROOM_COMMAND` to the program. Without it, runs work as before and the Agents page says "Headroom on · not used" with the reason. The code is `runner/headroom.js` (one server per runner, started on the first long output) and `runner/tools.js`. Each run's card shows what it saved in input tokens. It has not been measured on hosted sandboxes; the Fly image does not include headroom-ai yet.
+
 ## Apps from a template
 
 The Apps page (`ui/apps.html`, nav after Chat) builds a new app from `templates/<id>/`. Each template is a folder with `template.json` (name, description, questions, the install, dev and test commands, the port, and `editablePaths`) and the files, where `{{name}}`, `{{slug}}`, `{{description}}` and each question's key are filled in. `runner/templates.js` loads and checks them; a template that fails the check is listed as a problem, not offered.
 
 `POST /apps/new` (`/ui/api/apps/new`) takes `{ template, name, description, answers, parent, build }`: the folder `<parent>/<slug>` must be inside `RUNNER_ROOTS` and not exist yet. It writes the files, makes a git repo with one commit, registers the app, and with `build` (the default) starts a change run that builds the first version from `description`. `GET /apps/templates` lists the usable templates. Values are cleaned of quotes, brackets and line breaks before they are written into code. Only `web-app` ships so far.
+
 
 ## Apps (in-app agents, step 2)
 

@@ -13,6 +13,7 @@ const FILE = process.env.HARNESS_SETTINGS_FILE || path.join(__dirname, '..', 'ha
 const DEFAULTS = Object.freeze({
     caveman: true,            // append the terse-output instruction to the system prompt
     headroom: true,           // compress tool results
+    runHeadroom: true,        // agent runs: Headroom's MCP server shortens long tool outputs (runner/headroom.js); needs headroom-ai in .venv
     contextAnchor: true,      // replace repeated tool results with a pointer
     maxOutputTokens: 32768,   // cap on requested output (Groq rejects more than 65,536)
     fixedThreshold: null,     // number in [0, 1] to replace the keyword-derived threshold
@@ -58,6 +59,7 @@ const name = (k) => (v) => {
 const VALIDATORS = {
     caveman: bool('caveman'),
     headroom: bool('headroom'),
+    runHeadroom: bool('runHeadroom'),
     contextAnchor: bool('contextAnchor'),
     maxOutputTokens: int('maxOutputTokens', 1, 1000000),
     fixedThreshold: (v) => {

@@ -143,7 +143,7 @@ function toolName(server, tool, taken) {
 
 // A tool result as text for the model. Tool messages carry text only, so
 // images and audio are described rather than sent.
-function resultText(result) {
+function resultText(result, max = MAX_RESULT_CHARS) {
     if (result?.toolResult !== undefined) return typeof result.toolResult === 'string' ? result.toolResult : JSON.stringify(result.toolResult);
     const parts = (result?.content || []).map((c) => {
         if (c.type === 'text') return c.text;
@@ -153,7 +153,7 @@ function resultText(result) {
     });
     if (!parts.length && result?.structuredContent) parts.push(JSON.stringify(result.structuredContent));
     let text = parts.join('\n');
-    if (text.length > MAX_RESULT_CHARS) text = `${text.slice(0, MAX_RESULT_CHARS)}\n[harness: cut at ${MAX_RESULT_CHARS} characters]`;
+    if (text.length > max) text = `${text.slice(0, max)}\n[harness: cut at ${max} characters]`;
     return text;
 }
 
@@ -211,8 +211,10 @@ class McpManager {
     // environment; `vet` (async, throws) checks an entry before each connection.
     // `lazy` (a small hosted Machine): a stdio server's tool list is remembered next to the file, and the program itself
     // starts on its first call and stops again after idleMs, so Playwright's browser and the npx servers don't sit in memory.
-    constructor({ file = CONFIG_FILE, specs = null, plain = false, vet = null, lazy = false, idleMs = IDLE_CLOSE_MS } = {}) {
+    // `maxResultChars` caps a tool's text reply (Infinity for a server whose reply must arrive whole, as Headroom's does)
+    constructor({ file = CONFIG_FILE, specs = null, plain = false, vet = null, lazy = false, idleMs = IDLE_CLOSE_MS, maxResultChars = MAX_RESULT_CHARS } = {}) {
         this.file = file;
+        this.maxResultChars = maxResultChars;
         this.lazy = lazy;
         this.idleMs = idleMs;
         this.specsFn = specs;
@@ -544,7 +546,7 @@ class McpManager {
         try {
             result = await server.client.callTool({ name: tool.name, arguments: args || {} }, undefined, { timeout: positive((this.plain ? server.spec : expand(server.spec)).callTimeoutMs) ?? CALL_TIMEOUT_MS });
         } finally { server.busy--; this.touch(server); }
-        return { text: resultText(result), isError: !!result.isError, server: server.name, tool: tool.name };
+        return { text: resultText(result, this.maxResultChars), isError: !!result.isError, server: server.name, tool: tool.name };
     }
 
     async close() {

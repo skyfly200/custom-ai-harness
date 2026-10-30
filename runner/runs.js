@@ -57,6 +57,10 @@ const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const SPEEDS = new Set(['fast', 'batch']);
 const OVERNIGHT_WAIT_MINUTES = 24 * 60;
 const escalation = require('./escalate');
+const { Headroom } = require('./headroom');
+const settings = require('../utils/settings');
+// One Headroom server for every run on this runner: it starts on the first long output and stays up
+const headroomServer = new Headroom();
 const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
 /** Routing for an agent's task: what the task sets replaces the agent's own. One model directly and a routing exclude each other. */
 function taskRouting(cfg, agent) {
@@ -267,6 +271,16 @@ class RunManager {
         return this.password ? { 'x-harness-password': this.password } : {};
     }
 
+    /** Headroom shortened one tool output of a run: count it on the run, which the Agents page shows. */
+    headroomSaved(run, { saved, originalTokens }) {
+        const h = run.headroom;
+        h.compressions += 1;
+        h.saved += saved;
+        h.originalTokens += originalTokens;
+        h.note = null;
+        this.save(run);
+    }
+
     save(run) {
         // the record of a part of a continued run sits beside the run's own, so the run
         // itself keeps its id, goal and branch, and nothing is lost if the runner stops
@@ -430,6 +444,9 @@ class RunManager {
             prState: null, autoFixConflicts: isFlag(cfg.autoFixConflicts), autoFixMax: num(cfg.autoFixMax, 1, MAX_FIX_TRIES, DEFAULT_FIX_TRIES),
             fixOf: cfg.fixOf && this.runs.has(String(cfg.fixOf)) ? String(cfg.fixOf) : null, autoPush: isFlag(cfg.autoPush, false),
             sandbox, sandboxId: null,
+            // Headroom's MCP server shortens long tool outputs for this run (runner/headroom.js). Unset means the Settings default.
+            // `saved` counts the input tokens it took out; `note` says why nothing was saved, when Headroom could not help.
+            headroom: { on: isFlag(cfg.headroom, settings.get().runHeadroom !== false), compressions: 0, saved: 0, originalTokens: 0, note: null },
             // ChatDev runs: the most the sandbox's model key may spend, in dollars
             maxUsd: isChatDev ? Math.min(1000, Math.max(0.01, Number(cfg.maxUsd) || Number(process.env.CHATDEV_MAX_USD) || 2)) : null,
             debugOf: cfg.debugOf ? String(cfg.debugOf) : null, debugDepth: num(cfg.debugDepth, 0, 9, 0), debugRun: null,
@@ -1359,6 +1376,8 @@ class RunManager {
                 check: (kind, text) => this.guard(kind, text, run),
                 approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
                 editable: run.editable ? editableMatcher(run.editable) : null,
+                headroom: run.headroom?.on ? headroomServer : null,
+                onCompress: (c) => this.headroomSaved(run, c),
             });
             const handoff = notes.map((n) => `## ${n.role} (${n.stage})\n${n.summary}`).join('\n\n');
             // the stage's effort replaces the run's only when the person set none
@@ -1371,6 +1390,7 @@ class RunManager {
                 chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
             });
             if (outcome.status === 'out_of_steps') run.partialSummary = outcome.summary;
+            if (run.headroom?.on && !run.headroom.compressions) run.headroom.note = headroomServer.error;
             notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
             if (outcome.status !== 'finished') break;
             if (stage.verdict && /^\W*FAIL/i.test(outcome.summary)) {
@@ -1407,7 +1427,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             owner: from.owner, goal: from.goal, repo: from.repo, moreRepos: from.moreRepos, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, speed: from.speed, escalate: from.escalate, jev: from.jev, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax, autoFixConflicts: from.autoFixConflicts, autoFixMax: from.autoFixMax,
+            model: from.model, effort: from.effort, speed: from.speed, escalate: from.escalate, headroom: from.headroom?.on, jev: from.jev, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax, autoFixConflicts: from.autoFixConflicts, autoFixMax: from.autoFixMax,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };

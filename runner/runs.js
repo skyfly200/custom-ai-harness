@@ -11,6 +11,7 @@ const { createSandbox, attachSandbox, destroySandboxById, driverFor, normalizeKi
 const { makeTools } = require('./tools');
 const { runAgent, systemFor } = require('./agent');
 const workflows = require('../utils/workflows');
+const batchModels = require('../utils/batchModels');
 const swarm = require('./swarm');
 const chatdev = require('./chatdev');
 const { parseTickets } = require('./tickets');
@@ -47,6 +48,9 @@ const PARTIAL_CHARS = 8000;   // how much of what it was saying when it ran out 
 const MAX_CONTINUES = 50;     // four times what a run of 200 steps and 240 minutes needs
 const AGENT_HISTORY = 6;      // how many of an agent's earlier tasks a new one is told about
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
+// fast: every step runs as it goes. batch (overnight): steps that use no tools are sent as a half-price batch and may wait up to a day
+const SPEEDS = new Set(['fast', 'batch']);
+const OVERNIGHT_WAIT_MINUTES = 24 * 60;
 const escalation = require('./escalate');
 const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
 /** Routing for an agent's task: what the task sets replaces the agent's own. One model directly and a routing exclude each other. */
@@ -361,6 +365,7 @@ class RunManager {
             return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d;
         };
         if (cfg.effort && !EFFORTS.has(cfg.effort)) throw new Error(`effort must be one of ${[...EFFORTS].join(', ')}`);
+        if (cfg.speed && !SPEEDS.has(cfg.speed)) throw new Error(`speed must be one of ${[...SPEEDS].join(', ')}`);
         // which sandbox driver this run works in; blank is the runner's default
         const sandbox = cfg.sandbox ? normalizeKind(cfg.sandbox) : cfg.workflow === 'chatdev' && !isCloud(this.sandboxKind) ? 'sprites' : this.sandboxKind;
         if (!sandbox) throw new Error(`unknown sandbox ${cfg.sandbox}`);
@@ -392,7 +397,7 @@ class RunManager {
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
             id, owner, goal, repo, moreRepos: cleanMoreRepos(cfg.moreRepos, repo), prTarget: isSwarm || isChatDev ? null : (prBrief.findPulls(goal)[0] || null), agent: cfg.agent ? String(cfg.agent) : null, app: cfg.app ? String(cfg.app) : null, proposal: cfg.proposal && typeof cfg.proposal === 'object' ? { kind: String(cfg.proposal.kind || 'feedback').slice(0, 20), fingerprint: String(cfg.proposal.fingerprint || '').slice(0, 64), pr: null } : null, editable: Array.isArray(cfg.editable) ? cfg.editable.map(String).slice(0, 50) : null, source: cfg.source || null, auditParts: isSwarm && (cfg.auditParts === true || cfg.auditParts === 1 || cfg.auditParts === '1' || cfg.auditParts === 'true'), kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
-            profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
+            profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null, speed: cfg.speed === 'batch' ? 'batch' : 'fast',
             // escalate: on a failure, ask for more effort (up to two rungs); maxTier caps the tier it can reach
             escalate: !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false'), bumps: 0, maxTier: cfg.maxTier ? String(cfg.maxTier).trim().slice(0, 40) : null,
             // the model for the Strong tier, picked for this run (x-harness-strong-model); blank uses the routing's
@@ -1009,7 +1014,7 @@ class RunManager {
             owner: agent.owner, goal: cfg?.goal, repo: agent.repo, moreRepos: agent.moreRepos, workflow: agent.workflow, ...taskRouting(cfg, agent), escalate: agent.escalate, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
             autoContinue: cfg?.autoContinue ?? agent.autoContinue ?? undefined, autoContinueMax: cfg?.autoContinueMax ?? agent.autoContinueMax ?? undefined,
-            plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null, landing: agent.landing || undefined,
+            plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null, landing: agent.landing || undefined, speed: cfg?.speed,
         });
     }
 
@@ -1083,6 +1088,16 @@ class RunManager {
     }
 
     /**
+     * Whether a stage is answered as a batch. A canWait stage always is. In an overnight run, a stage with
+     * no tools whose model is on the batch list is too: its step is one request, so it can wait for a batch
+     * without losing any tool work. A stage with tools never is; its agent loop needs each answer at once.
+     */
+    waitsAsBatch(run, stage) {
+        if (stage.canWait) return true;
+        return run.speed === 'batch' && stage.tools === 'none' && Boolean(stage.model) && batchModels.isBatch(stage.model, batchModels.load());
+    }
+
+    /**
      * A stage with canWait: one request, no tools, answered as a half-price batch. The run
      * waits for it (a stop still works), and falls back to an ordinary call when the model
      * is not a batch model, there is no key, the batch fails, or maxWaitMinutes pass.
@@ -1109,7 +1124,8 @@ class RunManager {
             id = body.id;
         } catch (err) { return await fallback(`it could not be batched (${err.message})`); }
         emit({ type: 'note', text: `Sent as a half-price batch to ${stage.model} (${id}); waiting for it.` });
-        const until = Date.now() + stage.maxWaitMinutes * 60000;
+        const waitMinutes = stage.canWait ? stage.maxWaitMinutes : OVERNIGHT_WAIT_MINUTES;
+        const until = Date.now() + waitMinutes * 60000;
         while (Date.now() < until) {
             if (live.stopped) return { status: 'stopped', summary: 'Stopped by a person.' };
             await sleep(this.batchPollMs);
@@ -1136,7 +1152,7 @@ class RunManager {
             }
             return await fallback(`the batch ${got.status === 'completed' ? 'had no answer' : got.status}${got.result?.error || got.error ? `: ${got.result?.error || got.error}` : ''}`);
         }
-        return await fallback(`the batch had not finished in ${stage.maxWaitMinutes} minutes`);
+        return await fallback(`the batch had not finished in ${waitMinutes} minutes`);
     }
 
     /**
@@ -1153,6 +1169,12 @@ class RunManager {
         const brief = !run.briefGiven ? [moreReposBrief(run), run.agent ? this.agentBrief(run) : '', run.debugOf ? this.brief(run.debugOf) : String(run.resumeNote || '')].filter(Boolean).join('\n\n') : '';
         if (brief) run.briefGiven = true;
         let outcome = { status: 'finished', summary: '' };
+        if (run.speed === 'batch') {
+            const waiting = workflow.stages.filter((s) => this.waitsAsBatch(run, s)).length;
+            this.event(run, { type: 'note', text: waiting
+                ? `Overnight run: ${waiting} step${waiting === 1 ? '' : 's'} with no tools will wait for a half-price batch (up to a day). Steps with tools run as they go.`
+                : 'Overnight run, but no step here can wait for a batch (it needs no tools and a batch model), so every step runs now.' });
+        }
         for (let i = 0; i < workflow.stages.length; i++) {
             const stage = workflow.stages[i];
             run.stage = stage.id;
@@ -1166,7 +1188,7 @@ class RunManager {
             const handoff = notes.map((n) => `## ${n.role} (${n.stage})\n${n.summary}`).join('\n\n');
             // the stage's effort replaces the run's only when the person set none
             const stageEffort = run.effort || stage.effort || null;
-            if (stage.canWait) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageEffort, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
+            if (this.waitsAsBatch(run, stage)) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageEffort, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
             else outcome = await runAgent({
                 run: { goal: run.goal, softSteps: run.softSteps, maxSteps: Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity) === Infinity ? 0 : Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity), deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
@@ -1210,7 +1232,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             owner: from.owner, goal: from.goal, repo: from.repo, moreRepos: from.moreRepos, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax,
+            model: from.model, effort: from.effort, speed: from.speed, escalate: from.escalate, maxTier: from.maxTier, strongModel: from.strongModel, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };

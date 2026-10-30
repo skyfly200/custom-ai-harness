@@ -656,7 +656,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.speed === 'batch' ? { speed: 'batch' } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }

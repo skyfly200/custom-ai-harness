@@ -16,6 +16,10 @@ fs.writeFileSync(path.join(wfDir, 'nightly.json'), JSON.stringify({ id: 'nightly
     { id: 'work', role: 'Worker', tools: 'all', prompt: 'do it' },
     { id: 'critic', role: 'Critic', canWait: true, model: 'openai/gpt-x', diff: true, maxWaitMinutes: 1, prompt: 'Check the diff.' },
 ] }));
+fs.writeFileSync(path.join(wfDir, 'overnight.json'), JSON.stringify({ id: 'overnight', stages: [
+    { id: 'work', role: 'Worker', tools: 'all', prompt: 'do it' },
+    { id: 'summary', role: 'Summariser', tools: 'none', model: 'openai/gpt-x', prompt: 'Summarise the work.' },
+] }));
 process.env.HARNESS_WORKFLOWS_DIR = wfDir;
 process.env.HARNESS_SETTINGS_FILE = path.join(dir, 'settings.json');
 process.env.HARNESS_PROFILES_FILE = path.join(dir, 'profiles.json');
@@ -166,4 +170,30 @@ test('a model that cannot be batched is asked normally, with no tools', async ()
     assert.equal(normal[1].model, 'openai/gpt-x');
     assert.equal(normal[1].chat.tools, undefined);
     assert.ok(run.events.some((e) => /could not be batched \(not a batch model\); asking openai\/gpt-x normally/.test(e.text || '')));
+});
+
+test('an overnight run batches its tool-less steps and runs the rest as it goes', async () => {
+    batchMode = 'ok'; batchPolls = 0; chats = [];
+    const run = await settle(manager.create({ goal: 'x', repo, workflow: 'overnight', speed: 'batch' }).id);
+    assert.equal(run.status, 'done', run.error);
+    assert.equal(run.speed, 'batch');
+    const sent = chats.filter((c) => c.batch);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].batch.messages[0].content, /You are the Summariser/);
+    assert.equal(chats.filter((c) => c.chat).length, 1, 'only the worker, which has tools, made an ordinary call');
+    assert.ok(run.events.some((e) => /Overnight run: 1 step with no tools/.test(e.text || '')));
+});
+
+test('a fast run, or an overnight run with no batchable step, sends nothing to a batch', async () => {
+    batchMode = 'ok'; batchPolls = 0; chats = [];
+    const fast = await settle(manager.create({ goal: 'x', repo, workflow: 'overnight' }).id);
+    assert.equal(fast.speed, 'fast');
+    assert.equal(chats.filter((c) => c.batch).length, 0);
+    assert.equal(chats.filter((c) => c.chat).length, 2, 'both stages ask normally, one call each');
+    chats = [];
+    const general = await settle(manager.create({ goal: 'x', repo, workflow: 'general', speed: 'batch' }).id);
+    assert.equal(general.status, 'done', general.error);
+    assert.equal(chats.filter((c) => c.batch).length, 0);
+    assert.ok(general.events.some((e) => /no step here can wait for a batch/.test(e.text || '')));
+    assert.throws(() => manager.create({ goal: 'x', repo, workflow: 'general', speed: 'slow' }), /speed must be one of/);
 });

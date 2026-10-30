@@ -11,6 +11,7 @@ const TOOLSETS = {
     read: ['list_files', 'read_file', 'finish'],
     check: ['list_files', 'read_file', 'run_command', 'finish'],
     all: ['list_files', 'read_file', 'write_file', 'edit_file', 'run_command', 'finish'],
+    none: ['finish'], // no tools: the step answers from what it is given, then calls finish
 };
 
 // Every tool but finish takes `why`: a few words, shown live on the run page so a person can tell what

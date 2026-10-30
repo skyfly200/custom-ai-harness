@@ -43,10 +43,6 @@
   <aside class="livepanel" id="livePanel" aria-label="Open runs" hidden></aside>
   <div class="backbar" id="backBar" hidden>
     <button type="button" id="backBtn">← All agents</button>
-    <span class="seg" id="subNav" role="tablist" aria-label="Views">
-      <button type="button" role="tab" data-sub="start" id="tabStart">New run</button>
-      <button type="button" role="tab" data-sub="runs" id="tabRuns">Runs</button>
-    </span>
     <button type="button" id="settingsLink" class="gearlink" data-hint="GitHub connection and sandboxes" aria-label="Agent settings">⚙</button>
     <span class="seg" id="layoutNav" aria-label="Run layout" hidden>
       <button type="button" data-layout="side" id="layoutSide" data-hint="Run and terminal next to each other">Side by side</button>
@@ -101,8 +97,10 @@
     </form>
   </dialog>
 
-  <form class="card composer" id="newRun" autocomplete="off">
-    <h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2>
+
+  <dialog id="runDialog" class="picker agentdlg rundlg" aria-label="Start a run">
+  <form class="composer" id="newRun" autocomplete="off">
+    <div class="picker-head"><h2 id="formTitle" data-hint="An agent works on a copy of one of your repos, on its own branch, and your files are not touched">Start a run</h2><button type="button" id="runClose" aria-label="Close">×</button></div>
     <label class="field wide goal"><span class="sr">What should it do?</span>
       <textarea name="goal" rows="3" required placeholder="Fix the failing test in utils/tiers.test.js, or: add a --version flag to the CLI"></textarea></label>
     <div class="row oneoff pickrow">
@@ -110,10 +108,12 @@
       <div class="field repo-field" id="repoField"><span data-hint="A git repo inside the folders the runner may use (RUNNER_ROOTS, default the repos folder). Type or paste a path, pick a recent one, or browse">Repo</span>
         <div class="repo-input"><input type="text" name="repo" id="repo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="browse">Browse…</button></div>
         <div class="recent" id="recent"></div><datalist id="repoList"></datalist></div>
-      <label class="field"><span data-hint="The steps the agent follows. Auto asks Jev which recipe fits your goal, and shows its pick before you start. Swarm runs several agents at once">How</span>
-        <select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select>
-        <span class="pick-note muted" id="pickNote"></span></label>
+      <div class="field wfield"><label for="workflow"><span data-hint="The steps the agent follows. Pick one below, or let Jev choose from your prompt">How</span></label>
+        <div class="wf-pick"><select name="workflow" id="workflow"><option value="auto">Jev picks (auto)</option></select><button type="button" id="suggestBtn" data-hint="Sends your prompt to Jev, which picks the way of working that fits it and selects it here">Suggest with Jev</button></div>
+        <span class="pick-note muted" id="pickNote" role="status"></span></div>
     </div>
+    <div class="wfhelp oneoff" id="wfHelp" aria-live="polite"></div>
+    <details class="more oneoff" id="wfCompare"><summary>Compare the ways of working</summary><div id="wfTable" class="wftable"></div></details>
     <label class="field wide oneoff" id="ticketsField" hidden><span data-hint="Optional. Paste the JSON that /wayfinder returned. The swarm then skips its planner and works the build tickets instead, a wave at a time: a ticket starts once the tickets it depends on are merged">Ticket draft (JSON from /wayfinder)</span>
       <textarea name="tickets" rows="5" spellcheck="false" placeholder='{"tickets":[{"id":"api","kind":"build","title":"...","description":"...","depends_on":[]}]}'></textarea>
       <span class="fine muted"><button type="button" id="fileTickets" data-hint="Write this draft into the repo above as markdown files (wayfinder/<map>/map.md and one file per ticket) you can read, edit and commit. Shows what it will write and asks first">Save as markdown files…</button> <button type="button" id="loadTickets" data-hint="Read a folder of wayfinder markdown files in the repo above back into this box">Load from a folder…</button> <span id="ticketsMsg" role="status"></span></span></label>
@@ -144,6 +144,7 @@
     </details>
     <div class="actions"><button class="primary" type="submit" id="startBtn">Start run</button><span class="note" id="startMsg"></span><span class="fine muted">Risky commands wait here for your OK. Nothing is pushed; the result is a branch.</span></div>
   </form>
+  </dialog>
 
   <dialog id="agentDialog" class="picker agentdlg" aria-label="Agent">
     <form id="agentForm" autocomplete="off">
@@ -183,37 +184,70 @@
     <div class="picker-foot"><span class="muted" id="pickHint"></span><button type="button" class="primary" id="pickUse" disabled>Use this repo</button></div>
   </dialog>
 
-  <h2 id="listTitle">Runs</h2>
-  <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
-  <div class="runview side" id="runView">
-    <div class="card detail" id="detail"><p class="muted">Pick a run to see what the agent did.</p></div>
-    <details class="card termpanel" id="termPanel" hidden open>
-      <summary data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</summary>
-      <div id="termHost" class="termhost"></div>
-    </details>
+  <div class="agentgrid" id="agentGrid">
+    <section>
+      <h2 id="listTitle">Runs</h2>
+      <div class="card list" id="list"><p class="muted">No runs yet.</p></div>
+    </section>
+    <section id="promptsBox">
+      <h2 id="promptsTitle" data-hint="Prompts you can start a run from. Click one to open it in the new run window">Prompts</h2>
+      <div class="card list" id="promptList"><p class="muted">No prompts yet.</p></div>
+    </section>
   </div>
-  <div class="card follow" id="followPanel" hidden>
-    <strong data-hint="Starts the run again on the same branch (harness/&lt;id&gt;), from the last commit, with everything it did so far as context. It gets a new sandbox, since the old one is gone. Whatever it changes is committed and kept on the branch">Ask the agent</strong>
-    <p class="muted" id="followSaved"></p>
-    <form id="followForm" autocomplete="off">
-      <textarea id="followText" rows="3" maxlength="4000" placeholder="Save the work, fix the failing test, add a test for it, push it…" aria-label="Message to the agent"></textarea>
-      <div class="chips" id="followChips"><button type="button" data-say="Save the work: commit everything that is useful on this branch and tell me what is in it.">Save the work</button><button type="button" data-say="Run the tests and fix anything that fails, then commit.">Fix the tests</button><button type="button" data-say="Explain what you changed and why, and list anything left unfinished.">Explain the changes</button></div>
-      <div class="actions"><button type="submit" class="primary" id="followSend">Send to the agent</button><span class="note" id="followMsg" role="status"></span></div>
-    </form>
+
+  <div id="runPage" hidden>
+    <section class="card statuscard" id="statusCard" aria-label="Status of this run"></section>
+    <div class="card follow" id="followPanel" hidden>
+      <strong data-hint="Starts the run again on the same branch (harness/&lt;id&gt;), from the last commit, with everything it did so far as context. It gets a new sandbox, since the old one is gone. Whatever it changes is committed and kept on the branch">Ask the agent</strong>
+      <span class="muted" id="followSaved"></span>
+      <form id="followForm" autocomplete="off">
+        <textarea id="followText" rows="2" maxlength="4000" placeholder="Save the work, fix the failing test, add a test for it, push it…" aria-label="Message to the agent"></textarea>
+        <div class="chips" id="followChips"><button type="button" data-say="Save the work: commit everything that is useful on this branch and tell me what is in it.">Save the work</button><button type="button" data-say="Run the tests and fix anything that fails, then commit.">Fix the tests</button><button type="button" data-say="Explain what you changed and why, and list anything left unfinished.">Explain the changes</button></div>
+        <div class="actions"><button type="submit" class="primary" id="followSend">Send to the agent</button><span class="note" id="followMsg" role="status"></span></div>
+      </form>
+    </div>
+    <div class="runview side" id="runView">
+      <div class="leftcol" id="leftCol">
+        <div class="card detail" id="detail"><p class="muted">Pick a run to see what the agent did.</p></div>
+        <div class="card" id="shipPanel" hidden>
+          <strong data-hint="Merges the change into the app through a GitHub pull request, so its normal pipeline deploys it. Needs GITHUB_TOKEN in .env. Approve stays off while tests fail or files outside the editable paths changed">Ship this change</strong>
+          <div id="shipInfo"></div>
+          <div class="actions"><button type="button" class="primary" id="shipBtn" disabled>Approve and merge</button><button type="button" id="undoBtn" hidden>Undo (revert)</button><span class="note" id="shipMsg"></span></div>
+        </div>
+        <details class="card termpanel" id="previewPanel" hidden>
+          <summary data-hint="Start the app's dev server inside this run's workspace and open it, to look at what the agent changed before you merge anything. Local runs only">Preview</summary>
+          <form id="previewForm" class="row" autocomplete="off">
+            <label class="field wide"><span data-hint="The command that starts the app. {port} becomes a free port (also set as PORT)">Dev server command</span><input type="text" name="command" id="previewCmd" placeholder="npm run dev -- --port {port}" spellcheck="false" maxlength="500"></label>
+            <div class="actions"><button class="primary" type="submit" id="previewStart">Start preview</button><button type="button" id="previewStop" hidden>Stop preview</button><span class="note" id="previewMsg" role="status"></span></div>
+          </form>
+          <div id="previewInfo"></div>
+        </details>
+      </div>
+      <div class="card rightcol" id="rightCol">
+        <div class="rtabs" role="tablist" aria-label="Terminal and trace">
+          <button type="button" role="tab" data-rtab="term" id="rtabTerm" data-hint="What the agent ran and what came back, as a terminal. It follows the run live; it is a replay of the run, not a shell, so typing here does nothing">Terminal</button>
+          <button type="button" role="tab" data-rtab="trace" id="rtabTrace" data-hint="Everything the agent did, step by step: what it said, each tool it used and what came back">Trace</button>
+          <span class="grow"></span>
+          <label class="check auto" data-hint="Keep the view at the newest line as the run goes on. Scrolling up pauses it"><input type="checkbox" id="autoScroll" checked><span>Auto-scroll</span></label>
+          <button type="button" id="toBottom" data-hint="Jump to the newest line" aria-label="Scroll to bottom">↓ Bottom</button>
+          <button type="button" id="fullBtn" data-hint="Fill the screen with this view. Esc closes it" aria-label="Full screen">⛶</button>
+        </div>
+        <div class="pane" id="termPanel">
+          <div id="termHost" class="termhost"></div>
+        </div>
+        <div class="pane" id="tracePane" hidden>
+          <div class="tracetools">
+            <select id="tfType" aria-label="Show only"><option value="all">All events</option><option value="model">Agent messages</option><option value="tool">Tools and results</option><option value="stage">Stages and notes</option><option value="approval">Approvals</option></select>
+            <select id="tfTool" aria-label="Tool"><option value="">Any tool</option></select>
+            <select id="tfStage" aria-label="Stage"><option value="">Any stage</option></select>
+            <label class="check"><input type="checkbox" id="tfErrors"><span>Errors only</span></label>
+            <span class="tsearch"><input type="search" id="tfSearch" placeholder="Search the trace" autocomplete="off" spellcheck="false" aria-label="Search the trace"><span class="muted" id="tfCount" role="status"></span><button type="button" id="tfPrev" aria-label="Previous match">↑</button><button type="button" id="tfNext" aria-label="Next match">↓</button></span>
+          </div>
+          <div class="trace" id="traceList"></div>
+        </div>
+      </div>
+    </div>
   </div>
-  <div class="card" id="shipPanel" hidden>
-    <strong data-hint="Merges the change into the app through a GitHub pull request, so its normal pipeline deploys it. Needs GITHUB_TOKEN in .env. Approve stays off while tests fail or files outside the editable paths changed">Ship this change</strong>
-    <div id="shipInfo"></div>
-    <div class="actions"><button type="button" class="primary" id="shipBtn" disabled>Approve and merge</button><button type="button" id="undoBtn" hidden>Undo (revert)</button><span class="note" id="shipMsg"></span></div>
-  </div>
-  <details class="card termpanel" id="previewPanel" hidden>
-    <summary data-hint="Start the app's dev server inside this run's workspace and open it, to look at what the agent changed before you merge anything. Local runs only">Preview</summary>
-    <form id="previewForm" class="row" autocomplete="off">
-      <label class="field wide"><span data-hint="The command that starts the app. {port} becomes a free port (also set as PORT)">Dev server command</span><input type="text" name="command" id="previewCmd" placeholder="npm run dev -- --port {port}" spellcheck="false" maxlength="500"></label>
-      <div class="actions"><button class="primary" type="submit" id="previewStart">Start preview</button><button type="button" id="previewStop" hidden>Stop preview</button><span class="note" id="previewMsg" role="status"></span></div>
-    </form>
-    <div id="previewInfo"></div>
-  </details>
 </main>
 <script src="dialogs.js"></script>
 <script src="githubconnect.js"></script>
@@ -227,6 +261,7 @@
 <script src="costs.js"></script>
 <script src="notify.js"></script>
 <script src="repos.js"></script>
+<script src="runview.js"></script>
 <script src="agents.js"></script>
 <script src="apps.js"></script>
 </body>

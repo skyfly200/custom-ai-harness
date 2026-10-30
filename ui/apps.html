@@ -23,15 +23,68 @@
   </header>
   <script src="nav.js"></script>
 
-  <p class="muted lead">An app is a repo the harness can change for you. Ask one for a change and the change runs on Agents, with a preview and a diff to ship or undo. Start a new one from a template: the builder makes the folder with its starting files, can make or link its GitHub repo, and adds the CI and deploy files for the host and database you pick.</p>
+  <p class="muted lead">An app is a repo the harness can change for you. Ask one for a change and the change runs on Agents, with a preview and a diff to ship or undo. Start a new one from a template, or import a repo you already have: the harness reads its stack and suggests where it runs and its database.</p>
 
   <section class="card" aria-labelledby="mineTitle">
     <div class="card-head">
       <h2 id="mineTitle">Your apps</h2>
-      <button type="button" class="primary" id="newApp">New app</button>
+      <div class="actions">
+        <button type="button" id="importApp">Import existing app</button>
+        <button type="button" class="primary" id="newApp">New app</button>
+      </div>
     </div>
     <div id="appList" class="app-list"><p class="muted">Loading…</p></div>
   </section>
+
+  <dialog id="importDialog" class="picker newdlg" aria-labelledby="importTitle">
+    <form id="importForm" class="new-form" autocomplete="off">
+      <div class="picker-head"><strong id="importTitle">Import an existing app</strong><button type="button" id="importClose" aria-label="Close">×</button></div>
+      <p class="fine muted">Register a repo you already have. Looking at it changes nothing. The files below are only added where the repo does not have them, and nothing is committed for you.</p>
+
+      <fieldset class="group">
+        <legend>Where it is</legend>
+        <label class="check"><input type="radio" name="source" value="local" checked> A folder on this computer</label>
+        <label class="field indent" data-src="local"><span>Folder</span><input name="folder" list="roots" placeholder="the folder with its .git folder in it" spellcheck="false"></label>
+        <label class="check"><input type="radio" name="source" value="github"> A GitHub repo</label>
+        <label class="field indent" data-src="github"><span>Repo</span><select name="githubRepo"><option value="">Loading your repos…</option></select></label>
+        <p id="importNote" class="fine muted" role="status"></p>
+        <div class="actions"><button type="button" id="importLook">Look at it</button></div>
+      </fieldset>
+
+      <div id="importRest" hidden>
+        <fieldset class="group">
+          <legend>What it looks like</legend>
+          <p id="importFound" class="fine"></p>
+          <ul id="importNotes" class="fine muted"></ul>
+        </fieldset>
+
+        <div class="row2">
+          <label class="field"><span>Name</span><input name="name" maxlength="60"></label>
+          <label class="field"><span>Where it runs</span><select name="deployTarget"></select></label>
+        </div>
+        <p id="importTargetHelp" class="fine muted"></p>
+        <label class="field"><span>Database</span><select name="database"></select></label>
+        <p id="importDatabaseHelp" class="fine muted"></p>
+        <div id="importConnect" class="connect-box" aria-live="polite"></div>
+
+        <label class="field"><span>Agents may edit (one path per line)</span><textarea name="editablePaths" rows="2" spellcheck="false"></textarea></label>
+        <details class="group">
+          <summary>Commands</summary>
+          <div class="row2">
+            <label class="field"><span>Install</span><input name="installCommand" maxlength="500" spellcheck="false"></label>
+            <label class="field"><span>Tests</span><input name="testCommand" maxlength="500" spellcheck="false" placeholder="none yet"></label>
+          </div>
+          <label class="field"><span>Dev server</span><input name="devCommand" maxlength="500" spellcheck="false" placeholder="none"></label>
+        </details>
+
+        <label class="check"><input type="checkbox" name="addFiles" checked> Add the CI workflow and DEPLOY.md for these choices, where the repo does not have them</label>
+        <div class="actions">
+          <button type="submit" class="primary" id="importGo">Import app</button>
+          <span id="importMsg" class="muted" role="status"></span>
+        </div>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="newDialog" class="picker newdlg" aria-labelledby="newTitle">
     <form id="newForm" class="new-form" autocomplete="off">

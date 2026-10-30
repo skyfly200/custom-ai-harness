@@ -163,6 +163,9 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     app.get('/apps/templates', (req, res) => res.json(templates.listTemplates()));
     app.get('/apps/hosting', (req, res) => res.json(hosting.catalog()));
     app.post('/apps/new', wrap(async (req, res) => res.status(201).json(await manager.newApp({ ...(req.body || {}), token: req.githubToken || '' }))));
+    // Existing apps: look at a folder or GitHub repo first (read only), then register it. Also before /apps/:id.
+    app.post('/apps/import/detect', wrap(async (req, res) => res.json(await manager.detectImport({ ...(req.body || {}), token: req.githubToken || '' }))));
+    app.post('/apps/import', wrap(async (req, res) => res.status(201).json(await manager.importApp({ ...(req.body || {}), token: req.githubToken || '' }))));
     app.post('/apps', (req, res) => {
         try { res.status(201).json(manager.createApp(req.body)); } catch (err) { fail(res, err); }
     });

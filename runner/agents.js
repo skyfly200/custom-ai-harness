@@ -97,6 +97,13 @@ class AgentStore {
             }
         }
         if (has('autoContinue')) out.autoContinue = !(cfg.autoContinue === false || cfg.autoContinue === 0 || cfg.autoContinue === '0' || cfg.autoContinue === 'false' || cfg.autoContinue === '' || cfg.autoContinue === null);
+        // auto-fix: a run whose pull request gets merge conflicts starts a fix by itself (off by default, see runs.js startFix)
+        if (has('autoFixConflicts')) out.autoFixConflicts = !(cfg.autoFixConflicts === false || cfg.autoFixConflicts === 0 || cfg.autoFixConflicts === '0' || cfg.autoFixConflicts === 'false' || cfg.autoFixConflicts === '' || cfg.autoFixConflicts === null);
+        if (has('autoFixMax')) {
+            const n = cfg.autoFixMax === null || cfg.autoFixMax === '' ? null : Math.floor(Number(cfg.autoFixMax));
+            if (n !== null && !Number.isFinite(n)) throw new Error('autoFixMax must be a number');
+            out.autoFixMax = n === null ? null : Math.min(5, Math.max(1, n));
+        }
         if (has('autoContinueMax')) {
             const n = cfg.autoContinueMax === null || cfg.autoContinueMax === '' ? null : Math.floor(Number(cfg.autoContinueMax));
             if (n !== null && !Number.isFinite(n)) throw new Error('autoContinueMax must be a number');
@@ -117,7 +124,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', landing: 'branch', iconSeed: null, iconImage: null, iconText: null, moreRepos: [], profile: null, model: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, project: null,
+            instructions: '', landing: 'branch', iconSeed: null, iconImage: null, iconText: null, moreRepos: [], profile: null, model: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, autoFixConflicts: false, autoFixMax: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

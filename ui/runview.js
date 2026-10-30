@@ -156,6 +156,13 @@
       const n = run.prTarget.number;
       out.push({ act: 'update-pr', primary: true, label: run.prUpdated ? 'Update PR branch again' : 'Update PR branch', hint: `Moves pull request #${n}'s branch forward to this run's commit, so the PR shows the agent's work. Fast-forward only: nothing on the PR is lost, and it is never merged for you` });
     }
+    // the PR's state buttons appear once GitHub has been asked (the run page asks when it opens)
+    if ((run.pr || run.prTarget) && (run.prState || run.pr)) {
+      const conflict = run.prState?.conflict === true && ['open', 'draft'].includes(run.prState.status);
+      if (conflict) out.push({ act: 'fix-conflicts', primary: true, label: 'Fix conflicts', hint: 'Starts a run that merges the pull request\'s base into its branch and resolves the merge conflicts. Its fix goes on the pull request with Update PR branch. It is never merged for you' });
+      out.push({ act: 'pr-check', label: 'Check pull request', hint: 'Asks GitHub for the pull request\'s state now: open, draft, merged or closed, merge conflicts and checks' });
+      out.push({ act: 'auto-fix', label: run.autoFixConflicts ? 'Turn off auto-fix' : 'Auto-fix conflicts', hint: run.autoFixConflicts ? 'Stops starting fixes by itself when this pull request gets merge conflicts' : 'When this pull request gets merge conflicts, starts a run to resolve them by itself (a few tries, capped at the cost limit). Off by default' });
+    }
     if (changed && ctx.hosted) {
       if (ctx.githubOn === false) out.push({ href: '#settings', primary: !namedPr, label: 'Connect GitHub to push', hint: 'Pushing and pull requests need your GitHub connection. Connect it in Agent settings' });
       else {

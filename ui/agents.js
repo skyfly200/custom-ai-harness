@@ -99,7 +99,7 @@ function renderList() {
   setHtml('list', list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <i class="sdot ${TAGS[r.status] || 'live'}${ACTIVE.has(r.status) ? ' pulse' : ''}" title="${esc(statusWord(r))}"></i>
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${AgentIcon.icon(agentOf(r.agent))}${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${AgentIcon.icon(agentOf(r.agent))}${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${r.prState ? `${PrState.chip(r.prState)} ` : ''}${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
 }
 
 function eventHtml(e) {
@@ -137,13 +137,22 @@ function actionButtons(run, { hosted, githubOn }) {
   return carrying + acts.map(button).join('');
 }
 
+// a run's pull request is asked about once when its page is first drawn (then the watch keeps it current)
+const prChecked = new Set();
+function ensurePrChecked(run) {
+  if (!(run.pr || run.prTarget) || prChecked.has(run.id)) return;
+  prChecked.add(run.id);
+  post(`/${run.id}/pr-check`).then(() => refresh()).catch(() => {});
+}
+
 function renderDetail(run) {
+  ensurePrChecked(run);
   if (!run) { setHtml('detail', `<p class="muted">Pick a ${agentSel ? 'task' : 'run'} to see what the agent did.</p>`); return; }
   const active = ACTIVE.has(run.status);
   const r = run.result;
   const diffOpen = openDetails.has('diff');
   const changed = setHtml('detail', `
-    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.landing && run.landing !== 'branch' && run.landOn ? `<span title="${run.landing === 'main' ? 'The commit goes straight onto this branch when it passes' : 'Merged into this branch when it passes'}">${run.landing === 'main' ? 'Straight onto' : 'Merge into'} <code>${esc(run.landOn)}</code></span>` : ''}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.strongModel ? `<span>Strong model ${esc(run.strongModel)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
+    <div class="facts">${run.pr || run.prTarget ? `<span class="prfact">${PrState.chip(run.prState) || '<span class="muted">Pull request: not checked yet</span>'}</span>` : ''}${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.landing && run.landing !== 'branch' && run.landOn ? `<span title="${run.landing === 'main' ? 'The commit goes straight onto this branch when it passes' : 'Merged into this branch when it passes'}">${run.landing === 'main' ? 'Straight onto' : 'Merge into'} <code>${esc(run.landOn)}</code></span>` : ''}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.strongModel ? `<span>Strong model ${esc(run.strongModel)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
@@ -511,6 +520,19 @@ $('detail').addEventListener('click', async (e) => {
       const out = await post(`/${selected}/update-pr`);
       ui.toast(`Pull request #${out.number} now has this work on ${out.branch}.`);
     }
+    if (act === 'pr-check') { await post(`/${selected}/pr-check`); ui.toast('Checked the pull request.'); }
+    if (act === 'fix-conflicts') {
+      const n = runById(selected)?.prTarget?.number || runById(selected)?.pr?.number;
+      if (!await ui.confirm(`Start a run that merges the base into pull request #${n} and resolves its merge conflicts? Nothing goes on the pull request until you press Update PR branch. It is never merged for you.`)) return;
+      const made = await post(`/${selected}/fix-conflicts`);
+      selected = made.id; location.hash = made.id; openDetails = new Set();
+      ui.toast('Fixing the merge conflicts in a new run.');
+    }
+    if (act === 'auto-fix') {
+      const on = !runById(selected)?.autoFixConflicts;
+      await post(`/${selected}/auto-fix`, { on });
+      ui.toast(on ? 'Auto-fix is on: a conflict on this pull request starts a fix by itself.' : 'Auto-fix is off.');
+    }
     if (act === 'export' || act === 'export-md') await downloadExport(selected, act === 'export-md');
     if (act === 'export-copy') {
       await navigator.clipboard.writeText(await fetchExport(selected, true));
@@ -648,6 +670,7 @@ $('newRun').addEventListener('submit', async (e) => {
   body.escalate = f.elements.escalate?.checked ? '1' : '0';
   body.autoContinue = f.elements.autoContinue?.checked ? '1' : '0';
   if (!agentSel && body.landing === 'main' && !await ui.confirm(`Work straight on the branch checked out in ${body.repo}, with no review? When this run finishes and its tests pass, its commit goes onto that branch by itself.`)) return;
+  body.autoFixConflicts = f.elements.autoFixConflicts?.checked ? '1' : '0';
   try {
     $('startMsg').textContent = 'Starting…';
     if (body.workflow === 'auto') {
@@ -656,7 +679,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.jev ? { jev: body.jev } : {}), ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.speed === 'batch' ? { speed: 'batch' } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.jev ? { jev: body.jev } : {}), ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.speed === 'batch' ? { speed: 'batch' } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}), ...(body.autoFixConflicts === '1' ? { autoFixConflicts: true, ...(body.autoFixMax ? { autoFixMax: body.autoFixMax } : {}) } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -1209,6 +1232,8 @@ async function initAgentDialog() {
     body.autoContinue = f.elements.autoContinue.checked;
     body.autoContinueMax = body.autoContinueMax === '' ? null : body.autoContinueMax;
     if (body.landing === 'main' && !await ui.confirm(`Every finished task of ${body.name || 'this agent'} goes straight onto the branch checked out in ${body.repo}, with no review, when it passes. Keep it that way?`)) return;
+    body.autoFixConflicts = f.elements.autoFixConflicts.checked;
+    body.autoFixMax = body.autoFixMax === '' ? null : body.autoFixMax;
     $('agentMsg').textContent = 'Saving…';
     try {
       const saved = editingAgent ? await sendAgent('PATCH', `/${editingAgent.id}`, body) : await sendAgent('POST', '', body);
@@ -1286,6 +1311,8 @@ function openAgentDialog(agent) {
   f.elements.jev.value = v.jev || '';
   f.elements.autoContinue.checked = !!v.autoContinue;
   f.elements.autoContinueMax.value = v.autoContinueMax ?? '';
+  f.elements.autoFixConflicts.checked = !!v.autoFixConflicts;
+  f.elements.autoFixMax.value = v.autoFixMax ?? '';
   f.elements.project.value = v.project?.id || '';
   f.elements.iconImage.value = agent?.iconImage || '';
   f.elements.iconText.value = agent?.iconText || '';

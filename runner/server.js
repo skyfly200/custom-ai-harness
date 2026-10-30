@@ -51,6 +51,7 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
             req.owner = String(req.headers['x-runner-owner'] || '');
             req.githubToken = String(req.headers['x-runner-github-token'] || '');
             if (!req.owner) return res.status(400).json({ error: 'x-runner-owner is required on a hosted runner' });
+            manager.rememberToken(req.owner, req.githubToken);
             next();
         });
         // these work on paths of this machine or on the local sandbox, which a shared server doesn't offer
@@ -230,6 +231,18 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     });
     // The same run carried on after it ran out of steps or time: same id, same branch,
     // not a new run (Retry is for a run that failed)
+    // Pull requests: ask GitHub for the PR's state now (the run page does this when it opens and on Check)
+    app.post('/runs/:id/pr-check', wrap(async (req, res) => {
+        res.json(await manager.refreshPr(req.params.id, { token: req.githubToken || '' }));
+    }));
+    // Fix conflicts: a run that merges the PR's base into its branch and resolves the conflicts
+    app.post('/runs/:id/fix-conflicts', wrap(async (req, res) => {
+        res.status(201).json(manager.startFix(req.params.id, { auto: false }));
+    }));
+    // Auto-fix on or off for this run (and its tries, 1 to 5)
+    app.post('/runs/:id/auto-fix', wrap(async (req, res) => {
+        res.json(manager.setAutoFix(req.params.id, { on: req.body?.on, max: req.body?.max }));
+    }));
     app.post('/runs/:id/continue', (req, res) => {
         try { res.status(201).json(manager.continueRun(req.params.id, { message: req.body?.message })); } catch (err) {
             fail(res, err, /no such run/.test(err.message) ? 404 : 409);
@@ -279,6 +292,9 @@ if (require.main === module) {
         console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}; sandbox: ${manager.sandboxKind}`);
         const resuming = manager.resumeInterrupted({ delayMs: Number(process.env.RUNNER_RESUME_DELAY_MS) || 5000 });
         if (resuming) console.log(`Resuming ${resuming} interrupted run(s) that are set to auto-continue.`);
+        // pull request state for the runs that have one (every RUNNER_PR_WATCH_MIN minutes, 0 turns it off)
+        const watchMin = Number(process.env.RUNNER_PR_WATCH_MIN ?? 5);
+        if (watchMin > 0) setInterval(() => manager.watchPrs().catch(() => {}), watchMin * 60 * 1000).unref();
     });
 }
 

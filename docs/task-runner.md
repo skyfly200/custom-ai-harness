@@ -28,6 +28,14 @@ To use it, run `npm run all` (it starts the runner as a fourth part), put a git 
 
 The cloud (E2B) sandbox's life is clamped to your plan's cap: `E2B_MAX_TIMEOUT_MIN` sets the longest a sandbox may live (default 60 minutes), so a long run is stopped before the sandbox is killed underneath it.
 
+### Pull requests: state, conflicts and auto-fix
+
+A run that opened a pull request, or whose task named one, keeps that pull request's state: open, draft, merged or closed, whether GitHub says it has merge conflicts, and what its checks say. The run list and the run page show it as an icon and label (`ui/prstate.js`). The runner refreshes it every `RUNNER_PR_WATCH_MIN` minutes (default 5, 0 turns the watch off), and the run page asks once when it opens. On a hosted server the watch uses the person's GitHub token from their last request, kept in memory only; locally it uses `GITHUB_TOKEN` if set.
+
+With merge conflicts, the run page offers **Fix conflicts**: a new run that merges the pull request's base into its branch and resolves the conflicts. Its commit goes back on the pull request with **Update PR branch**, as for any run. The pull request is never merged for you.
+
+**Auto-fix conflicts** is off by default. Turn it on for an agent (its form) or for a run (the run page, or the start form). A run with auto-fix on starts a fix by itself when its pull request gets conflicts, and puts the fix on the pull request when the fix finishes with a commit. It stops after its fix tries (`Fix tries`, default 2, at most 5) and after its cost: the Max cost of the run, or `RUNNER_FIX_MAX_USD` (default $2) when the run has none. A fix never starts while another one is still working, and fix runs never start fixes of their own. Code: `runner/prWatch.js` (GitHub), `runner/runs.js` (`refreshPr`, `startFix`, `landFix`, `watchPrs`).
+
 ### Persistent agents
 
 The Agents page opens on floating orbs, one per agent plus a built-in **Default** agent for one-off runs and a **+** orb to make a new agent. Hover (or tap, then tap again) an orb for its details card; click it to open that agent's page and start runs there. Open runs float in a small panel grouped by agent. Inside an agent there are three views: **New run**, **Runs** (the list) and one run. A run's pane scrolls and follows the newest line by itself while you stay at its bottom, never moving the page, and sits beside the terminal (or above it with **Stacked**; phones always stack). Motion stops under reduced-motion.

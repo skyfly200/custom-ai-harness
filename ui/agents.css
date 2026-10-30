@@ -316,3 +316,18 @@ ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 /* a run that was cut off, or that started itself again */
 .sc-cut { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.5; background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .sc-cut button { margin-left: 6px; }
+
+/* pull request state (ui/prstate.js): an icon and label, coloured by state; checks after it */
+.prst { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; border-radius: 999px; font-size: 12px; line-height: 18px; white-space: nowrap; color: var(--muted); border: 1px solid color-mix(in srgb, currentColor 22%, transparent); }
+.prst svg { width: 14px; height: 14px; flex: none; }
+.prst-open { color: var(--ok); }
+.prst-draft, .prst-unknown { color: var(--muted); }
+.prst-merged { color: #8957e5; }
+.prst-closed { color: var(--bad); }
+.prst-warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); font-weight: 600; }
+.prst-checks { margin-left: 4px; padding-left: 6px; border-left: 1px solid color-mix(in srgb, currentColor 30%, transparent); font-weight: 400; }
+.prst-passing { color: var(--ok); }
+.prst-failing { color: var(--bad); }
+.prst-pending { color: var(--muted); }
+.prst-link { text-decoration: none; }
+.prst-link:hover .prst { border-color: currentColor; }

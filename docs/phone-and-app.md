@@ -14,6 +14,8 @@ Bright Chat can be installed so it opens in its own window, with its own icon, l
 
 The installed app opens the chat page, and the Dashboard, Usage, Routing and Settings pages are shortcuts on its icon. It still needs the harness running: the app keeps a copy of the pages so it opens when the harness is slow or off, but chats and answers come from the harness and are never stored by the app. If you set `HARNESS_PASSWORD`, the app asks for it the same way the browser does.
 
+**Phone layout.** `ui/mobile.css` (loaded last on every page) makes the pages fit a small screen: the pages bar is one row that scrolls sideways instead of vanishing, buttons and fields are sized for a finger, dialogs and drawers fit the visible screen (with safe-area insets), and the chat is one full-height column. On a touch screen the help text under a field is folded away until you tap into it, so forms stay short.
+
 ## Reach it from your phone
 
 To use Bright Chat from a phone, or any device that isn't yours, over `https://`, run a **Cloudflare tunnel**. It is a small program next to the harness that connects out to Cloudflare, which gives you a normal `https://` address that reaches the harness. Nothing on your router or server needs opening, and the address works for installing the app. [Tailscale](server-docker.md#run-it-on-a-server-docker) is the more private option, but the phone needs the Tailscale app; a tunnel only needs a browser.

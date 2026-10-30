@@ -75,14 +75,17 @@ python -m pytest test/                     # Router: contract tests and every ba
 |---|---|
 | Login, passwords, API keys | `access`, `login`, `oauth`, `runKeys` |
 | Usage per person, admin usage view | `userUsage` (store, database layer, sums), `userUsageApi` (nobody sees another person's usage) |
-| Routing, tiers, profiles, Auto | `interceptor`, `profiles`, `tiers`, `autoStrategy`, `autoroute`, `escalate`, `jevQuestions` |
+| Routing, tiers, profiles, Auto | `interceptor`, `profiles`, `tiers`, `autoStrategy`, `autoroute`, `escalate`, `jevQuestions`, `routingDelete`, `routingSimplified`, `touch` (routing editor on a touch screen) |
 | Command guard, Jev file tools | `guard`, `gatewayGuard`, `jevFiles` |
 | Gateway config and model info | `gateway`, `gatewayConfig`, `modelInfo`, `modelInfoApi`, `modelStats`, `openrouterCatalog` |
-| Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `runview`, `e2bSandbox`, `spritesSandbox` |
-| MCP tools | `mcp`, `mcpAdmin`, `toolsApi`, `mcpAskFirst` (ask-first approval, Vercel entry) |
-| Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands`, `repos` |
+| Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `runview`, `e2bSandbox`, `spritesSandbox`, `agentBoard`, `agentWidget`, `runnerHosted`, `runsOff` (the no-task-runner note) |
+| MCP tools | `mcp`, `mcpAdmin`, `toolsApi`, `mcpAskFirst` (ask-first approval, Vercel entry), `toolSetup` (guided setup wizard), `toolApproval` |
+| Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands`, `chatReplies`, `chatMerge`, `chatPriceRetry`, `emptyReply`, `modelAlias` (`/model` names and model suggestions), `repos` |
+| Chat sidebar: imports, dictation, audio, notifications | `claudeKit` (import Claude Code commands and skills), `dictation`, `stt`, `audio`, `notify` (waiting-for-you browser notifications) |
+| Settings page and its panels | `settings`, `navOrder` (the shared pages bar) |
+| Site root and page URLs | `rootApi` (relative `api/...` at the site root), `pwa`, `oldHosts` |
 | Connect OpenRouter (OAuth PKCE) | `openrouterOAuth` |
-| Repo field suggestions (local scan) | `localRepos` |
+| Repo field suggestions (local scan) | `localRepos`, `repoTools` (read-only tools), `hostedRepoTools` (folder repos off on a hosted server) |
 | Connect GitHub, chat GitHub tools | `githubOAuth` (token renewal, in-process Postgres), `githubApi`, `guests` (routes) |
 | Guests, credit, own keys, proxy tickets | `guests` (in-process Postgres) |
 | Per-user tools, routings, settings | `userTools` (secrets, address checks, member MCP, routings; in-process Postgres) |

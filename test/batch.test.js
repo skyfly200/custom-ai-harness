@@ -197,3 +197,9 @@ test('a fast run, or an overnight run with no batchable step, sends nothing to a
     assert.ok(general.events.some((e) => /no step here can wait for a batch/.test(e.text || '')));
     assert.throws(() => manager.create({ goal: 'x', repo, workflow: 'general', speed: 'slow' }), /speed must be one of/);
 });
+
+test('the shipped one-shot workflow has a single tool-less step on a batch model, and Overnight batches it', () => {
+    const shipped = workflows.load(path.join(__dirname, '..', 'workflows')).list.find((w) => w.id === 'one-shot');
+    assert.deepEqual(shipped.stages.map((st) => [st.tools, st.model]), [['none', 'anthropic/claude-sonnet-5.5']]);
+    assert.ok(require('../utils/batchModels').isBatch(shipped.stages[0].model, require('../utils/batchModels').load()));
+});

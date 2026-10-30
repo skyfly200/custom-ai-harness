@@ -1,0 +1,9 @@
+{
+  "id": "one-shot",
+  "name": "One shot",
+  "when": "the person names the one-shot way of working, or asks for a single answer with no tools, from the text they give",
+  "stages": [
+    { "id": "answer", "role": "Answerer", "tools": "none", "model": "anthropic/claude-sonnet-5.5",
+      "prompt": "Answer the task in one reply, from the text you are given. You have no tools and cannot read files or run anything. Call finish with the answer. Say plainly what you could not tell from the text." }
+  ]
+}

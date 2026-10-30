@@ -24,6 +24,11 @@ body:has(main.wide) .site-bar-in { max-width: none; }
 .site-links a.here { color: var(--text); background: color-mix(in srgb, var(--accent) 15%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent); }
 .site-nav a.here::after { display: none; }
 .site-links a.here .ico { color: var(--accent); }
+/* desktop: Settings is just the gear (its title and aria-label carry the word) */
+@media (min-width: 761px) {
+  .site-links a.icon-only, body.chat-page .top nav a.icon-only { gap: 0; padding: 7px 9px; }
+  .site-links a.icon-only span, body.chat-page .top nav a.icon-only span { display: none; }
+}
 .ico { width: 16px; height: 16px; flex: none; }
 
 a:focus-visible, .site-nav button:focus-visible, .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

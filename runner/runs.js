@@ -112,6 +112,23 @@ function resumption(run) {
     return text.length > PARTIAL_CHARS ? `${text.slice(0, PARTIAL_CHARS)}\n… [cut]` : text;
 }
 
+/**
+ * A person's message to a run that has ended, as the brief for the part that picks it up:
+ * where the run stands, what is committed on its branch, and what they now ask.
+ */
+function followUpNote(run, message) {
+    const parts = [`This run (${run.id}) ended ${run.status === 'done' ? 'as done' : `as ${run.status}`} and the person is coming back to it. You are working on the same branch, ${run.branch}.`];
+    if (run.result?.commit) parts.push('Everything the run did is committed on that branch: start from there, and do not redo the task.');
+    else parts.push('The run committed nothing, so the branch is as it started (a plan-only run changes nothing).');
+    if (run.error) parts.push(`It stopped with this error:\n${short(run.error, 1000)}`);
+    if (run.result?.summary) parts.push(`What it reported:\n${short(run.result.summary, 1500)}`);
+    if (run.result?.tests && !run.result.tests.passed) parts.push(`Its last test run failed (${run.result.tests.command}):\n${short(run.result.tests.output || '', 1500)}`);
+    const tail = run.events.slice(-12).map((e) => (e.type === 'model' && e.text ? `- said: ${short(e.text, 400)}` : e.type === 'tool' ? `- used ${e.name} ${e.args?.command ?? e.args?.path ?? ''}`.trim() : '')).filter(Boolean).join('\n');
+    if (tail) parts.push(`The last things it did:\n${tail}`);
+    parts.push(`The person now says (do what they ask; commit any change you make on this branch, because the workspace is thrown away when you finish):\n${short(message, 4000)}`);
+    return parts.join('\n\n');
+}
+
 class RunManager {
     /**
      * dir: where runs are kept. roots: folders repos may be in.
@@ -530,8 +547,9 @@ class RunManager {
             // Plan mode changes nothing, so there is nothing to commit and no branch to
             // hand back: the plan itself is the result.
             let commit = run.plan ? null : await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
-            // a swarm's changes are already committed as merges
-            if (!commit && run.kind === 'swarm') { const head = (await sandbox.git(['rev-parse', 'HEAD'])).trim(); if (head !== run.base) commit = head; }
+            // a swarm's changes are already committed as merges, and a part carried on may only have asked for nothing new:
+            // the branch still holds the run's commits
+            if (!commit && (run.kind === 'swarm' || run.carriesOn)) { const head = (await sandbox.git(['rev-parse', 'HEAD'])).trim(); if (head !== run.base) commit = head; }
             const result = { summary: outcome.summary, commit, diffStat: run.plan ? '' : await sandbox.diffStat(), tests: null };
             if (run.test && !live.stopped && !run.plan) {
                 this.event(run, { type: 'note', text: `Running the test command: ${run.test}` });
@@ -555,9 +573,11 @@ class RunManager {
             run.status = { finished: 'done', stopped: 'stopped' }[outcome.status] || 'incomplete';
             if (run.status === 'done' && result.outside?.length) run.status = 'incomplete';
         } catch (err) {
-            run.status = live.stopped ? 'stopped' : 'failed';
             run.error = err.message;
             this.event(run, { type: 'note', text: `Error: ${err.message}` });
+            // before the status changes, so a page that sees the run ended also sees its commit
+            await this.salvage(run, live);
+            run.status = live.stopped ? 'stopped' : 'failed';
         } finally {
             run.pending = null;
             run.ended = new Date().toISOString();
@@ -573,6 +593,26 @@ class RunManager {
             this.noteAgent(run);
             this.startAutoDebug(run);
             this.pump();
+        }
+    }
+
+    /**
+     * A run that failed or was stopped may still have edited files. A cloud sandbox is
+     * deleted when the run ends, so commit what is there and hand the branch back to the
+     * repo first; the person can then continue, read or push it. Never throws.
+     */
+    async salvage(run, live) {
+        if (!live.sandbox || run.plan || run.result?.commit) return;
+        try {
+            const commit = await Promise.race([
+                live.sandbox.commit(`harness run ${run.id}: unfinished work saved when the run ended`),
+                new Promise((_, no) => setTimeout(() => no(new Error('timed out')), 60000).unref?.()),
+            ]);
+            if (!commit) return;
+            run.result = { summary: '', commit, diffStat: await live.sandbox.diffStat().catch(() => ''), tests: null, salvaged: true };
+            this.event(run, { type: 'note', text: `Saved the unfinished work as a commit on ${run.branch}, so it is not lost with the sandbox.` });
+        } catch (err) {
+            this.event(run, { type: 'note', text: `Could not save the unfinished work (${err.message}).` });
         }
     }
 
@@ -964,29 +1004,34 @@ class RunManager {
      * When the leg ends, what it did takes the run's place (run.legs counts the parts
      * done so far) and the record says how it stands, so the page is a run all along.
      */
-    continueRun(id) {
+    continueRun(id, { message = '' } = {}) {
         const run = this.runs.get(id);
         if (!run) throw new Error('no such run');
+        const said = String(message || '').trim();
         if (run.parent) throw new Error('this is one part of a swarm; continue the swarm instead');
         if (run.kind === 'swarm') throw new Error('a swarm cannot be continued as it is');
         if (run.kind === 'chatdev') throw new Error('a ChatDev run cannot be continued; start it again');
         if (['queued', 'running', 'waiting'].includes(run.status)) throw new Error('stop the run first');
-        if (run.status !== 'incomplete') throw new Error(`only a run that ran out of steps, time or budget can be continued, not one that ended as ${run.status}`);
+        // a message from the person can go to any run that has ended: that is the follow-up
+        if (!said && run.status !== 'incomplete') throw new Error(`only a run that ran out of steps, time or budget can be continued, not one that ended as ${run.status}`);
         const continues = (run.continues || 0) + 1;
         if (continues > MAX_CONTINUES) throw new Error(`this run has already been continued ${MAX_CONTINUES} times`);
         // what this part did, said now, while the run's record still holds it
-        const resumeNote = resumption(run);
+        const resumeNote = said ? followUpNote(run, said) : resumption(run);
         const leg = {
             ...run, continues, carriesOn: run.id, briefGiven: false, resumeNote,
             result: null, error: null, pending: null, events: [], steps: 0,
             tokens: { in: run.tokens.in, out: run.tokens.out }, cost: run.cost || 0, unpricedCalls: run.unpricedCalls || 0, models: run.models || {},
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
             outOfSteps: null, partialText: null, partialSummary: run.partialSummary || null,
+            // a plan-only run asked to go ahead has to be allowed to change things
+            ...(said ? { plan: false, outOfBudget: false, error: null } : {}),
         };
         // the leg works on behalf of the run: the run's own record stays as it is
         this.active.set(leg.id, leg);
         this.save(leg);
-        this.event(leg, { type: 'note', text: `Carrying the run on after it ran out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}; it goes on from where the earlier part got to, on the same branch.` });
+        if (said) this.event(leg, { type: 'note', text: `You said: ${short(said, 600)}` });
+        this.event(leg, { type: 'note', text: said ? 'Carrying the run on from your message, on the same branch.' : `Carrying the run on after it ran out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}; it goes on from where the earlier part got to, on the same branch.` });
         this.queue.push(leg.id);
         this.pump();
         return this.summary(leg);
@@ -1045,6 +1090,9 @@ class RunManager {
             resolve(text.length > limit ? `${text.slice(0, limit)}\n[... diff cut at ${limit} characters ...]` : text);
         }));
     }
+
+    /** The whole change as a patch file (git apply / git am-free), from the repo's copy of the branch. */
+    patch(id) { return this.diff(id, 20 * 1024 * 1024); }
 
     /** Remove a finished run's workspace and record. The branch stays in the repo. */
     /**

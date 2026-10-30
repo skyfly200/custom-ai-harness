@@ -306,7 +306,7 @@ let quickAgentValue = '';
 function renderNeeds(needs) {
   $('needs').hidden = !needs.length;
   $('needs').innerHTML = needs.map(r => `<div class="need" data-run="${esc(r.id)}">
-      <div class="need-head"><span class="tag warn" style="margin-left:0">needs you</span> <b>${r.agentSeed ? AgentIcon.icon(r.agentSeed) : ''}${r.agentName ? esc(r.agentName) : 'Run'}</b> <a href="agents.html#${esc(r.parent || r.id)}" class="muted">${esc(firstLine(r.goal, 90))}</a></div>
+      <div class="need-head"><span class="tag warn" style="margin-left:0">needs you</span> <b>${r.agentIcon ? AgentIcon.icon(r.agentIcon) : ''}${r.agentName ? esc(r.agentName) : 'Run'}</b> <a href="agents.html#${esc(r.parent || r.id)}" class="muted">${esc(firstLine(r.goal, 90))}</a></div>
       <div class="sub">The agent wants to ${r.pending.kind === 'write' ? 'write this file' : 'run this command'} <span class="muted">(${esc(r.pending.reason)})</span></div>
       <pre>${esc(String(r.pending.text).slice(0, 400))}</pre>
       <div class="actions"><button class="primary" data-allow="1">Allow</button><button data-allow="0">Decline</button></div></div>`).join('');
@@ -330,7 +330,7 @@ function renderAgentCards(b) {
 function runRow(r) {
   return `<a class="row" href="agents.html#${esc(r.id)}"><span class="title">${esc(firstLine(r.goal, 200))}</span>
     <span class="meta"><span class="tag ${RUN_TAGS[r.status] || ''}" style="margin-left:0">${esc(runWord(r))}</span> ${since(r.created)}</span>
-    <span class="proj">${r.agentName ? `${r.agentSeed ? AgentIcon.icon(r.agentSeed) : ''}${esc(r.agentName)} · ` : ''}${r.kind === 'swarm' ? 'swarm · ' : ''}<code>${esc(repoName(r.repo))}</code>${r.plan ? ' · plan only' : r.branch && r.status !== 'queued' ? ` · <code>${esc(r.branch)}</code>` : ''} · ${short(r.spent.tokens)} tokens · ${spendText(r.spent.cost, r.spent.unpriced)}${r.steps ? ` · ${r.steps} steps` : ''}</span></a>`;
+    <span class="proj">${r.agentName ? `${r.agentIcon ? AgentIcon.icon(r.agentIcon) : ''}${esc(r.agentName)} · ` : ''}${r.kind === 'swarm' ? 'swarm · ' : ''}<code>${esc(repoName(r.repo))}</code>${r.plan ? ' · plan only' : r.branch && r.status !== 'queued' ? ` · <code>${esc(r.branch)}</code>` : ''} · ${short(r.spent.tokens)} tokens · ${spendText(r.spent.cost, r.spent.unpriced)}${r.steps ? ` · ${r.steps} steps` : ''}</span></a>`;
 }
 
 function renderAgentRuns(b) {

@@ -102,6 +102,12 @@ test('an agent is created, edited, linked to a chat project and listed', async (
     assert.equal((await call('PATCH', `/agents/${id}`, { maxCost: 'lots' })).status, 400);
     assert.equal((await call('PATCH', `/agents/${id}`, { iconSeed: ' k3x9 ' })).body.iconSeed, 'k3x9');
     assert.equal((await call('PATCH', `/agents/${id}`, { iconSeed: '' })).body.iconSeed, null);
+    assert.equal((await call('PATCH', `/agents/${id}`, { iconText: ' 🙂abcdef ' })).body.iconText, '🙂abc');
+    const pic = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    assert.equal((await call('PATCH', `/agents/${id}`, { iconImage: pic })).body.iconImage, pic);
+    assert.equal((await call('PATCH', `/agents/${id}`, { iconImage: 'data:text/html;base64,PHNjcmlwdD4=' })).status, 400);
+    assert.equal((await call('PATCH', `/agents/${id}`, { iconImage: 'javascript:alert(1)' })).status, 400);
+    assert.equal((await call('PATCH', `/agents/${id}`, { iconImage: null, iconText: '' })).body.iconImage, null);
     assert.equal((await call('GET', '/agents')).body.agents.length, 1);
     // it survives a restart of the runner
     const again = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposDir], harnessUrl: 'http://127.0.0.1:1' });

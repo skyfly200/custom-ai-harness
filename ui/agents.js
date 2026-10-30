@@ -15,9 +15,11 @@ const NOTE_FOR = { done: 'finished', waiting: 'needs you' };
 // a run stopped at its cost limit is "incomplete" to the runner; say why
 const statusWord = (r) => (r.status === 'incomplete' && r.outOfBudget ? 'cost limit' : NOTE_FOR[r.status] || r.status);
 
-let selected = location.hash.slice(1) || null;
+let selected = location.hash.slice(1) === 'settings' ? null : location.hash.slice(1) || null;
 let runs = [];
 let agents = [];
+let inSettings = location.hash === '#settings'; // the agent settings page: GitHub and the sandboxes
+let githubOn = null;   // GitHub connected (null: not known yet)
 let inAgent = false;   // false: the floating-orbs home; true: one agent's page (agentSel null = the default agent)
 let sub = 'start';     // inside an agent: 'start' a run or the 'runs' list (a picked run shows its own view)
 let layout = (() => { try { return localStorage.getItem('harness-run-layout') === 'stack' ? 'stack' : 'side'; } catch { return 'side'; } })();
@@ -147,7 +149,7 @@ function renderDetail(run) {
       ${r.commit && hosted ? `<p class="muted">${run.pushed ? `Pushed to GitHub: <a href="${esc(run.pushed.url)}" target="_blank" rel="noopener">${esc(run.branch)}</a> · <a href="${esc(run.pushed.compare)}" target="_blank" rel="noopener">open a pull request</a>` : 'The branch is only on this server so far. Push it to your GitHub repo to review it there.'}</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
     <div class="actions">${active
       ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
-      : `${hosted && r?.commit && !run.parent ? `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
+      : `${hosted && r?.commit && !run.parent ? `${githubOn === false ? `<a class="btn primary" href="#settings" data-hint="Pushing and pull requests need your GitHub connection. Connect it in Agent settings">Connect GitHub to push</a>` : `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>`}` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
     <div class="timeline">${run.events.map(eventHtml).join('')}</div>`);
   if (changed && r?.commit && diffOpen) loadDiff(run.id);
 }
@@ -505,6 +507,7 @@ function fillRepoList(items) {
 async function loadGithub() {
   try {
     const j = await (await fetch('api/github/status')).json();
+    githubOn = Boolean(j.connected);
     $('githubNote').textContent = j.connected ? `GitHub: connected as ${j.login || 'you'}.` : 'GitHub is not connected. Public repos can be cloned without it; private repos and pushing need it.';
     $('githubManage').textContent = j.connected ? 'Manage' : 'Connect GitHub';
     $('githubManage').classList.toggle('primary', !j.connected);
@@ -612,6 +615,7 @@ async function initSandboxes() {
   try {
     const { default: def, drivers } = await api('/sandboxes');
     const options = drivers.map((d) => `<option value="${esc(d.id)}"${d.configured ? '' : ' disabled'}>${esc(d.name)}${d.configured ? '' : ` (needs ${esc(d.needs)})`}</option>`).join('');
+    $('sandboxList').innerHTML = drivers.map((d) => `<li><strong>${esc(d.name)}</strong> ${d.id === def ? '<span class="tag ok">default</span> ' : ''}${d.configured ? '<span class="tag ok">ready</span>' : `<span class="tag">needs ${esc(d.needs)}</span>`}</li>`).join('');
     for (const sel of document.querySelectorAll('.sandbox-select')) sel.innerHTML = `<option value="">Default (${esc(SANDBOX_NAMES[def] || def)})</option>${options}`;
   } catch { /* the runner's default is enough */ }
 }
@@ -627,7 +631,8 @@ async function init() {
   } catch { /* the default routing is enough */ }
   await initAgentDialog();
   const first = location.hash.slice(1);
-  if (first === 'default') { selected = null; inAgent = true; }
+  if (first === 'settings') { selected = null; inSettings = true; }
+  else if (first === 'default') { selected = null; inAgent = true; }
   else if (first.startsWith('a')) { selected = null; agentSel = first; inAgent = true; }
   else if (first) inAgent = true;
   await refresh();
@@ -704,25 +709,28 @@ function renderLive() {
 
 // home (floating orbs) or one agent's page
 function applyView() {
-  const view = !inAgent ? 'home' : selected ? 'run' : sub;
+  const view = inSettings ? 'settings' : !inAgent ? 'home' : selected ? 'run' : sub;
   document.body.classList.toggle('view-agent', inAgent);
-  document.body.classList.toggle('view-home', !inAgent);
-  for (const v of ['home', 'start', 'runs', 'run']) document.body.classList.toggle(`sub-${v}`, v === view);
-  $('agentChips').hidden = inAgent;
-  $('backBar').hidden = !inAgent;
+  document.body.classList.toggle('view-home', view === 'home');
+  for (const v of ['home', 'start', 'runs', 'run', 'settings']) document.body.classList.toggle(`sub-${v}`, v === view);
+  $('agentChips').hidden = view !== 'home';
+  $('agentsGear').hidden = view !== 'home';
+  $('settingsBox').hidden = view !== 'settings';
+  $('backBar').hidden = view === 'home';
   $('hero').hidden = true;
   $('agentInfo').hidden = view !== 'start';
   $('newRun').hidden = view !== 'start';
   $('listTitle').hidden = view !== 'runs';
   $('list').hidden = view !== 'runs';
   $('runView').hidden = view !== 'run';
-  $('subNav').hidden = view === 'run';
+  $('subNav').hidden = view === 'run' || view === 'settings';
+  $('settingsLink').hidden = view === 'settings';
   $('layoutNav').hidden = view !== 'run';
   $('tabStart').classList.toggle('on', view === 'start');
   $('tabRuns').classList.toggle('on', view === 'runs');
   const open = shown().filter((r) => ACTIVE.has(r.status) && !r.parent).length;
   $('tabRuns').textContent = open ? `Runs · ${open} open` : 'Runs';
-  $('backBtn').textContent = view === 'run' ? '← Runs' : '← All agents';
+  $('backBtn').textContent = view === 'run' ? '← Runs' : inSettings && inAgent ? '← Back' : '← All agents';
   $('runView').classList.toggle('side', layout === 'side');
   $('layoutSide').classList.toggle('on', layout === 'side');
   $('layoutStack').classList.toggle('on', layout === 'stack');
@@ -730,7 +738,7 @@ function applyView() {
   $('appsBox').hidden = view !== 'start' || Boolean(agentSel) || hosted;
 }
 function goHome() {
-  inAgent = false; agentSel = null; selected = null; peekId = null;
+  inSettings = false; inAgent = false; agentSel = null; selected = null; peekId = null;
   history.pushState(null, '', location.pathname + location.search);
   applyView(); applyMode(); renderAgents(); renderList(); renderDetail(null); drawTerminal(null); drawPreview(null); drawShip(null); drawFollow(null);
 }
@@ -768,6 +776,7 @@ $('agentChips').addEventListener('click', (e) => {
 $('agentChips').addEventListener('click', (e) => { if (e.target.closest('.orbcard .open')) chooseAgent(e.target.closest('.bubble').querySelector('[data-aid]').dataset.aid); });
 document.addEventListener('click', (e) => { if (peekId && !e.target.closest('.bubble')) { peekId = null; lastHtml.delete('agentChips'); renderAgents(); } });
 $('backBtn').addEventListener('click', () => {
+  if (inSettings) { inSettings = false; history.pushState(null, '', inAgent ? `#${selected || agentSel || 'default'}` : location.pathname + location.search); applyView(); renderAgents(); renderList(); return; }
   if (inAgent && selected) { selected = null; sub = 'runs'; history.pushState(null, '', `#${agentSel || 'default'}`); applyView(); renderList(); renderDetail(null); drawTerminal(null); drawPreview(null); drawShip(null); drawFollow(null); } else goHome();
 });
 $('subNav').addEventListener('click', (e) => { const b = e.target.closest('[data-sub]'); if (b) { sub = b.dataset.sub; applyView(); renderList(); } });
@@ -788,7 +797,14 @@ $('livePanel').addEventListener('click', (e) => {
   selected = r.id; agentSel = r.agent || null; inAgent = true; location.hash = r.id; openDetails = new Set();
   applyView(); applyMode(); renderAgents(); renderList(); refresh();
 });
-window.addEventListener('popstate', () => { if (!location.hash && inAgent) goHome(); });
+function openSettings() { inSettings = true; applyView(); loadGithub(); }
+$('agentsGear').addEventListener('click', () => { history.pushState(null, '', '#settings'); openSettings(); });
+$('settingsLink').addEventListener('click', () => { history.pushState(null, '', '#settings'); openSettings(); });
+window.addEventListener('popstate', () => {
+  if (location.hash === '#settings') return openSettings();
+  if (inSettings) { inSettings = false; if (!location.hash) return goHome(); applyView(); return; }
+  if (!location.hash && inAgent) goHome();
+});
 $('agentInfo').addEventListener('click', async (e) => {
   const act = e.target.closest('[data-aact]')?.dataset.aact;
   const a = agentOf(agentSel);

@@ -191,7 +191,7 @@ body.runs-off main > :not(header):not(#down) { display: none; }
 .hero[hidden], .split[hidden], #listTitle[hidden], #newRun[hidden], #agentInfo[hidden], .livepanel[hidden] { display: none !important; }
 .orbcard, .livepanel { background: var(--panel, #fff); }
 
-body.view-home #githubBox, body.view-home #updated, body.view-home .hero { display: none !important; }
+body.view-home #updated, body.view-home .hero { display: none !important; }
 .bubbles { min-height: calc(100vh - 150px); align-content: center; gap: 48px 64px; padding-top: 8px; }
 .orbbtn .orb { width: 96px; height: 96px; }
 .orbbtn .nm { font-weight: 600; font-size: 14px; letter-spacing: .01em; }
@@ -222,3 +222,7 @@ body.sub-runs .list { max-height: none; }
 .follow textarea { width: 100%; box-sizing: border-box; margin: 6px 0; }
 .follow .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .follow .chips button { font-size: 0.85em; padding: 3px 10px; border-radius: 999px; }
+.gear { text-align: center; margin: 0 0 24px; }
+.gear[hidden], #settingsBox[hidden], .gearlink[hidden] { display: none; }
+.gearlink { margin-left: auto; }
+ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }

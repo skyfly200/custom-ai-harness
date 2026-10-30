@@ -17,7 +17,7 @@ const { parseTickets } = require('./tickets');
 const { createPricer } = require('../utils/runCost');
 const usd = (n) => `$${(n >= 1 ? n.toFixed(2) : n.toFixed(n >= 0.1 ? 3 : 4))}`;
 const { PreviewManager } = require('./preview');
-const { AgentStore } = require('./agents');
+const { AgentStore, cleanMoreRepos } = require('./agents');
 const { AppStore, editableMatcher } = require('./apps');
 const { Shipper, verdict: shipVerdict } = require('./ship');
 
@@ -37,6 +37,12 @@ const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const escalation = require('./escalate');
 const LOCKED = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** What the agent is told about the repos connected beside the one it works in. */
+function moreReposBrief(run) {
+    if (!run.moreRepos?.length) return '';
+    return `Other repositories the user has connected: ${run.moreRepos.join(', ')}. They are not checked out here: this workspace is the default repository, and it is the only one you change. If the task needs a change or a fact from another one, say so in your summary instead of guessing.`;
+}
+
 const short = (v, n = EVENT_TEXT) => (typeof v === 'string' && v.length > n ? `${v.slice(0, n)}… [${v.length - n} more characters]` : v);
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -328,7 +334,7 @@ class RunManager {
         if (hosted) cfg = { ...cfg, ...hosted };
         const id = `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
         const run = {
-            id, owner, goal, repo, agent: cfg.agent ? String(cfg.agent) : null, app: cfg.app ? String(cfg.app) : null, proposal: cfg.proposal && typeof cfg.proposal === 'object' ? { kind: String(cfg.proposal.kind || 'feedback').slice(0, 20), fingerprint: String(cfg.proposal.fingerprint || '').slice(0, 64), pr: null } : null, editable: Array.isArray(cfg.editable) ? cfg.editable.map(String).slice(0, 50) : null, source: cfg.source || null, auditParts: isSwarm && (cfg.auditParts === true || cfg.auditParts === 1 || cfg.auditParts === '1' || cfg.auditParts === 'true'), kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
+            id, owner, goal, repo, moreRepos: cleanMoreRepos(cfg.moreRepos, repo), agent: cfg.agent ? String(cfg.agent) : null, app: cfg.app ? String(cfg.app) : null, proposal: cfg.proposal && typeof cfg.proposal === 'object' ? { kind: String(cfg.proposal.kind || 'feedback').slice(0, 20), fingerprint: String(cfg.proposal.fingerprint || '').slice(0, 64), pr: null } : null, editable: Array.isArray(cfg.editable) ? cfg.editable.map(String).slice(0, 50) : null, source: cfg.source || null, auditParts: isSwarm && (cfg.auditParts === true || cfg.auditParts === 1 || cfg.auditParts === '1' || cfg.auditParts === 'true'), kind: isSwarm ? 'swarm' : isChatDev ? 'chatdev' : 'run', parent: cfg.parent ? String(cfg.parent) : null, children: [], parts: null, tickets, workflow: workflow.id, workflowName: workflow.name, stage: null, base: cfg.base ? String(cfg.base) : null, branch: `harness/${id}`,
             profile: cfg.profile ? String(cfg.profile) : null, model: cfg.model ? String(cfg.model) : null, effort: cfg.effort || null,
             // escalate: on a failure, ask for more effort (up to two rungs); maxTier caps the tier it can reach
             escalate: !(cfg.escalate === false || cfg.escalate === 0 || cfg.escalate === '0' || cfg.escalate === 'false'), bumps: 0, maxTier: cfg.maxTier ? String(cfg.maxTier).trim().slice(0, 40) : null,
@@ -743,7 +749,7 @@ class RunManager {
     agentView(agent) {
         const tasks = this.tasksOf(agent.id);
         const active = tasks.filter((t) => ['queued', 'running', 'waiting'].includes(t.status));
-        return { ...agent, taskCount: tasks.length, active: active.length, waiting: active.some((t) => t.status === 'waiting'), lastTask: tasks[0] ? this.summary(tasks[0]) : null };
+        return { ...agent, repos: [agent.repo, ...(agent.moreRepos || [])], taskCount: tasks.length, active: active.length, waiting: active.some((t) => t.status === 'waiting'), lastTask: tasks[0] ? this.summary(tasks[0]) : null };
     }
 
     listAgents(owner) { return this.agents.list().filter((a) => owner === undefined || a.owner === owner).map((a) => this.agentView(a)); }
@@ -783,7 +789,7 @@ class RunManager {
         const source = cfg?.source && typeof cfg.source === 'object'
             ? { chat: cfg.source.chat ? { id: String(cfg.source.chat.id || '').slice(0, 80), title: String(cfg.source.chat.title || '').slice(0, 120) } : null } : null;
         return this.create({
-            owner: agent.owner, goal: cfg?.goal, repo: agent.repo, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
+            owner: agent.owner, goal: cfg?.goal, repo: agent.repo, moreRepos: agent.moreRepos, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
         });
@@ -926,7 +932,7 @@ class RunManager {
         const retries = {};
         // a retry or a debug run is told what the attempt before it got wrong, and a part
         // carried on from one that ran out of steps or time is told where that part got to
-        const brief = !run.briefGiven ? [run.agent ? this.agentBrief(run) : '', run.debugOf ? this.brief(run.debugOf) : String(run.resumeNote || '')].filter(Boolean).join('\n\n') : '';
+        const brief = !run.briefGiven ? [moreReposBrief(run), run.agent ? this.agentBrief(run) : '', run.debugOf ? this.brief(run.debugOf) : String(run.resumeNote || '')].filter(Boolean).join('\n\n') : '';
         if (brief) run.briefGiven = true;
         let outcome = { status: 'finished', summary: '' };
         for (let i = 0; i < workflow.stages.length; i++) {
@@ -984,7 +990,7 @@ class RunManager {
         if (OUT_OF_LIMIT.has(from.status)) throw new Error('that run only ran out of steps, time or budget, so nothing went wrong: use Continue');
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
-            owner: from.owner, goal: from.goal, repo: from.repo, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
+            owner: from.owner, goal: from.goal, repo: from.repo, moreRepos: from.moreRepos, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
             model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),

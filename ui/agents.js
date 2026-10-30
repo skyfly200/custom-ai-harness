@@ -688,7 +688,7 @@ function renderAgents() {
   const a = agentOf(agentSel);
   $('agentInfo').hidden = !inAgent;
   if (a) {
-    $('agentInfo').innerHTML = `<h3>${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span><span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+    $('agentInfo').innerHTML = `<h3>${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
   } else if (inAgent) {
@@ -817,7 +817,45 @@ $('agentInfo').addEventListener('click', async (e) => {
 });
 
 let editingAgent = null;
+// Repos beside the default (the Repo field): the whole list is [Repo field, ...agentExtras], and the chips reorder it.
+let agentExtras = [];
+const agentRepoList = () => Repos.fromSpecs([$('agentRepo').value, ...agentExtras]);
+// A chat project's repos (GitHub only on a shared server, which cannot read folders on your computer)
+const projectRepoEntries = (link) => Repos.list(chatProjects().find((p) => p.id === link.id)).filter((e) => !hosted || Repos.isGithub(e));
+function drawAgentRepos() {
+  const all = agentRepoList();
+  $('agentMoreChips').innerHTML = all.length > 1 ? Repos.chipsHtml(all, { controls: true, esc }) : '';
+  const link = chatProjects().find((p) => p.id === $('agentProject').value);
+  const inherited = link ? projectRepoEntries(link) : [];
+  const note = $('agentInherit');
+  note.hidden = !inherited.length;
+  note.innerHTML = inherited.length ? `The project “${esc(link.name)}” has ${inherited.length} repo${inherited.length === 1 ? '' : 's'} (${esc(inherited.map(Repos.labelOf).join(', '))}). ${$('agentRepo').value.trim() || agentExtras.length ? '<button type="button" id="agentUseProject">Use the project’s repos</button>' : 'Leave the Repo empty to use them.'}` : '';
+}
+function setAgentRepos(entries) {
+  const specs = Repos.toSpecs(entries);
+  $('agentRepo').value = specs[0] || '';
+  agentExtras = specs.slice(1);
+  drawAgentRepos();
+}
+
 async function initAgentDialog() {
+  Repos.bind($('agentMoreChips'), agentRepoList, setAgentRepos);
+  const addExtra = () => {
+    const v = $('agentMoreInput').value.trim();
+    if (!v) return;
+    if (!$('agentRepo').value.trim()) $('agentRepo').value = v; else if (![$('agentRepo').value.trim(), ...agentExtras].includes(v)) agentExtras.push(v);
+    $('agentMoreInput').value = '';
+    drawAgentRepos();
+  };
+  $('agentMoreAdd').addEventListener('click', addExtra);
+  $('agentMoreInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addExtra(); } });
+  $('agentRepo').addEventListener('input', drawAgentRepos);
+  $('agentProject').addEventListener('change', drawAgentRepos);
+  $('agentInherit').addEventListener('click', (e) => {
+    if (!e.target.closest('#agentUseProject')) return;
+    const link = chatProjects().find((p) => p.id === $('agentProject').value);
+    if (link) setAgentRepos(projectRepoEntries(link));
+  });
   const f = $('agentForm');
   $('agentClose').addEventListener('click', () => $('agentDialog').close());
   f.addEventListener('submit', async (e) => {
@@ -826,6 +864,14 @@ async function initAgentDialog() {
     const link = chatProjects().find((p) => p.id === body.project);
     body.project = link ? { id: link.id, name: link.name } : (body.project && editingAgent?.project?.id === body.project ? editingAgent.project : null);
     for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier']) if (body[k] === '') body[k] = null;
+    // The repo field is the default repo; the others are listed below it. With none of its own, the agent takes its project's.
+    if (!body.repo.trim() && !agentExtras.length && link) {
+      const inherited = Repos.toSpecs(projectRepoEntries(link));
+      body.repo = inherited[0] || '';
+      agentExtras = inherited.slice(1);
+    }
+    if (!body.repo.trim()) { $('agentMsg').textContent = 'Give the agent a repo, or link a project that has repos.'; return; }
+    body.moreRepos = agentExtras.filter((r) => r !== body.repo.trim());
     body.escalate = f.elements.escalate.checked;
     $('agentMsg').textContent = 'Saving…';
     try {
@@ -855,6 +901,8 @@ function openAgentDialog(agent) {
   const projects = chatProjects();
   const linked = agent?.project && !projects.some((p) => p.id === agent.project.id) ? [{ id: agent.project.id, name: `${agent.project.name || 'A project'} (not in this browser)` }] : [];
   $('agentProject').innerHTML = '<option value="">None</option>' + [...projects, ...linked].map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  agentExtras = (agent?.moreRepos || []).slice();
+  $('agentMoreInput').value = '';
   const v = agent || { name: '', repo: recentRepos()[0] || '', instructions: '', workflow: 'general', profile: '', effort: '', maxSteps: '', maxMinutes: '', maxCost: '', project: null };
   f.elements.name.value = v.name;
   f.elements.repo.value = v.repo;
@@ -869,6 +917,7 @@ function openAgentDialog(agent) {
   f.elements.maxTier.value = v.maxTier || '';
   f.elements.escalate.checked = v.escalate !== false;
   f.elements.project.value = v.project?.id || '';
+  drawAgentRepos();
   $('agentDialog').showModal();
   f.elements.name.focus();
 }

@@ -14,6 +14,13 @@ const { DRIVERS, normalizeKind } = require('./sandbox');
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const clean = (v, n) => String(v ?? '').trim().slice(0, n);
 
+/** Other repos connected beside the default: names (owner/name, or a folder path), at most 8, no repeats. They are told to the agent, not checked out. */
+function cleanMoreRepos(v, skip = '') {
+    if (v === undefined || v === null || v === '') return [];
+    if (!Array.isArray(v)) throw new Error('moreRepos must be a list of repos');
+    return [...new Set(v.map((r) => clean(r, 300)).filter((r) => r && r !== skip))].slice(0, 8);
+}
+
 class AgentStore {
     constructor(dir) {
         this.dir = dir;
@@ -75,6 +82,7 @@ class AgentStore {
             }
         }
         // the chat project (they live in the browser) this agent belongs to: its id and name
+        if (has('moreRepos')) out.moreRepos = cleanMoreRepos(cfg.moreRepos);
         if (has('project')) {
             const p = cfg.project;
             if (p && (typeof p !== 'object' || !clean(p.id, 80))) throw new Error('project needs an id');
@@ -88,7 +96,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, project: null,
+            instructions: '', moreRepos: [], profile: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, project: null,
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on
@@ -115,4 +123,4 @@ class AgentStore {
     }
 }
 
-module.exports = { AgentStore };
+module.exports = { AgentStore, cleanMoreRepos };

@@ -173,3 +173,33 @@ test('deleting an agent keeps its tasks as ordinary runs', async () => {
     assert.ok(manager.list().every((r) => r.agent === null));
     assert.equal((await call('POST', `/agents/${agent.id}/tasks`, { goal: 'x' })).status, 404);
 });
+
+test('an agent can name other repos beside its own; the first is the one it works in', async () => {
+    const made = await call('POST', '/agents', { name: 'Two repos', repo, moreRepos: ['skyfly200/docs', 'skyfly200/docs', ' ', '/home/me/other'] });
+    assert.equal(made.status, 201);
+    assert.deepEqual(made.body.moreRepos, ['skyfly200/docs', '/home/me/other']);
+    assert.deepEqual(made.body.repos, [repo, 'skyfly200/docs', '/home/me/other']);
+    assert.equal((await call('PATCH', `/agents/${made.body.id}`, { moreRepos: 'nope' })).status, 400);
+    // an agent made before this existed has none
+    assert.deepEqual((await call('POST', '/agents', { name: 'One repo', repo })).body.repos, [repo]);
+
+    script = [{ calls: [['finish', { summary: 'Looked.' }]] }];
+    modelCalls = [];
+    const task = (await call('POST', `/agents/${made.body.id}/tasks`, { goal: 'Check the docs link' })).body;
+    assert.deepEqual(task.moreRepos, ['skyfly200/docs', '/home/me/other']);
+    const done = await settle(task.id);
+    assert.equal(done.status, 'done', done.error);
+    // the agent is told about them, and that only the first is checked out
+    const told = modelCalls[0].messages.map((m) => m.content).join('\n');
+    assert.match(told, /Other repositories the user has connected: skyfly200\/docs, \/home\/me\/other\. They are not checked out/);
+    assert.equal(done.repo, repo);
+
+    const cleared = await call('PATCH', `/agents/${made.body.id}`, { moreRepos: [] });
+    assert.deepEqual(cleared.body.repos, [repo]);
+    // a one-off run can name them too
+    script = [{ calls: [['finish', { summary: 'ok' }]] }];
+    modelCalls = [];
+    const run = (await call('POST', '/runs', { goal: 'Look', repo, moreRepos: ['a/b'] })).body;
+    await settle(run.id);
+    assert.match(modelCalls[0].messages.map((m) => m.content).join('\n'), /connected: a\/b\./);
+});

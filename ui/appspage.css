@@ -1,0 +1,22 @@
+/* Apps page (after style.css, bright.css, nav.css, calm.css) */
+main.apps-page { max-width: 880px; }
+.lead { margin: 14px 0 0; font-size: 13px; max-width: 74ch; }
+.apps-page section.card { margin-top: 14px; }
+.apps-page h2 { font-size: 15px; margin: 0 0 10px; }
+.app-list { display: flex; flex-direction: column; gap: 8px; }
+.app-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.app-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; word-break: break-all; }
+.fine { font-size: 12px; }
+.tpls { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.tpl { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.tpl input { align-self: flex-start; margin: 0 0 2px; }
+.tpl b { font-size: 13.5px; }
+.tpl span { font-size: 13px; }
+.tpl small { font-size: 12px; }
+.tpl:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.new-form { display: flex; flex-direction: column; gap: 10px; }
+.new-form .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.new-form textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.new-form .check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.new-form .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 600px) { .new-form .row2 { grid-template-columns: 1fr; } }

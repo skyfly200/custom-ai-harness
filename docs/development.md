@@ -80,7 +80,7 @@ python -m pytest test/                     # Router: contract tests and every ba
 | Gateway config and model info | `gateway`, `gatewayConfig`, `modelInfo`, `modelInfoApi`, `modelStats`, `openrouterCatalog` |
 | Runner, agents, swarm, workflows | `runner`, `runnerAgent`, `swarm`, `workflows`, `agents`, `apps`, `preview`, `terminal`, `e2bSandbox`, `spritesSandbox`, `agentBoard`, `agentWidget`, `runnerHosted`, `runsOff` (the no-task-runner note) |
 | MCP tools | `mcp`, `mcpAdmin`, `toolsApi`, `mcpAskFirst` (ask-first approval, Vercel entry), `toolSetup` (guided setup wizard), `toolApproval` |
-| Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands`, `chatReplies`, `chatMerge`, `chatPriceRetry`, `emptyReply` |
+| Chat page logic | `markdown`, `cachetimer`, `chatShell.*`, `chatSync`, `projectShares`, `ownerScope`, `chatCommands`, `chatReplies`, `chatMerge`, `chatPriceRetry`, `emptyReply`, `modelAlias` (`/model` names and model suggestions) |
 | Chat sidebar: imports, dictation, audio, notifications | `claudeKit` (import Claude Code commands and skills), `dictation`, `stt`, `audio`, `notify` (waiting-for-you browser notifications) |
 | Settings page and its panels | `settings`, `navOrder` (the shared pages bar) |
 | Site root and page URLs | `rootApi` (relative `api/...` at the site root), `pwa`, `oldHosts` |

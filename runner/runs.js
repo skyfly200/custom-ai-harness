@@ -19,6 +19,8 @@ const usd = (n) => `$${(n >= 1 ? n.toFixed(2) : n.toFixed(n >= 0.1 ? 3 : 4))}`;
 const { PreviewManager } = require('./preview');
 const { AgentStore, cleanMoreRepos } = require('./agents');
 const { AppStore, editableMatcher } = require('./apps');
+const prBrief = require('./prBrief');
+const runExport = require('./runExport');
 const { Shipper, verdict: shipVerdict } = require('./ship');
 
 const MAX_EVENTS = 2000;
@@ -344,7 +346,7 @@ class RunManager {
             plan: cfg.plan === true || cfg.plan === 1 || cfg.plan === '1' || cfg.plan === 'true' || cfg.plan === 'plan',
             // 0 means no step limit: the agent runs until it calls finish, runs out of
             // time or is stopped. maxMinutes still bounds it, so it cannot run forever.
-            maxSteps: num0(cfg.maxSteps, 0, 10000, 0), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
+            maxSteps: num0(cfg.maxSteps, 0, 10000, 0), softSteps: num0(cfg.softSteps, 0, 10000, 40), maxMinutes: num(cfg.maxMinutes, 1, 240, 30),
             // dollars this run (or, after a Continue, this part of it) may spend; 0 means no limit
             maxCost: Math.min(1000, Math.max(0, Number(cfg.maxCost) || 0)), costFrom: 0, outOfBudget: false,
             autoDebug: num(cfg.autoDebug, 0, 1, this.autoDebugDefault ? 1 : 0) === 1,
@@ -386,12 +388,16 @@ class RunManager {
     }
 
     event(run, e) {
-        run.events.push({ t: new Date().toISOString(), ...e, ...(e.text !== undefined ? { text: short(e.text) } : {}), ...(e.args !== undefined ? { args: this.shortArgs(e.args) } : {}) });
+        const entry = { t: new Date().toISOString(), ...e, ...(e.text !== undefined ? { text: short(e.text), ...(String(e.text).length > EVENT_TEXT && e.size === undefined ? { size: String(e.text).length } : {}) } : {}), ...(e.args !== undefined ? { args: this.shortArgs(e.args) } : {}) };
+        run.events.push(entry);
         if (run.events.length > MAX_EVENTS) run.events.splice(0, run.events.length - MAX_EVENTS);
         if (e.type === 'step') run.steps += 1;
+        if (e.type === 'warning') run.warning = { step: e.step, text: e.text, at: entry.t };
         if (e.type === 'model' && e.usage) {
             run.tokens.in += e.usage.prompt_tokens || 0; run.tokens.out += e.usage.completion_tokens || 0;
             const c = this.pricer.cost(e.usage, e.model);
+            entry.cost = c.cost;
+            if (c.unpriced) entry.unpriced = true;
             run.cost = (run.cost || 0) + c.cost;
             if (c.unpriced) run.unpricedCalls = (run.unpricedCalls || 0) + 1;
             // what answered, so the run page can say which models did the work and what they cost
@@ -446,6 +452,7 @@ class RunManager {
         for (let attempt = 0; attempt < 3; attempt++) {
             if (attempt) await sleep(this.retryDelayMs * attempt * attempt);
             try {
+                const began = Date.now();
                 const res = await fetch(`${this.harnessUrl}/v1/chat/completions`, {
                     method: 'POST', headers: this.headers(run, n, effort, stageModel), signal: AbortSignal.timeout(6 * 60 * 1000),
                     body: JSON.stringify({ model: 'auto', messages, ...(tools?.length ? { tools, tool_choice: 'auto' } : {}), stream: false }),
@@ -455,7 +462,10 @@ class RunManager {
                     const message = body.choices?.[0]?.message;
                     if (!message) throw Object.assign(new Error('the model answered with no message'), { escalatable: true });
                     if (!message.content && !message.tool_calls?.length) throw Object.assign(new Error('the model answered with an empty reply'), { escalatable: true });
-                    return { message, usage: body.usage, model: body.model };
+                    // where the harness sent the call and why: the run's export shows it for every step
+                    const h = (k) => res.headers.get(k) || undefined;
+                    const route = { model: h('x-harness-model'), reason: h('x-harness-route'), tier: h('x-harness-tier') && decodeURIComponent(h('x-harness-tier')), profile: h('x-harness-profile') && decodeURIComponent(h('x-harness-profile')), effort: effort || undefined, bumps: run.bumps || undefined, attempt: attempt || undefined };
+                    return { message, usage: body.usage, model: body.model, route, ms: Date.now() - began };
                 }
                 lastError = new Error(`the harness answered HTTP ${res.status}: ${short(JSON.stringify(body.error || body), 300)}`);
                 if (![429, 502, 503, 504].includes(res.status)) throw lastError;
@@ -531,8 +541,10 @@ class RunManager {
         run.base = sandbox.base;
         if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; this.save(run); }
         this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}${isCloud(sandbox.kind) ? ` in ${sandbox.kind === 'sprites' ? 'a Fly Sprite' : 'an E2B sandbox'} (${sandbox.id})` : ''}.` });
+        // a task that names a pull request starts with that PR's code and a short plan for it
+        const pr = run.carriesOn ? '' : await prBrief.prepare({ sandbox, run, local: !isCloud(sandbox.kind), note: (text) => this.event(run, { type: 'note', text }) });
         const files = (await sandbox.git(['ls-files'])).split('\n').filter(Boolean);
-        const context = `The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
+        const context = `${pr ? `${pr}\n\n` : ''}The workspace has ${files.length} tracked files. First ones:\n${files.slice(0, 150).join('\n')}${files.length > 150 ? '\n…' : ''}`;
         const workflow = workflows.get(run.workflow) || workflows.get(workflows.FALLBACK);
         const deadline = Date.now() + run.maxMinutes * 60000;
         return { sandbox, outcome: await this.runStages({ run, live, sandbox, workflow, context, deadline, nextN }) };
@@ -555,7 +567,8 @@ class RunManager {
             let commit = run.plan ? null : await sandbox.commit(`harness run ${run.id}: ${run.goal.split('\n')[0].slice(0, 60)}`);
             // a swarm's changes are already committed as merges, and a part carried on may only have asked for nothing new:
             // the branch still holds the run's commits
-            if (!commit && (run.kind === 'swarm' || run.carriesOn)) { const head = (await sandbox.git(['rev-parse', 'HEAD'])).trim(); if (head !== run.base) commit = head; }
+            // (and one the agent committed itself, as a merge it was told to make: sandbox.commit finds nothing left to commit)
+            if (!commit && !run.plan) { const head = (await sandbox.git(['rev-parse', 'HEAD'])).trim(); if (head !== run.base) commit = head; }
             const result = { summary: outcome.summary, commit, diffStat: run.plan ? '' : await sandbox.diffStat(), tests: null };
             if (run.test && !live.stopped && !run.plan) {
                 this.event(run, { type: 'note', text: `Running the test command: ${run.test}` });
@@ -950,7 +963,7 @@ class RunManager {
             const stageEffort = run.effort || stage.effort || null;
             if (stage.canWait) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageEffort, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
             else outcome = await runAgent({
-                run: { goal: run.goal, maxSteps: Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity) === Infinity ? 0 : Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity), deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
+                run: { goal: run.goal, softSteps: run.softSteps, maxSteps: Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity) === Infinity ? 0 : Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity), deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
                 tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
                 firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
                 chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
@@ -991,7 +1004,7 @@ class RunManager {
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             owner: from.owner, goal: from.goal, repo: from.repo, moreRepos: from.moreRepos, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };
@@ -1099,6 +1112,20 @@ class RunManager {
 
     /** The whole change as a patch file (git apply / git am-free), from the repo's copy of the branch. */
     patch(id) { return this.diff(id, 20 * 1024 * 1024); }
+
+    /** Everything about a run for debugging, as an object (see runner/runExport.js). */
+    async exportRun(id) {
+        const run = this.get(id);
+        if (!run) throw new Error('no such run');
+        const gitOut = (cwd, args) => new Promise((r) => execFile('git', args, { cwd, timeout: 15000, maxBuffer: 8 * 1024 * 1024 }, (e, o) => r(e ? '' : o.trim())));
+        const root = path.join(__dirname, '..');
+        const commits = run.result?.commit ? (await gitOut(run.repo, ['log', '--oneline', '--no-decorate', `${run.base}..${run.branch}`])).split('\n').filter(Boolean) : [];
+        const environment = {
+            sandbox: run.sandbox || this.sandboxKind, hosted: !!this.hosted, runnerCommit: (await gitOut(root, ['rev-parse', '--short', 'HEAD'])) || undefined,
+            node: process.version, platform: process.platform, harness: (() => { try { return new URL(this.harnessUrl).host; } catch { return undefined; } })(),
+        };
+        return runExport.buildExport(run, { diff: await this.diff(id, 20 * 1024 * 1024), commits, environment });
+    }
 
     /** Remove a finished run's workspace and record. The branch stays in the repo. */
     /**

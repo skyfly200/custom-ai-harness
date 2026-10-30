@@ -13,6 +13,9 @@ Rules:
 - Check your work: run the project's tests or a command that proves the change works, and fix what fails.
 - You cannot ask questions. If something is ambiguous, pick the most reasonable reading and say so in your summary.
 - Never touch secrets, .env files or the .git folder. Do not push or publish anything: the person will review your branch.
+- Start with a plan: before your first tool call, write 2 to 5 short lines saying what you will do, in order. If the plan changes, say so in one line.
+- Every tool call has a \`why\`: under 15 words on what you are trying to find out or do. A person reads these live.
+- Be economical: search (grep) before reading, read only the lines you need, never read the same thing twice, and put independent reads or commands in one reply. Do not repeat a command that failed: change something first.
 - When you are done, or cannot continue, call finish with a short summary: what you changed, how you checked it, and anything they should look at.`;
 
 const KEEP_RECENT = 8;        // tool results in the last N messages stay whole
@@ -20,6 +23,7 @@ const OLD_RESULT_CHARS = 400; // older ones are cut to this
 const CUT_STEP = 6;           // the cut point moves in jumps of this many messages, so the start of the history
                               // stays the same between jumps and the provider's prompt cache keeps hitting
 const SAME_CALL_LIMIT = 3;    // the same call this many times in a row is a loop
+const SOFT_STEPS = 40;        // a nudge (and a warning on the run page) every this many steps; not a limit
 const WRAP_UP_AT = 3;         // steps left when the agent is told to finish
 const PARTIAL_CHARS = 2000;   // how much of what the model was saying a run carried on is told
 
@@ -64,7 +68,9 @@ function dropRepeatedReads(messages, callName, args) {
 }
 
 async function runTool(call, args, tools, emit, messages = [], recent = []) {
-    emit({ type: 'tool', name: call.function.name, args: args ?? call.function.arguments });
+    const { why, ...shown } = args && typeof args === 'object' ? args : {};
+    emit({ type: 'tool', name: call.function.name, args: args === null ? call.function.arguments : shown, ...(typeof why === 'string' && why.trim() ? { why: why.trim().slice(0, 200) } : {}) });
+    const began = Date.now();
     const sig = `${call.function.name}:${call.function.arguments}`;
     recent.push(sig);
     if (recent.length > 20) recent.shift();
@@ -73,7 +79,7 @@ async function runTool(call, args, tools, emit, messages = [], recent = []) {
     if (args === null) result = { text: 'Error: the arguments were not valid JSON. Send them again.' };
     else if (looping && call.function.name !== 'finish') result = { text: `You have made this exact call ${SAME_CALL_LIMIT} times in a row and nothing changed. Do something different (read another file, change your approach), or call finish and say what is blocking you.` };
     else { dropRepeatedReads(messages, call.function.name, args); result = await tools.call(call.function.name, args); }
-    emit({ type: 'result', name: call.function.name, text: result.text });
+    emit({ type: 'result', name: call.function.name, text: result.text, size: String(result.text ?? '').length, ms: Date.now() - began });
     return result;
 }
 
@@ -89,16 +95,23 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
     const messages = [{ role: 'system', content: system }, { role: 'user', content: `Task:\n${run.goal}${firstContext ? `\n\n${firstContext}` : ''}` }];
     let nudges = 0, wrapped = false;
     const recent = [];
+    const soft = run.softSteps === undefined ? SOFT_STEPS : Number(run.softSteps) || 0;
     // maxSteps of 0 means no step limit: only the deadline and the stop button end it.
     const last = run.maxSteps > 0 ? run.maxSteps : Infinity;
     for (let step = 1; step <= last; step++) {
         if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
         if (Date.now() > run.deadline) return { status: 'out_of_time', summary: 'Ran out of time.', partial: partialNote(messages) };
         if (run.overBudget?.()) return { status: 'out_of_budget', summary: 'Stopped at its cost limit.', partial: partialNote(messages) };
+        // A soft budget: past it the run goes on, but the model is asked to account for itself and the page shows a warning.
+        if (soft && step > 1 && (step - 1) % soft === 0) {
+            const text = `${step - 1} steps used so far. If this is still going to plan, carry on; if you are going round in circles, change approach or call finish and say what is blocking you.`;
+            emit({ type: 'warning', step: step - 1, text });
+            messages.push({ role: 'user', content: text });
+        }
         emit({ type: 'step', step });
         const reply = await chat(shrinkHistory(messages), tools.definitions);
         const msg = reply.message;
-        emit({ type: 'model', text: msg.content || '', calls: (msg.tool_calls || []).length, usage: reply.usage, model: reply.model });
+        emit({ type: 'model', text: msg.content || '', calls: (msg.tool_calls || []).length, usage: reply.usage, model: reply.model, route: reply.route, ms: reply.ms, messages: messages.length });
         messages.push({ role: 'assistant', content: msg.content ?? '', ...(msg.tool_calls?.length ? { tool_calls: msg.tool_calls } : {}) });
         if (!msg.tool_calls?.length) {
             if (++nudges > 2) return { status: 'finished', summary: msg.content || 'The model stopped without a summary.' };

@@ -100,6 +100,8 @@ test('an agent is created, edited, linked to a chat project and listed', async (
     assert.equal((await call('PATCH', `/agents/${id}`, { maxCost: '1.5' })).body.maxCost, 1.5);
     assert.equal((await call('PATCH', `/agents/${id}`, { maxCost: 0 })).body.maxCost, null);
     assert.equal((await call('PATCH', `/agents/${id}`, { maxCost: 'lots' })).status, 400);
+    assert.equal((await call('PATCH', `/agents/${id}`, { iconSeed: ' k3x9 ' })).body.iconSeed, 'k3x9');
+    assert.equal((await call('PATCH', `/agents/${id}`, { iconSeed: '' })).body.iconSeed, null);
     assert.equal((await call('GET', '/agents')).body.agents.length, 1);
     // it survives a restart of the runner
     const again = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposDir], harnessUrl: 'http://127.0.0.1:1' });

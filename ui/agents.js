@@ -98,7 +98,7 @@ function renderList() {
   setHtml('list', list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <i class="sdot ${TAGS[r.status] || 'live'}${ACTIVE.has(r.status) ? ' pulse' : ''}" title="${esc(statusWord(r))}"></i>
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${AgentIcon.icon(agentOf(r.agent))}${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
 }
 
 function eventHtml(e) {
@@ -109,7 +109,7 @@ function eventHtml(e) {
   if (e.type === 'tool') {
     const a = e.args || {};
     const brief = a.command ?? a.path ?? (typeof a.summary === 'string' ? a.summary : '') ?? '';
-    return `<div class="ev tool">${time}<strong>${esc(e.name)}</strong> <code>${esc(String(brief).slice(0, 200))}</code></div>`;
+    return `<div class="ev tool">${time}<strong>${esc(e.name)}</strong> <code>${esc(String(brief).slice(0, 200))}</code>${e.why ? ` <span class="why">${esc(e.why)}</span>` : ''}</div>`;
   }
   if (e.type === 'result') return `<div class="ev"><details data-k="${esc(key)}"${open(key)}><summary>${time}result: ${esc((e.text || '').split('\n')[0].slice(0, 120))}</summary><pre>${esc(e.text)}</pre></details></div>`;
   if (e.type === 'approval_needed') return `<div class="ev approval_needed">${time}Waiting for you: <code>${esc(e.text)}</code> (${esc(e.reason)})</div>`;
@@ -117,6 +117,7 @@ function eventHtml(e) {
   if (e.type === 'plan') return `<div class="ev stage">${time}<strong>Plan</strong><pre>${esc(e.text)}</pre></div>`;
   if (e.type === 'stage') return `<div class="ev stage">${time}<strong>${esc(e.text)}</strong></div>`;
   if (e.type === 'note') return `<div class="ev">${time}${esc(e.text)}</div>`;
+  if (e.type === 'warning') return `<div class="ev warning">${time}<strong>⚠ ${esc(e.text)}</strong></div>`;
   return '';
 }
 
@@ -147,7 +148,7 @@ function renderDetail(run) {
       ${r.commit && hosted ? `<p class="muted">${run.pushed ? `Pushed to GitHub: <a href="${esc(run.pushed.url)}" target="_blank" rel="noopener">${esc(run.branch)}</a> · <a href="${esc(run.pushed.compare)}" target="_blank" rel="noopener">open a pull request</a>` : 'The branch is only on this server so far. Push it to your GitHub repo to review it there.'}</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
     <div class="actions">${active
       ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
-      : `${hosted && r?.commit && !run.parent ? `${githubOn === false ? `<a class="btn primary" href="#settings" data-hint="Pushing and pull requests need your GitHub connection. Connect it in Agent settings">Connect GitHub to push</a>` : `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>`}` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>`);
+      : `${hosted && r?.commit && !run.parent ? `${githubOn === false ? `<a class="btn primary" href="#settings" data-hint="Pushing and pull requests need your GitHub connection. Connect it in Agent settings">Connect GitHub to push</a>` : `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>`}` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}<span class="export-btns"><button data-act="export" data-hint="Downloads everything about this run as one JSON file: the prompt, settings, every step with the model's words, tool calls and results, tokens, cost, routing and the outcome. Secrets are blanked">Export run</button><button data-act="export-md" data-hint="The same as a readable Markdown transcript">Export as text</button><button data-act="export-copy" data-hint="Copies the readable transcript so you can paste it into a chat to ask what went wrong">Copy for debugging</button></span></div>`);
   if (changed && r?.commit && diffOpen) loadDiff(run.id);
 }
 
@@ -306,7 +307,7 @@ function drawStatus(run) {
   const tag = run.status === 'incomplete' && run.outOfBudget ? 'cost limit' : run.status;
   const long = run.goal.length > 220 || run.goal.split('\n').length > 3;
   if (lastShown !== run.id) promptOpen = false;
-  setHtml('statusCard', `<div class="sc-top"><span class="orb${active ? ' live' : ''}${run.status === 'waiting' ? ' wait' : ''}"><i></i><i></i><i></i></span><span class="tag ${TAGS[run.status] || ''}">${esc(tag)}</span><span class="sc-quick">${esc(RunView.quickLine(run))}</span><span class="muted sc-when">started ${ago(run.created)}</span></div>
+  setHtml('statusCard', `<div class="sc-top">${AgentIcon.orb(agentOf(run.agent), `${active ? 'live' : ''}${run.status === 'waiting' ? ' wait' : ''}`.trim())}<span class="tag ${TAGS[run.status] || ''}">${esc(tag)}</span><span class="sc-quick">${esc(RunView.quickLine(run))}</span><span class="muted sc-when">started ${ago(run.created)}</span></div>
     <div class="sc-prompt${long && !promptOpen ? ' clip' : ''}" id="scPrompt" title="The prompt for this run">${esc(run.goal)}</div>${long ? `<button type="button" class="linklike" id="scMore">${promptOpen ? 'Show less' : 'Show all'}</button>` : ''}
     <p class="sc-summary">${esc(RunView.summarize(run, workers))}</p>`);
 }
@@ -471,6 +472,11 @@ $('detail').addEventListener('click', async (e) => {
       ui.toast(`Pull request #${pr.number} is open.`);
     }
     if (act === 'patch') await downloadPatch(selected);
+    if (act === 'export' || act === 'export-md') await downloadExport(selected, act === 'export-md');
+    if (act === 'export-copy') {
+      await navigator.clipboard.writeText(await fetchExport(selected, true));
+      ui.toast('Copied. Paste it wherever you want the run looked at.');
+    }
     if (act === 'retry' || act === 'debug') {
       const made = await post(`/${selected}/retry`, { debug: act === 'debug' });
       selected = made.id; location.hash = made.id; openDetails = new Set();
@@ -488,6 +494,17 @@ $('detail').addEventListener('click', async (e) => {
 });
 
 const runById = (id) => runs.find((r) => r.id === id);
+async function fetchExport(id, md) {
+  const res = await fetch(`api/runs/${id}/export${md ? '?format=md' : ''}`);
+  if (!res.ok) throw new Error(`could not export the run (HTTP ${res.status})`);
+  return res.text();
+}
+async function downloadExport(id, md) {
+  const url = URL.createObjectURL(new Blob([await fetchExport(id, md)], { type: md ? 'text/markdown' : 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `run-${id}.${md ? 'md' : 'json'}` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 async function downloadPatch(id) {
   const res = await fetch(`api/runs/${id}/patch`);
   if (!res.ok) throw new Error(`could not get the patch (HTTP ${res.status})`);
@@ -925,14 +942,14 @@ function renderAgents() {
     const st = def ? (runs.some((r) => !r.agent && !r.parent && r.status === 'waiting') ? 'wait' : runs.some((r) => !r.agent && !r.parent && ACTIVE.has(r.status)) ? 'live' : '') : state(a);
     return `<div class="bubble${peekId === id ? ' peek' : ''}${def ? ' def' : ''}" role="listitem" style="--d:${(i * 1.7) % 7}s;--t:${9 + (i * 3) % 5}s;--dx:${(i % 2 ? -1 : 1) * (6 + (i * 5) % 8)}px">
       <button type="button" class="orbbtn" data-aid="${esc(def ? '' : a.id)}" data-bid="${esc(id)}" aria-label="${esc(def ? 'Default' : a.name)}${st === 'wait' ? ', needs you' : st === 'live' ? ', working' : ''}">
-        <span class="orb ${st}"><i></i><i></i><i></i></span><span class="nm">${esc(def ? 'Default' : a.name)}</span></button>${orbCard(a)}</div>`;
+        ${AgentIcon.orb(a, st)}<span class="nm">${esc(def ? 'Default' : a.name)}</span></button>${orbCard(a)}</div>`;
   };
   const addB = `<div class="bubble add" role="listitem" style="--d:3s;--t:11s;--dx:7px"><button type="button" class="orbbtn" id="newAgent" aria-label="New agent"><span class="orb plus"><span>+</span></span><span class="nm">New agent</span></button></div>`;
   setHtml('agentChips', [bubble(null, 0), ...agents.map((a, i) => bubble(a, i + 1)), addB].join(''));
   renderLive();
   const a = agentOf(agentSel);
   if (a) {
-    $('agentInfo').innerHTML = `<h3>${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+    $('agentInfo').innerHTML = `<h3>${AgentIcon.icon(a, 'lg')}${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" class="primary" data-aact="newrun">New run</button><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
   } else if (inAgent) {
@@ -1093,13 +1110,15 @@ async function initAgentDialog() {
     if (link) setAgentRepos(projectRepoEntries(link));
   });
   const f = $('agentForm');
+  $('iconShuffle').addEventListener('click', () => setIconSeed(AgentIcon.randomSeed()));
+  $('iconReset').addEventListener('click', () => setIconSeed(''));
   $('agentClose').addEventListener('click', () => $('agentDialog').close());
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(f));
     const link = chatProjects().find((p) => p.id === body.project);
     body.project = link ? { id: link.id, name: link.name } : (body.project && editingAgent?.project?.id === body.project ? editingAgent.project : null);
-    for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier']) if (body[k] === '') body[k] = null;
+    for (const k of ['maxSteps', 'maxMinutes', 'maxCost', 'maxTier', 'iconSeed']) if (body[k] === '') body[k] = null;
     // The repo field is the default repo; the others are listed below it. With none of its own, the agent takes its project's.
     if (!body.repo.trim() && !agentExtras.length && link) {
       const inherited = Repos.toSpecs(projectRepoEntries(link));
@@ -1129,6 +1148,13 @@ async function initAgentDialog() {
   } catch { /* the default routing is enough */ }
 }
 
+// the icon in the agent dialog: the seed in the form wins, else the agent's id; a new agent starts with a rolled one
+function setIconSeed(seed) {
+  const f = $('agentForm');
+  f.elements.iconSeed.value = seed;
+  $('iconPreview').innerHTML = AgentIcon.orb(seed || editingAgent?.id || '');
+  $('iconReset').hidden = !seed || !editingAgent;
+}
 function openAgentDialog(agent) {
   editingAgent = agent;
   const f = $('agentForm');
@@ -1153,6 +1179,7 @@ function openAgentDialog(agent) {
   f.elements.maxTier.value = v.maxTier || '';
   f.elements.escalate.checked = v.escalate !== false;
   f.elements.project.value = v.project?.id || '';
+  setIconSeed(agent ? agent.iconSeed || '' : AgentIcon.randomSeed());
   drawAgentRepos();
   $('agentDialog').showModal();
   f.elements.name.focus();

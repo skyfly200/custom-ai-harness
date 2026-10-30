@@ -590,6 +590,7 @@ for (const part of ['runs', 'agents', 'tickets', 'apps']) {
                 method: req.method, headers, signal: AbortSignal.timeout(HOSTED_RUNS ? 180000 : 60000), // a first clone can take a while
                 ...(req.method === 'GET' ? {} : { body: JSON.stringify(req.body ?? {}) }),
             });
+            if (upstream.headers.get('content-disposition')) res.set('content-disposition', upstream.headers.get('content-disposition')); // a run's export downloads as a file
             res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(await upstream.text());
         } catch (err) {
             res.status(502).json({ error: HOSTED_RUNS ? `The task runner is not answering (${err.cause?.code || err.message}). It starts with the server; see fly logs.` : `The task runner is not running (${err.cause?.code || err.message}). Start it with npm run all, or node runner/server.js.` });

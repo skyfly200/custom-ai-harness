@@ -140,5 +140,36 @@
     return { what: stages ? `Steps: ${stages}.` : 'A custom recipe.', use: w.when ? `Fits ${w.when}.` : 'See the recipe file.', feel: '' };
   }
 
-  return { isError, filesChanged, quickLine, summarize, annotate, filterEvents, searchText, help, HELP };
+  /**
+   * The buttons a run's page offers now, in order. It shows only what can be done in the run's current state:
+   * a running run offers Stop and nothing else; GitHub actions appear only on a hosted server with changes to send;
+   * Update PR branch appears when the task named a pull request. `ctx` carries what the page already knows:
+   * hosted, githubOn (null when not known), canContinue, canRetry and canDebug. Each entry is
+   * { act } or { href } with a label, a hint and optionally primary.
+   */
+  function actionsFor(run, ctx = {}) {
+    if (ACTIVE.has(run.status)) return [{ act: 'stop', label: 'Stop', hint: 'Stops the run. Its work so far is saved as a commit' }];
+    const out = [];
+    const changed = Boolean(run.result?.commit) && !run.parent;
+    const namedPr = Boolean(run.prTarget) && run.kind === 'run' && changed;
+    if (namedPr) {
+      const n = run.prTarget.number;
+      out.push({ act: 'update-pr', primary: true, label: run.prUpdated ? 'Update PR branch again' : 'Update PR branch', hint: `Moves pull request #${n}'s branch forward to this run's commit, so the PR shows the agent's work. Fast-forward only: nothing on the PR is lost, and it is never merged for you` });
+    }
+    if (changed && ctx.hosted) {
+      if (ctx.githubOn === false) out.push({ href: '#settings', primary: !namedPr, label: 'Connect GitHub to push', hint: 'Pushing and pull requests need your GitHub connection. Connect it in Agent settings' });
+      else {
+        out.push({ act: 'push', primary: !namedPr && !run.pushed, label: run.pushed ? 'Push again' : 'Push branch to GitHub', hint: `Pushes ${run.branch} to the GitHub repo, using your token` });
+        out.push({ act: 'pr', label: run.pr ? 'Update pull request' : 'Open pull request', hint: 'Pushes the branch and opens a pull request for it on GitHub, using your token' });
+      }
+    }
+    if (changed) out.push({ act: 'patch', label: 'Download patch', hint: 'Downloads the whole change as a patch file you can apply with git apply' });
+    if (ctx.canContinue) out.push({ act: 'continue', primary: run.status === 'interrupted', label: 'Continue', hint: run.status === 'interrupted' ? 'The run was cut off. This carries it on in the same branch from its last saved commit, told what was interrupted' : run.status === 'stopped' ? 'Carries the stopped run on in the same branch, from what it had committed, with a full set of steps and minutes again' : 'Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again' });
+    if (ctx.canRetry) out.push({ act: 'retry', label: 'Retry run', hint: 'Starts the same task again from the same commit, on a fresh branch' });
+    if (ctx.canDebug) out.push({ act: 'debug', label: 'Auto debug', hint: 'Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did' });
+    out.push({ act: 'remove', label: 'Delete run', hint: 'Removes the workspace and this record. The branch stays in your repo' });
+    return out;
+  }
+
+  return { isError, filesChanged, quickLine, summarize, annotate, filterEvents, searchText, help, HELP, actionsFor };
 }));

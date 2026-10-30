@@ -100,4 +100,35 @@ function listClones(base, person) {
     try { return fs.readdirSync(dir).map((n) => path.join(dir, n)).filter((d) => fs.existsSync(path.join(d, '.git'))); } catch { return []; }
 }
 
-module.exports = { parse, ensureClone, pushBranch, openPullRequest, listClones, personDir, cloneDir, BRANCH };
+/**
+ * Put a finished run's branch on the pull request its task named: the PR's head branch moves forward to the run's
+ * commit. Fast-forward only: the PR's head must already be in the run's history (the run merged or built on it), so
+ * nothing on the PR is lost. A pull request from a fork is refused, since its branch is not this repo's.
+ * Resolves { number, url, branch, head }, where head is the new commit. `git` and `fetchImpl` are injectable for tests.
+ */
+async function updatePullBranch({ dir, branch, pr, token = '', git = run, fetchImpl = fetch, apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com' }) {
+    if (!BRANCH.test(branch)) throw new Error('only harness/ branches are pushed');
+    // the configured URL, not get-url, which applies url.<base>.insteadOf rewrites
+    const origin = parse((await git(['config', '--get', 'remote.origin.url'], { cwd: dir })).trim());
+    const want = `${pr.owner}/${pr.name}`;
+    if (`${origin.owner}/${origin.name}`.toLowerCase() !== want.toLowerCase()) throw new Error(`pull request #${pr.number} is in ${want}, not in this run's repo (${origin.owner}/${origin.name})`);
+    const res = await fetchImpl(`${apiUrl.replace(/\/$/, '')}/repos/${origin.owner}/${origin.name}/pulls/${pr.number}`, {
+        headers: { accept: 'application/vnd.github+json', 'user-agent': 'harness-runner', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        signal: AbortSignal.timeout(30000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`GitHub answered ${res.status} for pull request #${pr.number}${res.status === 404 ? ' (it may be private: connect GitHub first)' : ''}`);
+    if (data.state !== 'open') throw new Error(`pull request #${pr.number} is ${data.state}, so its branch is left as it is`);
+    const head = data.head || {};
+    if (String(head.repo?.full_name || '').toLowerCase() !== want.toLowerCase()) throw new Error(`pull request #${pr.number} comes from a fork (${head.repo?.full_name || 'a repo that is gone'}), so its branch is not this repo's and cannot be updated from here`);
+    if (!head.ref || !/^[\w./-]+$/.test(head.ref) || head.ref.includes('..')) throw new Error(`pull request #${pr.number} has a branch name this cannot push to`);
+    const prRef = `refs/remotes/pr/${pr.number}`;
+    await git(['fetch', '--quiet', 'origin', `pull/${pr.number}/head:${prRef}`], { cwd: dir, token });
+    const kept = await git(['merge-base', '--is-ancestor', prRef, branch], { cwd: dir }).then(() => true, () => false);
+    if (!kept) throw new Error(`pull request #${pr.number} has commits this run does not include, so the change cannot go on top of it. Run the task again: it will start from the pull request's current head`);
+    const headSha = (await git(['rev-parse', branch], { cwd: dir })).trim();
+    await git(['push', '--quiet', 'origin', `refs/heads/${branch}:refs/heads/${head.ref}`], { cwd: dir, token });
+    return { number: pr.number, url: data.html_url || `https://github.com/${want}/pull/${pr.number}`, branch: head.ref, head: headSha };
+}
+
+module.exports = { parse, ensureClone, pushBranch, openPullRequest, updatePullBranch, listClones, personDir, cloneDir, BRANCH };

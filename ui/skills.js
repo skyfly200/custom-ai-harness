@@ -81,6 +81,15 @@
     $('#delete').hidden = !skills.some((x) => x.id === k.id);
     paintMeter();
     paintUsed(k);
+    paintSource(k);
+  }
+
+  // A skill brought in from a link keeps the link, so it can be checked for changes later.
+  function paintSource(k) {
+    $('#source').hidden = !k.source;
+    if (!k.source) return;
+    $('#sourceLink').href = k.source.url;
+    $('#sourceLink').textContent = k.source.url;
   }
 
   function paintMeter() {
@@ -114,6 +123,7 @@
     description: f.description.value.trim(),
     body: f.body.value,
     disabled: !f.enabled.checked,
+    source: skills.find((x) => x.id === id)?.source,
   });
 
   const usedFromForm = () => {
@@ -211,6 +221,113 @@
     try { await store(KEYS.skills, skills); } catch (err) { toast(err.message, true); }
     paintAll();
     toast(`Imported ${added.length} skill${added.length === 1 ? '' : 's'}`);
+  });
+
+  // ---- from a link ---------------------------------------------------------
+  // The dialog shows what the link holds; nothing is saved until Import. Checking a skill's source uses the same
+  // dialog with the one skill, and Update replaces its instructions (its name and its uses stay).
+  const remote = $('#remote');
+  let remoteItems = [];  // what the last look found, each with pick: whether Import takes it
+  let remoteFor = null;  // the skill being updated from its source, or null when importing
+
+  // A name the page can keep: letters, digits, dashes, dots, underscores. Odd characters become dashes.
+  const safeName = (n) => String(n || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+
+  // Why an item cannot be taken, or null. Importing gives a free name, so only the instructions can be wrong.
+  const remoteProblem = (i) => i.error
+    || (remoteFor ? M.problem({ ...remoteFor, description: i.description, body: i.body }, skills)
+      : M.problem({ name: M.freeName(safeName(i.name), skills), body: i.body }, skills));
+
+  const sameAsCopy = (i) => Boolean(remoteFor) && i.body === remoteFor.body && (i.description || '') === (remoteFor.description || '');
+
+  function openRemote(skill = null) {
+    remoteFor = skill;
+    $('#remoteTitle').textContent = skill ? `Update “${skill.name}” from its source` : 'Import skills from a link';
+    $('#remoteLook').hidden = !!skill;
+    $('#remoteUrl').value = '';
+    remoteItems = [];
+    paintRemote();
+    remote.showModal();
+    if (skill) look(skill.source.file);
+    else $('#remoteUrl').focus();
+  }
+
+  const setRemoteStatus = (text, bad = false) => { $('#remoteStatus').textContent = text; $('#remoteStatus').classList.toggle('bad', bad); };
+
+  async function look(url) {
+    $('#remoteGo').disabled = true;
+    setRemoteStatus(remoteFor ? 'Checking the source…' : 'Looking…');
+    try {
+      const r = await fetch('api/skills/remote', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ url }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      remoteItems = data.items.map((i) => ({ ...i, pick: !remoteProblem(i) && !sameAsCopy(i) }));
+      const found = remoteItems.length;
+      const more = data.truncated ? ` The first ${found} are shown.` : '';
+      setRemoteStatus(remoteFor ? (sameAsCopy(remoteItems[0]) ? 'Already up to date.' : 'There is a newer version.')
+        : found ? `Found ${found} ${found === 1 ? 'file' : 'files'}. Pick what to import.${more}` : 'Nothing found there.');
+    } catch (err) {
+      remoteItems = [];
+      setRemoteStatus(err.message, true);
+    } finally {
+      $('#remoteGo').disabled = false;
+    }
+    paintRemote();
+  }
+
+  function paintRemote() {
+    $('#remoteList').replaceChildren(...remoteItems.map((i) => {
+      const bad = remoteProblem(i);
+      const same = !bad && sameAsCopy(i);
+      const box = el('input', { type: 'checkbox', checked: i.pick, disabled: !!bad || same });
+      box.addEventListener('change', () => { i.pick = box.checked; paintRemoteButton(); });
+      return el('div', { className: 'remote-item' },
+        el('label', { className: 'check' }, box, el('span', {}, el('b', { textContent: i.name || '(no name)' }), el('small', { className: 'muted', textContent: ` ${i.description || ''}` }))),
+        i.body ? el('details', {}, el('summary', { className: 'muted small', textContent: 'Read the instructions' }), el('pre', { textContent: i.body })) : '',
+        el('small', { className: bad ? 'bad' : 'muted', textContent: bad || (same ? 'The same as the copy you have.' : `${i.body.length.toLocaleString()} characters`) }),
+        el('a', { className: 'small', href: i.page, target: '_blank', rel: 'noopener noreferrer', textContent: i.page }));
+    }));
+    paintRemoteButton();
+  }
+
+  function paintRemoteButton() {
+    const count = remoteItems.filter((i) => i.pick && !remoteProblem(i)).length;
+    const go = $('#remoteImport');
+    go.disabled = !count;
+    go.textContent = remoteFor ? 'Update' : count ? `Import ${count}` : 'Import';
+  }
+
+  $('#importUrl').addEventListener('click', () => openRemote());
+  $('#remoteLook').addEventListener('submit', (e) => { e.preventDefault(); look($('#remoteUrl').value.trim()); });
+  $('#remoteCancel').addEventListener('click', () => remote.close());
+  remote.addEventListener('close', () => { remoteFor = null; });
+
+  $('#remoteImport').addEventListener('click', async () => {
+    const picked = remoteItems.filter((i) => i.pick && !remoteProblem(i));
+    if (!picked.length) return;
+    const fetchedAt = new Date().toISOString();
+    const k = remoteFor;
+    remote.close();
+    if (k) {
+      await commit({ ...k, description: picked[0].description, body: picked[0].body, source: { ...k.source, fetchedAt } }, null);
+      toast(`Updated ${k.name}`);
+      return;
+    }
+    const added = [];
+    for (const i of picked) {
+      added.push({ id: uid(), name: M.freeName(safeName(i.name), [...skills, ...added]), description: i.description, body: i.body, disabled: false, source: { url: i.page, file: i.url, fetchedAt } });
+    }
+    skills = [...skills, ...added];
+    draft = null;
+    selected = added[0].id;
+    try { await store(KEYS.skills, skills); } catch (err) { toast(err.message, true); }
+    paintAll();
+    toast(`Imported ${added.length} skill${added.length === 1 ? '' : 's'}`);
+  });
+
+  $('#resync').addEventListener('click', () => {
+    const k = skills.find((x) => x.id === selected);
+    if (k?.source) openRemote(k);
   });
 
   // The .claude skills, read the first time the box opens (only the computer the harness runs on can read them)

@@ -1,0 +1,11 @@
+{
+  "id": "plan",
+  "name": "Plan",
+  "when": "a request for a plan, design or approach to a change, before anyone changes code, with nothing to change",
+  "stages": [
+    { "id": "explore", "role": "Explorer", "tools": "read", "effort": "low",
+      "prompt": "Find what a plan for the task needs: search the repository and read the files that the change would touch, and the tests that cover them. Do not change any file. Call finish with notes: file, line and what it shows, for everything the plan will depend on." },
+    { "id": "plan", "role": "Planner", "tools": "none", "model": "anthropic/claude-sonnet-5.5", "effort": "medium",
+      "prompt": "Write the plan from the Explorer's notes. You have no tools: plan from the notes alone. Give the steps in order, each naming the file it changes, how to check it, and the risks. Say plainly what the notes do not settle. Call finish with the plan." }
+  ]
+}

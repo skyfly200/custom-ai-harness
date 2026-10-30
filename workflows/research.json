@@ -5,7 +5,7 @@
   "stages": [
     { "id": "gather", "role": "Reader", "tools": "read", "effort": "low",
       "prompt": "Gather what the question needs: search the repository and read the relevant files. Do not change any file. Call finish with your notes: file, line and what it shows, for everything relevant." },
-    { "id": "write", "role": "Writer", "tools": "read", "effort": "medium",
-      "prompt": "Answer the question from the notes. Check any claim you are unsure of in the code. Call finish with a clear answer, then a short list of the files it rests on." }
+    { "id": "write", "role": "Writer", "tools": "none", "model": "anthropic/claude-sonnet-5.5", "effort": "medium",
+      "prompt": "Answer the question from the Reader's notes, which name the files and lines they rest on. You have no tools: answer from the notes alone, and say plainly where the notes do not settle a point. Call finish with a clear answer, then a short list of the files it rests on." }
   ]
 }

@@ -20,6 +20,7 @@
     };
   }
   const r1 = (n) => Math.round(n * 10) / 10;
+  const DEFAULT_SEED = 'default';
   const seedOf = (agent) => (agent && (agent.iconSeed || agent.id)) || '';
 
   /** The look for a seed: four glow colours (the orb's --glow-a..d) and the glyph markup. */
@@ -72,13 +73,12 @@
 
   /**
    * The orb markup for an agent (or a bare seed string). `state` is '', 'live' or 'wait';
-   * `extra` more classes (e.g. 'big'). With no agent (the Default one) it is the standard
-   * harness orb: the page's own colours and no glyph.
+   * `extra` more classes (e.g. 'big'). With no agent (the Default one) it uses a fixed seed,
+   * so Default looks like the others.
    */
   function orb(agent, state = '', extra = '') {
-    const seed = typeof agent === 'string' ? agent : seedOf(agent);
+    const seed = typeof agent === 'string' ? agent : seedOf(agent) || DEFAULT_SEED;
     const cls = `orb${extra ? ` ${extra}` : ''}${state ? ` ${state}` : ''}`;
-    if (!seed) return `<span class="${cls}"><i></i><i></i><i></i></span>`;
     const m = make(seed);
     const cu = customOf(agent);
     if (cu.image) return `<span class="${cls} gen img" style="${styleOf(m.colors)};background-image:url(${cu.image})"><i></i><i></i><i></i></span>`;
@@ -86,11 +86,10 @@
     return `<span class="${cls} gen" style="${styleOf(m.colors)}">${m.svg}<i></i><i></i><i></i></span>`;
   }
 
-  /** A small still icon (no orbiting dots) for rows and lists; styled by agenticon.css. Default agent: the plain orb colours. */
+  /** A small still icon for rows and lists; styled by agenticon.css. With no agent it uses the Default seed. */
   function icon(agent, extra = '') {
-    const seed = typeof agent === 'string' ? agent : seedOf(agent);
+    const seed = typeof agent === 'string' ? agent : seedOf(agent) || DEFAULT_SEED;
     const cls = `aicon${extra ? ` ${extra}` : ''}`;
-    if (!seed) return `<span class="${cls}" aria-hidden="true"></span>`;
     const m = make(seed);
     const cu = customOf(agent);
     if (cu.image) return `<span class="${cls} img" style="${styleOf(m.colors)};background-image:url(${cu.image})" aria-hidden="true"></span>`;
@@ -101,7 +100,7 @@
   /** A fresh random seed for the Shuffle button. */
   const randomSeed = () => Math.random().toString(36).slice(2, 10);
 
-  const api = { IMG, hash, make, orb, icon, seedOf, styleOf, randomSeed };
+  const api = { IMG, DEFAULT_SEED, hash, make, orb, icon, seedOf, styleOf, randomSeed };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.AgentIcon = api;
 })(typeof window !== 'undefined' ? window : globalThis);

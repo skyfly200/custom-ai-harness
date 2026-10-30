@@ -70,6 +70,8 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
             body.owner = req.owner;
             if (repo && body.repo !== undefined && body.repo !== null && body.repo !== '') body.repo = await git.ensureClone({ base: reposBase, person: req.owner, spec: body.repo, token: req.githubToken });
             else if (repo && body.repo !== undefined) delete body.repo;
+            // repos connected beside the default are only named to the agent: each must still be a GitHub repo
+            if (Array.isArray(body.moreRepos)) body.moreRepos = body.moreRepos.map((spec) => { const r = git.parse(spec); return `${r.owner}/${r.name}`; });
         }
         return body;
     };

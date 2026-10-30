@@ -4,6 +4,7 @@
 'use strict';
 
 const fs = require('fs');
+const { withRepoArg } = require('./repoArg');
 const path = require('path');
 const { execFile } = require('child_process');
 
@@ -211,4 +212,4 @@ async function call(repoDir, name, args = {}) {
     }
 }
 
-module.exports = { inspect, localFoldersAvailable, checkFolderPath, HOSTED_MESSAGE, call, definitions: () => DEFINITIONS, isRepoTool: (name) => NAMES.has(name), globToRegExp, insideRepo };
+module.exports = { inspect, localFoldersAvailable, checkFolderPath, HOSTED_MESSAGE, call, definitions: () => withRepoArg(DEFINITIONS, 'name of one of the linked git folders'), isRepoTool: (name) => NAMES.has(name), globToRegExp, insideRepo };

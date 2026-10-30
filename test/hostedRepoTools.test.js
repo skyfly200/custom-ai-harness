@@ -75,6 +75,8 @@ test('over HTTP a hosted server lists no repo or shell tools and refuses their c
 
 test('the chat page ignores a folder repo on a hosted server and does not sync it', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'ui', 'chat.js'), 'utf8');
-    assert.match(src, /const repoOf = \(c\) => \(hostedNoFolders\(\) \? null/);
-    assert.match(src, /const \{ messages, syncVersion, repo: _folder, \.\.\.chatMeta \} = c;/);
+    assert.match(src, /const reposOf = \(c\) => \{[\s\S]*hostedNoFolders\(\) \? all\.filter\(Repos\.isGithub\) : all/);
+    assert.match(src, /const repoOf = \(c\) => Repos\.defaultOf\(reposOf\(c\), 'local'\);/);
+    assert.match(src, /const \{ messages, syncVersion, repo: _folder, repos: _repos, \.\.\.chatMeta \} = c;/);
+    assert.match(src, /chatMeta\.repos = synced/);
 });

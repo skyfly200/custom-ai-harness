@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="agents.css">
+<link rel="stylesheet" href="repos.css">
 <link rel="stylesheet" href="vendor/xterm/xterm.css">
 <link rel="stylesheet" href="calm.css">
 <link rel="stylesheet" href="mobile.css">
@@ -149,7 +150,11 @@
       <div class="picker-head"><strong id="agentDialogTitle">New agent</strong><button type="button" id="agentClose" aria-label="Close">×</button></div>
       <label class="field"><span>Name</span><input type="text" name="name" required maxlength="60" placeholder="Docs keeper"></label>
       <div class="field repo-field"><span data-hint="A git repo inside the folders the runner may use. Changing it starts the agent's work over from that repo">Repo</span>
-        <div class="repo-input"><input type="text" name="repo" id="agentRepo" list="repoList" required placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
+        <div class="repo-input"><input type="text" name="repo" id="agentRepo" list="repoList" placeholder="Paste a path, or browse" spellcheck="false"><button type="button" id="agentBrowse">Browse…</button></div></div>
+      <div class="field repo-field" id="agentMoreField"><span data-hint="More repos this agent knows about. The Repo above, the first one, is the one it works in; the others are named in every task and used only when the task asks. They are not checked out">More repos (the first is the default)</span>
+        <ul class="repo-chips" id="agentMoreChips"></ul>
+        <div class="repo-input"><input type="text" id="agentMoreInput" list="repoList" placeholder="Add another repo" spellcheck="false" aria-label="Add another repo"><button type="button" id="agentMoreAdd">Add</button></div>
+        <div class="fine muted" id="agentInherit" hidden></div></div>
       <label class="field"><span data-hint="Told to the agent at the start of every task">Standing instructions</span>
         <textarea name="instructions" rows="4" placeholder="Keep changes small. Update the docs when behaviour changes. Run npm test before finishing."></textarea></label>
       <div class="row">
@@ -221,6 +226,7 @@
 <script src="terminal.js"></script>
 <script src="costs.js"></script>
 <script src="notify.js"></script>
+<script src="repos.js"></script>
 <script src="agents.js"></script>
 <script src="apps.js"></script>
 </body>

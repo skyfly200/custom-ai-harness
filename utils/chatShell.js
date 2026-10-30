@@ -6,6 +6,7 @@
 'use strict';
 
 const fs = require('fs');
+const { withRepoArg } = require('./repoArg');
 const path = require('path');
 const { spawn } = require('child_process');
 const { PowerShellSession } = require('./powershellSession');
@@ -110,4 +111,4 @@ function repoRoot(dir) {
     return real;
 }
 
-module.exports = { exec, repoRoot, closePowerShellSessions, definitions: () => DEFINITIONS, isShellTool: (name) => name === NAME, NAME, ENV_ALLOW, MAX_OUTPUT };
+module.exports = { exec, repoRoot, closePowerShellSessions, definitions: () => withRepoArg(DEFINITIONS, 'name of one of the linked git folders'), isShellTool: (name) => name === NAME, NAME, ENV_ALLOW, MAX_OUTPUT };

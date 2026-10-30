@@ -404,6 +404,60 @@ test('a run that was running when the runner stopped is marked failed on restart
     assert.match(again.get(id).error, /restarted/);
 });
 
+test('a person can write to a finished run and it goes on from its last commit', async () => {
+    script = [
+        { calls: [['edit_file', { path: 'app.js', old: 'a - b', new: 'a + b' }]] },
+        { calls: [['finish', { summary: 'plus now' }]] },
+    ];
+    const { id } = start();
+    const first = await settle(id);
+    assert.equal(first.status, 'done');
+    script = [
+        { calls: [['edit_file', { path: 'check.js', old: "console.log('ok')", new: "console.log('fine')" }]] },
+        { calls: [['finish', { summary: 'tweaked the check' }]] },
+    ];
+    modelCalls = [];
+    const leg = manager.continueRun(id, { message: 'also say fine instead of ok' });
+    assert.equal(leg.id, id);
+    const done = await settle(id);
+    assert.equal(done.status, 'done');
+    assert.equal(done.legs, 1);
+    assert.equal(done.branch, first.branch);
+    assert.match(modelCalls[0].body.messages[1].content, /also say fine instead of ok/);
+    assert.match(modelCalls[0].body.messages[1].content, /committed on that branch/);
+    assert.ok(done.events.some((e) => e.type === 'note' && /You said: also say fine/.test(e.text)));
+    // both parts' work is on the one branch
+    assert.match(git(repo, 'show', `${done.branch}:app.js`), /a \+ b/);
+    assert.match(git(repo, 'show', `${done.branch}:check.js`), /fine/);
+    // a message that asks for nothing new keeps the run's commit (the push button needs it)
+    script = [{ calls: [['finish', { summary: 'nothing to change' }]] }];
+    manager.continueRun(id, { message: 'push it' });
+    const same = await settle(id);
+    assert.equal(same.result.commit, done.result.commit);
+    assert.equal(same.legs, 2);
+    // without a message only a run that ran out of room can be continued; one still going never can
+    assert.throws(() => manager.continueRun(id), /only a run that ran out/);
+    script = [{ calls: [['finish', { summary: 'ok' }]] }];
+    const busy = start({ maxSteps: 20 }).id;
+    assert.throws(() => manager.continueRun(busy, { message: 'hi' }), /stop the run first/);
+    await settle(busy);
+});
+
+test('a run that fails after editing keeps its work as a commit on the branch', async () => {
+    script = [{ calls: [['edit_file', { path: 'app.js', old: 'a - b', new: 'a * b' }]] }, 400];
+    const { id } = start();
+    const run = await settle(id);
+    assert.equal(run.status, 'failed');
+    assert.match(run.result.commit, /^[0-9a-f]{40}$/);
+    assert.equal(run.result.salvaged, true);
+    assert.match(git(repo, 'show', `${run.branch}:app.js`), /a \* b/);
+    assert.ok(run.events.some((e) => /Saved the unfinished work/.test(e.text)));
+    // and it can be written to, to carry on from that
+    script = [{ calls: [['finish', { summary: 'carried on' }]] }];
+    manager.continueRun(id, { message: 'fix it properly' });
+    assert.equal((await settle(id)).status, 'done');
+});
+
 test('a leg of a continued run keeps its own record, and a restart carries it on', async () => {
     // the run that ran out of steps, and a leg that is working when the runner stops
     script = [{ calls: [['list_files', {}]] }];

@@ -177,6 +177,15 @@
       <div id="termHost" class="termhost"></div>
     </details>
   </div>
+  <div class="card follow" id="followPanel" hidden>
+    <strong data-hint="Starts the run again on the same branch (harness/&lt;id&gt;), from the last commit, with everything it did so far as context. It gets a new sandbox, since the old one is gone. Whatever it changes is committed and kept on the branch">Ask the agent</strong>
+    <p class="muted" id="followSaved"></p>
+    <form id="followForm" autocomplete="off">
+      <textarea id="followText" rows="3" maxlength="4000" placeholder="Save the work, fix the failing test, add a test for it, push it…" aria-label="Message to the agent"></textarea>
+      <div class="chips" id="followChips"><button type="button" data-say="Save the work: commit everything that is useful on this branch and tell me what is in it.">Save the work</button><button type="button" data-say="Run the tests and fix anything that fails, then commit.">Fix the tests</button><button type="button" data-say="Explain what you changed and why, and list anything left unfinished.">Explain the changes</button></div>
+      <div class="actions"><button type="submit" class="primary" id="followSend">Send to the agent</button><span class="note" id="followMsg" role="status"></span></div>
+    </form>
+  </div>
   <div class="card" id="shipPanel" hidden>
     <strong data-hint="Merges the change into the app through a GitHub pull request, so its normal pipeline deploys it. Needs GITHUB_TOKEN in .env. Approve stays off while tests fail or files outside the editable paths changed">Ship this change</strong>
     <div id="shipInfo"></div>

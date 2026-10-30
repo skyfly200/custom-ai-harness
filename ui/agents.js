@@ -142,10 +142,12 @@ function renderDetail(run) {
     ${r ? `<div class="result">${run.plan ? '<p class="muted">Plan only: nothing was changed, so there is no branch to review.</p>' : ''}<p class="summary">${esc(r.summary)}</p>
       ${run.plan ? '' : r.diffStat ? `<pre>${esc(r.diffStat)}</pre>` : '<p class="muted">No files changed.</p>'}
       ${r.tests ? `<p>${r.tests.passed ? '<span class="tag ok">tests pass</span>' : `<span class="tag bad">tests fail${r.tests.timedOut ? ' (timed out)' : ''}</span>`} <code>${esc(r.tests.command)}</code></p><details data-k="tests"${openDetails.has('tests') ? ' open' : ''}><summary>Test output</summary><pre>${esc(r.tests.output)}</pre></details>` : ''}
+      ${r.commit ? `<p class="muted">${r.salvaged ? 'The run stopped early; its unfinished work was saved as a commit. ' : ''}Saved on ${hosted ? 'this server' : 'your repo'} as branch <code>${esc(run.branch)}</code>, so it is kept after the sandbox ends.</p>` : ''}
+      ${run.pr ? `<p>Pull request: <a href="${esc(run.pr.url)}" target="_blank" rel="noopener">#${esc(run.pr.number)} into ${esc(run.pr.base)}</a></p>` : ''}
       ${r.commit && hosted ? `<p class="muted">${run.pushed ? `Pushed to GitHub: <a href="${esc(run.pushed.url)}" target="_blank" rel="noopener">${esc(run.branch)}</a> · <a href="${esc(run.pushed.compare)}" target="_blank" rel="noopener">open a pull request</a>` : 'The branch is only on this server so far. Push it to your GitHub repo to review it there.'}</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
     <div class="actions">${active
       ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
-      : `${hosted && r?.commit && !run.parent ? `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button>` : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
+      : `${hosted && r?.commit && !run.parent ? `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}</div>
     <div class="timeline">${run.events.map(eventHtml).join('')}</div>`);
   if (changed && r?.commit && diffOpen) loadDiff(run.id);
 }
@@ -279,7 +281,8 @@ async function refresh() {
       drawTerminal(run);
       drawPreview(run);
       drawShip(run);
-    } else { drawTerminal(null); drawPreview(null); drawShip(null); }
+      drawFollow(run);
+    } else { drawTerminal(null); drawPreview(null); drawShip(null); drawFollow(null); }
     $('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('down').hidden = false;
@@ -313,7 +316,17 @@ $('detail').addEventListener('click', async (e) => {
     if (act === 'allow') await post(`/${selected}/approve`, { allow: true });
     if (act === 'decline') await post(`/${selected}/approve`, { allow: false });
     if (act === 'stop') await post(`/${selected}/stop`);
-    if (act === 'push') await post(`/${selected}/push`);
+    if (act === 'push') {
+      if (!await ui.confirm(`Push ${runById(selected)?.branch || 'this branch'} to your GitHub repo? It uses your connected GitHub account.`)) return;
+      await post(`/${selected}/push`);
+      ui.toast('Pushed to GitHub.');
+    }
+    if (act === 'pr') {
+      if (!await ui.confirm(`Push ${runById(selected)?.branch || 'this branch'} and open a pull request on GitHub? It is never merged for you.`)) return;
+      const pr = await post(`/${selected}/pr`);
+      ui.toast(`Pull request #${pr.number} is open.`);
+    }
+    if (act === 'patch') await downloadPatch(selected);
     if (act === 'retry' || act === 'debug') {
       const made = await post(`/${selected}/retry`, { debug: act === 'debug' });
       selected = made.id; location.hash = made.id; openDetails = new Set();
@@ -327,6 +340,45 @@ $('detail').addEventListener('click', async (e) => {
       renderDetail(null);
     }
   } catch (err) { ui.toast(err.message, { kind: 'error' }); }
+  refresh();
+});
+
+const runById = (id) => runs.find((r) => r.id === id);
+async function downloadPatch(id) {
+  const res = await fetch(`api/runs/${id}/patch`);
+  if (!res.ok) throw new Error(`could not get the patch (HTTP ${res.status})`);
+  const url = URL.createObjectURL(new Blob([await res.text()], { type: 'text/x-diff' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `${id}.patch` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Ask the agent: a message to a run that has ended starts it again on the same branch
+let followFor = null;
+function drawFollow(run) {
+  const ok = run && !ACTIVE.has(run.status) && !run.parent && !['swarm', 'chatdev'].includes(run.kind) && !$('followForm').dataset.busy;
+  $('followPanel').hidden = !run || run.parent || ['swarm', 'chatdev'].includes(run.kind) || ACTIVE.has(run.status);
+  if (!ok) return;
+  if (followFor !== run.id) { followFor = run.id; $('followText').value = ''; $('followMsg').textContent = ''; }
+  $('followSaved').textContent = run.result?.commit
+    ? `The work is saved on branch ${run.branch}${hosted ? ' on this server' : ''}; a message here starts the agent again from its last commit${hosted ? ', and Push or Open pull request above sends it to GitHub' : ''}.`
+    : 'No commit yet, so the branch is as it started. A message here starts the agent again with what it did as context.';
+}
+$('followChips').addEventListener('click', (e) => { const say = e.target.closest('[data-say]')?.dataset.say; if (say) { $('followText').value = say; $('followText').focus(); } });
+$('followForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = $('followText').value.trim();
+  if (!message || !selected) return;
+  $('followForm').dataset.busy = '1';
+  $('followSend').disabled = true;
+  try {
+    await post(`/${selected}/continue`, { message });
+    $('followText').value = '';
+    $('followMsg').textContent = '';
+    ui.toast('Sent. The agent is picking the run up again.');
+  } catch (err) { ui.toast(err.message, { kind: 'error' }); }
+  delete $('followForm').dataset.busy;
+  $('followSend').disabled = false;
   refresh();
 });
 
@@ -680,7 +732,7 @@ function applyView() {
 function goHome() {
   inAgent = false; agentSel = null; selected = null; peekId = null;
   history.pushState(null, '', location.pathname + location.search);
-  applyView(); applyMode(); renderAgents(); renderList(); renderDetail(null); drawTerminal(null); drawPreview(null); drawShip(null);
+  applyView(); applyMode(); renderAgents(); renderList(); renderDetail(null); drawTerminal(null); drawPreview(null); drawShip(null); drawFollow(null);
 }
 
 // the form is for one-off runs, or for a task of the selected agent
@@ -716,7 +768,7 @@ $('agentChips').addEventListener('click', (e) => {
 $('agentChips').addEventListener('click', (e) => { if (e.target.closest('.orbcard .open')) chooseAgent(e.target.closest('.bubble').querySelector('[data-aid]').dataset.aid); });
 document.addEventListener('click', (e) => { if (peekId && !e.target.closest('.bubble')) { peekId = null; lastHtml.delete('agentChips'); renderAgents(); } });
 $('backBtn').addEventListener('click', () => {
-  if (inAgent && selected) { selected = null; sub = 'runs'; history.pushState(null, '', `#${agentSel || 'default'}`); applyView(); renderList(); renderDetail(null); drawTerminal(null); drawPreview(null); drawShip(null); } else goHome();
+  if (inAgent && selected) { selected = null; sub = 'runs'; history.pushState(null, '', `#${agentSel || 'default'}`); applyView(); renderList(); renderDetail(null); drawTerminal(null); drawPreview(null); drawShip(null); drawFollow(null); } else goHome();
 });
 $('subNav').addEventListener('click', (e) => { const b = e.target.closest('[data-sub]'); if (b) { sub = b.dataset.sub; applyView(); renderList(); } });
 $('layoutNav').addEventListener('click', (e) => {

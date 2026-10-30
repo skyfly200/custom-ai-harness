@@ -67,10 +67,37 @@ async function pushBranch({ dir, branch, token, git = run }) {
     return { branch, url: `https://github.com/${repo.owner}/${repo.name}/tree/${branch}`, compare: `https://github.com/${repo.owner}/${repo.name}/compare/${branch}?expand=1` };
 }
 
+/**
+ * Open a pull request from a pushed run branch (pushing it first). `base` defaults to the repo's default
+ * branch. A pull request that is already open for the branch is returned instead of failing.
+ * Resolves { number, url, existed }. `fetchImpl` and `apiUrl` are injectable for tests.
+ */
+async function openPullRequest({ dir, branch, token, title, body = '', base = '', draft = false, git = run, fetchImpl = fetch, apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com' }) {
+    const pushed = await pushBranch({ dir, branch, token, git });
+    const { owner, name } = parse((await git(['remote', 'get-url', 'origin'], { cwd: dir })).trim());
+    const api = async (method, route, payload) => {
+        const res = await fetchImpl(`${apiUrl.replace(/\/$/, '')}${route}`, {
+            method, headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'harness-runner' },
+            ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(30000),
+        });
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, data };
+    };
+    const target = base || (await api('GET', `/repos/${owner}/${name}`)).data.default_branch || 'main';
+    const made = await api('POST', `/repos/${owner}/${name}/pulls`, { title: String(title).slice(0, 200), head: branch, base: target, body, draft });
+    if (made.ok) return { number: made.data.number, url: made.data.html_url, base: target, existed: false, pushed };
+    if (made.status === 422) {
+        const open = await api('GET', `/repos/${owner}/${name}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}`);
+        if (open.ok && open.data[0]) return { number: open.data[0].number, url: open.data[0].html_url, base: open.data[0].base?.ref || target, existed: true, pushed };
+    }
+    if (made.status === 401 || made.status === 403 || made.status === 404) throw new Error(`GitHub would not open the pull request (${made.status}): the token needs Pull requests: write on ${owner}/${name}`);
+    throw new Error(`GitHub answered ${made.status}: ${String(made.data.message || '').slice(0, 200)}`);
+}
+
 /** The person's clones, as paths, for the repo picker. */
 function listClones(base, person) {
     const dir = personDir(base, person);
     try { return fs.readdirSync(dir).map((n) => path.join(dir, n)).filter((d) => fs.existsSync(path.join(d, '.git'))); } catch { return []; }
 }
 
-module.exports = { parse, ensureClone, pushBranch, listClones, personDir, cloneDir, BRANCH };
+module.exports = { parse, ensureClone, pushBranch, openPullRequest, listClones, personDir, cloneDir, BRANCH };

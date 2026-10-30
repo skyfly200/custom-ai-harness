@@ -128,7 +128,7 @@ function renderDetail(run) {
   const r = run.result;
   const diffOpen = openDetails.has('diff');
   const changed = setHtml('detail', `
-    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
+    <div class="facts">${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.strongModel ? `<span>Strong model ${esc(run.strongModel)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
@@ -613,7 +613,7 @@ $('newRun').addEventListener('submit', async (e) => {
   body.autoDebug = f.elements.autoDebug?.checked ? '1' : '0';
   body.plan = f.elements.plan?.checked ? '1' : '0';
   body.auditParts = f.elements.auditParts?.checked ? '1' : '0';
-  if (body.model) delete body.profile; // one model directly replaces the routing
+  if (body.model) { delete body.profile; delete body.strongModel; } // one model directly replaces the routing
   body.escalate = f.elements.escalate?.checked ? '1' : '0';
   body.autoContinue = f.elements.autoContinue?.checked ? '1' : '0';
   try {
@@ -624,7 +624,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -1031,7 +1031,7 @@ function applyMode() {
   const a = agentOf(agentSel);
   // routing fields stay on for a task, and start from the agent's own
   if (a !== lastModeAgent) {
-    f.elements.profile.value = a?.profile || ''; f.elements.model.value = a?.model || ''; f.elements.effort.value = a?.effort || ''; f.elements.maxTier.value = a?.maxTier || '';
+    f.elements.profile.value = a?.profile || ''; f.elements.model.value = a?.model || ''; f.elements.effort.value = a?.effort || ''; f.elements.maxTier.value = a?.maxTier || ''; f.elements.strongModel.value = '';
     lastModeAgent = a;
   }
   for (const el of f.querySelectorAll('.oneoff')) {

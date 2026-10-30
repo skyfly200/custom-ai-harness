@@ -208,8 +208,10 @@ function estimateTokens(body) {
  * `effort` (x-harness-effort) moves the score up or down before the
  * threshold and the extra tiers (utils/tiers.js) are applied; `maxTier`
  * (x-harness-max-tier) names the highest tier the request may use.
+ * `strongModel` (x-harness-strong-model) is the model a client chose for the
+ * Strong tier; it replaces the routing's Strong model for this request only.
  */
-async function routeModel(body, requested, profile, effort, maxTier) {
+async function routeModel(body, requested, profile, effort, maxTier, strongModel) {
     const { messages } = body;
     const config = settings.get();
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
@@ -257,9 +259,10 @@ async function routeModel(body, requested, profile, effort, maxTier) {
         const extra = tiers.pick(profile ? profile.tiers : config.tiers, threshold, score, hasTools);
         if (extra) return { ...base, model: extra.model, tier: extra.tier, winRate: win_rate };
         const strong = score >= threshold;
+        const chosenStrong = strong && typeof strongModel === 'string' ? strongModel.trim() : '';
         return {
             ...base,
-            model: profile ? profiles.pick(profile, score, threshold, tokens, hasTools) : model,
+            model: chosenStrong || (profile ? profiles.pick(profile, score, threshold, tokens, hasTools) : model),
             tier: strong ? 'Strong' : 'Weak',
             winRate: win_rate,
         };
@@ -1759,7 +1762,7 @@ async function routeAndRecord(req, res) {
     const prompt = latestUserText(req.body.messages);
     monitor.recordRouting({ path: req.path, clientId, prompt, user: personOf(req) });
     const started = Date.now();
-    const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile, req.get('x-harness-effort'), req.get('x-harness-max-tier'));
+    const route = await routeModel(req.body, req.get('x-harness-model'), req.harnessProfile, req.get('x-harness-effort'), req.get('x-harness-max-tier'), req.get('x-harness-strong-model'));
     route.model = profiles.currentName(route.model);
     req.body.model = route.model;
     // A strategy's own fallback chains replace the Gateway's for this request

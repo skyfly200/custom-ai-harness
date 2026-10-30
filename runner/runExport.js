@@ -95,7 +95,7 @@ function insights(run, steps) {
     };
 }
 
-const SETTINGS = ['workflow', 'workflowName', 'profile', 'model', 'effort', 'escalate', 'maxTier', 'sandbox', 'plan', 'maxSteps', 'softSteps', 'maxMinutes', 'maxCost', 'autoDebug', 'test', 'agent', 'app', 'editable', 'moreRepos', 'kind', 'parent', 'carriesOn', 'continues', 'debugOf'];
+const SETTINGS = ['workflow', 'workflowName', 'profile', 'model', 'effort', 'escalate', 'maxTier', 'strongModel', 'sandbox', 'plan', 'maxSteps', 'softSteps', 'maxMinutes', 'maxCost', 'autoDebug', 'test', 'agent', 'app', 'editable', 'moreRepos', 'kind', 'parent', 'carriesOn', 'continues', 'debugOf'];
 
 /**
  * run: the run record. extra: { diff, commits, environment } the manager gathered from the repo.

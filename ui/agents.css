@@ -188,7 +188,7 @@ body.runs-off main > :not(header):not(#down) { display: none; }
 @media (prefers-reduced-motion: reduce) { .bubble, .livepanel { animation: none; } .orbbtn .orb, .orbcard { transition: none; } }
 @media (max-width: 760px) { .bubbles { gap: 26px 22px; padding-bottom: 150px; } .orbbtn .orb { width: 72px; height: 72px; } .orbcard { width: min(250px, 80vw); }
   .livepanel { right: 12px; left: 12px; width: auto; bottom: 12px; } }
-.hero[hidden], .split[hidden], #listTitle[hidden], #newRun[hidden], #agentInfo[hidden], .livepanel[hidden] { display: none !important; }
+.hero[hidden], .split[hidden], #agentInfo[hidden], .livepanel[hidden] { display: none !important; }
 .orbcard, .livepanel { background: var(--panel, #fff); }
 
 body.view-home #updated, body.view-home .hero { display: none !important; }
@@ -199,30 +199,114 @@ body.view-home #updated, body.view-home .hero { display: none !important; }
 .orbbtn:hover .orb, .orbbtn:focus-visible .orb { transform: scale(1.1); }
 @media (max-width: 760px) { .bubbles { min-height: calc(100vh - 190px); gap: 34px 28px; } .orbbtn .orb { width: 76px; height: 76px; } }
 
-/* Views inside an agent: start a run, the list of runs, one run */
+/* Views inside an agent: its page (runs and prompts) and one run */
 .backbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .seg { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel, transparent); }
 .seg[hidden] { display: none; }
 .seg button { margin: 0; padding: 4px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
 .seg button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); font-weight: 600; }
-.list[hidden], .runview[hidden] { display: none !important; }
-body.sub-runs .list { max-height: none; }
+.agentgrid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; align-items: start; }
+.agentgrid[hidden], #runPage[hidden] { display: none !important; }
+.agentgrid .list { max-height: 60vh; }
+.prompt-item .meta { font-size: 12px; }
+@media (max-width: 760px) { .agentgrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* the run page: status on top, then Ask the agent, then the run itself */
+.statuscard { margin: 0 0 10px; padding: 12px 16px; }
+.statuscard:empty { display: none; }
+.sc-top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.sc-top .orb { width: 20px; height: 20px; } .sc-top .orb i { --r: 14px; }
+.sc-quick { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.sc-when { margin-left: auto; font-size: 12px; }
+.sc-prompt { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--text) 4%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; max-height: 30vh; overflow: auto; }
+.sc-prompt.clip { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sc-summary { margin: 8px 0 0; font-size: 14px; line-height: 1.5; }
+.linklike { margin: 2px 0 0; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
 .runview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
 .runview.side { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-.runview .detail { max-height: calc(100vh - 190px); overflow: auto; overscroll-behavior: contain; margin: 0; }
-.runview .termpanel { margin: 0; position: sticky; top: 8px; }
-.runview.side .termhost { height: calc(100vh - 290px); min-height: 240px; }
-.runview:not(.side) .detail { max-height: 70vh; }
+.runview .detail { margin: 0; }
+.leftcol { display: grid; gap: 12px; min-width: 0; align-content: start; }
+.leftcol .termpanel { margin: 0; }
 .approval { position: sticky; top: 0; z-index: 2; background: var(--panel, var(--bg)); }
-@media (max-width: 900px) { .runview.side { grid-template-columns: minmax(0, 1fr); } .runview .termpanel { position: static; } .runview.side .termhost { height: 300px; } }
-.runview .detail-head { position: sticky; top: -12px; z-index: 1; margin: -12px -12px 8px; padding: 12px; background: var(--panel, var(--bg)); }
-@media (max-width: 900px) { #layoutNav { display: none !important; } }
+.rightcol { margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.rtabs { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; }
+.rtabs > button { margin: 0; padding: 4px 12px; border-radius: 999px; font-size: 13px; }
+.rtabs > button[role=tab].on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); font-weight: 600; }
+.rtabs .grow { flex: 1; }
+.rtabs .check { margin: 0; font-size: 12px; }
+.pane { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.pane[hidden] { display: none; }
+.rightcol .termhost { margin: 0; border-radius: 0; height: 360px; flex: 1; }
+.tracetools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); flex: none; }
+.tracetools select, .tracetools input[type=search] { margin: 0; font-size: 13px; padding: 4px 8px; max-width: 150px; }
+.tracetools .check { margin: 0; font-size: 12px; }
+.tracetools .tsearch { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.tracetools .tsearch input { width: 150px; }
+.tracetools .tsearch button { margin: 0; padding: 2px 9px; }
+.tracetools .tsearch .muted { font-size: 12px; min-width: 44px; text-align: center; }
+.trace { padding: 8px 12px; overflow: auto; overscroll-behavior: contain; display: grid; gap: 6px; align-content: start; min-height: 0; flex: 1; max-height: 460px; }
+.trace .ev { margin: 0; }
+.trace pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); overflow: auto; max-height: 260px; white-space: pre-wrap; word-break: break-word; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.trace code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+mark.hit { background: color-mix(in srgb, var(--warn) 45%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+mark.hit.cur { background: var(--warn); color: #111; outline: 2px solid var(--warn); }
+.rightcol.full { position: fixed; inset: 0; z-index: 200; border-radius: 0; border: 0; height: 100vh; background: var(--panel, var(--bg)); }
+.rightcol.full .termhost, .rightcol.full .trace { height: auto; max-height: none; }
+body.has-full { overflow: hidden; }
+@media (max-width: 900px) { .runview.side { grid-template-columns: minmax(0, 1fr); } #layoutNav { display: none !important; } .rightcol .termhost { height: 300px; } }
 
+/* On a desktop screen the run page does not scroll: every box fits and scrolls inside itself */
+@media (min-width: 901px) and (min-height: 600px) {
+  body.sub-run { overflow: hidden; }
+  body.sub-run main { height: calc(100vh - 53px); max-height: calc(100vh - 53px); padding-bottom: 14px; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; }
+  body.sub-run main > * { flex: none; }
+  body.sub-run main > #runPage { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  body.sub-run #runPage > * { flex: none; }
+  body.sub-run #runPage > .runview { flex: 1; min-height: 0; align-items: stretch; margin-top: 10px; }
+  body.sub-run .runview.side { grid-template-rows: minmax(0, 1fr); }
+  body.sub-run .runview:not(.side) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  body.sub-run .leftcol { overflow: auto; overscroll-behavior: contain; min-height: 0; }
+  body.sub-run .rightcol { min-height: 0; }
+  body.sub-run .rightcol .termhost, body.sub-run .trace { height: auto; max-height: none; }
+  body.sub-run .trace { flex: 1 1 0; }
+  body.sub-run .rightcol .termhost { flex: 1 1 0; }
+  body.sub-run .sc-prompt { max-height: 9vh; }
+  body.sub-run .sc-prompt.clip { -webkit-line-clamp: 2; }
+  body.sub-run .sc-summary { max-height: 10vh; overflow: auto; }
+  body.sub-run .follow { padding: 8px 14px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: start; }
+  body.sub-run .follow > strong { grid-column: 1; }
+  body.sub-run .follow > #followSaved { grid-column: 2; font-size: 12px; }
+  body.sub-run .follow > form { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: start; }
+  body.sub-run .follow textarea { grid-row: 1 / 3; margin: 0; }
+  body.sub-run .follow .chips { margin: 0; grid-column: 2; }
+  body.sub-run .follow .actions { grid-column: 2; }
+}
+
+/* the new run window and the way-of-working help */
+.rundlg { width: min(760px, calc(100vw - 32px)); }
+.rundlg .composer { padding: 0; margin: 0; display: grid; gap: 10px; }
+.rundlg .composer .row { margin-top: 0; }
+.rundlg .picker-head h2 { margin: 0; font-size: 17px; }
+.wf-pick { display: flex; gap: 6px; flex-wrap: wrap; }
+.wf-pick select { flex: 1; min-width: 150px; }
+.wfhelp { padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, transparent); font-size: 13px; }
+.wfhelp p { margin: 4px 0 0; }
+.wftable { display: grid; gap: 6px; margin-top: 8px; }
+.wfrow { display: grid; gap: 2px; text-align: left; margin: 0; padding: 8px 12px; border-radius: 10px; font-size: 13px; }
+.wfrow.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.wfrow .muted { font-size: 12px; }
+.wfhelp[hidden], #wfCompare[hidden] { display: none; }
 /* Ask the agent: a message to a finished run */
 .follow textarea { width: 100%; box-sizing: border-box; margin: 6px 0; }
+.follow > .muted { margin: 4px 0 0; font-size: 13px; }
 .follow .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .follow .chips button { font-size: 0.85em; padding: 3px 10px; border-radius: 999px; }
 .gear { text-align: center; margin: 0 0 24px; }
 .gear[hidden], #settingsBox[hidden], .gearlink[hidden] { display: none; }
 .gearlink { margin-left: auto; }
 ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.follow[hidden], .statuscard[hidden] { display: none !important; }
+.promptbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.promptbar button { margin: 0; padding: 3px 12px; font-size: 13px; border-radius: 999px; }
+.promptbar .fine { margin-left: auto; font-size: 12px; }
+.prompt-item { padding-left: 10px; }

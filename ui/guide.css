@@ -1,0 +1,10 @@
+/* The page guide, opened from the book button (guide.js) */
+.guide-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; flex: none; border-radius: 50%; color: var(--text); background: transparent; border: 1px solid var(--field-border, var(--border, #e2dfee)); cursor: pointer; }
+.guide-btn:hover { background: var(--hover, rgba(127, 127, 160, .12)); }
+.guide-btn:focus-visible { outline: 2px solid var(--accent, #6a4cf5); outline-offset: 2px; }
+.ui-dialog.guide-dialog { width: min(720px, 100%); }
+.ui-dialog.guide-dialog h3 { font-size: 17px; margin-bottom: 4px; }
+.guide-body { line-height: 1.55; font-size: 14px; }
+.guide-body ol { padding-left: 20px; margin: 8px 0; }
+.guide-body li { margin: 6px 0; }
+.guide-body p { margin: 8px 0; }

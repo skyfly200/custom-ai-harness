@@ -6,11 +6,12 @@ const nav = require('../ui/nav.js');
 
 const ui = path.join(__dirname, '..', 'ui');
 const read = (f) => fs.readFileSync(path.join(ui, f), 'utf8');
-const pages = ['index', 'chat', 'apps', 'usage', 'usage-users', 'routing', 'agents', 'workflows', 'prompts', 'tools', 'settings', 'users'];
+const pages = ['index', 'chat', 'apps', 'usage', 'usage-users', 'routing', 'agents', 'workflows', 'prompts', 'skills', 'tools', 'settings', 'users'];
 
-test('the bar keeps one fixed order, with Settings last', () => {
-  assert.deepStrictEqual(nav.PAGES.map((p) => p.label), ['Dashboard', 'Chat', 'Apps', 'Agents', 'Workflows', 'Prompts', 'Tools', 'Usage', 'Routing', 'Settings']);
+test('the bar keeps one fixed order, with Settings last and as a gear on desktop', () => {
+  assert.deepStrictEqual(nav.PAGES.map((p) => p.label), ['Dashboard', 'Chat', 'Apps', 'Agents', 'Workflows', 'Prompts', 'Skills', 'Tools', 'Usage', 'Routing', 'Settings']);
   for (const p of nav.PAGES) assert.ok(nav.ICONS[p.id], `icon for ${p.id}`);
+  assert.deepStrictEqual(nav.PAGES.filter((p) => p.iconOnly).map((p) => p.id), ['settings']);
 });
 
 test('every page takes its bar from the shared script, with no copy of the links in the page', () => {

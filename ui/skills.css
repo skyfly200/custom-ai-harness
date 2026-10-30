@@ -1,0 +1,29 @@
+/* Skills page (after style.css, bright.css, nav.css, calm.css, mobile.css): a list on the left, the editor on the right */
+main.skills-page { max-width: 1180px; }
+.lead { margin: 14px 0 0; font-size: 13px; max-width: 74ch; }
+.split { display: grid; grid-template-columns: minmax(240px, 320px) 1fr; gap: 14px; margin-top: 14px; align-items: start; }
+.lib input[type=search] { width: 100%; box-sizing: border-box; }
+.slist { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.slist button { text-align: left; display: block; width: 100%; background: transparent; padding: 7px 10px; }
+.slist button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.slist b { display: block; font-size: 13.5px; }
+.slist small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.editor { display: flex; flex-direction: column; gap: 10px; }
+.editor textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.5; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.actions.end { padding-top: 6px; border-top: 1px solid var(--border); }
+.actions #usedIn { flex: 1; min-width: 160px; }
+.fine { font-size: 12px; margin: 4px 0; }
+button.quiet { background: transparent; }
+button.danger { color: var(--bad); }
+.button-link { display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--field-border); color: var(--text); text-decoration: none; font-weight: 600; font-size: 13.5px; }
+.button-link:hover { border-color: var(--accent); color: var(--accent); }
+.import { margin-top: 14px; font-size: 13px; }
+.import summary { cursor: pointer; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.plain { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.plain li { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
+.plain li small { display: block; flex-basis: 100%; color: var(--muted); }
+.plain li .mini { margin-left: auto; }
+.empty { font-size: 13px; }
+[hidden] { display: none !important; }
+@media (max-width: 800px) { .split { grid-template-columns: 1fr; } }

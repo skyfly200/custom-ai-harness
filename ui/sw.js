@@ -16,7 +16,7 @@ function keepable(request) {
   if (!url.pathname.startsWith(base)) return false;
   const rel = url.pathname.slice(base.length);
   if (/(^|\/)api\//.test(rel) || /^(v1|openrouter-proxy|auth|login|logout|admin|healthz)(\/|$)/.test(rel)) return false;
-  return rel === '' || rel === 'ui/' || /^(index|chat|apps|usage|usage-users|routing|agents|runs|prompts|tools|settings|users)$/.test(rel) || /\.(html|js|css|svg|png|webmanifest)$/.test(rel);
+  return rel === '' || rel === 'ui/' || /^(index|chat|apps|usage|usage-users|routing|agents|runs|prompts|skills|tools|settings|users)$/.test(rel) || /\.(html|js|css|svg|png|webmanifest)$/.test(rel);
 }
 
 self.addEventListener('install', (event) => {

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bright Chat · Apps</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
+<link rel="stylesheet" href="appspage.css">
+</head>
+<body>
+<main class="apps-page">
+  <header>
+    <nav data-site-nav></nav>
+  </header>
+  <script src="nav.js"></script>
+
+  <p class="muted lead">An app is a repo the harness can change for you. Ask one for a change and the change runs on Agents, with a preview and a diff to ship or undo. Start a new one from a template below: the builder makes the folder with its starting files, commits them, and can run a first build from your description.</p>
+
+  <section class="card" aria-labelledby="mineTitle">
+    <h2 id="mineTitle">Your apps</h2>
+    <div id="appList" class="app-list"><p class="muted">Loading…</p></div>
+  </section>
+
+  <section class="card" aria-labelledby="newTitle">
+    <h2 id="newTitle">New app</h2>
+    <div id="tpls" class="tpls" role="radiogroup" aria-label="Template"><p class="muted">Loading templates…</p></div>
+
+    <form id="newForm" class="new-form" autocomplete="off">
+      <div class="row2">
+        <label class="field"><span>Name</span><input name="name" maxlength="60" required placeholder="Note board"></label>
+        <label class="field"><span>Folder it goes in</span><input name="parent" list="roots" placeholder="the first allowed folder"></label>
+      </div>
+      <datalist id="roots"></datalist>
+      <label class="field"><span>What should it do?</span><textarea name="description" rows="3" placeholder="A board where the team pins short notes, newest first"></textarea></label>
+      <div id="questions" class="row2"></div>
+      <label class="check"><input type="checkbox" name="build" checked> Build the first version from the description now</label>
+      <div class="actions">
+        <button type="submit" class="primary" id="create">Create app</button>
+        <span id="newMsg" class="muted" role="status"></span>
+      </div>
+    </form>
+  </section>
+</main>
+<script src="dialogs.js"></script>
+<script src="hints.js"></script>
+<script src="bright.js"></script>
+<script src="appspage.js"></script>
+</body>
+</html>

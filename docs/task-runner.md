@@ -152,6 +152,12 @@ RUNNER_SANDBOX=e2b            # the compose default for this container
 
 The runner comes up beside the Interceptor (`http://runner:3100`, no ports published) and the Interceptor sends it the Agents page's requests with the same `RUNNER_TOKEN`, so nothing else on the network can drive it. Runs and their branches land in the `runs` and `repos` folders on the server, so **Continue**, **Retry** and `git diff` work as they do on your PC, and the branch is pushed from the server. Local mode is possible too but pointless there: the worktree is made from the copy of the repo in `repos`, and commands run inside the runner's image, which has only Node and git.
 
+## Apps from a template
+
+The Apps page (`ui/apps.html`, nav after Chat) builds a new app from `templates/<id>/`. Each template is a folder with `template.json` (name, description, questions, the install, dev and test commands, the port, and `editablePaths`) and the files, where `{{name}}`, `{{slug}}`, `{{description}}` and each question's key are filled in. `runner/templates.js` loads and checks them; a template that fails the check is listed as a problem, not offered.
+
+`POST /apps/new` (`/ui/api/apps/new`) takes `{ template, name, description, answers, parent, build }`: the folder `<parent>/<slug>` must be inside `RUNNER_ROOTS` and not exist yet. It writes the files, makes a git repo with one commit, registers the app, and with `build` (the default) starts a change run that builds the first version from `description`. `GET /apps/templates` lists the usable templates. Values are cleaned of quotes, brackets and line breaks before they are written into code. Only `web-app` ships so far.
+
 ## Apps (in-app agents, step 2)
 
 An app is a repo you can ask for changes: on the Agents page, **Register an app** with its repo, the paths an agent may edit (`ui/**`, one per line; `*` stays in one folder), an optional dev server command (`{port}` is filled in) and test command. **Ask for a change** starts a run on the `change-app` workflow (implement, then verify).

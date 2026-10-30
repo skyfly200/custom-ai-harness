@@ -14,6 +14,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { RunManager } = require('./runs');
+const templates = require('./templates');
 const { listDrivers } = require('./sandbox');
 const ticketFiles = require('./ticketFiles');
 const github = require('./github');
@@ -157,6 +158,11 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     });
     // Apps: registered apps whose own agent changes them, limited to editable paths
     app.get('/apps', (req, res) => res.json({ apps: manager.listApps() }));
+    // New apps from a template (templates/<id>/): the list, then the builder. Registered before /apps/:id.
+    app.get('/apps/templates', (req, res) => res.json(templates.listTemplates()));
+    app.post('/apps/new', (req, res) => {
+        try { res.status(201).json(manager.newApp(req.body || {})); } catch (err) { fail(res, err); }
+    });
     app.post('/apps', (req, res) => {
         try { res.status(201).json(manager.createApp(req.body)); } catch (err) { fail(res, err); }
     });

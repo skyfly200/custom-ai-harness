@@ -15,11 +15,12 @@ test('icons differ across many ids', () => {
     assert.ok(hues.size >= 10, 'hues should spread around the wheel');
 });
 
-test('an iconSeed wins over the id, and the Default agent keeps the plain orb', () => {
+test('an iconSeed wins over the id, and the Default agent uses a fixed seed like the others', () => {
     assert.equal(seedOf({ id: 'a1', iconSeed: 's9' }), 's9');
     assert.notEqual(orb({ id: 'a1', iconSeed: 's9' }), orb({ id: 'a1' }));
-    assert.equal(orb(null), '<span class="orb"><i></i><i></i><i></i></span>');
-    assert.match(orb(null, 'wait', 'big'), /class="orb big wait"/);
+    assert.equal(orb(null), orb('default'));
+    assert.equal(orb(undefined), orb({ id: '' }));
+    assert.match(orb(null, 'wait', 'big'), /class="orb big wait gen"/);
 });
 
 test('markup is safe and well formed', () => {

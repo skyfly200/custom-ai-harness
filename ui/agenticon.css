@@ -10,7 +10,7 @@
 .icon-pick .orb { width: 44px; height: 44px; margin: 0 8px; }
 
 /* Generated orbs: a softer highlight so the pattern shows, and the three dots orbit outside the orb, like the logo's, all the time */
-.orb.gen { background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .28) 0 6%, var(--glow-a) 26%, var(--glow-b) 54%, var(--glow-c) 80%); }
+.orb.gen { background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .14) 0 5%, var(--glow-a) 26%, var(--glow-b) 54%, var(--glow-c) 80%); }
 .orb.gen i { animation-play-state: running; --r: 17px; }
 .orb.gen.big i { --r: 30px; }
 .orbbtn .orb.gen i { --r: 56px; }

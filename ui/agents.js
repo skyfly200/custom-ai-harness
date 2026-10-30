@@ -8,9 +8,10 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const ACTIVE = new Set(['queued', 'running', 'waiting']);
 // Retry is for a run that went wrong; Continue is for one that only ran out of steps or time
 const RETRYABLE = new Set(['done', 'failed', 'stopped']);
-const CONTINUABLE = new Set(['incomplete']);
+// interrupted: the runner or its sandbox was cut off; stopped: a person pressed Stop. Both can be picked up where they left off
+const CONTINUABLE = new Set(['incomplete', 'interrupted', 'stopped']);
 const DEBUGGABLE = new Set(['failed', 'stopped']);
-const TAGS = { done: 'ok', running: '', queued: '', waiting: 'warn', incomplete: 'warn', failed: 'bad', stopped: 'warn' };
+const TAGS = { done: 'ok', running: '', queued: '', waiting: 'warn', incomplete: 'warn', interrupted: 'warn', failed: 'bad', stopped: 'warn' };
 const NOTE_FOR = { done: 'finished', waiting: 'needs you' };
 // a run stopped at its cost limit is "incomplete" to the runner; say why
 const statusWord = (r) => (r.status === 'incomplete' && r.outOfBudget ? 'cost limit' : NOTE_FOR[r.status] || r.status);
@@ -148,7 +149,7 @@ function renderDetail(run) {
       ${r.commit && hosted ? `<p class="muted">${run.pushed ? `Pushed to GitHub: <a href="${esc(run.pushed.url)}" target="_blank" rel="noopener">${esc(run.branch)}</a> · <a href="${esc(run.pushed.compare)}" target="_blank" rel="noopener">open a pull request</a>` : 'The branch is only on this server so far. Push it to your GitHub repo to review it there.'}</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : r.commit ? `<p class="muted">Review it in your repo: <code>git diff ${esc(run.base.slice(0, 10))}..${esc(run.branch)}</code>, then push the branch when you are happy.</p><details data-k="diff"${diffOpen ? ' open' : ''}><summary>Show the changes</summary><pre id="diffText">Loading…</pre></details>` : ''}</div>` : ''}
     <div class="actions">${active
       ? `${run.legs || run.carriesOn ? '<span class="muted">Carrying on…</span> ' : ''}<button data-act="stop">Stop</button>`
-      : `${hosted && r?.commit && !run.parent ? `${githubOn === false ? `<a class="btn primary" href="#settings" data-hint="Pushing and pull requests need your GitHub connection. Connect it in Agent settings">Connect GitHub to push</a>` : `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>`}` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev' ? '<button data-act="continue" data-hint="Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again">Continue</button>' : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}<span class="export-btns"><button data-act="export" data-hint="Downloads everything about this run as one JSON file: the prompt, settings, every step with the model's words, tool calls and results, tokens, cost, routing and the outcome. Secrets are blanked">Export run</button><button data-act="export-md" data-hint="The same as a readable Markdown transcript">Export as text</button><button data-act="export-copy" data-hint="Copies the readable transcript so you can paste it into a chat to ask what went wrong">Copy for debugging</button></span></div>`);
+      : `${hosted && r?.commit && !run.parent ? `${githubOn === false ? `<a class="btn primary" href="#settings" data-hint="Pushing and pull requests need your GitHub connection. Connect it in Agent settings">Connect GitHub to push</a>` : `<button data-act="push" class="primary" data-hint="Pushes ${esc(run.branch)} to the GitHub repo, using your token">${run.pushed ? 'Push again' : 'Push branch to GitHub'}</button><button data-act="pr" data-hint="Pushes the branch and opens a pull request for it on GitHub, using your token">${run.pr ? 'Update pull request' : 'Open pull request'}</button>`}` : ''}${r?.commit && !run.parent ? '<button data-act="patch" data-hint="Downloads the whole change as a patch file you can apply with git apply">Download patch</button>' : ''}<button data-act="remove" data-hint="Removes the workspace and this record. The branch stays in your repo">Delete run</button>${canContinue(run) ? `<button data-act="continue"${run.status === 'interrupted' ? ' class="primary"' : ''} data-hint="${run.status === 'interrupted' ? 'The run was cut off. This carries it on in the same branch from its last saved commit, told what was interrupted' : run.status === 'stopped' ? 'Carries the stopped run on in the same branch, from what it had committed, with a full set of steps and minutes again' : 'Carries this run on in the same branch, from what the earlier part committed, with a full set of steps and minutes again'}">Continue</button>` : ''}${RETRYABLE.has(run.status) && !run.parent && run.kind !== 'swarm' ? '<button data-act="retry" data-hint="Starts the same task again from the same commit, on a fresh branch">Retry run</button>' : ''}${DEBUGGABLE.has(run.status) && !run.parent ? '<button data-act="debug" data-hint="Starts it again and tells the agent what went wrong this time: the error, the failed tests, the last things it did">Auto debug</button>' : ''}`}<span class="export-btns"><button data-act="export" data-hint="Downloads everything about this run as one JSON file: the prompt, settings, every step with the model's words, tool calls and results, tokens, cost, routing and the outcome. Secrets are blanked">Export run</button><button data-act="export-md" data-hint="The same as a readable Markdown transcript">Export as text</button><button data-act="export-copy" data-hint="Copies the readable transcript so you can paste it into a chat to ask what went wrong">Copy for debugging</button></span></div>`);
   if (changed && r?.commit && diffOpen) loadDiff(run.id);
 }
 
@@ -299,6 +300,19 @@ $('traceList').addEventListener('toggle', (e) => {
 // The status section: what the run is doing now and what it has done, in plain words
 let lastRun = null;
 let promptOpen = false;   // the whole prompt is shown, not the first lines
+const canContinue = (run) => CONTINUABLE.has(run.status) && !run.parent && run.kind !== 'swarm' && run.kind !== 'chatdev';
+const CUT_WHY = { restart: 'the runner restarted', shutdown: 'the runner was shutting down for a restart or deploy', sandbox: 'its cloud sandbox ended' };
+// what the card says about a run that was cut off, or that started itself again after one
+function cutLine(run) {
+  const auto = run.resumedAuto && ACTIVE.has(run.status) ? `<span class="tag ok">resumed automatically</span> Attempt ${run.resumedAuto.attempt} of ${run.resumedAuto.of}, after ${esc(CUT_WHY[run.resumedAuto.after] || 'an interruption')}.` : '';
+  if (auto) return `<div class="sc-cut">${auto}</div>`;
+  if (run.status === 'interrupted') {
+    const will = run.autoContinue && (run.autoAttempts || 0) < (run.autoMax || 3) ? `It will resume by itself${run.interrupted?.reason === 'sandbox' ? ' in a moment' : ' when the runner is back'} (attempt ${(run.autoAttempts || 0) + 1} of ${run.autoMax || 3}).` : run.autoContinue ? `It has already resumed itself ${run.autoAttempts || 0} times, so it waits for you.` : 'It has not resumed.';
+    return `<div class="sc-cut">Its work up to the last save is kept. ${will} ${canContinue(run) ? '<button data-act="continue" class="primary">Continue</button>' : ''}</div>`;
+  }
+  if (run.status === 'stopped' && canContinue(run)) return `<div class="sc-cut">Nothing is lost: Continue picks it up from its last commit. <button data-act="continue">Continue</button></div>`;
+  return '';
+}
 function drawStatus(run) {
   lastRun = run;
   if (!run) { setHtml('statusCard', ''); return; }
@@ -308,10 +322,16 @@ function drawStatus(run) {
   const long = run.goal.length > 220 || run.goal.split('\n').length > 3;
   if (lastShown !== run.id) promptOpen = false;
   setHtml('statusCard', `<div class="sc-top">${AgentIcon.orb(agentOf(run.agent), `${active ? 'live' : ''}${run.status === 'waiting' ? ' wait' : ''}`.trim())}<span class="tag ${TAGS[run.status] || ''}">${esc(tag)}</span><span class="sc-quick">${esc(RunView.quickLine(run))}</span><span class="muted sc-when">started ${ago(run.created)}</span></div>
+    ${cutLine(run)}
     <div class="sc-prompt${long && !promptOpen ? ' clip' : ''}" id="scPrompt" title="The prompt for this run">${esc(run.goal)}</div>${long ? `<button type="button" class="linklike" id="scMore">${promptOpen ? 'Show less' : 'Show all'}</button>` : ''}
     <p class="sc-summary">${esc(RunView.summarize(run, workers))}</p>`);
 }
-$('statusCard').addEventListener('click', (e) => {
+$('statusCard').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-act="continue"]') && selected) {
+    try { await post(`/${selected}/continue`); } catch (err) { ui.toast(err.message, { kind: 'error' }); }
+    refresh();
+    return;
+  }
   if (!e.target.closest('#scMore')) return;
   promptOpen = !promptOpen;
   lastHtml.delete('statusCard');
@@ -590,6 +610,7 @@ $('newRun').addEventListener('submit', async (e) => {
   body.plan = f.elements.plan?.checked ? '1' : '0';
   body.auditParts = f.elements.auditParts?.checked ? '1' : '0';
   body.escalate = f.elements.escalate?.checked ? '1' : '0';
+  body.autoContinue = f.elements.autoContinue?.checked ? '1' : '0';
   try {
     $('startMsg').textContent = 'Starting…';
     if (body.workflow === 'auto') {
@@ -598,7 +619,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -1128,6 +1149,8 @@ async function initAgentDialog() {
     if (!body.repo.trim()) { $('agentMsg').textContent = 'Give the agent a repo, or link a project that has repos.'; return; }
     body.moreRepos = agentExtras.filter((r) => r !== body.repo.trim());
     body.escalate = f.elements.escalate.checked;
+    body.autoContinue = f.elements.autoContinue.checked;
+    body.autoContinueMax = body.autoContinueMax === '' ? null : body.autoContinueMax;
     $('agentMsg').textContent = 'Saving…';
     try {
       const saved = editingAgent ? await sendAgent('PATCH', `/${editingAgent.id}`, body) : await sendAgent('POST', '', body);
@@ -1178,6 +1201,8 @@ function openAgentDialog(agent) {
   f.elements.maxCost.value = v.maxCost ?? '';
   f.elements.maxTier.value = v.maxTier || '';
   f.elements.escalate.checked = v.escalate !== false;
+  f.elements.autoContinue.checked = !!v.autoContinue;
+  f.elements.autoContinueMax.value = v.autoContinueMax ?? '';
   f.elements.project.value = v.project?.id || '';
   setIconSeed(agent ? agent.iconSeed || '' : AgentIcon.randomSeed());
   drawAgentRepos();

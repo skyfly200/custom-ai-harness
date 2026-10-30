@@ -32,6 +32,15 @@ const DIAGNOSIS_CHARS = 6000; // how much of the failure a retry is told about
 // The statuses a run ends on when it ran out of steps, time or budget rather than going wrong.
 // Those are what Continue is for: Retry is for a run that failed.
 const OUT_OF_LIMIT = new Set(['incomplete']);
+// What Continue picks up: ran out of a limit, was cut off by the runner or its sandbox, or was stopped by a person.
+const CONTINUABLE = new Set(['incomplete', 'interrupted', 'stopped']);
+const DEFAULT_AUTO_ATTEMPTS = 3;  // automatic resumes of one run before it waits for a person
+const MAX_AUTO_ATTEMPTS = 10;
+// how often a cloud sandbox's work is committed and handed back to the repo while it runs, so a sandbox that dies loses little (0: never)
+const checkpointMs = () => (process.env.RUNNER_CHECKPOINT_MIN !== undefined && Number(process.env.RUNNER_CHECKPOINT_MIN) >= 0 ? Number(process.env.RUNNER_CHECKPOINT_MIN) : 10) * 60000;
+// What a cloud provider says when the sandbox itself is gone (its lifetime ended, or it was killed), not a command failing.
+const SANDBOX_GONE = /sandbox[^.\n]{0,80}(not found|timed? ?out|expired|not running|terminated|killed|paused|closed|no longer)|not running anymore|(sandbox|sprite)[^.\n]{0,40}(does not|doesn't) exist/i;
+const isFlag = (v, d = false) => (v === undefined || v === null || v === '' ? d : !(v === false || v === 0 || v === '0' || v === 'false'));
 const PARTIAL_CHARS = 8000;   // how much of what it was saying when it ran out a continue is told
 const MAX_CONTINUES = 50;     // four times what a run of 200 steps and 240 minutes needs
 const AGENT_HISTORY = 6;      // how many of an agent's earlier tasks a new one is told about
@@ -98,9 +107,14 @@ function diagnosis(run) {
  */
 function resumption(run) {
     const why = run.outOfBudget ? `its cost limit of ${usd(run.maxCost)}` : run.outOfSteps ? (run.maxSteps ? `all ${run.maxSteps} of its steps` : 'every step it was allowed') : `${run.maxMinutes} minutes`;
-    const parts = [`This run is carried on from an earlier part of the same run (${run.id}, the same branch ${run.branch}), which used ${why} before it could finish.`];
-    if (run.result?.commit) parts.push(`The work it did is committed on the branch: continue from there, and do not start the task over.`);
+    const cut = run.status === 'interrupted' ? `was interrupted (${run.interrupted?.text || 'the runner restarted'}) before it could finish. That was nothing the agent did wrong`
+        : run.status === 'stopped' ? 'was stopped by a person before it could finish'
+            : `used ${why} before it could finish`;
+    const parts = [`This run is carried on from an earlier part of the same run (${run.id}, the same branch ${run.branch}), which ${cut}.`];
+    const saved = run.result?.commit || run.checkpoint;
+    if (saved) parts.push(`The work it did is committed on the branch: continue from there, and do not start the task over.`);
     else parts.push('It committed nothing, so the branch is as it started. Do not start the task over; carry on from what it said below.');
+    if (run.status === 'interrupted' || run.status === 'stopped') parts.push('Files it changed after its last commit may still be in the workspace, or be gone if it ran in a cloud sandbox that has ended: look at git status and git diff before you start.');
     if (run.result?.summary) parts.push(`Where it got to:\n${short(run.result.summary, 1500)}`);
     if (run.result?.tests && !run.result.tests.passed) {
         parts.push(`Its last test run failed (${run.result.tests.command}${run.result.tests.timedOut ? ', timed out' : `, exit code ${run.result.tests.code}`}):\n${short(run.result.tests.output || '', 1500)}`);
@@ -114,8 +128,9 @@ function resumption(run) {
     const tail = run.events.slice(-30).map(line).filter(Boolean).join('\n');
     if (tail) parts.push(`The last things it did:\n${tail}`);
     const said = run.partialSummary || run.partialText;
-    if (said) parts.push(`What it was saying when the ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'} ran out:\n${short(said, 3000)}`);
+    if (said && run.status === 'incomplete') parts.push(`What it was saying when the ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'} ran out:\n${short(said, 3000)}`);
     parts.push('Check the state of the workspace first: it may have been partway through a change. Then finish the task. You have a full set of steps and minutes again, not what was left.');
+    if (run.status === 'interrupted' && run.autoAttempts) parts.push(`You were resumed automatically (attempt ${run.autoAttempts + 1} of ${run.autoMax || DEFAULT_AUTO_ATTEMPTS}).`);
     const text = parts.join('\n\n');
     return text.length > PARTIAL_CHARS ? `${text.slice(0, PARTIAL_CHARS)}\n… [cut]` : text;
 }
@@ -137,13 +152,17 @@ function followUpNote(run, message) {
     return parts.join('\n\n');
 }
 
+/** Only a plain run can be carried on after a cut: a swarm, its workers and a ChatDev run start over instead. */
+const canInterrupt = (run) => !run.parent && (run.kind || 'run') === 'run';
+
 class RunManager {
     /**
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoDebug = false, sandbox = 'local', shipper = null, hosted = false, token = '', limits = {} }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoResumeMs = 5000, autoDebug = false, sandbox = 'local', shipper = null, hosted = false, token = '', limits = {} }) {
         this.pollMs = pollMs;
+        this.autoResumeMs = autoResumeMs; // how long after its sandbox ended an auto-continue run starts again
         this.batchPollMs = batchPollMs; // how often a waiting batch stage asks whether its batch is done
         this.dir = dir;
         this.roots = roots.map((r) => { try { return fs.realpathSync(r); } catch { return path.resolve(r); } });
@@ -162,6 +181,7 @@ class RunManager {
         this.runs = new Map();      // id -> record
         this.active = new Map();    // id -> the part a continued run is working as now
         this.live = new Map();      // id -> { sandbox, stop, resolve }
+        this.executing = new Map(); // id -> the promise of the part working now, for shutdown()
         this.previews = new PreviewManager(); // a run's dev server, for looking at its work
         this.queue = [];
         fs.mkdirSync(dir, { recursive: true });
@@ -175,8 +195,11 @@ class RunManager {
         const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
         const wasRunning = (run) => {
             if (!['queued', 'running', 'waiting'].includes(run.status)) return false;
-            run.status = 'failed';
-            run.error = 'The runner was restarted while this was running.';
+            // an ordinary run can be picked up again; a swarm, its workers and ChatDev cannot, so those just failed
+            const text = 'The runner was restarted while this was running.';
+            if (canInterrupt(run)) run.interrupted = { reason: 'restart', text: 'the runner restarted', at: new Date().toISOString() };
+            run.status = canInterrupt(run) ? 'interrupted' : 'failed';
+            run.error = text;
             run.pending = null;
             run.ended = new Date().toISOString();
             // its cloud sandbox would otherwise go on billing until the provider's own timeout
@@ -350,6 +373,9 @@ class RunManager {
             // dollars this run (or, after a Continue, this part of it) may spend; 0 means no limit
             maxCost: Math.min(1000, Math.max(0, Number(cfg.maxCost) || 0)), costFrom: 0, outOfBudget: false,
             autoDebug: num(cfg.autoDebug, 0, 1, this.autoDebugDefault ? 1 : 0) === 1,
+            // auto-continue: pick the run up again by itself when the runner or its sandbox cuts it off (never after a Stop),
+            // at most autoMax times; autoCostFrom is what it had spent when the first automatic resume began
+            autoContinue: isFlag(cfg.autoContinue), autoMax: num(cfg.autoContinueMax, 1, MAX_AUTO_ATTEMPTS, DEFAULT_AUTO_ATTEMPTS), autoAttempts: 0, autoCostFrom: null, resumedAuto: null, interrupted: null, checkpoint: null,
             sandbox, sandboxId: null,
             // ChatDev runs: the most the sandbox's model key may spend, in dollars
             maxUsd: isChatDev ? Math.min(1000, Math.max(0.01, Number(cfg.maxUsd) || Number(process.env.CHATDEV_MAX_USD) || 2)) : null,
@@ -383,7 +409,10 @@ class RunManager {
             const run = this.active.get(this.queue[at]) || this.runs.get(this.queue[at]);
             if (run?.status === 'queued' && working() >= this.maxRuns && run.kind !== 'swarm') return;
             this.queue.splice(at, 1);
-            if (run?.status === 'queued') this.execute(run).catch(() => {});
+            if (run?.status === 'queued') {
+                const done = this.execute(run).catch(() => {}).finally(() => this.executing.delete(run.id));
+                this.executing.set(run.id, done);
+            }
         }
     }
 
@@ -539,7 +568,7 @@ class RunManager {
         live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind: run.sandbox || this.sandboxKind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
         const sandbox = live.sandbox;
         run.base = sandbox.base;
-        if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; this.save(run); }
+        if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; this.save(run); this.startCheckpoints(run, live); }
         this.event(run, { type: 'note', text: `Working on branch ${run.branch} from ${sandbox.base.slice(0, 10)}${isCloud(sandbox.kind) ? ` in ${sandbox.kind === 'sprites' ? 'a Fly Sprite' : 'an E2B sandbox'} (${sandbox.id})` : ''}.` });
         // a task that names a pull request starts with that PR's code and a short plan for it
         const pr = run.carriesOn ? '' : await prBrief.prepare({ sandbox, run, local: !isCloud(sandbox.kind), note: (text) => this.event(run, { type: 'note', text }) });
@@ -551,13 +580,14 @@ class RunManager {
     }
 
     async execute(run) {
-        const live = { sandbox: null, stopped: false, resolve: null, swarm: run.kind === 'swarm' };
+        const live = { sandbox: null, stopped: false, shutdown: false, resolve: null, swarm: run.kind === 'swarm', checkpoint: null };
         this.live.set(run.id, live);
         run.status = 'running';
         run.started = new Date().toISOString();
         // a part carried on after a stop gets the whole limit again
         run.costFrom = run.cost || 0;
         run.outOfBudget = false;
+        run.interrupted = null;
         this.save(run);
         let n = 0;
         try {
@@ -591,13 +621,21 @@ class RunManager {
             run.partialText = run.outOfSteps || run.outOfBudget || outcome.status === 'out_of_time' ? outcome.partial || null : null;
             run.status = { finished: 'done', stopped: 'stopped' }[outcome.status] || 'incomplete';
             if (run.status === 'done' && result.outside?.length) run.status = 'incomplete';
+            // the runner is shutting down (a deploy or restart), not a person stopping it: the work is committed above
+            if (run.status === 'stopped' && live.shutdown) this.markInterrupted(run, 'shutdown', 'the runner was shutting down');
         } catch (err) {
             run.error = err.message;
             this.event(run, { type: 'note', text: `Error: ${err.message}` });
             // before the status changes, so a page that sees the run ended also sees its commit
             await this.salvage(run, live);
             run.status = live.stopped ? 'stopped' : 'failed';
+            if (live.shutdown) this.markInterrupted(run, 'shutdown', 'the runner was shutting down');
+            else if (!live.stopped && canInterrupt(run) && isCloud(run.sandbox) && SANDBOX_GONE.test(String(err.message))) {
+                this.markInterrupted(run, 'sandbox', 'its cloud sandbox ended');
+                this.event(run, { type: 'note', text: `The cloud sandbox ended while the run was working (${short(err.message, 200)}). Its committed work is on ${run.branch}; Continue starts a new sandbox from there.` });
+            }
         } finally {
+            clearInterval(live.checkpoint);
             run.pending = null;
             run.ended = new Date().toISOString();
             this.save(run);
@@ -612,7 +650,108 @@ class RunManager {
             this.noteAgent(run);
             this.startAutoDebug(run);
             this.pump();
+            // a sandbox that ended under it is picked up again at once (a restart is picked up when the runner is back: resumeInterrupted)
+            if (run.status === 'interrupted' && run.interrupted?.reason === 'sandbox') this.scheduleAutoContinue(this.runs.get(run.carriesOn || run.id), this.autoResumeMs);
         }
+    }
+
+    /** The run is cut off, not failed: it can be continued from its branch. */
+    markInterrupted(run, reason, text) {
+        run.status = 'interrupted';
+        run.interrupted = { reason, text, at: new Date().toISOString() };
+    }
+
+    /** While a cloud sandbox works, commit its files and hand the branch to the repo now and then, so losing the sandbox loses little. */
+    startCheckpoints(run, live) {
+        const every = checkpointMs();
+        if (!every || run.plan || !isCloud(live.sandbox?.kind)) return;
+        let busy = false;
+        live.checkpoint = setInterval(async () => {
+            if (busy || live.stopped) return;
+            busy = true;
+            try {
+                const commit = await live.sandbox.commit(`harness run ${run.id}: checkpoint`);
+                if (commit) { run.checkpoint = commit; this.save(run); }
+            } catch { /* the next one tries again */ } finally { busy = false; }
+        }, every);
+        live.checkpoint.unref?.();
+    }
+
+    /**
+     * The runner is going down (a deploy, a restart, the idle stop). Stop every ordinary run the way a
+     * person's Stop does, but mark it interrupted, with its work committed to its branch, so Continue
+     * (or auto-continue when the runner is back) picks it up. Waits up to timeoutMs for the commits.
+     */
+    async shutdown({ timeoutMs = 15000 } = {}) {
+        const waiting = [];
+        for (const [id, live] of this.live) {
+            const run = this.active.get(id) || this.runs.get(id);
+            if (!run || !canInterrupt(run)) continue;
+            live.shutdown = true;
+            live.stopped = true;
+            live.resolve?.(false);
+            try { live.sandbox?.stop(); } catch { /* already gone */ }
+            if (this.executing.has(id)) waiting.push(this.executing.get(id));
+        }
+        if (!waiting.length) return 0;
+        await Promise.race([Promise.allSettled(waiting), sleep(timeoutMs)]);
+        // one that did not finish saving in time is still marked, so it is not left "running"
+        for (const [id, live] of this.live) {
+            const run = this.active.get(id) || this.runs.get(id);
+            if (!live.shutdown || !run) continue;
+            this.markInterrupted(run, 'shutdown', 'the runner was shutting down');
+            run.pending = null;
+            run.ended = new Date().toISOString();
+            this.save(run);
+        }
+        return waiting.length;
+    }
+
+    /**
+     * Whether a run that was cut off may start again by itself, and if not why not (null when it simply isn't
+     * set to). Never after a Stop. At most autoMax resumes, and together they may spend at most one more
+     * cost limit: a run that keeps getting cut off cannot go on spending.
+     */
+    autoContinueCheck(run) {
+        if (!run || !run.autoContinue || run.status !== 'interrupted' || !canInterrupt(run)) return { ok: false, why: null };
+        const max = run.autoMax || DEFAULT_AUTO_ATTEMPTS;
+        if ((run.autoAttempts || 0) >= max) return { ok: false, why: `it has already resumed itself ${max} times` };
+        if (run.maxCost > 0 && run.autoCostFrom !== null && (run.cost || 0) - run.autoCostFrom >= run.maxCost) {
+            return { ok: false, why: `the resumes have already spent its cost limit of ${usd(run.maxCost)}` };
+        }
+        return { ok: true, why: null };
+    }
+
+    /** Resume an interrupted run by itself after delayMs, if it is set to and still waiting. */
+    scheduleAutoContinue(run, delayMs) {
+        if (!run) return false;
+        const check = this.autoContinueCheck(run);
+        if (!check.ok) {
+            if (check.why) this.event(run, { type: 'note', text: `Not resuming automatically: ${check.why}. Press Continue to carry on.` });
+            return false;
+        }
+        const timer = setTimeout(() => {
+            const now = this.runs.get(run.id);
+            if (!now || this.active.has(run.id) || !this.autoContinueCheck(now).ok) return;
+            try { this.continueRun(run.id, { auto: true }); } catch (err) {
+                this.event(now, { type: 'note', text: `Could not resume automatically: ${err.message}` });
+            }
+        }, delayMs);
+        timer.unref?.();
+        return true;
+    }
+
+    /**
+     * At start-up: resume the runs the last runner left interrupted that are set to auto-continue, one after
+     * another staggerMs apart, so a restart does not start them all in one breath.
+     */
+    resumeInterrupted({ delayMs = 5000, staggerMs = 3000 } = {}) {
+        let n = 0;
+        for (const run of [...this.runs.values()].sort((a, b) => a.created.localeCompare(b.created))) {
+            if (run.status !== 'interrupted' || !run.autoContinue) continue;
+            if (this.scheduleAutoContinue(run, delayMs + n * staggerMs)) n++;
+        }
+        return n;
     }
 
     /**
@@ -804,6 +943,7 @@ class RunManager {
         return this.create({
             owner: agent.owner, goal: cfg?.goal, repo: agent.repo, moreRepos: agent.moreRepos, workflow: agent.workflow, profile: agent.profile, effort: agent.effort, escalate: agent.escalate, maxTier: agent.maxTier || undefined, sandbox: agent.sandbox || undefined,
             maxSteps: cfg?.maxSteps ?? agent.maxSteps ?? undefined, maxMinutes: cfg?.maxMinutes ?? agent.maxMinutes ?? undefined, maxCost: cfg?.maxCost ?? agent.maxCost ?? undefined,
+            autoContinue: cfg?.autoContinue ?? agent.autoContinue ?? undefined, autoContinueMax: cfg?.autoContinueMax ?? agent.autoContinueMax ?? undefined,
             plan: cfg?.plan, agent: agent.id, source: source?.chat?.id ? source : null,
         });
     }
@@ -1001,10 +1141,11 @@ class RunManager {
         if (from.kind === 'swarm' && !debug) throw new Error('a swarm cannot be retried as it is; use Debug');
         // running out of steps or time is not a failure: that is what Continue is for
         if (OUT_OF_LIMIT.has(from.status)) throw new Error('that run only ran out of steps, time or budget, so nothing went wrong: use Continue');
+        if (from.status === 'interrupted') throw new Error('that run was cut off, not failed: use Continue to pick it up from its branch');
         if (debug && ['done', 'queued', 'running', 'waiting'].includes(from.status)) throw new Error('that run did not fail, so there is nothing to debug');
         const cfg = {
             owner: from.owner, goal: from.goal, repo: from.repo, moreRepos: from.moreRepos, base: from.base || 'HEAD', workflow: from.workflow, profile: from.profile,
-            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug,
+            model: from.model, effort: from.effort, escalate: from.escalate, maxTier: from.maxTier, sandbox: from.sandbox, maxUsd: from.maxUsd, test: from.test, agent: from.agent, app: from.app, editable: from.editable, source: from.source, maxSteps: from.maxSteps, softSteps: from.softSteps, maxMinutes: from.maxMinutes, maxCost: from.maxCost, autoDebug: from.autoDebug, autoContinue: from.autoContinue, autoContinueMax: from.autoMax,
             // a debug run of a debug run is allowed, but only so deep, so a failure that cannot be fixed stops here
             ...(debug ? { debugOf: from.id, debugDepth: from.debugDepth + 1 } : {}),
         };
@@ -1023,7 +1164,7 @@ class RunManager {
      * When the leg ends, what it did takes the run's place (run.legs counts the parts
      * done so far) and the record says how it stands, so the page is a run all along.
      */
-    continueRun(id, { message = '' } = {}) {
+    continueRun(id, { message = '', auto = false } = {}) {
         const run = this.runs.get(id);
         if (!run) throw new Error('no such run');
         const said = String(message || '').trim();
@@ -1032,7 +1173,8 @@ class RunManager {
         if (run.kind === 'chatdev') throw new Error('a ChatDev run cannot be continued; start it again');
         if (['queued', 'running', 'waiting'].includes(run.status)) throw new Error('stop the run first');
         // a message from the person can go to any run that has ended: that is the follow-up
-        if (!said && run.status !== 'incomplete') throw new Error(`only a run that ran out of steps, time or budget can be continued, not one that ended as ${run.status}`);
+        if (!said && !CONTINUABLE.has(run.status)) throw new Error(`only a run that ran out of steps, time or budget, was interrupted or was stopped can be continued, not one that ended as ${run.status}`);
+        if (auto && !this.autoContinueCheck(run).ok) throw new Error('this run is not set to resume by itself, or has used its automatic resumes');
         const continues = (run.continues || 0) + 1;
         if (continues > MAX_CONTINUES) throw new Error(`this run has already been continued ${MAX_CONTINUES} times`);
         // what this part did, said now, while the run's record still holds it
@@ -1042,7 +1184,10 @@ class RunManager {
             result: null, error: null, pending: null, events: [], steps: 0,
             tokens: { in: run.tokens.in, out: run.tokens.out }, cost: run.cost || 0, unpricedCalls: run.unpricedCalls || 0, models: run.models || {},
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
-            outOfSteps: null, partialText: null, partialSummary: run.partialSummary || null,
+            outOfSteps: null, partialText: null, partialSummary: run.partialSummary || null, interrupted: null,
+            // an automatic resume counts against autoMax; a person pressing Continue starts the count again
+            autoAttempts: auto ? (run.autoAttempts || 0) + 1 : 0, autoCostFrom: auto ? (run.autoCostFrom ?? (run.cost || 0)) : null,
+            resumedAuto: auto ? { attempt: (run.autoAttempts || 0) + 1, of: run.autoMax || DEFAULT_AUTO_ATTEMPTS, after: run.interrupted?.reason || null } : null,
             // a plan-only run asked to go ahead has to be allowed to change things
             ...(said ? { plan: false, outOfBudget: false, error: null } : {}),
         };
@@ -1050,7 +1195,9 @@ class RunManager {
         this.active.set(leg.id, leg);
         this.save(leg);
         if (said) this.event(leg, { type: 'note', text: `You said: ${short(said, 600)}` });
-        this.event(leg, { type: 'note', text: said ? 'Carrying the run on from your message, on the same branch.' : `Carrying the run on after it ran out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}; it goes on from where the earlier part got to, on the same branch.` });
+        const cause = run.status === 'interrupted' ? `it was interrupted (${run.interrupted?.text || 'the runner restarted'})` : run.status === 'stopped' ? 'it was stopped' : `it ran out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}`;
+        if (auto) this.event(leg, { type: 'note', auto: true, text: `Resumed automatically (attempt ${leg.resumedAuto.attempt} of ${leg.resumedAuto.of}) after ${cause}. It goes on from its last saved commit on ${run.branch}.` });
+        else this.event(leg, { type: 'note', text: said ? 'Carrying the run on from your message, on the same branch.' : `Carrying the run on after ${cause}; it goes on from where the earlier part got to, on the same branch.` });
         this.queue.push(leg.id);
         this.pump();
         return this.summary(leg);

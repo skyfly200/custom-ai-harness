@@ -290,7 +290,7 @@ function renderGuard(g) {
 // ---- agents ------------------------------------------------------------------
 // Runs and agents come from the task runner through the Interceptor (/ui/api/runs, /ui/api/agents)
 
-const RUN_TAGS = { done: 'ok', waiting: 'warn', incomplete: 'warn', failed: 'bad', stopped: 'warn' };
+const RUN_TAGS = { done: 'ok', waiting: 'warn', incomplete: 'warn', interrupted: 'warn', failed: 'bad', stopped: 'warn' };
 const RUN_WORD = { done: 'finished', waiting: 'needs you' };
 const runWord = (r) => (r.status === 'incomplete' && r.outOfBudget ? 'cost limit' : RUN_WORD[r.status] || r.status);
 const STATE_DOT = { waiting: 'warn', working: 'ok', queued: 'ok', idle: 'off' };

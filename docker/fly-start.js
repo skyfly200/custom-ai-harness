@@ -91,7 +91,7 @@ function main() {
         if (stopping) return;
         stopping = true;
         for (const c of children) { try { c.kill('SIGTERM'); } catch { /* already gone */ } }
-        setTimeout(() => process.exit(code), 5000).unref();
+        setTimeout(() => process.exit(code), 25000).unref(); // the runner saves running agents' work before it exits
         Promise.all(children.map((c) => new Promise((r) => (c.exitCode !== null ? r() : c.once('exit', r))))).then(() => process.exit(code));
     };
     for (const c of commands()) {

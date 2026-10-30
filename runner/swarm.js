@@ -6,7 +6,7 @@
 'use strict';
 
 const MAX_PARTS = 5;
-const TERMINAL = new Set(['done', 'failed', 'stopped', 'incomplete']);
+const TERMINAL = new Set(['done', 'failed', 'stopped', 'incomplete', 'interrupted']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const WORKFLOWS = new Set(['general', 'fix-bug', 'build-feature', 'refactor']);
 

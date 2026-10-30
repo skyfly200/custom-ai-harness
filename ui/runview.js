@@ -45,6 +45,7 @@
     if (run.status === 'incomplete') return run.outOfBudget ? 'Stopped at its cost limit.' : run.outOfSteps ? 'Ran out of steps before it finished.' : 'Ran out of time before it finished.';
     if (run.status === 'failed') return `Failed: ${cut(first(run.error) || 'see the trace', 100)}`;
     if (run.status === 'stopped') return 'Stopped by you.';
+    if (run.status === 'interrupted') return `Interrupted: ${{ restart: 'the runner restarted', shutdown: 'the runner was shutting down', sandbox: 'the cloud sandbox ended' }[run.interrupted?.reason] || 'it was cut off'}.`;
     return run.status;
   }
 
@@ -70,6 +71,7 @@
       const done = workers.filter((w) => w.status === 'done').length;
       out.push(`${plural(workers.length, 'worker')} on separate branches; ${done} finished.`);
     }
+    if (run.resumedAuto) out.push(`Resumed automatically (attempt ${run.resumedAuto.attempt} of ${run.resumedAuto.of}) after it was interrupted.`);
     if (run.warning) out.push(`Warning: ${first(run.warning.text)}`);
     if (errors) out.push(`${plural(errors, 'step')} hit a problem${run.status === 'done' ? ', but it carried on' : ''}.`);
     const r = run.result;

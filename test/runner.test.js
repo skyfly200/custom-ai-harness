@@ -395,12 +395,13 @@ test('old tool output is cut from the history sent to the model', () => {
     assert.equal(out.at(-1).content.length, 2000);
 });
 
-test('a run that was running when the runner stopped is marked failed on restart', async () => {
+test('a run that was running when the runner stopped is marked interrupted on restart', async () => {
     const id = 'rdead';
     fs.mkdirSync(path.join(dir, 'runs', id), { recursive: true });
     fs.writeFileSync(path.join(dir, 'runs', id, 'run.json'), JSON.stringify({ id, status: 'running', created: '2020-01-01', events: [], tokens: { in: 0, out: 0 } }));
     const again = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposDir] });
-    assert.equal(again.get(id).status, 'failed');
+    assert.equal(again.get(id).status, 'interrupted');
+    assert.equal(again.get(id).interrupted.reason, 'restart');
     assert.match(again.get(id).error, /restarted/);
 });
 
@@ -480,7 +481,7 @@ test('a leg of a continued run keeps its own record, and a restart carries it on
     fs.writeFileSync(path.join(folder, 'leg-1.json'), JSON.stringify({ id: 'rhalf', goal: 'the goal', branch: 'harness/rhalf', status: 'running', continues: 1, carriesOn: 'rhalf', steps: 4, events: [{ t: '2020-01-01', type: 'note', text: 'from the leg' }], tokens: { in: 0, out: 0 } }));
     const again = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposDir] });
     const back = again.get('rhalf');
-    assert.equal(back.status, 'failed');
+    assert.equal(back.status, 'interrupted');
     assert.match(back.error, /restarted/);
     assert.equal(back.legs, 1);
     assert.equal(back.continues, 1);

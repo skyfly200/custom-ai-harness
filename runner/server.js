@@ -59,11 +59,12 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         // these work on paths of this machine or on the local sandbox, which a shared server doesn't offer
         app.use(['/runs/browse', '/tickets'], (req, res) => res.status(404).json({ error: 'not available on a shared server' }));
         // apps: a person sees and changes their own. Each app's folder and GitHub repo are their own (see the app checks below);
-        // a new app from a template needs a GitHub repo, and a change runs in a cloud sandbox. Editing an app's settings and
-        // the page-error proposals stay off here, and importing a folder on this machine is refused by the runner itself.
+        // a new app from a template needs a GitHub repo, and a change runs in a cloud sandbox. An owner may edit their app's
+        // settings (editApp: a folder on this machine is refused, a new GitHub repo is cloned with their token). The
+        // page-error proposals stay off here, and importing a folder on this machine is refused by the runner itself.
         const sharedApps = [
             /^GET \/apps$/, /^GET \/apps\/(templates|hosting)$/, /^POST \/apps\/import(\/detect)?$/, /^POST \/apps\/new$/,
-            /^GET \/apps\/[^/]+$/, /^DELETE \/apps\/[^/]+$/, /^POST \/apps\/[^/]+\/changes$/,
+            /^GET \/apps\/[^/]+$/, /^PATCH \/apps\/[^/]+$/, /^DELETE \/apps\/[^/]+$/, /^POST \/apps\/[^/]+\/changes$/,
         ];
         app.use((req, res, next) => {
             if (req.path !== '/apps' && !req.path.startsWith('/apps/')) return next();
@@ -186,9 +187,7 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         const a = manager.getApp(req.params.id);
         return a ? res.json(a) : fail(res, new Error('no such app'), 404);
     });
-    app.patch('/apps/:id', (req, res) => {
-        try { res.json(manager.updateApp(req.params.id, req.body)); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 400); }
-    });
+    app.patch('/apps/:id', wrap(async (req, res) => res.json(await manager.editApp(req.params.id, req.body, { owner: req.owner || '', token: req.githubToken || '' }))));
     app.delete('/apps/:id', (req, res) => {
         try { manager.removeApp(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 409); }
     });

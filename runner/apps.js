@@ -86,7 +86,9 @@ class AppStore {
             if (n !== null && !(n >= 1024 && n <= 65535)) throw new Error('previewPort must be between 1024 and 65535');
             out.previewPort = n;
         }
-        return { ...current, ...out };
+        const merged = { ...current, ...out };
+        if (merged.deploy === 'hook' && !merged.deployHook) throw new Error('a deploy hook needs its URL');
+        return merged;
     }
 
     create(cfg, repo) {

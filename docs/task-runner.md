@@ -178,7 +178,7 @@ An app is a repo you can ask for changes: on the Agents page, **Register an app*
 - The write and edit tools refuse any file outside the editable paths. A command can still write anywhere, so after the run the changed files are checked too: anything outside is listed in the result and the run ends `incomplete` instead of `done`.
 - The run's test command runs at the end, and Preview uses the app's dev command when you give none.
 - What the person was looking at (`context` in `POST /apps/:id/changes`) is passed to the agent as untrusted data.
-- Registrations live in `runs/_apps/`. API: `GET/POST /apps`, `GET/PATCH/DELETE /apps/:id`, `POST /apps/:id/changes` (also under `/ui/api/apps`).
+- Registrations live in `runs/_apps/`. API: `GET/POST /apps`, `GET/PATCH/DELETE /apps/:id`, `POST /apps/:id/changes` (also under `/ui/api/apps`). The Apps page's **Edit** button sends `PATCH` with the settings the import dialog shows: name, editable paths, commands, base branch, preview port, GitHub repo, deploy mode (`merge`, or `hook` with `deployHook`), hosting and database. `deploy: hook` needs its URL. On a shared server the owner may edit too (`editApp` in `runner/runs.js`): a folder on the machine is refused, and a new GitHub repo is cloned with the owner's token first; not while a change to the app is running.
 
 ### Ship and undo
 

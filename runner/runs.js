@@ -1200,6 +1200,29 @@ class RunManager {
         }
     }
     updateApp(id, cfg) { return this.apps.update(id, cfg || {}, cfg?.repo !== undefined ? this.checkRepo(cfg.repo) : null); }
+
+    /**
+     * Edit an app's settings. On a shared server an app's folder is its GitHub repo: a folder on this machine is refused,
+     * and a new GitHub repo is cloned for the owner with their token before it is saved. No change while the app has a change going.
+     */
+    async editApp(id, cfg = {}, { owner = '', token = '' } = {}) {
+        if (!this.hosted) return this.updateApp(id, cfg);
+        const app = this.apps.get(id);
+        if (!app) throw new Error('no such app');
+        if (cfg.repo !== undefined) throw new Error('on a shared server an app\'s folder is its GitHub repo: change the GitHub repo instead');
+        const body = { ...cfg };
+        delete body.owner;
+        const wanted = body.githubRepo === undefined ? app.githubRepo : String(body.githubRepo || '').trim();
+        if (!wanted) throw new Error('a shared app needs a GitHub repo');
+        let repo = null;
+        if (wanted !== app.githubRepo) {
+            if (!/^[\w.-]+\/[\w.-]+$/.test(wanted)) throw new Error('GitHub repo must look like owner/name');
+            if (!token) throw new Error('connect GitHub to change the repo: it is cloned with your connection');
+            if ([...this.runs.values()].some((r) => r.app === id && ['queued', 'running', 'waiting'].includes(r.status))) throw new Error('stop its changes first');
+            repo = await this.gitHub.ensureClone({ base: this.roots[0], person: String(owner), spec: wanted, token: String(token) });
+        }
+        return this.apps.update(id, { ...body, githubRepo: wanted }, repo);
+    }
     removeApp(id) {
         if ([...this.runs.values()].some((r) => r.app === id && ['queued', 'running'].includes(r.status))) throw new Error('stop its changes first');
         if (!this.apps.get(id)) throw new Error('no such app');

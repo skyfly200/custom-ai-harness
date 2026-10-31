@@ -1,0 +1,1 @@
+{ "name": "notes-club", "scripts": { "test": "node --test" } }

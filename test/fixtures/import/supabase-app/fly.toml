@@ -1,0 +1,4 @@
+app = "notes"
+
+[http_service]
+  internal_port = 3000

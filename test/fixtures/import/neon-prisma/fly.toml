@@ -1,0 +1,4 @@
+app = "blog"
+
+[http_service]
+  internal_port = 8080

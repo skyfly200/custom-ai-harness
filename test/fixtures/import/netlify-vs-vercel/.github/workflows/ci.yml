@@ -1,0 +1,6 @@
+name: ci
+on: push
+jobs:
+  deploy:
+    steps:
+      - uses: nwtgck/actions-netlify@v3

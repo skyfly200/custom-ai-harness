@@ -157,3 +157,23 @@ test('a GitHub file page is read from its raw file, and other GitHub pages are r
   assert.equal(r.items[0].url, raw);
   await assert.rejects(R.fetchSkills('https://github.com/acme/skills/issues/3', fakeWeb({}).opts), /Paste a link/);
 });
+
+// Regression: Node 20+ connects with lookup(host, { all: true }) and needs an array back. The callback used to
+// return a bare address, so every import failed with "Invalid IP address: undefined". The connection must still
+// go only to the address that was checked.
+test('the connection lookup answers Node with an array when it asks for all addresses', async () => {
+  const https = require('node:https');
+  const original = https.request;
+  let lookup;
+  https.request = (_u, options) => { lookup = options.lookup; return { on() { return this; }, end() {}, destroy() {} }; };
+  try {
+    R.request(new URL('https://example.com/SKILL.md'), { address: PUBLIC, family: 4 }, {}).catch(() => {});
+  } finally {
+    https.request = original;
+  }
+  const seen = await new Promise((resolve) => lookup('example.com', { all: true }, (err, addrs) => resolve({ err, addrs })));
+  assert.equal(seen.err, null);
+  assert.deepEqual(seen.addrs, [{ address: PUBLIC, family: 4 }]);
+  const single = await new Promise((resolve) => lookup('example.com', {}, (err, addr, fam) => resolve({ err, addr, fam })));
+  assert.deepEqual(single, { err: null, addr: PUBLIC, fam: 4 });
+});

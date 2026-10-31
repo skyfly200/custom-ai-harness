@@ -1138,7 +1138,7 @@ function reasoningHtml(m) {
   const shown = text.length > REASONING_SHOWN ? `${text.slice(0, REASONING_SHOWN)}\n… (${(text.length - REASONING_SHOWN).toLocaleString()} more characters)` : text;
   // the dots hop only while the model is thinking: not once text or a tool call has followed
   const live = isThinking(m);
-  return `<details class="reasoning${live ? ' live' : ''}" data-k="reasoning"><summary>
+  return `<details class="reasoning${live ? ' thinking-now' : ''}" data-k="reasoning"><summary>
       <span class="spark"><i></i><i></i><i></i></span><span>${live ? 'Thinking' : 'Thought'}</span>
       <span class="t">${text.length.toLocaleString()} characters</span></summary><pre>${esc(shown)}</pre></details>`;
 }

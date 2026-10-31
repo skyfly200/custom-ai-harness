@@ -17,7 +17,7 @@ See every model call grouped by chat or run. Back to the [README](../README.md).
 3. Install the logger once into the `.venv` (Docker does this for you): `pip install langfuse`.
 4. Restart. With `npm run all` the Gateway then starts through `docker/gateway-start.py`, which writes `.gateway-config.yaml` (your `config.yaml` plus the Langfuse callbacks; `config.yaml` itself is not touched). With Docker, `docker compose up -d --build`.
 
-The Settings page shows a Langfuse box: off, connected (with a link to open it), or what is wrong (keys refused, unreachable).
+The Settings page shows a Langfuse box: off, connected (with a link to open it), or what is wrong, with the HTTP status. Langfuse Cloud keeps each project in one region, and a key pair only works in that region. If the keys are refused on the default EU cloud, the box tries the US and HIPAA clouds too and tells you the `LANGFUSE_HOST` line to use. Keys pasted the wrong way round (public key in the secret slot) are flagged before any request is sent.
 
 **What is logged.** By default only metadata: model, tokens, cost, timing, tags. The text of your prompts and replies (which can include your code and files) stays out. To log it as well, tick "Langfuse: also log prompts and replies" on the Settings page; it applies from the next request, no restart. Or set `LANGFUSE_LOG_CONTENT=1` in `.env` as the starting value. The Gateway redacts text by default, so programs that call the Gateway directly (port 4000) are never logged with content.
 

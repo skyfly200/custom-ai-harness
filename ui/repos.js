@@ -57,6 +57,15 @@
     return own.length ? own : list(project);
   }
 
+  /**
+   * The repos a place can use: the owner's own entries that `keep` allows, else its project's. Filtering first
+   * matters: a folder a hosted server cannot read must not hide the project's GitHub repo behind an empty own list.
+   */
+  function usable(owner, project, keep = () => true) {
+    const own = list(owner).filter(keep);
+    return own.length ? own : list(project).filter(keep);
+  }
+
   /** Whether the list is the owner's own, rather than inherited. */
   const isOwn = (owner) => list(owner).length > 0;
 
@@ -176,7 +185,7 @@
     });
   }
 
-  const api = { list, set, effective, isOwn, defaultOf, add, remove, makeDefault, move, find, keyOf, labelOf, specOf, fromSpecs, toSpecs, mergeKeepingFolders, promptText, chipsHtml, bind, isGithub, isLocal, githubUrl, filterGithub };
+  const api = { list, set, effective, usable, isOwn, defaultOf, add, remove, makeDefault, move, find, keyOf, labelOf, specOf, fromSpecs, toSpecs, mergeKeepingFolders, promptText, chipsHtml, bind, isGithub, isLocal, githubUrl, filterGithub };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.Repos = api;
 })(typeof window !== 'undefined' ? window : globalThis);

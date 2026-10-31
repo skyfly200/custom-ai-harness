@@ -181,3 +181,16 @@ test('chipsHtml links GitHub names only when asked, and leaves folders as text',
   assert.match(linked, /<a href="https:\/\/github\.com\/a\/b" target="_blank" rel="noopener"[^>]*>a\/b<\/a>/);
   assert.doesNotMatch(linked, /href="[^"]*x"/);
 });
+
+test('usable: a hosted server keeps the project GitHub repo when the chat own list holds only a folder', () => {
+  const project = { repos: [gh('p/one')] };
+  const isGithub = R.isGithub;
+  // on the hosted server a folder is dropped, so the chat has no usable repo of its own: the project's are used
+  const chat = { repos: [{ kind: 'local', path: '/Users/me/code/x', name: 'x' }] };
+  assert.deepEqual(R.usable(chat, project, isGithub).map(R.labelOf), ['p/one']);
+  // with no filter (a local server) the folder stays the chat's own, as before
+  assert.deepEqual(R.usable(chat, project).map(R.labelOf), ['x']);
+  // a chat with its own GitHub repo keeps it over the project's
+  assert.deepEqual(R.usable({ repos: [gh('c/mine')] }, project, isGithub).map(R.labelOf), ['c/mine']);
+  assert.deepEqual(R.usable({}, {}, isGithub), []);
+});

@@ -6,6 +6,8 @@
     { "id": "review", "role": "Reviewer", "tools": "check", "effort": "high",
       "prompt": "Review the code or changes the task points at (for recent changes use `git log` and `git diff`). Look for bugs, missing error handling, security problems and missing tests. Do not change any file. Call finish with a numbered list of findings, each with the file and line and why it is a problem." },
     { "id": "verify", "role": "Skeptic", "tools": "check", "effort": "medium",
-      "prompt": "Try to disprove each finding from the review: read the code, run it if you can, and decide whether the problem is real. Do not change any file. Call finish with the findings that survived, each marked CONFIRMED or UNSURE, and the ones you dropped with a reason." }
+      "prompt": "Try to disprove each finding from the review: read the code, run it if you can, and decide whether the problem is real. Do not change any file. Call finish with the findings that survived, each marked CONFIRMED or UNSURE, and the ones you dropped with a reason." },
+    { "id": "write-up", "role": "Writer", "tools": "none", "model": "anthropic/claude-sonnet-5.5", "effort": "medium",
+      "prompt": "Write the review up for a person to read: the CONFIRMED findings first, most serious first, each with its file and line, what goes wrong and a one-line fix. Then the UNSURE ones, marked as unsure. Say plainly if there are no real problems. You have no tools: write from the notes alone, and keep it under 400 words. Call finish with the write-up." }
   ]
 }

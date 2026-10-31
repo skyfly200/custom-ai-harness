@@ -1396,10 +1396,7 @@ $('log').addEventListener('click', async (e) => {
 const hostedNoFolders = () => toolInfo?.localRepos === false;
 // The repos a chat works with, the first one the default (ui/repos.js): its own list, else its project's.
 // Folders on someone's computer are left out on a hosted server.
-const reposOf = (c) => {
-  const all = Repos.effective(c, projectOf(c));
-  return hostedNoFolders() ? all.filter(Repos.isGithub) : all;
-};
+const reposOf = (c) => Repos.usable(c, projectOf(c), hostedNoFolders() ? Repos.isGithub : undefined);
 // The default git folder, and the default GitHub repo ({ full: "owner/name", branch, private }), attached under Options > Tools
 const repoOf = (c) => Repos.defaultOf(reposOf(c), 'local');
 const ghOf = (c) => Repos.defaultOf(reposOf(c), 'github');
@@ -1556,7 +1553,7 @@ async function runReply(c, turn) {
     await loadTools();
     tools = activeTools(c);
   }
-  reply.toolsMissing = turn?.tools !== false && !tools.length && !!repoOf(c);
+  reply.toolsMissing = turn?.tools !== false && !tools.length && (!!repoOf(c) || !!ghOf(c));
   // 0 (or empty, or junk) means no limit: the round loop runs until the model
   // stops asking for tools. The stall and no-reply timeouts still bound it.
   const rawRounds = parseInt($('maxToolRounds').value, 10);
@@ -2956,10 +2953,12 @@ async function loadGithub() {
 function drawGithub() {
   const st = ghStatus;
   const box = $('ghBox');
-  const attached = chatRepoList(chat || {}).filter(Repos.isGithub);
+  const attached = reposOf(chat || {}).filter(Repos.isGithub);
   const g = attached[0];
-  box.hidden = !st || !(st.connected || st.canConnect || g);
+  box.hidden = !(st || g) || !(st?.connected || st?.canConnect || g);
   if (box.hidden) return;
+  // The status did not load: say so rather than hide the linked repo
+  if (!st) { $('ghInfo').innerHTML = `${g ? `Linked to <b>${esc(g.full)}</b>. ` : ''}Could not check GitHub just now: reload the page to see whether the model can read it.`; return; }
   $('ghRepo').value = $('ghRepo').dataset.typed || '';
   $('ghAttach').textContent = 'Add';
   $('ghRepo').hidden = $('ghAttach').hidden = !st.connected;
@@ -2967,7 +2966,9 @@ function drawGithub() {
   // Connecting, reconnecting, choosing repos and disconnecting live in a dialog (githubconnect.js), opened from here
   const manage = (label) => `<a href="#" data-gh-manage>${label}</a>`;
   $('ghInfo').innerHTML = !st.connected
-    ? `${st.canConnect ? manage('Connect GitHub') : esc(st.note || 'GitHub is not connected.')} to let the model read your repos.`
+    ? (g
+      ? `Linked to <b>${esc(g.full)}</b>, but GitHub is not connected, so the model cannot read it. ${st.canConnect ? manage('Connect GitHub') : esc(st.note || 'Connect GitHub on this account.')}`
+      : `${st.canConnect ? manage('Connect GitHub') : esc(st.note || 'GitHub is not connected.')} to let the model read your repos.`)
     : g
       ? `${attached.length} GitHub repo${attached.length === 1 ? '' : 's'}, default <b>${esc(g.full)}</b>${g.branch ? ` (<code>${esc(g.branch)}</code>)` : ''}, as <b>${esc(st.login || '')}</b>. Writes wait for your Allow. ${manage('Manage')}`
       : `Connected as <b>${esc(st.login || '')}</b>${st.via === 'env' ? ' (GITHUB_TOKEN)' : ''}. Pick a repo or type owner/name. ${manage('Manage')}`;

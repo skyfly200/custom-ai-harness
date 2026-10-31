@@ -106,6 +106,16 @@ test('an app is registered, validated and listed', async () => {
     assert.equal(patched.body.name, 'Harness UI');
     assert.equal((await call('POST', '/apps/nope/changes', { request: 'x' })).status, 404);
     assert.equal((await call('POST', `/apps/${made.body.id}/changes`, {})).status, 400);
+    // settings: a deploy hook needs its URL, and the page can switch to one once it has it
+    const id = made.body.id;
+    assert.match((await call('PATCH', `/apps/${id}`, { deploy: 'hook' })).body.error, /needs its URL/);
+    const hooked = await call('PATCH', `/apps/${id}`, { deploy: 'hook', deployHook: 'https://example.com/deploy' });
+    assert.equal(hooked.body.deploy, 'hook');
+    assert.equal((await call('PATCH', `/apps/${id}`, { deployHook: '' })).status, 400);
+    const back = await call('PATCH', `/apps/${id}`, { deploy: 'merge', deployHook: '' });
+    assert.equal(back.status, 200);
+    assert.equal(back.body.deploy, 'merge');
+    assert.equal(back.body.deployHook, null);
 });
 
 test('a change run writes inside the editable paths and is refused outside them', async () => {

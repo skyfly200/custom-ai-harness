@@ -223,6 +223,49 @@ test('refreshClone: fetches with the token for that one command and only moves a
     assert.ok(seen.every((s) => s.token === 't'));
 });
 
+test('an owner edits their app\'s settings on a shared server; a folder here, a hook with no URL and other people are refused', async () => {
+    const made = await call('eve', 'POST', '/apps/new', { template: 'web-app', name: 'Notes', github: { mode: 'create', repo: 'notes' }, build: false }, { 'x-runner-github-token': 'eve-token' });
+    assert.equal(made.status, 201);
+    const { app } = await made.json();
+    const patch = (owner, body, extra) => call(owner, 'PATCH', `/apps/${app.id}`, body, extra);
+    let res = await patch('eve', { name: 'Notes 2', editablePaths: ['ui/**'], baseBranch: 'trunk' });
+    assert.equal(res.status, 200);
+    let saved = await res.json();
+    assert.equal(saved.name, 'Notes 2');
+    assert.deepEqual(saved.editablePaths, ['ui/**']);
+    assert.equal(saved.baseBranch, 'trunk');
+    assert.equal(saved.repo, app.repo, 'the folder stays the same');
+    // a folder on this machine is refused with the reason
+    res = await patch('eve', { repo: '/etc' });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /folder is its GitHub repo/);
+    // a deploy hook needs its URL
+    res = await patch('eve', { deploy: 'hook' });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /needs its URL/);
+    res = await patch('eve', { deploy: 'hook', deployHook: 'https://example.com/hook' });
+    assert.equal((await res.json()).deploy, 'hook');
+    // the app needs a GitHub repo; changing it needs the person's GitHub connection
+    res = await patch('eve', { githubRepo: '' });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /needs a GitHub repo/);
+    res = await patch('eve', { githubRepo: 'eve/other' });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /connect GitHub/);
+    res = await patch('eve', { githubRepo: 'not a repo' });
+    assert.equal(res.status, 400);
+    // with a token, the new repo is cloned for the owner and the app points at that clone
+    res = await patch('eve', { githubRepo: 'eve/other' }, { 'x-runner-github-token': 'eve-token' });
+    assert.equal(res.status, 200);
+    saved = await res.json();
+    assert.equal(saved.githubRepo, 'eve/other');
+    assert.ok(saved.repo.startsWith(github.personDir(reposBase, 'eve') + path.sep), saved.repo);
+    assert.ok(calls.some((c) => c.what === 'clone' && c.person === 'eve' && c.spec === 'eve/other' && c.token === 'eve-token'));
+    // someone else cannot see or change it
+    assert.equal((await patch('bob', { name: 'Stolen' })).status, 404);
+    assert.equal((await (await call('eve', 'GET', `/apps/${app.id}`)).json()).name, 'Notes 2');
+});
+
 test('apps on a shared server: import only from GitHub, and each person sees their own apps', async () => {
     const local = await call('ann', 'POST', '/apps/import', { source: 'local', folder: '/somewhere' });
     assert.equal(local.status, 400);

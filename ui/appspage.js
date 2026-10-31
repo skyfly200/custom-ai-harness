@@ -21,7 +21,7 @@
       <div class="app-info"><strong>${esc(a.name)}</strong><span class="muted fine">${esc(a.repo)}</span>
         <span class="muted fine">Hosting: ${esc(label(hosting.targets, a.deployTarget))} · Database: ${esc(label(hosting.databases, a.database))}${a.githubRepo ? ` · GitHub: ${esc(a.githubRepo)}` : ''}</span>
         <span class="muted fine">Edits only: ${esc(a.editablePaths.join(', '))}${a.testCommand ? ` · tests: ${esc(a.testCommand)}` : ''}</span></div>
-      <div class="actions"><button type="button" class="primary" data-act="change">Ask for a change</button></div>
+      <div class="actions"><button type="button" data-act="edit">Edit</button><button type="button" class="primary" data-act="change">Ask for a change</button></div>
     </div>`).join('') : '<p class="muted">No apps yet. Start one with New app.</p>';
   }
 
@@ -93,7 +93,7 @@
   function paintRepos(sel) {
     const picked = sel.value;
     sel.innerHTML = repos.length
-      ? `<option value="">Choose a repo</option>${repos.map((r) => `<option value="${esc(r.full)}">${esc(r.full)}${r.private ? ' (private)' : ''}</option>`).join('')}`
+      ? `<option value="">${esc(sel.dataset.none || 'Choose a repo')}</option>${repos.map((r) => `<option value="${esc(r.full)}">${esc(r.full)}${r.private ? ' (private)' : ''}</option>`).join('')}`
       : '<option value="">No repos to pick</option>';
     if (picked) sel.value = picked;
   }
@@ -154,9 +154,10 @@
   $('#newClose').addEventListener('click', () => $('#newDialog').close());
 
   $('#appList').addEventListener('click', async (e) => {
-    const btn = e.target.closest('button[data-act=change]');
+    const btn = e.target.closest('button[data-act]');
     const app = apps.find((a) => a.id === btn?.closest('.app-row')?.dataset.id);
-    if (!app) return;
+    if (!app || !btn) return;
+    if (btn.dataset.act === 'edit') return openEdit(app);
     const request = await ui.prompt(`What should ${app.name} do differently?`, { ok: 'Start change', placeholder: 'Add a dark mode toggle' });
     if (!request) return;
     try {
@@ -207,6 +208,93 @@
 
   // ---- Import an existing app: look first (read only), then fill the form and register it ----
   let looked = null; // the detection for the folder or repo the person looked at
+  // ---- Edit an app: the same dialog, without the look-first steps; saves with PATCH ----
+  let editing = null; // the app being edited, or null when the dialog imports
+  const IMPORT_INTRO = $('#importIntro').textContent;
+
+  /** Show the fields for a mode: import (look first, then register) or edit (change the settings of an app). */
+  function setMode(mode) {
+    for (const el of importForm().querySelectorAll('[data-mode]')) el.hidden = el.dataset.mode !== mode;
+    const edit = mode === 'edit';
+    editing = edit ? editing : null;
+    $('#importTitle').textContent = edit ? `Edit ${editing.name}` : 'Import an existing app';
+    $('#importIntro').textContent = edit ? 'Change how this app is set up. A change that is already running keeps the settings it started with.' : IMPORT_INTRO;
+    $('#importGo').textContent = edit ? 'Save changes' : 'Import app';
+    paintDeploy();
+  }
+
+  /** The deploy hook field is only for the "call a deploy hook" choice. */
+  function paintDeploy() {
+    const f = importForm();
+    for (const el of f.querySelectorAll('[data-deploy]')) el.hidden = el.dataset.deploy !== f.elements.deploy.value;
+  }
+
+  /** Make sure the app's own GitHub repo is an option, even when the list of repos did not include it. */
+  function ensureRepoOption(sel, value) {
+    if (value && ![...sel.options].some((o) => o.value === value)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(value)}">${esc(value)}</option>`);
+    sel.value = value || '';
+  }
+
+  async function openEdit(app) {
+    const f = importForm();
+    f.reset();
+    editing = app;
+    setMode('edit');
+    hideImportRest();
+    paintImportHosting(); // the host and database lists first, so the saved choices can be picked
+    f.elements.deployTarget.value = app.deployTarget || 'none';
+    f.elements.database.value = app.database || 'none';
+    f.elements.name.value = app.name;
+    f.elements.editablePaths.value = (app.editablePaths || []).join('\n');
+    f.elements.installCommand.value = app.installCommand || '';
+    f.elements.testCommand.value = app.testCommand || '';
+    f.elements.devCommand.value = app.devCommand || '';
+    f.elements.baseBranch.value = app.baseBranch || '';
+    f.elements.previewPort.value = app.previewPort || '';
+    f.elements.deploy.value = app.deploy || 'merge';
+    f.elements.deployHook.value = app.deployHook || '';
+    $('#importRest').hidden = false;
+    $('#importMsg').textContent = '';
+    $('#importDialog').showModal();
+    paintImportChoices();
+    paintDeploy();
+    await loadRepos(f.elements.editRepo, $('#editRepoNote'));
+    if (editing === app) ensureRepoOption(f.elements.editRepo, app.githubRepo || '');
+    paintImportChoices();
+  }
+
+  async function saveEdit() {
+    const f = importForm();
+    const app = editing;
+    const msg = $('#importMsg');
+    const btn = $('#importGo');
+    btn.disabled = true;
+    msg.textContent = 'Saving…';
+    try {
+      const saved = await api('PATCH', `/${app.id}`, {
+        name: f.elements.name.value.trim(),
+        githubRepo: f.elements.editRepo.value,
+        baseBranch: f.elements.baseBranch.value.trim(),
+        previewPort: f.elements.previewPort.value,
+        deploy: f.elements.deploy.value,
+        deployHook: f.elements.deployHook.value.trim(),
+        deployTarget: f.elements.deployTarget.value,
+        database: f.elements.database.value,
+        editablePaths: f.elements.editablePaths.value.split('\n').map((s) => s.trim()).filter(Boolean),
+        installCommand: f.elements.installCommand.value.trim(),
+        testCommand: f.elements.testCommand.value.trim(),
+        devCommand: f.elements.devCommand.value.trim(),
+      });
+      $('#importDialog').close();
+      ui.toast(`${saved.name} is saved.`);
+      loadApps();
+    } catch (err) {
+      msg.textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
 
   const importForm = () => $('#importForm');
   const importSource = () => importForm().elements.source.value;
@@ -244,7 +332,8 @@
     if (!target || !db) return;
     $('#importTargetHelp').textContent = target.help;
     $('#importDatabaseHelp').textContent = db.help;
-    $('#importConnect').innerHTML = connectHtml(target, db, importSource() === 'github' || Boolean(looked?.githubRepo));
+    const onGithub = editing ? Boolean(f.elements.editRepo.value || editing.githubRepo) : importSource() === 'github' || Boolean(looked?.githubRepo);
+    $('#importConnect').innerHTML = connectHtml(target, db, onGithub);
   }
 
   function fillImport(d) {
@@ -267,6 +356,7 @@
 
   $('#importApp').addEventListener('click', () => {
     importForm().reset();
+    setMode('import');
     hideImportRest();
     paintImportHosting();
     paintImportSrc();
@@ -277,6 +367,7 @@
   importForm().addEventListener('change', (e) => {
     if (e.target.name === 'source') paintImportSrc();
     else if (e.target.name === 'deployTarget' || e.target.name === 'database') paintImportChoices();
+    else if (e.target.name === 'deploy') paintDeploy();
   });
 
   $('#importLook').addEventListener('click', async () => {
@@ -303,6 +394,7 @@
 
   importForm().addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (editing) return saveEdit();
     if (!looked) return;
     const f = importForm();
     const msg = $('#importMsg');

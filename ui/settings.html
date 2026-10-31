@@ -36,6 +36,7 @@
   <div class="card" id="langfuse" hidden>
     <div class="sub"><b>Langfuse</b> <span id="lfState"></span></div>
     <div class="sub muted fine" id="lfNote"></div>
+    <div class="sub fine" id="lfHint" hidden></div>
   </div>
 
   <nav class="jump" aria-label="Sections">
@@ -482,12 +483,16 @@ async function loadLangfuse() {
     lfShown = true;
     $('langfuse').hidden = !!$('setFilter').value.trim();
     if (!lf.configured) {
+      $('lfHint').hidden = true;
       $('lfState').textContent = 'is off';
       $('lfNote').innerHTML = 'Add <code>LANGFUSE_PUBLIC_KEY</code> and <code>LANGFUSE_SECRET_KEY</code> to <code>.env</code> and restart the Gateway to log every call. See the README, “Langfuse”.';
       return;
     }
+    const openHost = lf.suggestion ? lf.suggestion.host : lf.url;
     $('lfState').innerHTML = (lf.ok ? '<span class="note ok">connected</span>' : `<span class="note err">${esc(lf.problem)}</span>`)
-      + ` · <a href="${esc(lf.url)}" target="_blank" rel="noopener">open ${esc(new URL(lf.url).host)}</a>`;
+      + ` · <a href="${esc(openHost)}" target="_blank" rel="noopener">open ${esc(new URL(openHost).host)}</a>`;
+    $('lfHint').hidden = !lf.hint;
+    $('lfHint').innerHTML = lf.hint ? `<span class="note ${lf.suggestion ? 'ok' : ''}">${esc(lf.hint)}</span>` : '';
     $('lfNote').textContent = lf.content
       ? 'Prompts and replies are logged too (the setting below).'
       : 'Logging metadata only: model, tokens, cost, timing and tags. Prompt and reply text is left out (the setting below).';

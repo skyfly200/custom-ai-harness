@@ -123,6 +123,12 @@
     try {
       const r = await (await fetch('/ui/api/runs/repos', { credentials: 'same-origin' })).json();
       $('#roots').innerHTML = (r.roots || []).map((p) => `<option value="${esc(p)}">`).join('');
+      // a shared server cannot read folders on someone's computer: only a GitHub repo can be imported there
+      if (r.hosted) {
+        document.querySelector('#importForm input[name=source][value=local]').closest('label').hidden = true;
+        importForm().elements.source.value = 'github';
+        paintImportSrc();
+      }
     } catch { /* the server picks the folder */ }
   }
 

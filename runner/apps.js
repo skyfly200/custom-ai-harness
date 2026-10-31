@@ -96,7 +96,7 @@ class AppStore {
         const now = new Date().toISOString();
         const app = {
             installCommand: null, devCommand: null, testCommand: null, deploy: 'merge', deployHook: null, githubRepo: null, baseBranch: null, previewPort: null, deployTarget: 'none', database: 'none',
-            ...base, id: `p${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, created: now, updated: now,
+            ...base, id: `p${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner: cfg?.owner ? String(cfg.owner) : null, created: now, updated: now,
         };
         this.apps.set(app.id, app);
         this.save(app);

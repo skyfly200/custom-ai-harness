@@ -57,7 +57,15 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
             next();
         });
         // these work on paths of this machine or on the local sandbox, which a shared server doesn't offer
-        app.use(['/runs/browse', '/tickets', '/apps'], (req, res) => res.status(404).json({ error: 'not available on a shared server' }));
+        app.use(['/runs/browse', '/tickets'], (req, res) => res.status(404).json({ error: 'not available on a shared server' }));
+        // apps: a person sees their own, can import a GitHub repo as one, and can read the templates and hosts. Making an app
+        // from a template, or changing one, works in a folder on this machine, so those stay off here.
+        const sharedApps = new Set(['GET /apps', 'GET /apps/templates', 'GET /apps/hosting', 'POST /apps/import/detect', 'POST /apps/import']);
+        app.use((req, res, next) => {
+            if (req.path !== '/apps' && !req.path.startsWith('/apps/')) return next();
+            if (sharedApps.has(`${req.method} ${req.path}`)) return next();
+            return res.status(404).json({ error: 'making or changing apps is not available on a shared server yet; import a GitHub repo instead' });
+        });
         app.use('/runs/:id/preview', (req, res) => res.status(404).json({ error: 'previews are not available on a shared server' }));
         // a run or agent that is not yours does not exist
         app.param('id', (req, res, next, id) => {
@@ -158,14 +166,14 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         try { res.status(201).json(manager.assign(req.params.id, req.body)); } catch (err) { fail(res, err, /no such agent/.test(err.message) ? 404 : 400); }
     });
     // Apps: registered apps whose own agent changes them, limited to editable paths
-    app.get('/apps', (req, res) => res.json({ apps: manager.listApps() }));
+    app.get('/apps', (req, res) => res.json({ apps: manager.listApps(hosted ? req.owner : undefined) }));
     // New apps from a template (templates/<id>/): the list, then the builder. Registered before /apps/:id.
     app.get('/apps/templates', (req, res) => res.json(templates.listTemplates()));
     app.get('/apps/hosting', (req, res) => res.json(hosting.catalog()));
     app.post('/apps/new', wrap(async (req, res) => res.status(201).json(await manager.newApp({ ...(req.body || {}), token: req.githubToken || '' }))));
     // Existing apps: look at a folder or GitHub repo first (read only), then register it. Also before /apps/:id.
     app.post('/apps/import/detect', wrap(async (req, res) => res.json(await manager.detectImport({ ...(req.body || {}), token: req.githubToken || '' }))));
-    app.post('/apps/import', wrap(async (req, res) => res.status(201).json(await manager.importApp({ ...(req.body || {}), token: req.githubToken || '' }))));
+    app.post('/apps/import', wrap(async (req, res) => res.status(201).json(await manager.importApp({ ...(req.body || {}), token: req.githubToken || '', owner: hosted ? req.owner : '' }))));
     app.post('/apps', (req, res) => {
         try { res.status(201).json(manager.createApp(req.body)); } catch (err) { fail(res, err); }
     });

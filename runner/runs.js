@@ -7,6 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile, execFileSync } = require('child_process');
+// On a shared server, an app comes from a GitHub repo: a folder on someone's computer is only on their own install
+const SHARED_LOCAL_IMPORT = 'on a shared server, import a GitHub repo: a folder on your computer is only on your own install';
 const { createSandbox, attachSandbox, destroySandboxById, driverFor, normalizeKind, isCloud, LocalSandbox } = require('./sandbox');
 const { makeTools } = require('./tools');
 const { runAgent, systemFor } = require('./agent');
@@ -1016,7 +1018,7 @@ class RunManager {
     }
 
     // --- apps: registered apps whose own agent changes them ---------------------------------
-    listApps() { return this.apps.list(); }
+    listApps(owner) { return this.apps.list().filter((a) => owner === undefined || a.owner === owner); }
     getApp(id) { return this.apps.get(id); }
     createApp(cfg) { return this.apps.create(cfg || {}, this.checkRepo(cfg?.repo)); }
     /**
@@ -1087,13 +1089,14 @@ class RunManager {
             const spec = gitHub.parse(repo);
             const scratch = path.join(this.dir, `_detect-${crypto.randomBytes(4).toString('hex')}`);
             try {
-                await gitHub.cloneRepo({ owner: spec.owner, name: spec.name, dir: scratch, token: String(token || process.env.GITHUB_TOKEN || '') });
+                await gitHub.cloneRepo({ owner: spec.owner, name: spec.name, dir: scratch, token: String(token || (this.hosted ? '' : process.env.GITHUB_TOKEN || '')) });
                 return { source, suggestedName: spec.name, ...importDetect.detectFolder(scratch), githubRepo: `${spec.owner}/${spec.name}` };
             } finally {
                 fs.rmSync(scratch, { recursive: true, force: true });
             }
         }
         if (source !== 'local') throw new Error('the source must be local or github');
+        if (this.hosted) throw new Error(SHARED_LOCAL_IMPORT);
         const real = this.importFolder(folder);
         return { source, folder: real, ...importDetect.detectFolder(real) };
     }
@@ -1113,10 +1116,16 @@ class RunManager {
      * comes from the detection. With `addFiles`, the CI workflow, the deploy workflow, fly.toml and DEPLOY.md are written
      * for the chosen host and database, but only where the repo does not already have that file; nothing is committed.
      */
-    async importApp({ source = 'local', folder, repo, parent, name, editablePaths, deployTarget, database, installCommand, testCommand, devCommand, previewPort, addFiles = true, token = '' } = {}) {
+    async importApp({ source = 'local', folder, repo, parent, name, editablePaths, deployTarget, database, installCommand, testCommand, devCommand, previewPort, addFiles = true, token = '', owner = '' } = {}) {
         let real;
         let cloned = null;
-        if (source === 'github') {
+        if (this.hosted && source !== 'github') throw new Error(SHARED_LOCAL_IMPORT);
+        if (source === 'github' && this.hosted) {
+            // a shared server keeps each person's clones apart; the clone stays even if the import fails, as a repo they can retry
+            if (!owner) throw new Error('a hosted import needs an owner');
+            const spec = gitHub.parse(repo);
+            real = await gitHub.ensureClone({ base: this.roots[0], person: String(owner), spec: `${spec.owner}/${spec.name}`, token: String(token || '') });
+        } else if (source === 'github') {
             const spec = gitHub.parse(repo);
             const dir = String(parent || this.roots[0] || '');
             let base;
@@ -1151,7 +1160,7 @@ class RunManager {
             };
             const app = this.createApp({
                 name: appName, repo: real, editablePaths: editablePaths ?? found.editablePaths, ...commands, previewPort: previewPort ?? found.previewPort,
-                deploy: 'merge', githubRepo, ...choice,
+                deploy: 'merge', githubRepo, ...choice, owner: this.hosted ? String(owner) : null,
             });
             const added = [];
             const skipped = [];

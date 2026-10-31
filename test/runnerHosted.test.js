@@ -157,8 +157,25 @@ test('agents belong to their owner too', async () => {
     assert.equal((await task.json()).owner, 'gus');
 });
 
-test('local-only features are off: browse, tickets, apps, previews', async () => {
-    for (const p of ['/runs/browse', '/tickets/read', '/apps']) assert.equal((await call('ann', 'GET', p)).status, 404, p);
+test('local-only features are off: browse, tickets, making apps, previews', async () => {
+    for (const p of ['/runs/browse', '/tickets/read']) assert.equal((await call('ann', 'GET', p)).status, 404, p);
+    assert.equal((await call('ann', 'POST', '/apps/new', { name: 'X' })).status, 404);
+    assert.equal((await call('ann', 'PATCH', '/apps/nope', { name: 'X' })).status, 404);
+});
+
+test('apps on a shared server: import only from GitHub, and each person sees their own apps', async () => {
+    const local = await call('ann', 'POST', '/apps/import', { source: 'local', folder: '/somewhere' });
+    assert.equal(local.status, 400);
+    assert.match((await local.json()).error, /shared server, import a GitHub repo/);
+    assert.match((await (await call('ann', 'POST', '/apps/import/detect', { source: 'local', folder: '/x' })).json()).error, /shared server/);
+    assert.equal((await call('ann', 'GET', '/apps/templates')).status, 200);
+    assert.equal((await (await call('ann', 'GET', '/apps')).json()).apps.length, 0);
+    const repo = path.join(reposBase, 'ann', 'notes');
+    fs.mkdirSync(repo, { recursive: true });
+    gitIn(repo, 'init', '-q');
+    manager.createApp({ name: 'Notes', repo, editablePaths: ['ui/**'], owner: 'ann' });
+    assert.deepEqual((await (await call('ann', 'GET', '/apps')).json()).apps.map((a) => a.name), ['Notes']);
+    assert.equal((await (await call('bob', 'GET', '/apps')).json()).apps.length, 0);
 });
 
 test('push: a finished run goes to GitHub with the person\'s token', async () => {

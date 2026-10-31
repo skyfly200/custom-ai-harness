@@ -204,10 +204,10 @@ test('the shipped one-shot workflow has a single tool-less step on a batch model
     assert.ok(require('../utils/batchModels').isBatch(shipped.stages[0].model, require('../utils/batchModels').load()));
 });
 
-test('the shipped research and plan workflows each end in a tool-less step on a batch model', () => {
+test('the shipped research, plan and review workflows each end in a tool-less step on a batch model', () => {
     const list = workflows.load(path.join(__dirname, '..', 'workflows')).list;
     const { isBatch, load } = require('../utils/batchModels');
-    for (const [id, last] of [['research', 'write'], ['plan', 'plan']]) {
+    for (const [id, last] of [['research', 'write'], ['plan', 'plan'], ['review', 'write-up']]) {
         const step = list.find((w) => w.id === id).stages.at(-1);
         assert.equal(step.id, last);
         assert.equal(step.tools, 'none');

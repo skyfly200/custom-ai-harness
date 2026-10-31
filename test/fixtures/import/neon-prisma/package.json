@@ -1,0 +1,1 @@
+{ "name": "blog", "dependencies": { "@prisma/client": "5.20.0" } }

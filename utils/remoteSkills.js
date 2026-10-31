@@ -79,7 +79,11 @@ function request(u, address, headers) {
     const req = https.request(u, {
       method: 'GET',
       headers: { 'user-agent': 'custom-ai-harness', accept: 'text/plain, text/markdown, application/json;q=0.9, */*;q=0.5', ...headers },
-      lookup: (_host, _options, done) => done(null, address.address, address.family),
+      // Node 20+ asks for every address (options.all) when it connects, and then wants an array back. The
+      // connection still goes only to the address that was checked above.
+      lookup: (_host, options, done) => (options?.all
+        ? done(null, [{ address: address.address, family: address.family }])
+        : done(null, address.address, address.family)),
       timeout: TIMEOUT_MS,
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -204,4 +208,4 @@ async function fetchSkills(input, opts = {}) {
   return { kind: 'file', truncated: false, items: [item] };
 }
 
-module.exports = { fetchSkills, getText, httpsUrl, isPublicAddress, githubTarget, MAX_BYTES, MAX_FILES };
+module.exports = { fetchSkills, getText, httpsUrl, isPublicAddress, githubTarget, request, MAX_BYTES, MAX_FILES };

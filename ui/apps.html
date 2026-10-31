@@ -51,6 +51,18 @@
         <div class="actions"><button type="button" id="importLook">Look at it</button></div>
       </fieldset>
 
+      <fieldset class="group">
+        <legend>Hosting and database</legend>
+        <p class="fine muted">Where the app runs and where its data lives. Looking at the repo suggests a choice; you can change it before you import.</p>
+        <div class="row2">
+          <label class="field"><span>Where it runs</span><select name="deployTarget"></select></label>
+          <label class="field"><span>Database</span><select name="database"></select></label>
+        </div>
+        <p id="importTargetHelp" class="fine muted"></p>
+        <p id="importDatabaseHelp" class="fine muted"></p>
+        <div id="importConnect" class="connect-box" aria-live="polite"></div>
+      </fieldset>
+
       <div id="importRest" hidden>
         <fieldset class="group">
           <legend>What it looks like</legend>
@@ -58,14 +70,7 @@
           <ul id="importNotes" class="fine muted"></ul>
         </fieldset>
 
-        <div class="row2">
-          <label class="field"><span>Name</span><input name="name" maxlength="60"></label>
-          <label class="field"><span>Where it runs</span><select name="deployTarget"></select></label>
-        </div>
-        <p id="importTargetHelp" class="fine muted"></p>
-        <label class="field"><span>Database</span><select name="database"></select></label>
-        <p id="importDatabaseHelp" class="fine muted"></p>
-        <div id="importConnect" class="connect-box" aria-live="polite"></div>
+        <label class="field"><span>Name</span><input name="name" maxlength="60"></label>
 
         <label class="field"><span>Agents may edit (one path per line)</span><textarea name="editablePaths" rows="2" spellcheck="false"></textarea></label>
         <details class="group">

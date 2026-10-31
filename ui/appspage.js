@@ -116,7 +116,7 @@
   }
 
   async function loadHosting() {
-    try { hosting = await api('GET', '/hosting'); paintHosting(); } catch { /* the form still works with the defaults */ }
+    try { hosting = await api('GET', '/hosting'); paintHosting(); paintImportHosting(); } catch { /* the form still works with the defaults */ }
   }
 
   async function loadRoots() {
@@ -225,7 +225,18 @@
     $('#importMsg').textContent = '';
   }
 
-  /** The select options for host and database, with the detection's pick selected. */
+  /** Fill the host and database selects from the catalog, keeping what the person already picked. Shown from the start. */
+  function paintImportHosting() {
+    const f = importForm();
+    const keep = { deploy: f.elements.deployTarget.value, db: f.elements.database.value };
+    f.elements.deployTarget.innerHTML = hosting.targets.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('');
+    f.elements.database.innerHTML = hosting.databases.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('');
+    if (keep.deploy) f.elements.deployTarget.value = keep.deploy;
+    if (keep.db) f.elements.database.value = keep.db;
+    paintImportChoices();
+  }
+
+  /** The help under each choice, and the steps to connect for the chosen host and database. */
   function paintImportChoices() {
     const f = importForm();
     const target = hosting.targets.find((o) => o.id === f.elements.deployTarget.value) || hosting.targets[0];
@@ -238,8 +249,6 @@
 
   function fillImport(d) {
     const f = importForm();
-    f.elements.deployTarget.innerHTML = hosting.targets.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('');
-    f.elements.database.innerHTML = hosting.databases.map((o) => `<option value="${esc(o.id)}">${esc(o.label)}</option>`).join('');
     f.elements.deployTarget.value = d.deployTarget;
     f.elements.database.value = d.database;
     f.elements.name.value = d.suggestedName || '';
@@ -259,6 +268,7 @@
   $('#importApp').addEventListener('click', () => {
     importForm().reset();
     hideImportRest();
+    paintImportHosting();
     paintImportSrc();
     $('#importDialog').showModal();
   });

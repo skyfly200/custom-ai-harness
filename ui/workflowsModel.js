@@ -28,7 +28,46 @@
   const slug = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 
   function stage(over = {}) {
-    return { id: 'step', role: 'Step', tools: 'all', prompt: '', effort: null, model: null, verdict: false, retryTo: null, maxRetries: 0, maxSteps: 0, canWait: false, maxWaitMinutes: 120, diff: false, ...over };
+    return {
+      kind: 'agent', id: 'step', role: 'Step', tools: 'all', prompt: '', effort: null, model: null, verdict: false, retryTo: null, maxRetries: 0, maxSteps: 0, canWait: false, maxWaitMinutes: 120, diff: false,
+      ask: null, contains: null, question: '', options: [], defaultOption: null, timeoutMinutes: 60, goto: {},
+      ...over,
+    };
+  }
+
+  const KIND_NAMES = {
+    agent: 'Works on the task',
+    branch: 'Yes or no: sends the run one way or the other',
+    human: 'Asks a person a question',
+  };
+
+  const isAgent = (s) => !s.kind || s.kind === 'agent';
+
+  /** The outcomes a stage has, and the goto key for each: what a stage's "Where each outcome goes" rows choose from. */
+  function outcomesFor(s) {
+    if (s.kind === 'branch') return [{ key: 'yes', label: 'Yes' }, { key: 'no', label: 'No' }];
+    if (s.kind === 'human') return (s.options || []).map((o) => ({ key: o, label: o }));
+    if (s.kind !== 'branch' && s.verdict) return [{ key: 'PASS', label: 'PASS' }];
+    return [];
+  }
+
+  /** The goto a stage should keep: only outcomes it has, each to a stage in the run or to the end. */
+  function cleanGoto(s, stages) {
+    const out = {};
+    const ids = new Set(stages.map((t) => t.id));
+    for (const o of outcomesFor(s)) {
+      const to = s.goto?.[o.key];
+      if (to === 'end' || (to && ids.has(to))) out[o.key] = to;
+    }
+    return out;
+  }
+
+  /** The stage named a goto or a retry points at, renamed or removed: the references follow the change. */
+  function followRename(stages, old, next) {
+    return stages.map((s) => {
+      const goto = Object.fromEntries(Object.entries(s.goto || {}).map(([k, v]) => [k, v === old ? next : v]));
+      return { ...s, goto, retryTo: s.retryTo === old ? next : s.retryTo };
+    });
   }
 
   /** A stage id no other stage in the list uses, from a base such as the role name. */
@@ -80,6 +119,10 @@
       stage: { id: 'docs', role: 'Docs writer', tools: 'all', prompt: 'Update the README, docs and help text that the change affects. Match the wording already there. Do not change code. Call finish with the files you changed.' } },
     { key: 'summarizer', label: 'Summarizer', text: 'Reads what the earlier stages handed on and writes a short summary for the person: what changed, what was tested and what is left. No tools.',
       stage: { id: 'summarizer', role: 'Summarizer', tools: 'none', prompt: 'Summarize what the earlier stages did as a short list for the person: what changed, what was tested and what is left. Call finish with the summary.' } },
+    { key: 'branch', label: 'Yes or no branch', text: 'Asks Jev a yes or no question about the last summary, or looks for some text in it, and sends the run one way or the other. No agent, no cost beyond Jev’s answer.',
+      stage: { kind: 'branch', id: 'check', role: 'Check', tools: 'none', ask: 'Did the tests fail?' } },
+    { key: 'human', label: 'Ask a person', text: 'Pauses the run and asks you a question. Pick an option or type an answer. If you do not answer in time, the default is taken.',
+      stage: { kind: 'human', id: 'ask', role: 'You', tools: 'none', question: 'Should the run go ahead?', options: ['Yes', 'No'], defaultOption: 'No', timeoutMinutes: 60 } },
   ];
 
   /** The stage a checking stage inserted at position `at` sends FAIL to: the nearest earlier stage that does the work, else the one just before it. */
@@ -107,7 +150,7 @@
 
   /** A saved template from a stage: its settings without its place in a run. */
   function toTemplate(s, label) {
-    const { retryTo, ...rest } = s;
+    const { retryTo, goto, ...rest } = s;
     const text = String(s.prompt || '').replace(/\s+/g, ' ').trim();
     return { key: `u:${Date.now().toString(36)}`, label, text: text.length > 140 ? `${text.slice(0, 137)}...` : text, stage: { ...rest, maxSteps: rest.maxSteps || 0, model: rest.model || null, effort: rest.effort || null } };
   }
@@ -119,7 +162,25 @@
     const first = i === 0;
     const last = i === stages.length - 1;
     const after = last ? 'Its finish summary is the run’s result.' : `Its finish summary is handed to ${stages[i + 1].role}.`;
+    const where = (key) => {
+      const to = s.goto?.[key];
+      if (!to) return `goes on to ${last ? 'the finish' : stages[i + 1].role}`;
+      if (to === 'end') return 'ends the run';
+      return `goes to ${stages.find((t) => t.id === to)?.role || to}`;
+    };
+    if (s.kind === 'branch') {
+      lines.push(`${s.role} answers yes or no, without an agent: ${s.ask ? `Jev is asked “${s.ask}” about the last summary` : `it looks for “${s.contains}” in the last summary`}. Yes ${where('yes')}; no ${where('no')}.`);
+      return lines;
+    }
+    if (s.kind === 'human') {
+      const picks = s.options.length ? `The person picks one of ${s.options.map((o) => `“${o}”`).join(', ')}.` : 'The person types an answer.';
+      const fallback = s.defaultOption ? `If nobody answers in ${s.timeoutMinutes} minutes, “${s.defaultOption}” is taken.` : `If nobody answers in ${s.timeoutMinutes} minutes, the run goes on with an empty answer.`;
+      lines.push(`${s.role} pauses the run and asks “${s.question}”. ${picks} ${fallback}`);
+      if (s.options.length) lines.push(s.options.map((o) => `“${o}” ${where(o)}.`).join(' '));
+      return lines;
+    }
     lines.push(`${s.role} ${TOOLS[s.tools]?.text || 'uses the tools set'}. ${first ? 'It starts the run.' : `It starts once ${stages[i - 1].role} has finished.`} ${after}`);
+    if (s.verdict && s.goto?.PASS) lines.push(`If its summary starts with PASS it ${where('PASS')}.`);
     if (s.verdict) {
       const target = stages.find((t) => t.id === s.retryTo);
       lines.push(target
@@ -132,6 +193,22 @@
     if (s.maxSteps) lines.push(`It may make at most ${s.maxSteps} model calls.`);
     if (s.diff) lines.push('It is given the working diff, so it can judge the changes directly.');
     return lines;
+  }
+
+  /** Renaming a stage also updates the retry lines and goto choices that name it. */
+  function renameStage(stages, i, newId) {
+    const old = stages[i].id;
+    return followRename(stages.map((s, k) => (k === i ? { ...s, id: newId } : s)), old, newId);
+  }
+
+  /** The list without stage i, with every goto and retry that pointed at it cleared. */
+  function dropStage(stages, i) {
+    const old = stages[i].id;
+    const rest = stages.filter((_, k) => k !== i).map((s) => {
+      const goto = Object.fromEntries(Object.entries(s.goto || {}).filter(([, v]) => v !== old));
+      return { ...s, goto, retryTo: s.retryTo === old ? null : s.retryTo };
+    });
+    return rest;
   }
 
   /** The stages a Verifier may send work back to: itself or one before it. */
@@ -149,12 +226,6 @@
     return next.map((s, k) => (s.retryTo && !next.slice(0, k).some((t) => t.id === s.retryTo) ? { ...s, retryTo: null } : s));
   }
 
-  /** Renaming a stage also updates the retry lines that name it. */
-  function renameStage(stages, i, newId) {
-    const old = stages[i].id;
-    return stages.map((s, k) => (k === i ? { ...s, id: newId } : s.retryTo === old ? { ...s, retryTo: newId } : s));
-  }
-
   /** Problems that would stop the file from loading, in words for the page. Mirrors utils/workflows.js. */
   function problems(w) {
     const out = [];
@@ -168,7 +239,16 @@
       else if (seen.has(s.id)) out.push(`${label}: the id ${s.id} is used by another stage.`);
       seen.add(s.id);
       if (!String(s.role || '').trim()) out.push(`Stage ${i + 1}: give it a role name.`);
-      if (!String(s.prompt || '').trim()) out.push(`${label}: write what the stage should do.`);
+      if (!isAgent(s) ? false : !String(s.prompt || '').trim()) out.push(`${label}: write what the stage should do.`);
+      if (s.kind === 'branch' && Boolean(s.ask) === Boolean(s.contains)) out.push(`${label}: a yes or no stage needs either a question for Jev or some text to look for, not both.`);
+      if (s.kind === 'human') {
+        if (!String(s.question || '').trim()) out.push(`${label}: write the question for the person.`);
+        if (s.options.length && s.defaultOption && !s.options.includes(s.defaultOption)) out.push(`${label}: the default answer must be one of its options.`);
+      }
+      for (const [key, to] of Object.entries(s.goto || {})) {
+        if (!outcomesFor(s).some((o) => o.key === key)) out.push(`${label}: “${key}” is not an outcome of this stage.`);
+        else if (to !== 'end' && !w.stages.some((t) => t.id === to)) out.push(`${label}: the stage it goes to for ${key} is gone.`);
+      }
       if (s.canWait && !s.model) out.push(`${label}: a batch stage needs a model.`);
       if (s.retryTo && !retryChoices(w.stages, i).some((t) => t.id === s.retryTo)) out.push(`${label}: pick this stage or an earlier one to send FAIL back to.`);
       if (s.retryTo && !s.verdict) out.push(`${label}: only a stage that says PASS or FAIL can send work back.`);
@@ -176,7 +256,7 @@
     return out;
   }
 
-  const api = { TOOLS, EFFORTS, TEMPLATES, STAGE_TEMPLATES, retryTarget, fromTemplate, insertStage, toTemplate, stage, uniqueId, slug, explain, retryChoices, moveStage, renameStage, problems, ID_RE };
+  const api = { TOOLS, EFFORTS, TEMPLATES, STAGE_TEMPLATES, KIND_NAMES, isAgent, retryTarget, fromTemplate, insertStage, toTemplate, stage, uniqueId, slug, explain, retryChoices, moveStage, renameStage, dropStage, outcomesFor, cleanGoto, problems, ID_RE };
   if (typeof module === 'object' && module.exports) module.exports = api;
   root.WorkflowsModel = api;
 })(typeof window !== 'undefined' ? window : globalThis);

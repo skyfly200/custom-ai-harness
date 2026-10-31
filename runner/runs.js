@@ -206,8 +206,9 @@ class RunManager {
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoResumeMs = 5000, autoDebug = false, sandbox = 'local', shipper = null, hosted = false, token = '', limits = {}, github = gitHub }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoResumeMs = 5000, autoDebug = false, sandbox = 'local', shipper = null, hosted = false, token = '', limits = {}, github = gitHub, minuteMs = 60 * 1000 }) {
         this.pollMs = pollMs;
+        this.minuteMs = minuteMs; // one minute of a person's answer timeout (a test can shorten it)
         this.gitHub = github; // the GitHub calls (clone, push, create); a test can stand in for it
         this.autoResumeMs = autoResumeMs; // how long after its sandbox ended an auto-continue run starts again
         this.batchPollMs = batchPollMs; // how often a waiting batch stage asks whether its batch is done
@@ -1526,14 +1527,17 @@ class RunManager {
     }
 
     /**
-     * Run a workflow's stages in order in one sandbox. Each stage is its own
-     * agent loop with its own prompt, tools and effort, and gets the earlier
-     * stages' summaries. A verdict stage that says FAIL sends the run back to
-     * its retryTo stage (maxRetries times), with what was wrong.
+     * Run a workflow's stages in one sandbox, in order unless a stage sends the run
+     * somewhere else. Each agent stage is its own agent loop with its own prompt,
+     * tools and effort, and gets the earlier stages' summaries. A verdict stage that
+     * says FAIL sends the run back to its retryTo stage (maxRetries times), with what
+     * was wrong. A branch answers yes or no, and a human stage waits for a person;
+     * a stage's goto says which stage runs next for each outcome, or "end".
      */
     async runStages({ run, live, sandbox, workflow, context, deadline, nextN }) {
         const notes = [];
         const retries = {};
+        const visits = {};
         // a retry or a debug run is told what the attempt before it got wrong, and a part
         // carried on from one that ran out of steps or time is told where that part got to
         const brief = !run.briefGiven ? [moreReposBrief(run), run.agent ? this.agentBrief(run) : '', run.debugOf ? this.brief(run.debugOf) : String(run.resumeNote || '')].filter(Boolean).join('\n\n') : '';
@@ -1545,48 +1549,156 @@ class RunManager {
                 ? `Overnight run: ${waiting} step${waiting === 1 ? '' : 's'} with no tools will wait for a half-price batch (up to a day). Steps with tools run as they go.`
                 : 'Overnight run, but no step here can wait for a batch (it needs no tools and a batch model), so every step runs now.' });
         }
-        for (let i = 0; i < workflow.stages.length; i++) {
+        let i = 0;
+        while (i < workflow.stages.length) {
             const stage = workflow.stages[i];
-            run.stage = stage.id;
-            this.event(run, { type: 'stage', stage: stage.id, role: stage.role, text: `Stage ${i + 1} of ${workflow.stages.length}: ${stage.role}` });
-            const tools = makeTools({
-                sandbox, toolset: run.plan ? 'read' : stage.tools,
-                check: (kind, text) => this.guard(kind, text, run),
-                approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
-                editable: run.editable ? editableMatcher(run.editable) : null,
-                headroom: run.headroom?.on ? headroomServer : null,
-                onCompress: (c) => this.headroomSaved(run, c),
-            });
-            const handoff = notes.map((n) => `## ${n.role} (${n.stage})\n${n.summary}`).join('\n\n');
-            // the stage's effort replaces the run's only when the person set none
-            const stageEffort = run.effort || stage.effort || null;
-            if (this.waitsAsBatch(run, stage)) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageEffort, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
-            else outcome = await runAgent({
-                run: { goal: run.goal, softSteps: run.softSteps, maxSteps: Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity) === Infinity ? 0 : Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity), deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
-                tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
-                firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
-                chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
-            });
-            if (outcome.status === 'out_of_steps') run.partialSummary = outcome.summary;
-            if (run.headroom?.on && !run.headroom.compressions) run.headroom.note = headroomServer.error;
-            notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
-            if (outcome.status !== 'finished') break;
-            if (stage.verdict && /^\W*FAIL/i.test(outcome.summary)) {
-                retries[stage.id] = (retries[stage.id] || 0) + 1;
-                if (retries[stage.id] <= stage.maxRetries) {
-                    this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo} (round ${retries[stage.id] + 1} of ${stage.maxRetries + 1}).` });
-                    if (escalation.canClimb(run, stageEffort)) this.escalate(run, stageEffort, `${stage.role} said FAIL`);
-                    i = workflow.stages.findIndex((s) => s.id === stage.retryTo) - 1;
-                    continue;
-                }
-                this.event(run, { type: 'note', text: `${stage.role} still says FAIL after ${stage.maxRetries + 1} round${stage.maxRetries ? 's' : ''}; stopping here for a person to look.` });
-                outcome = { status: 'incomplete', summary: outcome.summary };
+            visits[stage.id] = (visits[stage.id] || 0) + 1;
+            if (visits[stage.id] > workflows.MAX_VISITS) {
+                this.event(run, { type: 'note', text: `${stage.role} has run ${workflows.MAX_VISITS} times in this run; stopping here for a person to look, so a loop cannot go on.` });
+                outcome = { status: 'incomplete', summary: notes.at(-1)?.summary || '' };
                 break;
             }
+            run.stage = stage.id;
+            this.event(run, { type: 'stage', stage: stage.id, role: stage.role, text: `Stage ${i + 1} of ${workflow.stages.length}: ${stage.role}` });
+            // the outcome a goto can route on: PASS or FAIL, yes or no, a person's option; null when the stage has none
+            let key = null;
+            if (stage.kind === 'branch') {
+                const got = await this.runBranchStage({ run, live, stage, notes });
+                notes.push({ stage: stage.id, role: stage.role, summary: got.summary });
+                key = got.outcome;
+                outcome = { status: 'finished', summary: got.summary };
+            } else if (stage.kind === 'human') {
+                const got = await this.runHumanStage({ run, live, stage });
+                if (got.status !== 'finished') { outcome = got; break; }
+                const summary = `${stage.role}: the person answered "${got.answer}".`;
+                notes.push({ stage: stage.id, role: stage.role, summary });
+                key = got.answer;
+                outcome = { status: 'finished', summary };
+            } else {
+                const tools = makeTools({
+                    sandbox, toolset: run.plan ? 'read' : stage.tools,
+                    check: (kind, text) => this.guard(kind, text, run),
+                    approve: (info) => (live.stopped ? Promise.resolve(false) : this.waitForApproval(run, live, info)),
+                    editable: run.editable ? editableMatcher(run.editable) : null,
+                    headroom: run.headroom?.on ? headroomServer : null,
+                    onCompress: (c) => this.headroomSaved(run, c),
+                });
+                const handoff = notes.map((n) => `## ${n.role} (${n.stage})\n${n.summary}`).join('\n\n');
+                // the stage's effort replaces the run's only when the person set none
+                const stageEffort = run.effort || stage.effort || null;
+                if (this.waitsAsBatch(run, stage)) outcome = await this.runWaitStage({ run, live, sandbox, stage, stageEffort, context: `${context}${brief ? `\n\n${brief}` : ''}`, handoff, nextN });
+                else outcome = await runAgent({
+                    run: { goal: run.goal, softSteps: run.softSteps, maxSteps: Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity) === Infinity ? 0 : Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity), deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
+                    tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
+                    firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
+                    chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
+                });
+                if (outcome.status === 'out_of_steps') run.partialSummary = outcome.summary;
+                if (run.headroom?.on && !run.headroom.compressions) run.headroom.note = headroomServer.error;
+                notes.push({ stage: stage.id, role: stage.role, summary: outcome.summary });
+                if (outcome.status !== 'finished') break;
+                if (stage.verdict) key = /^\W*FAIL/i.test(outcome.summary) ? 'FAIL' : 'PASS';
+                if (key === 'FAIL' && !(stage.goto && stage.goto.FAIL)) {
+                    retries[stage.id] = (retries[stage.id] || 0) + 1;
+                    if (retries[stage.id] <= stage.maxRetries) {
+                        this.event(run, { type: 'note', text: `${stage.role} said FAIL; going back to ${stage.retryTo} (round ${retries[stage.id] + 1} of ${stage.maxRetries + 1}).` });
+                        if (escalation.canClimb(run, stageEffort)) this.escalate(run, stageEffort, `${stage.role} said FAIL`);
+                        i = workflow.stages.findIndex((s) => s.id === stage.retryTo);
+                        continue;
+                    }
+                    this.event(run, { type: 'note', text: `${stage.role} still says FAIL after ${stage.maxRetries + 1} round${stage.maxRetries ? 's' : ''}; stopping here for a person to look.` });
+                    outcome = { status: 'incomplete', summary: outcome.summary };
+                    break;
+                }
+            }
+            // where the goto of this outcome sends the run; an outcome with no goto goes on to the next stage
+            const target = key !== null && stage.goto?.[key] !== undefined ? stage.goto[key] : null;
+            if (target === workflows.END) break;
+            if (target) {
+                this.event(run, { type: 'note', text: `${stage.role} → ${workflow.stages.find((s) => s.id === target)?.role || target}${key === null ? '' : ` (${key})`}.` });
+                i = workflow.stages.findIndex((s) => s.id === target);
+                continue;
+            }
+            i += 1;
         }
         run.stage = null;
         if (workflow.stages.length > 1) outcome.summary = notes.map((n) => `${n.role}: ${n.summary}`).join('\n\n');
         return outcome;
+    }
+
+    /**
+     * A branch stage: no agent, no tools. With `contains`, yes when the last summary
+     * has that text (any case). With `ask`, Jev is asked that question about the last
+     * summary and yes is 50% or more. If Jev cannot answer, the outcome is null and the
+     * run goes on to the next stage, with a note.
+     */
+    async runBranchStage({ run, stage, notes }) {
+        const last = notes.at(-1)?.summary || '';
+        const emit = (e) => this.event(run, { ...e, stage: stage.id });
+        if (stage.contains) {
+            const yes = last.toLowerCase().includes(stage.contains.toLowerCase());
+            emit({ type: 'note', text: `${yes ? 'Yes' : 'No'}: the last summary ${yes ? 'contains' : 'does not contain'} "${stage.contains}".` });
+            return { outcome: yes ? 'yes' : 'no', summary: `${stage.role}: ${yes ? 'yes' : 'no'}, the last summary ${yes ? 'contains' : 'does not contain'} "${stage.contains}".` };
+        }
+        try {
+            const got = await this.askJev(run, last || run.goal, stage.ask);
+            const outcome = got.answer ? 'yes' : 'no';
+            emit({ type: 'note', text: `Jev says ${outcome} (${Math.round((got.score ?? 0) * 100)}%): ${stage.ask}` });
+            return { outcome, summary: `${stage.role}: ${outcome} (Jev, ${Math.round((got.score ?? 0) * 100)}%). ${stage.ask}` };
+        } catch (err) {
+            emit({ type: 'note', text: `Jev could not answer "${stage.ask}" (${short(err.message, 160)}); the run goes on to the next stage.` });
+            return { outcome: null, summary: `${stage.role}: Jev could not answer, so the run went on to the next stage.` };
+        }
+    }
+
+    /** Jev's yes/no answer about a text, through the Interceptor's /v1/jev/ask (the same one the file tools use). */
+    async askJev(run, text, question) {
+        const headers = { 'content-type': 'application/json', ...this.authHeaders(run.owner) };
+        const res = await fetch(`${this.harnessUrl}/v1/jev/ask`, { method: 'POST', headers, body: JSON.stringify({ text: String(text).slice(-20000), question, mode: 'bool' }), signal: AbortSignal.timeout(120000) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || typeof body.answer !== 'boolean') throw new Error(body.error || `HTTP ${res.status}`);
+        return body;
+    }
+
+    /**
+     * A human stage: the run waits (status waiting, with the question as its pending
+     * item, on the Runs page and in notifications) until the person answers, the
+     * default is taken when timeoutMinutes pass, or the run is stopped.
+     */
+    runHumanStage({ run, live, stage }) {
+        const minutes = stage.timeoutMinutes || 60;
+        return new Promise((resolve) => {
+            let timer = null;
+            const settle = (answer, why) => {
+                clearTimeout(timer);
+                live.answer = null;
+                run.pending = null;
+                if (answer === null) return resolve({ status: 'stopped', summary: 'Stopped by a person.' });
+                run.status = 'running';
+                this.event(run, { type: 'answer', stage: stage.id, text: answer, why });
+                resolve({ status: 'finished', answer });
+            };
+            live.answer = (text) => settle(text, text === null ? 'stopped' : 'answered');
+            timer = setTimeout(() => settle(stage.defaultOption ?? '', `no answer in ${minutes} minute${minutes === 1 ? '' : 's'}, so the default was taken`), minutes * this.minuteMs);
+            run.pending = { kind: 'question', text: stage.question, options: stage.options, defaultOption: stage.defaultOption, stage: stage.id, minutes, at: new Date().toISOString() };
+            run.status = 'waiting';
+            this.event(run, { type: 'question_needed', stage: stage.id, text: stage.question, options: stage.options, minutes });
+        });
+    }
+
+    /** A person's answer to a human stage: one of its options (any case), or any text when it has none. */
+    answer(id, text) {
+        const live = this.live.get(id);
+        const pending = this.get(id)?.pending;
+        if (!live?.answer || pending?.kind !== 'question') throw new Error('nothing is waiting for an answer');
+        let answer = String(text ?? '').trim();
+        if (pending.options?.length) {
+            const hit = pending.options.find((o) => o.toLowerCase() === answer.toLowerCase());
+            if (!hit) throw new Error(`answer with one of: ${pending.options.join(', ')}`);
+            answer = hit;
+        } else if (!answer) throw new Error('write an answer');
+        if (answer.length > 4000) throw new Error('the answer is longer than 4000 characters');
+        live.answer(answer);
     }
 
     /**
@@ -1704,6 +1816,7 @@ class RunManager {
         if (!live) throw new Error('this run is not running');
         live.stopped = true;
         live.resolve?.(false);
+        live.answer?.(null);
         live.sandbox?.stop();
     }
 

@@ -240,6 +240,10 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     app.post('/runs/:id/approve', (req, res) => {
         try { manager.approve(req.params.id, req.body?.allow === true); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }
     });
+    // A person's answer to a human stage of a workflow (one of its options, or text when it has none)
+    app.post('/runs/:id/answer', (req, res) => {
+        try { manager.answer(req.params.id, req.body?.answer); res.json({ ok: true }); } catch (err) { fail(res, err, /nothing is waiting/.test(err.message) ? 409 : 400); }
+    });
     app.post('/runs/:id/stop', (req, res) => {
         try { manager.stop(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }
     });

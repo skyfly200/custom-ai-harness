@@ -43,13 +43,17 @@ const fakeGit = {
     },
     openPullRequest: async ({ dir: d, branch, token, title, body, base }) => { calls.push({ what: 'pr', dir: d, branch, token, title, body, base }); return { number: 7, url: 'https://github.com/o/r/pull/7', base: base || 'main', pushed: { branch, url: 'u', compare: 'c' } }; },
     pushBranch: async ({ dir: d, branch, token }) => { calls.push({ what: 'push', dir: d, branch, token }); return { branch, url: `https://github.com/o/r/tree/${branch}`, compare: 'c' }; },
+    // new apps: the person's GitHub repo is made (no network) and its first commit is pushed
+    createRepo: async ({ name, token }) => { calls.push({ what: 'create', name, token }); return { owner: 'dee', name, url: `https://github.com/dee/${name}` }; },
+    pushDefault: async ({ dir: d, token }) => { calls.push({ what: 'pushDefault', dir: d, token }); },
+    refreshClone: async ({ dir: d, token }) => { calls.push({ what: 'refresh', dir: d, token }); },
 };
 
 let manager, server, url;
 test.before(async () => {
     fs.mkdirSync(reposBase, { recursive: true });
     // maxRuns 0: runs are accepted and stay queued; nothing starts a sandbox
-    manager = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposBase], maxRuns: 0, hosted: true, token: 'tok', limits: { perUser: 2, maxMinutes: 20, defaultCost: 1.5 } });
+    manager = new RunManager({ dir: path.join(dir, 'runs'), roots: [reposBase], maxRuns: 0, hosted: true, token: 'tok', sandbox: 'e2b', limits: { perUser: 2, maxMinutes: 20, defaultCost: 1.5 }, github: fakeGit });
     // the runner only answers to its own host name, so find a free port first
     const probe = http.createServer();
     await new Promise((r) => probe.listen(0, '127.0.0.1', r));
@@ -157,10 +161,66 @@ test('agents belong to their owner too', async () => {
     assert.equal((await task.json()).owner, 'gus');
 });
 
-test('local-only features are off: browse, tickets, making apps, previews', async () => {
+test('local-only features are off: browse, tickets, app settings, previews', async () => {
     for (const p of ['/runs/browse', '/tickets/read']) assert.equal((await call('ann', 'GET', p)).status, 404, p);
-    assert.equal((await call('ann', 'POST', '/apps/new', { name: 'X' })).status, 404);
     assert.equal((await call('ann', 'PATCH', '/apps/nope', { name: 'X' })).status, 404);
+    assert.equal((await call('ann', 'POST', '/apps', { name: 'X', repo: '/etc' })).status, 404);
+    assert.equal((await call('ann', 'POST', '/apps/nope/proposals', { kind: 'error' })).status, 404);
+});
+
+test('a new app on a shared server: a GitHub repo in the person\'s own folder, made with their token', async () => {
+    const local = await call('dee', 'POST', '/apps/new', { template: 'web-app', name: 'Board', github: { mode: 'local' }, build: false });
+    assert.equal(local.status, 400);
+    assert.match((await local.json()).error, /needs a GitHub repo/);
+    // a folder the person names is ignored here: the app goes in their own folder
+    const res = await call('dee', 'POST', '/apps/new', { template: 'web-app', name: 'Board', parent: '/etc', build: false, github: { mode: 'create', repo: 'board' } }, { 'x-runner-github-token': 'dee-token' });
+    assert.equal(res.status, 201);
+    const { app, run, buildError } = await res.json();
+    assert.equal(run, null);
+    assert.equal(buildError, null);
+    assert.equal(app.owner, 'dee');
+    assert.equal(app.githubRepo, 'dee/board');
+    assert.equal(app.baseBranch, 'main');
+    assert.ok(app.repo.startsWith(github.personDir(reposBase, 'dee') + path.sep), app.repo);
+    assert.ok(fs.existsSync(path.join(app.repo, '.git')));
+    assert.ok(calls.some((c) => c.what === 'create' && c.token === 'dee-token'));
+    assert.ok(calls.some((c) => c.what === 'pushDefault' && c.token === 'dee-token'));
+    // an app is only ever seen by its owner
+    assert.equal((await call('bob', 'GET', `/apps/${app.id}`)).status, 404);
+});
+
+test('a change to a shared-server app starts from GitHub\'s latest, runs for its owner, and is refused to others', async () => {
+    const { apps } = await (await call('dee', 'GET', '/apps')).json();
+    const app = apps.find((a) => a.name === 'Board');
+    assert.ok(app);
+    const ch = await call('dee', 'POST', `/apps/${app.id}/changes`, { request: 'add a title' }, { 'x-runner-github-token': 'dee-token' });
+    assert.equal(ch.status, 201);
+    const { id } = await ch.json();
+    assert.ok(calls.some((c) => c.what === 'refresh' && c.dir === app.repo && c.token === 'dee-token'));
+    assert.equal((await (await call('dee', 'GET', `/runs/${id}`)).json()).owner, 'dee');
+    assert.equal((await call('bob', 'POST', `/apps/${app.id}/changes`, { request: 'x' })).status, 404);
+    assert.equal((await call('bob', 'DELETE', `/apps/${app.id}`, {})).status, 404);
+    // page-error proposals stay off on a shared server
+    assert.equal((await call('dee', 'POST', `/apps/${app.id}/proposals`, { kind: 'error', note: 'boom' })).status, 404);
+});
+
+test('ship on a shared server uses the person\'s token, never the server\'s; without one it says to connect GitHub', async () => {
+    const { Shipper, verdict } = require('../runner/ship');
+    assert.equal(typeof verdict, 'function');
+    const seen = [];
+    const shipper = new Shipper({ token: 'server-token', api: 'https://api.test', fetchImpl: async (url, opts) => { seen.push(opts.headers.authorization); return new Response('{}', { status: 200 }); } });
+    await shipper.gh('GET', '/x', undefined, 'ann-token');
+    assert.equal(seen.at(-1), 'Bearer ann-token');
+    await shipper.gh('GET', '/x');
+    assert.equal(seen.at(-1), 'Bearer server-token');
+    await assert.rejects(shipper.gh('GET', '/x', undefined, ''), /connect GitHub to ship/);
+});
+
+test('refreshClone: fetches with the token for that one command and only moves a fast-forward', async () => {
+    const seen = [];
+    await github.refreshClone({ dir: '/x', token: 't', git: async (args, opts) => { seen.push({ cmd: args[0], token: opts.token }); return ''; } });
+    assert.deepEqual(seen.map((s) => s.cmd), ['fetch', 'merge']);
+    assert.ok(seen.every((s) => s.token === 't'));
 });
 
 test('apps on a shared server: import only from GitHub, and each person sees their own apps', async () => {

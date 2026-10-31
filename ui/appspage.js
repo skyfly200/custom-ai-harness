@@ -123,11 +123,16 @@
     try {
       const r = await (await fetch('/ui/api/runs/repos', { credentials: 'same-origin' })).json();
       $('#roots').innerHTML = (r.roots || []).map((p) => `<option value="${esc(p)}">`).join('');
-      // a shared server cannot read folders on someone's computer: only a GitHub repo can be imported there
+      // a shared server cannot read folders on someone's computer: only a GitHub repo can be imported or made there
       if (r.hosted) {
         document.querySelector('#importForm input[name=source][value=local]').closest('label').hidden = true;
         importForm().elements.source.value = 'github';
         paintImportSrc();
+        const nf = $('#newForm');
+        nf.querySelector('input[name=repoMode][value=local]').closest('label').hidden = true;
+        nf.querySelector('input[name=repoMode][value=create]').checked = true;
+        nf.elements.parent.closest('label').hidden = true;
+        paintRepoMode();
       }
     } catch { /* the server picks the folder */ }
   }
@@ -183,7 +188,7 @@
     btn.disabled = true;
     msg.textContent = 'Making the folder…';
     try {
-      const { app, run } = await api('POST', '/new', {
+      const { app, run, buildError } = await api('POST', '/new', {
         template: t.id, name: f.elements.name.value, description: f.elements.description.value,
         parent: f.elements.parent.value.trim() || undefined, answers, build: f.elements.build.checked,
         github: repoChoice(f), deployTarget: f.elements.deployTarget.value, database: f.elements.database.value,
@@ -191,6 +196,7 @@
       if (run) { location.href = `agents.html#${run.id}`; return; }
       $('#newDialog').close();
       ui.toast(`${app.name} is ready${app.githubRepo ? `, and its GitHub repo is ${app.githubRepo}` : ` in ${app.repo}`}.`);
+      if (buildError) ui.toast(`The first version did not start: ${buildError}`, { kind: 'error' });
       loadApps();
     } catch (err) {
       msg.textContent = err.message;

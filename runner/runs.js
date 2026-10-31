@@ -206,8 +206,9 @@ class RunManager {
      * dir: where runs are kept. roots: folders repos may be in.
      * harnessUrl/password: the Interceptor, for model calls and the guard.
      */
-    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoResumeMs = 5000, autoDebug = false, sandbox = 'local', shipper = null, hosted = false, token = '', limits = {} }) {
+    constructor({ dir, roots, harnessUrl = 'http://localhost:3000', password = '', maxRuns = 2, retryDelayMs = 3000, pollMs = 1000, batchPollMs = Number(process.env.RUNNER_BATCH_POLL_MS) || 30000, autoResumeMs = 5000, autoDebug = false, sandbox = 'local', shipper = null, hosted = false, token = '', limits = {}, github = gitHub }) {
         this.pollMs = pollMs;
+        this.gitHub = github; // the GitHub calls (clone, push, create); a test can stand in for it
         this.autoResumeMs = autoResumeMs; // how long after its sandbox ended an auto-continue run starts again
         this.batchPollMs = batchPollMs; // how often a waiting batch stage asks whether its batch is done
         this.dir = dir;
@@ -758,7 +759,7 @@ class RunManager {
         const message = `Merge ${run.branch}: ${run.goal.split('\n')[0].slice(0, 60)}`;
         try {
             const out = this.hosted
-                ? await gitHub.landRemote({ dir: run.repo, branch: run.branch, into: run.landOn, mode: run.landing, title: message, token: this.landTokens.get(run.id) })
+                ? await this.gitHub.landRemote({ dir: run.repo, branch: run.branch, into: run.landOn, mode: run.landing, title: message, token: this.landTokens.get(run.id) })
                 : { sha: await landings.landLocal({ repo: run.repo, branch: run.branch, into: run.landOn, mode: run.landing, message }) };
             run.landed = { ok: true, mode: run.landing, into: run.landOn, sha: out.sha, url: out.url || null, pr: out.pr || null, at: stamp };
             this.event(run, { type: 'note', text: `${run.landing === 'main' ? 'Put straight onto' : 'Merged into'} ${run.landOn} (${out.sha.slice(0, 10)}).${out.url ? ` ${out.url}` : ''}` });
@@ -979,7 +980,7 @@ class RunManager {
             return;
         }
         try {
-            const out = await gitHub.updatePullBranch({ dir: run.repo, branch: run.branch, pr: prWatch.prRefOf(root), token: this.tokenFor(root) });
+            const out = await this.gitHub.updatePullBranch({ dir: run.repo, branch: run.branch, pr: prWatch.prRefOf(root), token: this.tokenFor(root) });
             root.prUpdated = { ...out, at: new Date().toISOString() };
             this.event(run, { type: 'note', text: `Put the fix on pull request #${out.number} (${out.branch}). It is not merged.` });
             this.save(root);
@@ -1029,12 +1030,17 @@ class RunManager {
      * { mode: 'create', repo: 'name' } (a new private repo on the person's account) or { mode: 'existing', repo:
      * 'owner/name' } (an empty repo on GitHub, cloned into the folder). `token` is the person's GitHub token here.
      */
-    async newApp({ template, name, description, answers = {}, parent, build = true, github = {}, deployTarget, database, token = '' } = {}) {
+    async newApp({ template, name, description, answers = {}, parent, build = true, github = {}, deployTarget, database, token = '', owner = '' } = {}) {
         const t = templates.loadTemplate(String(template || ''));
         const mode = String(github?.mode || 'local');
         if (!['local', 'create', 'existing'].includes(mode)) throw new Error('the repo must be local, create or existing');
+        // on a shared server the app lives in its owner's folder, and its repo is on GitHub: a folder here would be shared
+        if (this.hosted) {
+            if (!owner) throw new Error('a hosted app needs an owner');
+            if (mode === 'local') throw new Error('on a shared server a new app needs a GitHub repo: create one, or use an empty repo you own');
+        }
         const hostingChoice = { deployTarget: hosting.targetId(deployTarget), database: hosting.databaseId(database) };
-        const dir = String(parent || this.roots[0] || '');
+        const dir = this.hosted ? this.personRoot(owner) : String(parent || this.roots[0] || '');
         let real;
         try { real = fs.realpathSync(dir); } catch { throw new Error(`${dir || 'the folder'} does not exist`); }
         if (!this.roots.some((r) => real === r || real.startsWith(r + path.sep))) {
@@ -1049,9 +1055,9 @@ class RunManager {
         let githubRepo = null;
         let remote = null;
         if (mode === 'existing') {
-            const repo = gitHub.parse(github.repo);
+            const repo = this.gitHub.parse(github.repo);
             if (fs.existsSync(folder) && fs.readdirSync(folder).length) throw new Error(`${folder} is not empty`);
-            await gitHub.cloneRepo({ owner: repo.owner, name: repo.name, dir: folder, token: gitToken });
+            await this.gitHub.cloneRepo({ owner: repo.owner, name: repo.name, dir: folder, token: gitToken });
             if (fs.readdirSync(folder).some((f) => f !== '.git')) {
                 fs.rmSync(folder, { recursive: true, force: true });
                 throw new Error(`${repo.owner}/${repo.name} already has files: use an empty repo, or create a new one`);
@@ -1059,7 +1065,7 @@ class RunManager {
             githubRepo = `${repo.owner}/${repo.name}`;
             git('symbolic-ref', 'HEAD', 'refs/heads/main');
         } else if (mode === 'create') {
-            const made = await gitHub.createRepo({ name: String(github.repo || slug), token: gitToken });
+            const made = await this.gitHub.createRepo({ name: String(github.repo || slug), token: gitToken });
             githubRepo = `${made.owner}/${made.name}`;
             remote = `https://github.com/${githubRepo}.git`;
         }
@@ -1070,15 +1076,27 @@ class RunManager {
         if (remote) git('remote', 'add', 'origin', remote);
         git('add', '-A');
         git('commit', '-q', '-m', `Start from the ${t.name} template`);
-        if (githubRepo) await gitHub.pushDefault({ dir: folder, token: gitToken });
+        if (githubRepo) await this.gitHub.pushDefault({ dir: folder, token: gitToken });
+        // a GitHub repo's default branch is main (the one newApp pushes); a local app finds its own
         const app = this.createApp({
             name: templates.cleanText(name, 60), repo: folder, editablePaths: t.editablePaths, installCommand: t.installCommand,
             devCommand: t.devCommand, testCommand: t.testCommand, previewPort: t.previewPort, deploy: t.deploy,
-            githubRepo, ...hostingChoice,
+            githubRepo, baseBranch: githubRepo ? 'main' : null, ...hostingChoice, owner: this.hosted ? String(owner) : null,
         });
         const text = templates.cleanText(description, 300);
-        const run = build && text ? this.askChange(app.id, { request: `Build the first version: ${text}` }) : null;
-        return { app, run };
+        // the first version is a change run; on a shared server it can be refused (limits), and the app is still made
+        let run = null;
+        let buildError = null;
+        if (build && text) {
+            try { run = this.askChange(app.id, { request: `Build the first version: ${text}` }); } catch (err) { buildError = err.message; }
+        }
+        return { app, run, buildError };
+    }
+    /** A shared server's folder for one person's repos and apps (made if it is not there yet). */
+    personRoot(owner) {
+        const dir = this.gitHub.personDir(this.roots[0], String(owner));
+        fs.mkdirSync(dir, { recursive: true });
+        return fs.realpathSync(dir);
     }
     /**
      * An existing app, read but not changed: the folder (or a shallow look at a GitHub repo's clone, removed again) and
@@ -1086,10 +1104,10 @@ class RunManager {
      */
     async detectImport({ source = 'local', folder, repo, parent, token = '' } = {}) {
         if (source === 'github') {
-            const spec = gitHub.parse(repo);
+            const spec = this.gitHub.parse(repo);
             const scratch = path.join(this.dir, `_detect-${crypto.randomBytes(4).toString('hex')}`);
             try {
-                await gitHub.cloneRepo({ owner: spec.owner, name: spec.name, dir: scratch, token: String(token || (this.hosted ? '' : process.env.GITHUB_TOKEN || '')) });
+                await this.gitHub.cloneRepo({ owner: spec.owner, name: spec.name, dir: scratch, token: String(token || (this.hosted ? '' : process.env.GITHUB_TOKEN || '')) });
                 return { source, suggestedName: spec.name, ...importDetect.detectFolder(scratch), githubRepo: `${spec.owner}/${spec.name}` };
             } finally {
                 fs.rmSync(scratch, { recursive: true, force: true });
@@ -1123,10 +1141,10 @@ class RunManager {
         if (source === 'github' && this.hosted) {
             // a shared server keeps each person's clones apart; the clone stays even if the import fails, as a repo they can retry
             if (!owner) throw new Error('a hosted import needs an owner');
-            const spec = gitHub.parse(repo);
-            real = await gitHub.ensureClone({ base: this.roots[0], person: String(owner), spec: `${spec.owner}/${spec.name}`, token: String(token || '') });
+            const spec = this.gitHub.parse(repo);
+            real = await this.gitHub.ensureClone({ base: this.roots[0], person: String(owner), spec: `${spec.owner}/${spec.name}`, token: String(token || '') });
         } else if (source === 'github') {
-            const spec = gitHub.parse(repo);
+            const spec = this.gitHub.parse(repo);
             const dir = String(parent || this.roots[0] || '');
             let base;
             try { base = fs.realpathSync(dir); } catch { throw new Error(`${dir || 'the folder'} does not exist`); }
@@ -1135,7 +1153,7 @@ class RunManager {
             if (!slug) throw new Error('an app needs a name with letters or numbers');
             cloned = path.join(base, slug);
             if (fs.existsSync(cloned) && fs.readdirSync(cloned).length) throw new Error(`${cloned} is not empty`);
-            await gitHub.cloneRepo({ owner: spec.owner, name: spec.name, dir: cloned, token: String(token || process.env.GITHUB_TOKEN || '') });
+            await this.gitHub.cloneRepo({ owner: spec.owner, name: spec.name, dir: cloned, token: String(token || process.env.GITHUB_TOKEN || '') });
             real = cloned;
         } else if (source === 'local') {
             real = this.importFolder(folder);
@@ -1206,8 +1224,21 @@ class RunManager {
         ].filter(Boolean).join('\n\n');
         const picked = workflow === null || workflow === undefined || workflow === '' ? 'change-app' : String(workflow);
         if (['swarm', 'chatdev'].includes(picked)) throw new Error('a change runs one workflow: Swarm and ChatDev are for one-off runs');
-        const summary = this.create({ goal, repo: app.repo, workflow: picked, app: app.id, editable: app.editablePaths, test: app.testCommand || undefined, maxMinutes: 30, proposal });
+        if (this.hosted && !app.owner) throw new Error('this app has no owner on the shared server: import it again');
+        const summary = this.create({ goal, repo: app.repo, workflow: picked, app: app.id, editable: app.editablePaths, test: app.testCommand || undefined, maxMinutes: 30, proposal, owner: app.owner || undefined });
         return summary;
+    }
+
+    /**
+     * A change to an app, started from its current GitHub state. On a shared server the clone is brought up to date
+     * first, so the change never starts from old code; if that fails, no run starts (the error says why).
+     */
+    async startChange(appId, body, token = '') {
+        const app = this.apps.get(appId);
+        if (this.hosted && app) {
+            try { await this.gitHub.refreshClone({ dir: app.repo, token: String(token || '') }); } catch (err) { throw new Error(`could not update ${app.name} from GitHub first: ${err.message}`); }
+        }
+        return this.askChange(appId, body);
     }
 
     /**
@@ -1270,24 +1301,27 @@ class RunManager {
     }
 
     /** Merge the change into the app's base branch on GitHub. Only when the verdict allows it. */
-    async shipChange(id) {
+    async shipChange(id, { token } = {}) {
         const { run, app } = this.changeOf(id);
         if (run.ship) throw new Error('this change was already shipped');
         const v = await shipVerdict(run, app.repo);
         if (!v.canShip) throw new Error(`not shipping: ${v.blocked.join('; ')}`);
-        const out = await this.shipper.ship({ run, app, repoDir: app.repo, base: await this.baseBranchOf(app) });
+        const out = await this.shipper.ship({ run, app, repoDir: app.repo, base: await this.baseBranchOf(app), token: this.hostedToken(token) });
         run.ship = { ...out, ...(await this.shipper.deploy(app)) };
         this.event(run, { type: 'note', text: `Shipped: pull request ${out.pr} merged into ${out.base} (${out.url}).` });
         this.save(run);
         return run.ship;
     }
 
+    /** On a shared server, the person's own GitHub token for this request ('' if none), never the server's; locally undefined (use GITHUB_TOKEN). */
+    hostedToken(token) { return this.hosted ? String(token || '') : undefined; }
+
     /** Revert a shipped change with a revert pull request. */
-    async undoChange(id) {
+    async undoChange(id, { token } = {}) {
         const { run, app } = this.changeOf(id);
         if (!run.ship) throw new Error('this change was not shipped');
         if (run.undo) throw new Error('this change was already undone');
-        const out = await this.shipper.undo({ run, app, repoDir: app.repo });
+        const out = await this.shipper.undo({ run, app, repoDir: app.repo, token: this.hostedToken(token) });
         run.undo = { ...out, ...(await this.shipper.deploy(app)) };
         this.event(run, { type: 'note', text: `Undone: revert pull request ${out.pr} merged (${out.url}).` });
         this.save(run);

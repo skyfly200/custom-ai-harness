@@ -3,12 +3,12 @@ checkpoint: routellm/bert_gpt4_augmented
 
 # Gateway (config.yaml) model names the Router picks between.
 # The Interceptor sends the request to the Gateway, which applies the fallback chain.
-strong_model: or-deepseek-v4.1-flash-1017
+strong_model: or-claude-haiku-5.5
 # Hard requests that carry tools (Claude Code, agents) can go to their own
 # model; unset sends them to strong_model. fallback-openrouter-tools is free
 # (NVIDIA Nemotron 3.5 Super VL) and calls tools.
 # strong_model_tools: fallback-openrouter-tools
-weak_model: or-deepseek-v4.1-flash-1017
+weak_model: or-claude-haiku-5.5
 
 # Groq's free tier allows 8K tokens per minute, counting requested output.
 # Weak requests estimated above this go to the overflow model instead
@@ -26,8 +26,8 @@ weak_model: or-deepseek-v4.1-flash-1017
 # Active: TypeSafe's Jev through OpenRouter, with the OPENROUTER_API_KEY from .env.
 # If Jev errors or times out, the Interceptor sends the request to fallback-openrouter.
 backend: systemone
-base_url: https://openrouter.ai/api      # the Router appends /v1/systemone
-api_key_env: OPENROUTER_API_KEY
+base_url: http://127.0.0.1:3000/openrouter-proxy      # the Router appends /v1/systemone
+api_key_env: OPENROUTER_PROXY_KEY
 model: jev-latest                        # or pin a version, e.g. jev-1.13
 max_chars: 2000          # tail of the prompt sent
 timeout: 5               # under the Interceptor's 10 s wait on the Router

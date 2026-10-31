@@ -158,6 +158,17 @@ test('an agent works one task at a time, in the order given', async () => {
     assert.deepEqual(order, ['first', 'second']);
 });
 
+test('a task can pick another workflow than its agent; Swarm and ChatDev are refused', async () => {
+    const agent = manager.listAgents()[0];
+    script = [{ calls: [['finish', { summary: 'Answered.' }]] }];
+    const picked = manager.assign(agent.id, { goal: 'just answer', workflow: 'one-shot' });
+    assert.equal(picked.workflow, 'one-shot');
+    assert.equal((await settle(picked.id)).workflow, 'one-shot');
+    assert.equal(manager.assign(agent.id, { goal: 'keeps its own', workflow: 'agent' }).workflow, agent.workflow);
+    assert.throws(() => manager.assign(agent.id, { goal: 'x', workflow: 'swarm' }), /one workflow/);
+    assert.throws(() => manager.assign(agent.id, { goal: 'x', workflow: 'nope' }), /no workflow named nope/);
+});
+
 test('work the repo has already taken in is not carried again, and a plan task leaves the head alone', async () => {
     const agent = manager.listAgents()[0];
     const head = manager.agents.get(agent.id).head;

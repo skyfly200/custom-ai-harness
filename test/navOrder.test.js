@@ -6,11 +6,24 @@ const nav = require('../ui/nav.js');
 
 const ui = path.join(__dirname, '..', 'ui');
 const read = (f) => fs.readFileSync(path.join(ui, f), 'utf8');
-const pages = ['index', 'chat', 'usage', 'usage-users', 'routing', 'agents', 'prompts', 'tools', 'settings', 'users'];
+const pages = ['index', 'chat', 'apps', 'usage', 'usage-users', 'routing', 'agents', 'workflows', 'prompts', 'skills', 'tools', 'settings', 'users'];
 
-test('the bar keeps one fixed order, with Settings last', () => {
-  assert.deepStrictEqual(nav.PAGES.map((p) => p.label), ['Dashboard', 'Chat', 'Agents', 'Prompts', 'Tools', 'Usage', 'Routing', 'Settings']);
+test('the bar keeps one fixed order, with Settings last and Settings as the gear on desktop', () => {
+  assert.deepStrictEqual(nav.PAGES.map((p) => p.label), ['Dashboard', 'Chat', 'Apps', 'Agents', 'Workflows', 'Prompts', 'Skills', 'Tools', 'Usage', 'Routing', 'Settings']);
   for (const p of nav.PAGES) assert.ok(nav.ICONS[p.id], `icon for ${p.id}`);
+  assert.deepStrictEqual(nav.PAGES.filter((p) => p.iconOnly).map((p) => p.id), ['settings']);
+});
+
+test('desktop shows Chat, Apps and Agents as text and folds the rest under More; the brand is the dashboard', () => {
+  const primary = (me) => nav.primaryLinks(me).map((p) => p.id);
+  const more = (me) => nav.moreLinks(me).map((p) => p.id);
+  assert.deepStrictEqual(primary(null), ['chat', 'apps', 'agents', 'settings']);
+  assert.deepStrictEqual(nav.PAGES.filter((p) => p.inBrand).map((p) => p.id), ['dashboard']);
+  assert.deepStrictEqual(more(null), ['workflows', 'prompts', 'skills', 'tools', 'usage', 'routing']);
+  assert.deepStrictEqual(more({ name: 'u', role: 'user' }), ['workflows', 'prompts', 'skills', 'tools', 'usage', 'routing']);
+  assert.ok(!primary({ name: 'u', role: 'user' }).includes('settings'));
+  // every page is in exactly one of the two groups
+  assert.strictEqual(primary(null).length + more(null).length + 1, nav.linksFor(null).length);
 });
 
 test('every page takes its bar from the shared script, with no copy of the links in the page', () => {
@@ -33,6 +46,7 @@ test('the current page is marked in place, and sub-pages light their parent', ()
   assert.strictEqual(nav.currentId('/ui/usage-users.html'), 'usage');
   assert.strictEqual(nav.currentId('/ui/runs.html'), 'agents');
   assert.strictEqual(nav.currentId('/ui/users.html'), 'users');
+  assert.strictEqual(nav.currentId('/apps'), 'apps');
   assert.strictEqual(nav.currentId('/ui/nowhere.html'), null);
 });
 

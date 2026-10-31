@@ -52,6 +52,7 @@ const credentialTicket = require('./utils/credentialTicket');
 const secrets = require('./utils/secrets');
 const openrouterOAuth = require('./utils/openrouterOAuth');
 const claudeKit = require('./utils/claudeKit');
+const remoteSkills = require('./utils/remoteSkills');
 const localRepoScan = require('./utils/localRepos');
 const repoTools = require('./utils/repoTools');
 const chatShell = require('./utils/chatShell');
@@ -979,6 +980,22 @@ app.get('/ui/api/workflows', (req, res) => {
 app.post('/ui/api/workflows/pick', async (req, res) => {
     res.json(await workflows.pick(String(req.body?.goal || ''), { ask: askRouter }));
 });
+// One workflow in full (prompts included) for the Workflows page editor, and its save, create and delete. Writes are admin-only, like the other controls.
+app.get('/ui/api/workflows/:id', (req, res) => {
+    const w = workflows.get(req.params.id);
+    if (!w) return res.status(404).json({ error: `no workflow named ${req.params.id}` });
+    res.json(workflows.toFile(w));
+});
+const sendWorkflowError = (res, err) => res.status(err.status || 500).json({ error: err.message });
+app.post('/ui/api/workflows', localJsonOnly, (req, res) => {
+    try { res.json(workflows.save(req.body || {}, { id: req.body?.id, isNew: true })); } catch (err) { sendWorkflowError(res, err); }
+});
+app.put('/ui/api/workflows/:id', localJsonOnly, (req, res) => {
+    try { res.json(workflows.save(req.body || {}, { id: req.params.id })); } catch (err) { sendWorkflowError(res, err); }
+});
+app.delete('/ui/api/workflows/:id', localJsonOnly, (req, res) => {
+    try { workflows.remove(req.params.id); res.json({ ok: true }); } catch (err) { sendWorkflowError(res, err); }
+});
 // The task runner makes a run key for an agent run's model calls and revokes it when the run ends
 app.post('/v1/run-keys', localJsonOnly, (req, res) => {
     try { res.json(runKeys.create({ ...(req.body || {}), owner: req.harnessRunner ? req.body?.owner : null })); } catch (err) { res.status(400).json({ error: err.message }); }
@@ -1490,6 +1507,15 @@ app.post('/ui/api/mcp/test', memberOrLocalJson, async (req, res) => {
 
 // Claude Code's commands and skills (.claude in this repo and in the home folder), to import into the chat page
 app.get('/ui/api/claude-kit', localOnly, (req, res) => res.json({ items: claudeKit.list() }));
+
+// Skills from a link (utils/remoteSkills.js): a file, a GitHub repo or folder, or a gist. The page shows them and saves what is picked.
+app.post('/ui/api/skills/remote', memberOrLocalJson, async (req, res) => {
+    try {
+        res.json(await remoteSkills.fetchSkills(req.body?.url));
+    } catch (err) {
+        res.status(err.status || 502).json({ error: err.message });
+    }
+});
 
 // Git repos found on this machine (utils/localRepos.js), for the repo fields. A hosted server answers with none.
 app.get('/ui/api/local-repos', localOnly, (req, res) => res.json(localRepoScan.list(process.env, { fresh: req.query.fresh === '1' })));

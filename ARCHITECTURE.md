@@ -39,13 +39,14 @@ Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Ev
 
 | Page | Files | Purpose |
 |---|---|---|
-| Bright Chat | `chat.html`, `chat.js`, `chat.css`, `markdown.js`, `chatmerge.js`, `schedule.js` | Chats, projects, skills, tools, voice, schedules, cache timers (`cachetimer.js`), imports from Claude Code (`utils/claudeKit.js`) |
+| Bright Chat | `chat.html`, `chat.js`, `chat.css`, `markdown.js`, `chatmerge.js`, `schedule.js` | Chats, projects, skills, tools, voice, schedules, cache timers (`cachetimer.js`), imports from Claude Code (`utils/claudeKit.js`), skills from a link (`utils/remoteSkills.js`) |
 | Dashboard | `index.html` | Health, routing log, recent chats, usage summary, command guard |
 | Routing | `routing.html`, `routing.js`, `autoroute.js`, `touch.js` | Node editor for routings, models, fallbacks, Auto-route (touch: `touch.js`) |
 | Settings | `settings.html` | Interceptor and Router settings, notifications (`notify.js`) |
 | Usage | `usage.html`, `usage.js`, `costs.js`; admins: `usage-users.html`, `usage-users.js`, `userUsage.js` | Cost and savings per layer; your own requests with logins on, everyone's per person for admins |
 | Tools | `tools.html`, `tools.js` | MCP servers, with a guided setup for catalog entries that need a key or folder |
 | Runs, Agents | `runs.html`, `agents.html`, `agents.js`, `agentBoard.js`, `apps.js` | Task runner, agents, in-app apps (`agent-widget.js`) |
+| Apps | `apps.html`, `appspage.js`, `templates/` | The Apps page: your apps, new ones from a template (`runner/templates.js`), and existing repos (`runner/importDetect.js`, Import existing app) |
 | Prompts | `prompts.html`, `prompts.js`, `promptlib.js` (`window.Prompts`, also used by the Agents page) | Saved prompts for agents: variables, versions, starters, "improve" through a model; server side `utils/prompts.js` (`user_data` key `prompts`, or `prompts.json`) |
 | Users | `users.html`, `users.js` | Logins, invites, guests, credentials |
 

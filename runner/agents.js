@@ -15,6 +15,13 @@ const { cleanLanding } = require('./landing');
 const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const clean = (v, n) => String(v ?? '').trim().slice(0, n);
 
+/** Skills the person turned on for this agent: a copy of each (id, name, body), at most 30. A later edit reaches the agent when the Skills page sends the copy again. */
+function cleanSkills(v) {
+    if (v === undefined || v === null || v === '') return [];
+    if (!Array.isArray(v)) throw new Error('skills must be a list');
+    return v.slice(0, 30).map((k) => ({ id: clean(k?.id, 80), name: clean(k?.name, 60), body: String(k?.body ?? '').trim().slice(0, 20000) })).filter((k) => k.id && k.name && k.body);
+}
+
 /** Other repos connected beside the default: names (owner/name, or a folder path), at most 8, no repeats. They are told to the agent, not checked out. */
 function cleanMoreRepos(v, skip = '') {
     if (v === undefined || v === null || v === '') return [];
@@ -111,6 +118,7 @@ class AgentStore {
         }
         // the chat project (they live in the browser) this agent belongs to: its id and name
         if (has('moreRepos')) out.moreRepos = cleanMoreRepos(cfg.moreRepos);
+        if (has('skills')) out.skills = cleanSkills(cfg.skills);
         if (has('project')) {
             const p = cfg.project;
             if (p && (typeof p !== 'object' || !clean(p.id, 80))) throw new Error('project needs an id');
@@ -124,7 +132,7 @@ class AgentStore {
         if (!base.name) throw new Error('an agent needs a name');
         const now = new Date().toISOString();
         const agent = {
-            instructions: '', landing: 'branch', iconSeed: null, iconImage: null, iconText: null, moreRepos: [], profile: null, model: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, autoFixConflicts: false, autoFixMax: null, project: null,
+            instructions: '', landing: 'branch', iconSeed: null, iconImage: null, iconText: null, moreRepos: [], profile: null, model: null, effort: null, sandbox: null, maxSteps: null, maxMinutes: null, maxCost: null, autoContinue: false, autoContinueMax: null, autoFixConflicts: false, autoFixMax: null, project: null, skills: [],
             ...base, id: `a${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`, repo, owner,
             head: null,   // the commit the last finished task left; the next task starts here
             branch: null, // the branch that task is on

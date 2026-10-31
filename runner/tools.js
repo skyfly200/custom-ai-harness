@@ -6,6 +6,9 @@
 'use strict';
 
 const MAX_READ = 16000; // about 4,000 tokens a read; every step sends the earlier reads again
+const RETRIEVE_CHARS = 24000; // a full original fetched back from Headroom, cut here like a read
+// Tools whose output Headroom may shorten (the rest are short, or the model must see them whole)
+const SHRINKABLE = new Set(['run_command', 'read_file']);
 // What a workflow stage may use: read looks only, check also runs commands, all writes too
 const TOOLSETS = {
     read: ['list_files', 'read_file', 'finish'],
@@ -13,6 +16,9 @@ const TOOLSETS = {
     all: ['list_files', 'read_file', 'write_file', 'edit_file', 'run_command', 'finish'],
     none: ['finish'], // no tools: the step answers from what it is given, then calls finish
 };
+// Added when Headroom is on: the full text behind a shortened output, by the hash the shortened text gives
+const RETRIEVE_DEF = { type: 'function', function: { name: 'headroom_retrieve', description: 'Get the full original of a tool output that was shortened. The shortened text says where it was cut, with hash=... ; pass that hash here.',
+    parameters: { type: 'object', properties: { hash: { type: 'string', description: 'The hash from the shortened output' } }, required: ['hash'] } } };
 
 // Every tool but finish takes `why`: a few words, shown live on the run page so a person can tell what
 // the agent is trying to do. It is not needed to run the tool, so a model that leaves it out still works.
@@ -34,16 +40,19 @@ const definitions = [
     { type: 'function', function: { name: 'finish', description: 'Say the task is done, or cannot be done, and summarise what you did and anything the person should check.',
         parameters: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] } } },
 ].map(withWhy);
+const retrieveDefinition = withWhy(RETRIEVE_DEF);
 
 /**
  * `sandbox` is a LocalSandbox or an E2BSandbox (both: resolve, readFile,
  * writeFile, listDir, exec; the file calls may be async). `check(kind, text)`
  * is the guard: resolves
  * { decision, reason }. `approve({ kind, text, reason })` resolves true when a
- * person allows it. Returns { definitions, call(name, args) } where call
+ * person allows it. `headroom` (runner/headroom.js, optional) shortens long
+ * outputs; `onCompress({ saved, originalTokens, compressedTokens })` hears each
+ * one that was shortened. Returns { definitions, call(name, args) } where call
  * resolves { text, finished? }.
  */
-function makeTools({ sandbox, check, approve, toolset = 'all', editable = null }) {
+function makeTools({ sandbox, check, approve, toolset = 'all', editable = null, headroom = null, onCompress = null }) {
     // an app's change run may only write inside its editable paths; the tool refuses, not the prompt
     const outside = (p) => (editable && !editable(p) ? `${p} is outside the paths this app lets the agent edit. Choose a file inside them, or call finish and say what needs changing elsewhere.` : null);
     async function gate(kind, text) {
@@ -100,13 +109,36 @@ function makeTools({ sandbox, check, approve, toolset = 'all', editable = null }
         async finish({ summary }) { return String(summary || ''); },
     };
 
-    const allowed = TOOLSETS[toolset] || TOOLSETS.all;
+    // Headroom's compression: a long output goes through it; a shortened one keeps its hash for headroom_retrieve
+    let shortened = 0; // outputs Headroom has shortened so far: headroom_retrieve is offered once there is one
+    async function shrink(text) {
+        const out = await headroom.compress(text);
+        if (!out) return text;
+        shortened += 1;
+        onCompress?.({ saved: out.saved, originalTokens: out.originalTokens, compressedTokens: out.compressedTokens });
+        return out.text;
+    }
+    run.headroom_retrieve = async ({ hash }) => {
+        if (!hash) return 'Give the hash from the shortened output.';
+        const full = await headroom.retrieve(hash);
+        return full.length > RETRIEVE_CHARS ? `${full.slice(0, RETRIEVE_CHARS)}\n[... cut at ${RETRIEVE_CHARS} characters ...]` : full;
+    };
+
+    const base = TOOLSETS[toolset] || TOOLSETS.all;
+    const useHeadroom = !!headroom && toolset !== 'none';
+    const allowed = useHeadroom ? [...base, 'headroom_retrieve'] : base;
     return {
-        definitions: definitions.filter((d) => allowed.includes(d.function.name)),
+        // read on each model call, so headroom_retrieve appears from the call after the first shortened output
+        get definitions() {
+            const defs = useHeadroom && shortened ? [...definitions, retrieveDefinition] : definitions;
+            return defs.filter((d) => allowed.includes(d.function.name));
+        },
         async call(name, args) {
             if (!Object.hasOwn(run, name) || !allowed.includes(name)) return { text: `Unknown tool ${name}. Available: ${allowed.join(', ')}.` };
             try {
-                return { text: await run[name](args || {}), finished: name === 'finish' };
+                let text = await run[name](args || {});
+                if (useHeadroom && SHRINKABLE.has(name)) text = await shrink(text);
+                return { text, finished: name === 'finish' };
             } catch (err) {
                 return { text: `Error: ${err.message}` };
             }

@@ -65,21 +65,69 @@ function headersFor(req, route, { content = false, env = process.env } = {}) {
     return out;
 }
 
-let checkCache = { at: 0, result: null };
+// Langfuse Cloud has one project per region, and a key pair only works on the
+// region its project lives in. A refused key pair is often just the wrong region.
+const CLOUD_REGIONS = [
+    { name: 'EU', host: 'https://cloud.langfuse.com' },
+    { name: 'US', host: 'https://us.cloud.langfuse.com' },
+    { name: 'HIPAA US', host: 'https://hipaa.cloud.langfuse.com' },
+];
+
+const isCloud = (h) => CLOUD_REGIONS.some((r) => r.host === h);
+
+/** The public key is pk-lf-..., the secret key sk-lf-...; a pair typed the other way round is refused everywhere. */
+function swappedKeys(env = process.env) {
+    const pk = String(env.LANGFUSE_PUBLIC_KEY || '').trim();
+    const sk = String(env.LANGFUSE_SECRET_KEY || '').trim();
+    if (pk.startsWith('sk-lf-') || sk.startsWith('pk-lf-')) {
+        return 'LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY look swapped (the public key starts pk-lf-, the secret key sk-lf-).';
+    }
+    return null;
+}
+
+/** One GET /api/public/projects with the key pair against one host. Never throws. */
+async function probe(h, env, fetchFn) {
+    try {
+        const auth = Buffer.from(`${env.LANGFUSE_PUBLIC_KEY.trim()}:${env.LANGFUSE_SECRET_KEY.trim()}`).toString('base64');
+        const res = await fetchFn(`${h}/api/public/projects`, { headers: { authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(4000) });
+        return { status: res.status, ok: !!res.ok };
+    } catch (err) {
+        return { error: err.message || String(err) };
+    }
+}
+
+const refusedText = (status, h) => `Langfuse refused the keys (HTTP ${status} from ${h})`;
 
 /** Is Langfuse reachable with these keys? Cached for a minute. */
 async function check(env = process.env, fetchFn = fetch) {
     if (!configured(env)) return { ok: false, problem: 'No keys' };
     if (checkCache.result && Date.now() - checkCache.at < 60000) return checkCache.result;
+    const h = host(env);
     let result;
-    try {
-        const auth = Buffer.from(`${env.LANGFUSE_PUBLIC_KEY.trim()}:${env.LANGFUSE_SECRET_KEY.trim()}`).toString('base64');
-        const res = await fetchFn(`${host(env)}/api/public/projects`, { headers: { authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(4000) });
-        if (res.status === 401 || res.status === 403) result = { ok: false, problem: 'Langfuse refused the keys' };
-        else if (!res.ok) result = { ok: false, problem: `Langfuse answered HTTP ${res.status}` };
-        else result = { ok: true };
-    } catch (err) {
-        result = { ok: false, problem: `Can't reach ${host(env)}: ${err.message}` };
+    const swapped = swappedKeys(env);
+    if (swapped) {
+        result = { ok: false, host: h, problem: 'Langfuse keys look swapped', hint: swapped };
+    } else {
+        const first = await probe(h, env, fetchFn);
+        if (first.error) {
+            result = { ok: false, host: h, problem: `Can't reach ${h}: ${first.error}` };
+        } else if (first.status === 401 || first.status === 403) {
+            result = { ok: false, host: h, httpStatus: first.status, problem: refusedText(first.status, h), hint: 'Check that both keys come from the same project (Langfuse: Settings, API Keys) and that .env has no extra spaces or quotes. Restart the Gateway after editing .env.' };
+            if (isCloud(h)) {
+                // Try the other cloud regions; the first that accepts the keys is the one to use.
+                const others = CLOUD_REGIONS.filter((r) => r.host !== h);
+                const tries = await Promise.all(others.map(async (r) => ({ region: r, res: await probe(r.host, env, fetchFn) })));
+                const hit = tries.find((t) => t.res.ok);
+                if (hit) {
+                    result.suggestion = { region: hit.region.name, host: hit.region.host };
+                    result.hint = `These keys work on the ${hit.region.name} cloud. Set LANGFUSE_HOST=${hit.region.host} in .env and restart the Gateway.`;
+                }
+            }
+        } else if (!first.ok) {
+            result = { ok: false, host: h, httpStatus: first.status, problem: `Langfuse answered HTTP ${first.status} from ${h}`, hint: first.status === 404 ? 'That address does not look like Langfuse. Check LANGFUSE_HOST.' : undefined };
+        } else {
+            result = { ok: true, host: h, httpStatus: first.status };
+        }
     }
     checkCache = { at: Date.now(), result };
     return result;
@@ -92,4 +140,4 @@ async function status(settings, env = process.env, fetchFn = fetch) {
 
 function resetCheck() { checkCache = { at: 0, result: null }; }
 
-module.exports = { configured, host, openUrl, contentDefault, sessionOf, headersFor, check, status, resetCheck, DEFAULT_HOST };
+module.exports = { configured, host, openUrl, contentDefault, sessionOf, headersFor, check, status, resetCheck, swappedKeys, CLOUD_REGIONS, DEFAULT_HOST };

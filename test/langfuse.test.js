@@ -72,3 +72,59 @@ test('npm run all starts the Gateway through gateway-start.py only with keys', (
     assert.strictEqual(withKeys.env.GATEWAY_TARGET, '.gateway-config.yaml');
     assert.match(withKeys.env.GATEWAY_LITELLM, /litellm$/);
 });
+
+test('refused on the EU cloud: the US cloud accepts the keys, so the hint names it', async () => {
+    langfuse.resetCheck();
+    const seen = [];
+    const fake = async (url) => {
+        seen.push(url);
+        return url.startsWith('https://us.cloud.langfuse.com') ? { ok: true, status: 200 } : { ok: false, status: 401 };
+    };
+    const s = await langfuse.status({}, KEYS, fake);
+    assert.strictEqual(s.ok, false);
+    assert.match(s.problem, /refused the keys \(HTTP 401 from https:\/\/cloud\.langfuse\.com\)/);
+    assert.deepStrictEqual(s.suggestion, { region: 'US', host: 'https://us.cloud.langfuse.com' });
+    assert.match(s.hint, /LANGFUSE_HOST=https:\/\/us\.cloud\.langfuse\.com/);
+    assert.strictEqual(seen.length, 3, 'EU first, then US and HIPAA');
+    langfuse.resetCheck();
+});
+
+test('refused everywhere: no suggestion, hint points at the project and the keys', async () => {
+    langfuse.resetCheck();
+    const s = await langfuse.status({}, KEYS, async () => ({ ok: false, status: 403 }));
+    assert.strictEqual(s.suggestion, undefined);
+    assert.match(s.problem, /HTTP 403/);
+    assert.match(s.hint, /same project/);
+    langfuse.resetCheck();
+});
+
+test('a self-hosted host is not probed against the cloud regions', async () => {
+    langfuse.resetCheck();
+    const seen = [];
+    const env = { ...KEYS, LANGFUSE_HOST: 'http://langfuse-web:3000' };
+    const s = await langfuse.status({}, env, async (url) => { seen.push(url); return { ok: false, status: 401 }; });
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(s.suggestion, undefined);
+    langfuse.resetCheck();
+});
+
+test('a non-auth HTTP error shows the status code; 404 hints at LANGFUSE_HOST', async () => {
+    langfuse.resetCheck();
+    const s = await langfuse.status({}, KEYS, async () => ({ ok: false, status: 502 }));
+    assert.strictEqual(s.httpStatus, 502);
+    assert.match(s.problem, /HTTP 502/);
+    langfuse.resetCheck();
+    const n = await langfuse.status({ }, { ...KEYS, LANGFUSE_HOST: 'http://x:1' }, async () => ({ ok: false, status: 404 }));
+    assert.match(n.hint, /LANGFUSE_HOST/);
+    langfuse.resetCheck();
+});
+
+test('keys typed the wrong way round are caught without a network call', async () => {
+    langfuse.resetCheck();
+    let called = false;
+    const s = await langfuse.status({}, { LANGFUSE_PUBLIC_KEY: 'sk-lf-x', LANGFUSE_SECRET_KEY: 'pk-lf-y' }, async () => { called = true; return { ok: true, status: 200 }; });
+    assert.strictEqual(s.ok, false);
+    assert.match(s.hint, /swapped/);
+    assert.strictEqual(called, false);
+    langfuse.resetCheck();
+});

@@ -64,7 +64,7 @@ The [technical roadmap](../ROADMAP.md) has four phases, all implemented:
 | `utils/login.js`, `utils/users.js`, `ui/users.html`, `scripts/hash-password.js` | Named logins with admins (see [Named logins](logins.md#named-logins-with-admins-harness_require_login)) |
 | `guard-rules.json`, `utils/guard.js`, `.claude/hooks/guard.js` | The command guard (see [Command guard](claude-code.md#command-guard-jev-checks-commands-before-they-run)) |
 | `scripts/jev-files-mcp.js`, `utils/jevFiles.js`, `utils/jevAsk.js` | The `ask_jev_file` tools (see [Ask Jev about a file](claude-code.md#ask-jev-about-a-file-ask_jev_file-tools)) |
-| `workflows/`, `utils/workflows.js` | Recipes for the task runner and Jev's pick between them |
+| `workflows/`, `utils/workflows.js`, `ui/workflows.*` | Recipes for the task runner, Jev's pick between them, and the Workflows page that edits them |
 | `runner/chatdev.js`, `chatdev/` | The "ChatDev" workflow: installs ChatDev in a cloud sandbox and runs one YAML (see [ChatDev](chatdev.md)) |
 | `runner/`, `ui/agents.html` | The task runner: sandbox, tools, agent loop, run manager and API (see [Task runner](task-runner.md#task-runner-agents-that-do-a-whole-task)) |
 | `ui/manifest.webmanifest`, `ui/sw.js`, `ui/icon*.svg`, `ui/icon-*.png` | The installable app: manifest, offline copy of the pages, icons (re-render the PNGs from the SVGs if the logo changes) |

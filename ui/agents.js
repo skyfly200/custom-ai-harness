@@ -72,6 +72,14 @@ const modelsFact = (r) => {
   const title = rows.map(([m, v]) => `${m}: ${v.calls} calls, ${(v.in + v.out).toLocaleString()} tokens, ${Costs.usd(v.cost)}`).join('\n');
   return `<span title="${esc(title)}">Models ${rows.slice(0, 3).map(([m, v]) => `${esc(m.split('/').pop())} ×${v.calls}`).join(', ')}${rows.length > 3 ? ` +${rows.length - 3}` : ''}</span>`;
 };
+// Headroom in a run (runner/headroom.js): what it took out of the tool output the agent read, or why it did nothing
+const headroomFact = (r) => {
+  const h = r.headroom;
+  if (!h) return '';
+  if (!h.on) return '<span class="muted" title="Headroom is off for this run (Settings > Headroom in agent runs, or the task)">Headroom off</span>';
+  if (h.compressions) return `<span title="${esc(`${h.compressions} long output${h.compressions === 1 ? '' : 's'} shortened by Headroom; the full text can be fetched back with headroom_retrieve`)}">Headroom saved ${h.saved.toLocaleString()} input tokens</span>`;
+  return `<span class="muted" title="${esc(h.note || 'No output was long enough to shorten')}">Headroom on${h.note ? ' · not used' : ''}</span>`;
+};
 const agentSpend = (id) => {
   const own = runs.filter((r) => r.agent === id);
   const ids = new Set(own.map((r) => r.id));
@@ -114,6 +122,8 @@ function eventHtml(e) {
   }
   if (e.type === 'result') return `<div class="ev"><details data-k="${esc(key)}"${open(key)}><summary>${time}result: ${esc((e.text || '').split('\n')[0].slice(0, 120))}</summary><pre>${esc(e.text)}</pre></details></div>`;
   if (e.type === 'approval_needed') return `<div class="ev approval_needed">${time}Waiting for you: <code>${esc(e.text)}</code> (${esc(e.reason)})</div>`;
+  if (e.type === 'question_needed') return `<div class="ev approval_needed">${time}The workflow asks you: ${esc(e.text)}</div>`;
+  if (e.type === 'answer') return `<div class="ev decided">${time}Answered: <code>${esc(e.text || '(nothing)')}</code> <span class="muted">${esc(e.why || '')}</span></div>`;
   if (e.type === 'approval') return `<div class="ev decided">${time}${e.allowed ? 'Allowed' : 'Declined'}: <code>${esc(e.text)}</code></div>`;
   if (e.type === 'plan') return `<div class="ev stage">${time}<strong>Plan</strong><pre>${esc(e.text)}</pre></div>`;
   if (e.type === 'stage') return `<div class="ev stage">${time}<strong>${esc(e.text)}</strong></div>`;
@@ -152,7 +162,7 @@ function renderDetail(run) {
   const r = run.result;
   const diffOpen = openDetails.has('diff');
   const changed = setHtml('detail', `
-    <div class="facts">${run.pr || run.prTarget ? `<span class="prfact">${PrState.chip(run.prState) || '<span class="muted">Pull request: not checked yet</span>'}</span>` : ''}${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.landing && run.landing !== 'branch' && run.landOn ? `<span title="${run.landing === 'main' ? 'The commit goes straight onto this branch when it passes' : 'Merged into this branch when it passes'}">${run.landing === 'main' ? 'Straight onto' : 'Merge into'} <code>${esc(run.landOn)}</code></span>` : ''}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.strongModel ? `<span>Strong model ${esc(run.strongModel)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
+    <div class="facts">${run.pr || run.prTarget ? `<span class="prfact">${PrState.chip(run.prState) || '<span class="muted">Pull request: not checked yet</span>'}</span>` : ''}${run.plan ? '<span class="tag plan" title="Plan only: nothing was changed or committed">Plan only</span>' : ''}<span>Repo <code>${esc(run.repo)}</code></span>${run.plan ? '' : `<span>Branch <code>${esc(run.branch)}</code></span>`}${run.landing && run.landing !== 'branch' && run.landOn ? `<span title="${run.landing === 'main' ? 'The commit goes straight onto this branch when it passes' : 'Merged into this branch when it passes'}">${run.landing === 'main' ? 'Straight onto' : 'Merge into'} <code>${esc(run.landOn)}</code></span>` : ''}${run.workflowName ? `<span>Workflow ${esc(run.workflowName)}${run.stage ? ` · ${esc(run.stage)}` : ''}</span>` : ''}<span title="${run.maxSteps ? '' : 'No step limit: only the finish call, the minutes and the cost limit end it'}">Steps ${run.steps}${run.maxSteps ? ` of ${run.maxSteps}` : ' · no limit'}</span><span>${(run.tokens.in + run.tokens.out).toLocaleString()} tokens</span><span title="${run.unpricedCalls ? `${run.unpricedCalls} model call(s) had no known price, so the real cost is higher` : 'Priced like the Usage page'}">Cost ${runCost(run)}${run.maxCost ? ` of ${Costs.usd(run.maxCost)} limit` : ''}</span>${modelsFact(run)}${headroomFact(run)}${run.model ? `<span title="Every call went to this model, no routing">Model ${esc(run.model)}</span>` : run.profile ? `<span>Routing ${esc(run.profile)}</span>` : ''}${run.effort ? `<span>Effort ${esc(run.effort)}</span>` : ''}${run.strongModel ? `<span>Strong model ${esc(run.strongModel)}</span>` : ''}${run.maxTier ? `<span>Highest tier ${esc(run.maxTier)}</span>` : ''}${run.bumps ? `<span title="A failure made this run ask for a stronger model">Escalated ${run.bumps}×</span>` : ''}${run.sandbox && run.sandbox !== 'local' ? `<span>Sandbox ${esc(SANDBOX_NAMES[run.sandbox] || run.sandbox)}${run.sandboxId ? ` <code>${esc(run.sandboxId)}</code>` : ''}</span>` : ''}</div>
     ${run.agent && agentOf(run.agent) ? `<p class="muted">A task of <a href="#${esc(run.agent)}" data-agent="${esc(run.agent)}">${esc(agentOf(run.agent).name)}</a>${run.source?.chat ? `, handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>` : ''}.</p>` : run.source?.chat ? `<p class="muted">Handed over from the chat <a href="chat#c=${encodeURIComponent(run.source.chat.id)}">${esc(run.source.chat.title || 'a chat')}</a>.</p>` : ''}
     ${run.parent ? `<p class="muted">A worker in <a href="#${esc(run.parent)}" data-go="${esc(run.parent)}">its swarm</a>.</p>` : ''}
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
@@ -163,7 +173,7 @@ function renderDetail(run) {
       if (!id) return `<span class="worker muted">${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} · waiting for what it depends on</span>`;
       return `<button class="worker" data-go="${esc(id)}"><span class="tag ${TAGS[c?.status] || ''}">${esc(NOTE_FOR[c?.status] || c?.status || '?')}</span> ${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} <span class="muted">step ${c?.steps ?? 0}</span></button>`;
     }).join('')}</div></div>` : ''}
-    ${run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
+    ${run.pending?.kind === 'question' ? questionCard(run.pending) : run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
     ${run.error ? `<div class="result"><span class="tag bad">error</span> ${esc(run.error)}</div>` : ''}
     ${r ? `<div class="result">${run.plan ? '<p class="muted">Plan only: nothing was changed, so there is no branch to review.</p>' : ''}<p class="summary">${esc(r.summary)}</p>${run.landed ? `<p class="muted">${run.landed.ok ? `${run.landed.mode === 'main' ? 'Put straight onto' : 'Merged into'} <code>${esc(run.landed.into)}</code> (${esc(String(run.landed.sha || '').slice(0, 10))})${run.landed.url ? ` · <a href="${esc(run.landed.url)}" target="_blank" rel="noopener">view on GitHub</a>` : ''}.` : `Not landed: ${esc(run.landed.reason)}. The change is still on <code>${esc(run.branch)}</code>.`}</p>` : ''}
       ${run.plan ? '' : r.diffStat ? `<pre>${esc(r.diffStat)}</pre>` : '<p class="muted">No files changed.</p>'}
@@ -492,9 +502,34 @@ $('list').addEventListener('click', (e) => {
   refresh();
 });
 
+// A workflow's question for the person: one button per option, or a typed answer
+function questionCard(p) {
+  const minutes = p.minutes || 60;
+  const fallback = p.defaultOption ? `“${esc(p.defaultOption)}” is taken` : 'the run goes on with an empty answer';
+  const input = p.options?.length
+    ? `<div class="actions">${p.options.map((o) => `<button${o === p.defaultOption ? ' class="primary"' : ''} data-answer="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
+    : `<form class="answer-form" data-answer-form><input type="text" name="answer" maxlength="4000" autocomplete="off" placeholder="Type your answer"> <button class="primary" type="submit">Send</button></form>`;
+  return `<div class="approval question"><strong>The workflow asks you</strong><p>${esc(p.text)}</p>${input}<p class="muted small">If nobody answers in ${minutes} minute${minutes === 1 ? '' : 's'}, ${fallback}.</p></div>`;
+}
+
+$('detail').addEventListener('submit', async (e) => {
+  const form = e.target.closest('[data-answer-form]');
+  if (!form || !selected) return;
+  e.preventDefault();
+  const answer = form.elements.answer.value.trim();
+  if (!answer) return;
+  try { await post(`/${selected}/answer`, { answer }); } catch (err) { ui.toast(err.message || 'Could not send the answer.'); }
+});
+
 $('detail').addEventListener('click', async (e) => {
   const goAgent = e.target.closest('[data-agent]')?.dataset.agent;
   if (goAgent) { e.preventDefault(); chooseAgent(goAgent); return; }
+  const answer = e.target.closest('[data-answer]')?.dataset.answer;
+  if (answer !== undefined && selected) {
+    e.preventDefault();
+    try { await post(`/${selected}/answer`, { answer }); } catch (err) { ui.toast(err.message || 'Could not send the answer.'); }
+    return;
+  }
   const go = e.target.closest('[data-go]')?.dataset.go;
   if (go) { e.preventDefault(); selected = go; location.hash = go; openDetails = new Set(); applyView(); renderList(); refresh(); return; }
   const act = e.target.closest('[data-act]')?.dataset.act;
@@ -679,7 +714,7 @@ $('newRun').addEventListener('submit', async (e) => {
     }
     let run;
     if (agentSel) {
-      const task = { goal: body.goal, plan: body.plan === '1', ...(body.jev ? { jev: body.jev } : {}), ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.speed === 'batch' ? { speed: 'batch' } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}), ...(body.autoFixConflicts === '1' ? { autoFixConflicts: true, ...(body.autoFixMax ? { autoFixMax: body.autoFixMax } : {}) } : {}) };
+      const task = { goal: body.goal, plan: body.plan === '1', ...(body.workflow && body.workflow !== 'agent' ? { workflow: body.workflow } : {}), ...(body.jev ? { jev: body.jev } : {}), ...(body.model ? { model: body.model } : body.profile ? { profile: body.profile } : {}), ...(body.effort ? { effort: body.effort } : {}), ...(body.speed === 'batch' ? { speed: 'batch' } : {}), ...(body.maxTier ? { maxTier: body.maxTier } : {}), ...(body.strongModel ? { strongModel: body.strongModel } : {}), ...(body.maxSteps !== undefined ? { maxSteps: body.maxSteps } : {}), ...(body.maxMinutes !== undefined ? { maxMinutes: body.maxMinutes } : {}), ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}), ...(body.autoContinue === '1' ? { autoContinue: true, ...(body.autoContinueMax ? { autoContinueMax: body.autoContinueMax } : {}) } : {}), ...(body.autoFixConflicts === '1' ? { autoFixConflicts: true, ...(body.autoFixMax ? { autoFixMax: body.autoFixMax } : {}) } : {}) };
       run = await sendAgent('POST', `/${agentSel}/tasks`, task);
     } else run = await post('', body);
     if (!agentSel && body.repo) { rememberRepo(body.repo); renderRecent(); }
@@ -716,13 +751,25 @@ function schedulePick() {
   pickTimer = setTimeout(() => { if ($('workflow').value === 'auto') pickWorkflow(goal).catch(() => {}); }, 700);
 }
 
+// The How menu. A one-off run offers Jev's pick, every recipe, Swarm and ChatDev. A task of an agent starts on the
+// agent's own workflow ("Same as ..."), and may pick any recipe instead; Swarm and ChatDev are one-off only.
+function fillWorkflowOptions() {
+  const sel = $('workflow');
+  const keep = sel.value;
+  const a = agentOf(agentSel);
+  const head = a ? `<option value="agent">Same as ${esc(a.name)} (${esc(nameOf(a.workflow))})</option>` : '<option value="auto">Jev picks (auto)</option>';
+  const recipes = workflowList.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join('');
+  const extra = a ? '' : '<option value="swarm">Swarm (several agents at once)</option><option value="chatdev">ChatDev (in a cloud sandbox)</option>';
+  sel.innerHTML = head + recipes + extra;
+  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : sel.options[0].value;
+}
+
 async function initWorkflows() {
   try {
     const { workflows } = await (await fetch('api/workflows')).json();
     workflowList = workflows;
-    $('workflow').insertAdjacentHTML('beforeend', workflows.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join(''));
-    $('workflow').insertAdjacentHTML('beforeend', '<option value="swarm">Swarm (several agents at once)</option><option value="chatdev">ChatDev (in a cloud sandbox)</option>');
   } catch { /* auto still works without the list */ }
+  fillWorkflowOptions();
   $('newRun').elements.goal.addEventListener('input', schedulePick);
   $('workflow').addEventListener('change', () => { applyMode(); $('pickNote').textContent = ''; drawWorkflowHelp(); if ($('workflow').value === 'auto') schedulePick(); });
   $('suggestBtn').addEventListener('click', suggestWorkflow);
@@ -741,14 +788,18 @@ function wfEntries() {
   const known = workflowList.map((w) => ({ id: w.id, name: w.name, help: RunView.help(w), stages: w.stages.map((x) => x.role) }));
   const extra = [{ id: 'swarm', name: 'Swarm', help: RunView.help('swarm'), stages: ['Planner', 'Workers', 'Reviewer'] }, { id: 'chatdev', name: 'ChatDev', help: RunView.help('chatdev'), stages: [] }];
   const all = [{ id: 'auto', name: 'Jev picks (auto)', help: RunView.help('auto'), stages: [] }, ...known, ...extra];
-  return all.sort((a, b) => (WF_ORDER.indexOf(a.id) + 1 || 99) - (WF_ORDER.indexOf(b.id) + 1 || 99));
+  const sorted = all.sort((a, b) => (WF_ORDER.indexOf(a.id) + 1 || 99) - (WF_ORDER.indexOf(b.id) + 1 || 99));
+  return agentOf(agentSel) ? sorted.filter((w) => !['auto', 'swarm', 'chatdev'].includes(w.id)) : sorted;
 }
 function drawWorkflowHelp() {
   const entries = wfEntries();
-  const cur = entries.find((w) => w.id === $('workflow').value) || entries[0];
+  const agent = agentOf(agentSel);
+  const want = $('workflow').value === 'agent' ? agent?.workflow : $('workflow').value;
+  const cur = entries.find((w) => w.id === want) || entries[0];
   const h = cur.help;
   $('wfHelp').innerHTML = `<strong>${esc(cur.name)}</strong>${cur.stages.length ? ` <span class="muted">${esc(cur.stages.join(' → '))}</span>` : ''}
-    <p>${esc(h.what)}</p><p><span class="muted">Use it for:</span> ${esc(h.use)}</p>${h.feel ? `<p><span class="muted">Cost and time:</span> ${esc(h.feel)}</p>` : ''}`;
+    <p>${esc(h.what)}</p><p><span class="muted">Use it for:</span> ${esc(h.use)}</p>${h.feel ? `<p><span class="muted">Cost and time:</span> ${esc(h.feel)}</p>` : ''}
+    <p class="fine"><a href="workflows.html">Workflows page</a>: read, edit or add a way of working</p>`;
   $('wfTable').innerHTML = entries.map((w) => `<button type="button" class="wfrow${w.id === cur.id ? ' on' : ''}" data-wf="${esc(w.id)}"><strong>${esc(w.name)}</strong><span>${esc(w.help.what)}</span><span class="muted">${esc(w.help.feel || '')}</span></button>`).join('');
 }
 // Jev reads the prompt and the matching way of working is selected, with the reason in one line
@@ -796,6 +847,7 @@ async function loadGithub() {
   try {
     const j = await (await fetch('api/github/status')).json();
     githubOn = Boolean(j.connected);
+    syncGhButtons();
     $('githubNote').textContent = j.connected ? `GitHub: connected as ${j.login || 'you'}.` : 'GitHub is not connected. Public repos can be cloned without it; private repos and pushing need it.';
     $('githubManage').textContent = j.connected ? 'Manage' : 'Connect GitHub';
     $('githubManage').classList.toggle('primary', !j.connected);
@@ -1030,7 +1082,7 @@ function renderAgents() {
   renderLive();
   const a = agentOf(agentSel);
   if (a) {
-    $('agentInfo').innerHTML = `<h3>${AgentIcon.icon(a, 'lg')}${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.model ? `<span>Model ${esc(a.model)}</span>` : a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+    $('agentInfo').innerHTML = `<h3>${AgentIcon.icon(a, 'lg')}${esc(a.name)}</h3><div class="facts"><span>Repo ${repoCode(a.repo)}</span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map(repoCode).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.model ? `<span>Model ${esc(a.model)}</span>` : a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" class="primary" data-aact="newrun">New run</button><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
   } else if (inAgent) {
@@ -1085,6 +1137,8 @@ function applyMode() {
   const a = agentOf(agentSel);
   // routing fields stay on for a task, and start from the agent's own
   if (a !== lastModeAgent) {
+    fillWorkflowOptions();
+    drawWorkflowHelp();
     f.elements.profile.value = a?.profile || ''; f.elements.model.value = a?.model || ''; f.elements.effort.value = a?.effort || ''; f.elements.maxTier.value = a?.maxTier || ''; f.elements.strongModel.value = '';
     lastModeAgent = a;
   }
@@ -1160,11 +1214,66 @@ let editingAgent = null;
 // Repos beside the default (the Repo field): the whole list is [Repo field, ...agentExtras], and the chips reorder it.
 let agentExtras = [];
 const agentRepoList = () => Repos.fromSpecs([$('agentRepo').value, ...agentExtras]);
+// Add one owner/name (or folder path): the Repo field when it is empty, else the More repos list
+function addAgentSpec(v) {
+  const spec = String(v || '').trim();
+  if (!spec) return;
+  if (!$('agentRepo').value.trim()) $('agentRepo').value = spec;
+  else if (![$('agentRepo').value.trim(), ...agentExtras].includes(spec)) agentExtras.push(spec);
+}
+// A link to the repo on GitHub, or a plain code tag for anything else
+const repoCode = (spec) => {
+  const e = Repos.fromSpecs([spec])[0];
+  const url = e && Repos.isGithub(e) ? Repos.githubUrl(e.full) : '';
+  return url ? `<a href="${esc(url)}" target="_blank" rel="noopener"><code>${esc(spec)}</code></a>` : `<code>${esc(spec)}</code>`;
+};
+
+// Pick repos from the connected GitHub account: 'repo' (the Repo field, one) or 'more' (More repos, several)
+let ghPickInto = 'repo';
+let ghPickAll = [];          // the account's repos, loaded when the picker opens
+let ghPickPicked = new Set();
+function syncGhButtons() {
+  const on = githubOn === true;
+  $('agentGhRepo').hidden = !on;
+  $('agentMoreGh').hidden = !on;
+}
+function drawGhPicker() {
+  const single = ghPickInto === 'repo';
+  const rows = Repos.filterGithub(ghPickAll, $('ghPickFilter').value, single ? [] : agentRepoList());
+  $('ghPickList').innerHTML = rows.length
+    ? rows.map((r) => `<div class="pick-row${ghPickPicked.has(r.full) ? ' on' : ''}" data-full="${esc(r.full)}" role="option" aria-selected="${ghPickPicked.has(r.full)}" tabindex="0"><span class="ico">${r.private ? '🔒' : '◆'}</span><span class="nm">${esc(r.full)}</span>${r.private ? '<span class="tag">private</span>' : ''}</div>`).join('')
+    : `<p class="muted pad">${ghPickAll.length ? 'No repos match.' : 'Your GitHub account has no repos this connection can reach. Check the GitHub section above.'}</p>`;
+  $('ghPickHint').textContent = ghPickPicked.size ? `${ghPickPicked.size} selected` : (single ? 'Click the repo the agent works in.' : 'Click repos to select them.');
+  $('ghPickUse').disabled = !ghPickPicked.size;
+}
+async function openGhPicker(into) {
+  ghPickInto = into;
+  ghPickPicked = new Set();
+  ghPickAll = [];
+  $('ghPickFilter').value = '';
+  $('ghPickTitle').textContent = into === 'repo' ? 'Choose the repo the agent works in' : 'Add GitHub repos';
+  $('ghPickUse').textContent = into === 'repo' ? 'Use this repo' : 'Add';
+  $('ghPickList').innerHTML = '<p class="muted pad">Loading your GitHub repos…</p>';
+  $('ghPickHint').textContent = '';
+  $('ghPickUse').disabled = true;
+  $('ghPicker').showModal();
+  try {
+    const res = await fetch('api/github/repos');
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || `GitHub answered HTTP ${res.status}`);
+    ghPickAll = j.repos || [];
+  } catch (err) {
+    $('ghPickList').innerHTML = '';
+    $('ghPickHint').textContent = err.message;
+    return;
+  }
+  drawGhPicker();
+}
 // A chat project's repos (GitHub only on a shared server, which cannot read folders on your computer)
 const projectRepoEntries = (link) => Repos.list(chatProjects().find((p) => p.id === link.id)).filter((e) => !hosted || Repos.isGithub(e));
 function drawAgentRepos() {
   const all = agentRepoList();
-  $('agentMoreChips').innerHTML = all.length > 1 ? Repos.chipsHtml(all, { controls: true, esc }) : '';
+  $('agentMoreChips').innerHTML = all.length > 1 ? Repos.chipsHtml(all, { controls: true, links: true, esc }) : '';
   const link = chatProjects().find((p) => p.id === $('agentProject').value);
   const inherited = link ? projectRepoEntries(link) : [];
   const note = $('agentInherit');
@@ -1183,10 +1292,34 @@ async function initAgentDialog() {
   const addExtra = () => {
     const v = $('agentMoreInput').value.trim();
     if (!v) return;
-    if (!$('agentRepo').value.trim()) $('agentRepo').value = v; else if (![$('agentRepo').value.trim(), ...agentExtras].includes(v)) agentExtras.push(v);
+    addAgentSpec(v);
     $('agentMoreInput').value = '';
     drawAgentRepos();
   };
+  $('agentGhRepo').addEventListener('click', () => openGhPicker('repo'));
+  $('agentMoreGh').addEventListener('click', () => openGhPicker('more'));
+  $('ghPickClose').addEventListener('click', () => $('ghPicker').close());
+  $('ghPickFilter').addEventListener('input', drawGhPicker);
+  $('ghPickList').addEventListener('click', (e) => {
+    const row = e.target.closest('.pick-row');
+    if (!row) return;
+    const full = row.dataset.full;
+    if (ghPickInto === 'repo') ghPickPicked = new Set([full]);
+    else if (ghPickPicked.has(full)) ghPickPicked.delete(full); else ghPickPicked.add(full);
+    drawGhPicker();
+  });
+  $('ghPickList').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.closest('.pick-row')?.click(); });
+  $('ghPickUse').addEventListener('click', () => {
+    if (ghPickInto === 'repo') {
+      const [full] = ghPickPicked;
+      setAgentRepos(Repos.fromSpecs([full, ...agentExtras.filter((x) => x !== full)]));
+    } else {
+      for (const full of ghPickPicked) addAgentSpec(full);
+      drawAgentRepos();
+    }
+    ghPickPicked = new Set();
+    $('ghPicker').close();
+  });
   $('agentMoreAdd').addEventListener('click', addExtra);
   $('agentMoreInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addExtra(); } });
   $('agentRepo').addEventListener('input', drawAgentRepos);
@@ -1247,7 +1380,9 @@ async function initAgentDialog() {
   try {
     const { workflows } = await (await fetch('api/workflows')).json();
     $('agentWorkflow').innerHTML = workflows.map((w) => `<option value="${esc(w.id)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join('');
+    workflowList = workflows;
   } catch { $('agentWorkflow').innerHTML = '<option value="general">Do the task</option>'; }
+  $('agentWorkflow').addEventListener('change', drawAgentWorkflowHelp);
   try {
     const { profiles } = await (await fetch('api/profiles')).json();
     $('agentProfile').insertAdjacentHTML('beforeend', profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('') + '<option value="auto">Jev picks (auto)</option>');
@@ -1283,6 +1418,12 @@ function shrinkImage(file) {
     img.src = url;
   });
 }
+// What the agent's workflow does, in the form, with a way to compare or edit them
+function drawAgentWorkflowHelp() {
+  const w = workflowList.find((x) => x.id === $('agentForm').elements.workflow.value);
+  $('agentWfHelp').innerHTML = `${w ? `${esc(RunView.help(w).what)} ` : ''}<a href="workflows.html">Workflows page</a>`;
+}
+
 function openAgentDialog(agent) {
   editingAgent = agent;
   const f = $('agentForm');
@@ -1298,6 +1439,7 @@ function openAgentDialog(agent) {
   f.elements.repo.value = v.repo;
   f.elements.instructions.value = v.instructions || '';
   f.elements.workflow.value = v.workflow || 'general';
+  drawAgentWorkflowHelp();
   f.elements.profile.value = v.profile || '';
   f.elements.model.value = v.model || '';
   f.elements.effort.value = v.effort || '';

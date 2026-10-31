@@ -58,20 +58,46 @@
     $('changeTitle').textContent = `Ask ${app.name} for a change`;
     $('changeForm').dataset.id = app.id;
     $('changeMsg').textContent = '';
+    $('changeWorkflow').value = changeWorkflows.some((w) => w.id === 'change-app') ? 'change-app' : 'auto';
+    drawChangeHelp();
     $('changeDialog').showModal();
   });
   $('changeClose').addEventListener('click', () => $('changeDialog').close());
+  $('changeWorkflow').addEventListener('change', drawChangeHelp);
   $('changeForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
-      const run = await call('POST', `/${f.dataset.id}/changes`, { request: f.elements.request.value });
+      let workflow = f.elements.workflow.value;
+      if (workflow === 'auto') {
+        const pick = await (await fetch('api/workflows/pick', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ goal: f.elements.request.value }) })).json();
+        workflow = pick.id || 'change-app';
+      }
+      const run = await call('POST', `/${f.dataset.id}/changes`, { request: f.elements.request.value, workflow });
       $('changeDialog').close();
       f.reset();
       location.hash = run.id;
       location.reload();
     } catch (err) { $('changeMsg').textContent = err.message; }
   });
+
+  // The How menu for a change: Change an app (the usual one), Jev's pick, or any other recipe
+  let changeWorkflows = [];
+  function drawChangeHelp() {
+    const id = $('changeWorkflow').value;
+    const w = changeWorkflows.find((x) => x.id === id);
+    const help = id === 'auto' ? window.RunView.help('auto') : w ? window.RunView.help(w) : null;
+    $('changeWfHelp').innerHTML = `${help ? `<p>${esc(help.what)}</p>` : ''}<p class="fine"><a href="workflows.html">Workflows page</a>: read, edit or add a way of working</p>`;
+  }
+  (async () => {
+    try {
+      const { workflows } = await (await fetch('api/workflows')).json();
+      changeWorkflows = workflows;
+      $('changeWorkflow').innerHTML = '<option value="auto">Jev picks (auto)</option>' + workflows.map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
+    } catch { $('changeWorkflow').innerHTML = '<option value="change-app">Change an app</option>'; }
+    $('changeWorkflow').value = changeWorkflows.some((w) => w.id === 'change-app') ? 'change-app' : 'auto';
+    drawChangeHelp();
+  })();
 
   load();
 })();

@@ -23,10 +23,12 @@ function parse(spec) {
 const personDir = (base, person) => path.join(base, `${String(person).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 40)}-${crypto.createHash('sha1').update(String(person)).digest('hex').slice(0, 8)}`);
 const cloneDir = (base, person, { owner, name }) => path.join(personDir(base, person), `${owner}__${name}`);
 
+/** The git arguments that send a token to GitHub for one command (never stored in the remote or on disk). */
+const authArgs = (token) => (token ? ['-c', `http.https://github.com/.extraheader=Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`] : []);
+
 function run(args, { cwd, token, timeoutMs = 120000 } = {}) {
-    const auth = token ? ['-c', `http.https://github.com/.extraheader=Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`] : [];
     return new Promise((resolve, reject) => {
-        execFile('git', [...auth, ...args], { cwd, timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'true' } }, (err, stdout, stderr) => {
+        execFile('git', [...authArgs(token), ...args], { cwd, timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'true' } }, (err, stdout, stderr) => {
             if (!err) return resolve(stdout);
             // never repeat a token, even though it is only on the command line
             const text = `${stderr || err.message}`.split(token || '\u0000').join('***').trim().split('\n').slice(-3).join(' ');
@@ -37,14 +39,19 @@ function run(args, { cwd, token, timeoutMs = 120000 } = {}) {
     });
 }
 
+/** Bring a clone up to date with GitHub: fetch, then move the checked-out branch along when that is a plain fast-forward. */
+async function refreshClone({ dir, token, git = run }) {
+    await git(['fetch', '--quiet', '--prune', '--no-tags', 'origin'], { cwd: dir, token });
+    // a person's own commits stay: only a fast-forward moves the branch
+    await git(['merge', '--quiet', '--ff-only', '@{u}'], { cwd: dir, token }).catch(() => {});
+}
+
 /** The person's clone of the repo, made or brought up to date. Resolves its path. */
 async function ensureClone({ base, person, spec, token, git = run }) {
     const repo = parse(spec);
     const dir = cloneDir(base, person, repo);
     if (fs.existsSync(path.join(dir, '.git'))) {
-        await git(['fetch', '--quiet', '--prune', '--no-tags', 'origin'], { cwd: dir, token });
-        // move the checked-out branch along when that is a plain fast-forward; a person's own commits stay
-        await git(['merge', '--quiet', '--ff-only', '@{u}'], { cwd: dir, token }).catch(() => {});
+        await refreshClone({ dir, token, git });
         return dir;
     }
     fs.mkdirSync(path.dirname(dir), { recursive: true });
@@ -55,6 +62,30 @@ async function ensureClone({ base, person, spec, token, git = run }) {
         throw err;
     }
     return dir;
+}
+
+/** Make a repo on the person's GitHub account (private unless isPrivate is false). Resolves { owner, name, url }. */
+async function createRepo({ name, token, isPrivate = true, fetchImpl = fetch, apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com' }) {
+    if (!token) throw new Error('connect GitHub first: making a repo needs your GitHub connection');
+    if (!/^[\w.-]{1,100}$/.test(name) || name === '.' || name === '..') throw new Error('a repo name can use letters, digits, dots, dashes and underscores');
+    const made = await fetchImpl(`${apiUrl}/user/repos`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'harness-runner' },
+        body: JSON.stringify({ name, private: isPrivate, auto_init: false }),
+    });
+    const data = await made.json().catch(() => ({}));
+    if (made.status === 422) throw new Error(`GitHub already has a repo called ${name} on your account: pick it as an existing repo, or choose another name`);
+    if (!made.ok) throw new Error(`GitHub would not create ${name} (HTTP ${made.status}): the token needs permission to create repositories`);
+    return { owner: data.owner.login, name: data.name, url: data.html_url || `https://github.com/${data.owner.login}/${data.name}` };
+}
+
+/** Clone a GitHub repo into dir (an empty repo clones to an empty folder with a .git). */
+async function cloneRepo({ owner, name, dir, token, git = run }) {
+    await git(['clone', '--quiet', `https://github.com/${owner}/${name}.git`, dir], { token, timeoutMs: 600000 });
+}
+
+/** Push the default branch (main) of a new local repo to its origin, with the person's token. */
+async function pushDefault({ dir, token, git = run }) {
+    await git(['push', '--quiet', '-u', 'origin', 'main'], { cwd: dir, token, timeoutMs: 600000 });
 }
 
 /** Push a run's branch (harness/<id>) from the clone to GitHub. Resolves { branch, url }. */
@@ -155,4 +186,4 @@ async function updatePullBranch({ dir, branch, pr, token = '', git = run, fetchI
     return { number: pr.number, url: data.html_url || `https://github.com/${want}/pull/${pr.number}`, branch: head.ref, head: headSha };
 }
 
-module.exports = { parse, ensureClone, pushBranch, openPullRequest, landRemote, updatePullBranch, listClones, personDir, cloneDir, BRANCH };
+module.exports = { parse, ensureClone, refreshClone, authArgs, createRepo, cloneRepo, pushDefault, pushBranch, openPullRequest, landRemote, updatePullBranch, listClones, personDir, cloneDir, BRANCH };

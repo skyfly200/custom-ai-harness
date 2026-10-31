@@ -1,0 +1,87 @@
+/* Workflows page: a row of stage boxes, the editor under it, and the new-workflow dialog. Colours come from style.css so dark mode follows. */
+main.wide { max-width: none; }
+.wf-bar { margin: 14px 0 10px; align-items: flex-end; }
+.wf-bar .grow { flex: 1 1 auto; }
+.wf-bar .wf-pick { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.wf-bar .wf-pick select { min-width: 220px; }
+button.danger { color: var(--bad); }
+.wf-problems { border-color: var(--warn); margin-bottom: 12px; }
+.wf-problems b { color: var(--warn); }
+.wf-problems ul { margin: 6px 0 0; padding-left: 20px; font-size: 13px; }
+
+.wf-meta { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr) auto; gap: 10px 16px; align-items: start; margin-bottom: 12px; }
+.wf-meta label, .wf-form label, .wf-verdict label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.wf-meta input, .wf-meta textarea, .wf-form input, .wf-form select, .wf-form textarea, .wf-verdict select, .wf-verdict input {
+  font: inherit; font-size: 13.5px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--field-border); background: var(--panel); color: var(--text); width: 100%; min-width: 0; box-sizing: border-box; font-weight: 400;
+}
+.wf-meta textarea, .wf-form textarea { resize: vertical; }
+.wf-check { flex-direction: row !important; align-items: center; gap: 8px !important; color: var(--text) !important; font-weight: 500 !important; }
+.wf-check input { width: auto !important; }
+.wf-meta .small { align-self: end; }
+
+.wf-canvas { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+  background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 20px 20px; }
+.track { position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 112px 28px 30px; width: max-content; min-width: 100%; box-sizing: border-box; }
+.arcs { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.arcs .arc { fill: none; stroke: var(--warn); stroke-width: 2; stroke-dasharray: 6 4; }
+.arcs .arc-label { fill: var(--warn); font: 600 11px system-ui, sans-serif; text-anchor: middle; }
+.arcs .arrow-tip { fill: var(--warn); }
+
+.wf-node { position: relative; flex: 0 0 210px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 10px 12px 10px 42px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); font: inherit; cursor: pointer; }
+.wf-node.check { border-left-color: var(--ok); }
+.wf-node.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.wf-node b { font-size: 14px; }
+.wf-node small { color: var(--muted); font-size: 12px; }
+.wf-node .wf-num { position: absolute; left: 10px; top: 10px; width: 22px; height: 22px; border-radius: 50%; background: var(--panel); border: 1px solid var(--border);
+  display: grid; place-items: center; font-size: 11px; font-weight: 700; color: var(--muted); }
+.wf-node .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.wf-node .chips i { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); color: var(--muted); max-width: 100%; overflow-wrap: anywhere; }
+.wf-arrow { align-self: flex-start; margin-top: 42px; color: var(--muted); font-size: 20px; line-height: 1; }
+.wf-end { align-self: flex-start; margin-top: 44px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+  border: 1px dashed var(--field-border); border-radius: 999px; padding: 3px 10px; }
+.wf-hint { margin: 6px 2px 14px; }
+
+.wf-edit { margin-top: 6px; }
+.wf-edit.needs { border-color: var(--warn); }
+.wf-edit h2 { margin: 0; font-size: 17px; }
+.wf-edit-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.wf-move { display: flex; flex-wrap: wrap; gap: 6px; }
+.wf-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; align-items: start; }
+.wf-form .wf-wide { grid-column: 1 / -1; }
+.wf-verdict { display: grid; grid-template-columns: minmax(200px, 2fr) minmax(120px, 1fr); gap: 10px 14px; padding: 10px 12px; border: 1px dashed var(--warn); border-radius: 8px; }
+.wf-verdict[hidden] { display: none; }
+.wf-kind { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; padding: 10px 12px; border: 1px dashed var(--accent, var(--muted)); border-radius: 8px; }
+.wf-kind[hidden], .wf-goto[hidden], .wf-form label[hidden] { display: none !important; }
+.wf-goto { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; display: grid; gap: 8px; }
+.wf-goto p { margin: 0; }
+.wf-goto-row { display: grid; grid-template-columns: minmax(90px, 140px) 1fr; gap: 10px; align-items: center; }
+.wf-goto-row select { min-width: 0; }
+.wf-node .chips i.wf-chip-goto { font-style: normal; }
+.wf-arc-label-goto { font-size: 11px; }
+.wf-form label[hidden] { display: none; }
+.wf-explain { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13.5px; }
+.wf-explain ul { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; color: var(--text); }
+.wf-explain li { line-height: 1.45; }
+
+#newDialog, #stageDialog { width: min(460px, 92vw); border: 1px solid var(--border); border-radius: 12px; padding: 18px; background: var(--panel); color: var(--text); }
+#newDialog::backdrop, #stageDialog::backdrop { background: rgba(10, 8, 20, .45); }
+#newDialog h2, #stageDialog h2 { margin: 0 0 10px; font-size: 17px; }
+#newDialog form, #stageDialog form { display: flex; flex-direction: column; gap: 10px; }
+#newDialog label, #stageDialog label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+#newDialog input[type="text"], #stageDialog input[type="text"] { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--field-border); background: var(--bg); color: var(--text); font-weight: 400; }
+.wf-start { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 0; }
+.wf-start legend { font-size: 12.5px; font-weight: 600; color: var(--muted); padding: 0 4px; }
+.wf-start-opt { flex-direction: row !important; align-items: flex-start; gap: 8px !important; padding: 6px 0; font-weight: 400 !important; color: var(--text) !important; }
+.wf-start-opt span { display: flex; flex-direction: column; gap: 2px; }
+.wf-start-opt small { color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.4; }
+.wf-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+@media (max-width: 700px) {
+  .wf-meta { grid-template-columns: 1fr; }
+  .wf-bar .wf-pick select { min-width: 0; width: 100%; }
+  .wf-bar .grow { display: none; }
+  .wf-verdict { grid-template-columns: 1fr; }
+  .track { padding-top: 116px; }
+}
+#stageDialog { max-height: calc(100vh - 32px); overflow: auto; }

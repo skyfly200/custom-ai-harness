@@ -12,10 +12,13 @@
     chat: '<path d="M21 12a8 8 0 0 1-11.7 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
     usage: '<path d="M5 20V11M12 20V4M19 20v-6"/>',
     routing: '<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="12" r="2.2"/><path d="M8.2 6H12a3 3 0 0 1 3 3v0l1 1.5M8.2 18H12a3 3 0 0 0 3-3v0l1-1.5"/>',
+    apps: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><path d="M17 13.5v7M13.5 17h7"/>',
     agents: '<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V4.5M9 13v1M15 13v1"/><circle cx="12" cy="3.6" r="1"/>',
+    workflows: '<rect x="3" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="16" width="7" height="5" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/><path d="M10 5.5h2a2 2 0 0 1 2 2v7a2 2 0 0 0 2 2M6.5 8v8"/>',
     prompts: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
     tools: '<path d="M14.5 6.5a4 4 0 0 0 4.9 5.2L10 21l-3-3 9.3-9.4a4 4 0 0 0-1.8-2.1z"/>',
-    settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    skills: '<path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-6.1-5.1-1.9 5.1-1.9z"/><path d="M19 16.5v4M17 18.5h4"/>',
     user: '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>',
     bg: '<circle cx="5" cy="7" r="1.6"/><circle cx="17" cy="5" r="1.6"/><circle cx="12" cy="13" r="1.6"/><circle cx="19" cy="18" r="1.6"/><circle cx="6" cy="18" r="1.6"/><path d="M6.4 7.7 10.8 12M13.4 12.2l2.6-5.6M13.3 13.9l4.4 3.1M10.6 13.8 7.3 17"/>',
     install: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/>',
@@ -28,20 +31,29 @@
 
   // The fixed order of the bar. `files` are the pages that count as being on that link.
   const PAGES = [
-    { id: 'dashboard', label: 'Dashboard', href: './', files: ['', 'index.html'], hint: 'Health of each part, recent chats, usage and requests' },
+    // the brand on the bar links here, so on desktop Dashboard is not a link of its own (phones and the chat menu list it)
+    { id: 'dashboard', label: 'Dashboard', href: './', files: ['', 'index.html'], inBrand: true, hint: 'Health of each part, recent chats, usage and requests' },
     { id: 'chat', label: 'Chat', href: 'chat', files: ['chat.html'], hint: 'Talk to the models through the harness' },
+    { id: 'apps', label: 'Apps', href: 'apps', files: ['apps.html'], hint: 'Apps you started from a template or registered: ask one for a change, or build a new one' },
     { id: 'agents', label: 'Agents', href: 'agents', files: ['agents.html', 'runs.html'], hint: 'Named agents that keep working on your repos, and one-off runs' },
-    { id: 'prompts', label: 'Prompts', href: 'prompts', files: ['prompts.html'], hint: 'Saved prompts for agents: write, improve and reuse them' },
-    { id: 'tools', label: 'Tools', href: 'tools', files: ['tools.html'], hint: 'The MCP servers the chat page can use' },
-    { id: 'usage', label: 'Usage', href: 'usage', files: ['usage.html', 'usage-users.html'], hint: 'Tokens used, by client, model and service' },
-    { id: 'routing', label: 'Routing', href: 'routing', files: ['routing.html'], hint: 'Where requests go, as connected boxes you can edit' },
-    { id: 'settings', label: 'Settings', href: 'settings', files: ['settings.html'], admin: true, hint: 'Interceptor and Router settings' },
+    // the less-used pages sit under More on desktop; the phone menu lists every page flat
+    { id: 'workflows', label: 'Workflows', href: 'workflows', files: ['workflows.html'], group: 'more', hint: 'The plan each agent follows, as stages you can edit' },
+    { id: 'prompts', label: 'Prompts', href: 'prompts', files: ['prompts.html'], group: 'more', hint: 'Saved prompts for agents: write, improve and reuse them' },
+    { id: 'skills', label: 'Skills', href: 'skills', files: ['skills.html'], group: 'more', hint: 'Named instructions you switch on in chat: write, edit and import them' },
+    { id: 'tools', label: 'Tools', href: 'tools', files: ['tools.html'], group: 'more', hint: 'The MCP servers the chat page can use' },
+    { id: 'usage', label: 'Usage', href: 'usage', files: ['usage.html', 'usage-users.html'], group: 'more', hint: 'Tokens used, by client, model and service' },
+    { id: 'routing', label: 'Routing', href: 'routing', files: ['routing.html'], group: 'more', hint: 'Where requests go, as connected boxes you can edit' },
+    // on desktop the gear stands alone (the label is its title and accessible name); phones keep the words
+    { id: 'settings', label: 'Settings', href: 'settings', files: ['settings.html'], admin: true, iconOnly: true, hint: 'Interceptor and Router settings' },
   ];
   const USERS = { id: 'users', href: 'users', files: ['users.html'] };
 
   // `me` is /ui/api/me, or null when logins are off (then it is your own machine: everything shows).
   const isAdmin = (me) => !me || me.role === 'admin';
   const linksFor = (me) => PAGES.filter((p) => !p.admin || isAdmin(me));
+  // the links on the desktop bar: not under More, and not already the brand
+  const primaryLinks = (me) => linksFor(me).filter((p) => !p.group && !p.inBrand);
+  const moreLinks = (me) => linksFor(me).filter((p) => p.group === 'more');
   const currentId = (pathname) => {
     const file = String(pathname || '').split('/').pop().replace(/\.html$/, '');
     const named = file === '' ? file : `${file}.html`;
@@ -58,7 +70,7 @@
     return items;
   };
 
-  const api = { PAGES, ICONS, linksFor, currentId, accountItems, isAdmin };
+  const api = { PAGES, ICONS, linksFor, primaryLinks, moreLinks, currentId, accountItems, isAdmin };
   if (typeof module === 'object' && module.exports) { module.exports = api; return; }
 
   // ---- in the page ----------------------------------------------------------
@@ -74,9 +86,23 @@
   const brandHtml = '<span class="logo" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Bright Chat</span>';
   const bgOn = () => (window.Bright?.background ? window.Bright.background() : false);
 
-  function linkHtml(p, cls = '') {
+  // a link in the bar (desktop); iconOnly pages show their icon and keep the label as title and aria-label
+  function linkHtml(p) {
     const cur = p.id === here;
-    return `<a class="${cls}${cur ? ' here' : ''}" href="${p.href}" data-hint="${esc(p.hint)}"${cur ? ' aria-current="page"' : ''}>${icon(p.id)}<span>${esc(p.label)}</span></a>`;
+    const iconOnly = p.iconOnly ? ' icon-only' : '';
+    const name = p.iconOnly ? ` aria-label="${esc(p.label)}" title="${esc(p.label)}"` : '';
+    return `<a class="${iconOnly.trim()}${cur ? ' here' : ''}" href="${p.href}" data-hint="${esc(p.hint)}"${name}${cur ? ' aria-current="page"' : ''}>${icon(p.id)}<span>${esc(p.label)}</span></a>`;
+  }
+  // a link inside a menu (phone panel, More, the chat page's pages menu): always labelled
+  function menuLink(p) {
+    const cur = p.id === here;
+    return `<a role="menuitem" class="menu-item${cur ? ' here' : ''}" href="${p.href}"${cur ? ' aria-current="page"' : ''}>${icon(p.id)}<span>${esc(p.label)}</span></a>`;
+  }
+  // the More button and its menu of the less-used pages
+  function moreHtml(links) {
+    const inside = links.some((p) => p.id === here);
+    return `<div class="more-wrap"><button type="button" class="more-btn${inside ? ' here' : ''}" id="moreBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moreMenu">More${icon('chevron')}</button>`
+      + `<div class="more-menu" id="moreMenu" role="menu" aria-labelledby="moreBtn" hidden>${links.map(menuLink).join('')}</div></div>`;
   }
   function itemHtml(it) {
     const role = it.kind === 'toggle' ? 'menuitemcheckbox' : 'menuitem';
@@ -108,7 +134,8 @@
 
   // ---- the chat page: the same links as a flat list inside its pages menu ----
   function renderChat(nav) {
-    nav.innerHTML = `<h1 class="brand">${brandHtml}</h1>${linksFor(me).map((p) => linkHtml(p)).join('')}`
+    nav.innerHTML = `<h1 class="brand">${brandHtml}</h1>${linksFor(me).filter((p) => !p.group).map(menuLink).join('')}`
+      + `<span class="nav-sep" role="separator"></span><span class="nav-label" aria-hidden="true">More</span>${moreLinks(me).map(menuLink).join('')}`
       + `<span class="nav-sep" role="separator"></span>${items().map(itemHtml).join('')}`;
   }
 
@@ -150,32 +177,35 @@
 
   function renderBar() {
     const links = linksFor(me);
-    bar.querySelector('[data-slot=links]').innerHTML = links.map((p) => linkHtml(p)).join('');
+    const more = moreLinks(me);
+    bar.querySelector('[data-slot=links]').innerHTML = primaryLinks(me).map((p) => linkHtml(p)).join('') + (more.length ? moreHtml(more) : '');
     const label = me && me.name ? `<span class="who">${esc(me.name)}</span>` : '';
     bar.querySelector('[data-slot=account]').innerHTML = `<button type="button" class="account-btn" id="accountBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu"
       aria-label="${me && me.name ? esc(me.name) + ', account menu' : 'Menu'}" title="${me && me.name ? esc(me.name) + (isAdmin(me) ? ' (admin)' : '') : 'Menu'}">${icon('user')}${label}${icon('chevron')}</button>
       <div class="account-menu" id="accountMenu" role="menu" aria-labelledby="accountBtn" hidden>${me && me.name ? `<div class="menu-head"><b>${esc(me.name)}</b><small>${esc(me.role || 'user')}</small></div>` : ''}${items().map(itemHtml).join('')}</div>`;
-    panel.innerHTML = `${links.map((p) => linkHtml(p, 'menu-item').replace('<a class="menu-item', '<a role="menuitem" class="menu-item')).join('')}<span class="nav-sep" role="separator"></span>${me && me.name ? `<div class="menu-head"><b>${esc(me.name)}</b><small>${esc(me.role || 'user')}</small></div>` : ''}${items().map(itemHtml).join('')}`;
+    panel.innerHTML = `${links.map(menuLink).join('')}<span class="nav-sep" role="separator"></span>${me && me.name ? `<div class="menu-head"><b>${esc(me.name)}</b><small>${esc(me.role || 'user')}</small></div>` : ''}${items().map(itemHtml).join('')}`;
     const burger = bar.querySelector('#siteBurger');
     burger.innerHTML = icon(panel.hidden ? 'menu' : 'close');
   }
 
+  const TOGGLES = '#accountBtn, #siteBurger, #moreBtn';
+  // each toggle names its menu in aria-controls
+  const menuOf = (btn) => bar.querySelector('#' + btn.getAttribute('aria-controls'));
   const openMenu = () => (bar && [...bar.querySelectorAll('[aria-expanded=true]')][0]) || null;
   function setOpen(btn, on) {
-    const target = btn.id === 'siteBurger' ? panel : bar.querySelector('#accountMenu');
     closeAll(btn);
     btn.setAttribute('aria-expanded', String(on));
-    target.hidden = !on;
+    menuOf(btn).hidden = !on;
     bar.classList.toggle('open', on);
     if (btn.id === 'siteBurger') btn.innerHTML = icon(on ? 'close' : 'menu');
     if (on) { syncToggle(); }
   }
   function closeAll(except) {
     if (!bar) return;
-    for (const b of bar.querySelectorAll('#accountBtn, #siteBurger')) {
+    for (const b of bar.querySelectorAll(TOGGLES)) {
       if (b === except) continue;
       b.setAttribute('aria-expanded', 'false');
-      (b.id === 'siteBurger' ? panel : bar.querySelector('#accountMenu')).hidden = true;
+      menuOf(b).hidden = true;
       if (b.id === 'siteBurger') b.innerHTML = icon('menu');
     }
     if (!except) bar.classList.remove('open');
@@ -184,7 +214,7 @@
     for (const t of bar.querySelectorAll('[data-act=bg]')) t.setAttribute('aria-checked', String(bgOn()));
   }
   function onClick(e) {
-    const toggle = e.target.closest('#accountBtn, #siteBurger');
+    const toggle = e.target.closest(TOGGLES);
     if (toggle) {
       const on = toggle.getAttribute('aria-expanded') !== 'true';
       setOpen(toggle, on);
@@ -195,7 +225,7 @@
     if (b) { act(b.dataset.act); if (b.dataset.act !== 'bg') closeAll(); return; }
     if (e.target.closest('a.menu-item')) closeAll();
   }
-  const menuItems = (btn) => [...(btn.id === 'siteBurger' ? panel : bar.querySelector('#accountMenu')).querySelectorAll('[role^=menuitem]')];
+  const menuItems = (btn) => [...menuOf(btn).querySelectorAll('[role^=menuitem]')];
   function onKey(e) {
     const btn = openMenu();
     if (!btn) return;

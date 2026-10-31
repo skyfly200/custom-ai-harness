@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bright Chat · Apps</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
+<link rel="stylesheet" href="appspage.css">
+</head>
+<body>
+<main class="apps-page">
+  <header>
+    <nav data-site-nav></nav>
+  </header>
+  <script src="nav.js"></script>
+
+  <p class="muted lead">An app is a repo the harness can change for you. Ask one for a change and the change runs on Agents, with a preview and a diff to ship or undo. Start a new one from a template, or import a repo you already have: the harness reads its stack and suggests where it runs and its database.</p>
+
+  <section class="card" aria-labelledby="mineTitle">
+    <div class="card-head">
+      <h2 id="mineTitle">Your apps</h2>
+      <div class="actions">
+        <button type="button" id="importApp">Import existing app</button>
+        <button type="button" class="primary" id="newApp">New app</button>
+      </div>
+    </div>
+    <div id="appList" class="app-list"><p class="muted">Loading…</p></div>
+  </section>
+
+  <dialog id="importDialog" class="picker newdlg" aria-labelledby="importTitle">
+    <form id="importForm" class="new-form" autocomplete="off">
+      <div class="picker-head"><strong id="importTitle">Import an existing app</strong><button type="button" id="importClose" aria-label="Close">×</button></div>
+      <p class="fine muted">Register a repo you already have. Looking at it changes nothing. The files below are only added where the repo does not have them, and nothing is committed for you.</p>
+
+      <fieldset class="group">
+        <legend>Where it is</legend>
+        <label class="check"><input type="radio" name="source" value="local" checked> A folder on this computer</label>
+        <label class="field indent" data-src="local"><span>Folder</span><input name="folder" list="roots" placeholder="the folder with its .git folder in it" spellcheck="false"></label>
+        <label class="check"><input type="radio" name="source" value="github"> A GitHub repo</label>
+        <label class="field indent" data-src="github"><span>Repo</span><select name="githubRepo"><option value="">Loading your repos…</option></select></label>
+        <p id="importNote" class="fine muted" role="status"></p>
+        <div class="actions"><button type="button" id="importLook">Look at it</button></div>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Hosting and database</legend>
+        <p class="fine muted">Where the app runs and where its data lives. Looking at the repo suggests a choice; you can change it before you import.</p>
+        <div class="row2">
+          <label class="field"><span>Where it runs</span><select name="deployTarget"></select></label>
+          <label class="field"><span>Database</span><select name="database"></select></label>
+        </div>
+        <p id="importTargetHelp" class="fine muted"></p>
+        <p id="importDatabaseHelp" class="fine muted"></p>
+        <div id="importConnect" class="connect-box" aria-live="polite"></div>
+      </fieldset>
+
+      <div id="importRest" hidden>
+        <fieldset class="group">
+          <legend>What it looks like</legend>
+          <p id="importFound" class="fine"></p>
+          <ul id="importNotes" class="fine muted"></ul>
+        </fieldset>
+
+        <label class="field"><span>Name</span><input name="name" maxlength="60"></label>
+
+        <label class="field"><span>Agents may edit (one path per line)</span><textarea name="editablePaths" rows="2" spellcheck="false"></textarea></label>
+        <details class="group">
+          <summary>Commands</summary>
+          <div class="row2">
+            <label class="field"><span>Install</span><input name="installCommand" maxlength="500" spellcheck="false"></label>
+            <label class="field"><span>Tests</span><input name="testCommand" maxlength="500" spellcheck="false" placeholder="none yet"></label>
+          </div>
+          <label class="field"><span>Dev server</span><input name="devCommand" maxlength="500" spellcheck="false" placeholder="none"></label>
+        </details>
+
+        <label class="check"><input type="checkbox" name="addFiles" checked> Add the CI workflow and DEPLOY.md for these choices, where the repo does not have them</label>
+        <div class="actions">
+          <button type="submit" class="primary" id="importGo">Import app</button>
+          <span id="importMsg" class="muted" role="status"></span>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="newDialog" class="picker newdlg" aria-labelledby="newTitle">
+    <form id="newForm" class="new-form" autocomplete="off">
+      <div class="picker-head"><strong id="newTitle">Start a new app</strong><button type="button" id="newClose" aria-label="Close">×</button></div>
+
+      <fieldset class="group">
+        <legend>Template</legend>
+        <div id="tpls" class="tpls" role="radiogroup" aria-label="Template"><p class="muted">Loading templates…</p></div>
+      </fieldset>
+
+      <div class="row2">
+        <label class="field"><span>Name</span><input name="name" maxlength="60" required placeholder="Note board"></label>
+        <label class="field"><span>Folder it goes in</span><input name="parent" list="roots" placeholder="the first allowed folder"></label>
+      </div>
+      <datalist id="roots"></datalist>
+      <label class="field"><span>What should it do?</span><textarea name="description" rows="3" placeholder="A board where the team pins short notes, newest first"></textarea></label>
+      <div id="questions" class="row2"></div>
+
+      <fieldset class="group">
+        <legend>GitHub repo</legend>
+        <p class="fine muted">The repo holds the code, runs the CI tests and deploys the app. It is private unless you say otherwise on GitHub.</p>
+        <label class="check"><input type="radio" name="repoMode" value="local" checked> Only a folder on this computer for now</label>
+        <label class="check"><input type="radio" name="repoMode" value="create"> Create a new GitHub repo</label>
+        <label class="field indent" data-for="create"><span>New repo name</span><input name="newRepo" maxlength="100" placeholder="note-board" spellcheck="false"></label>
+        <label class="check"><input type="radio" name="repoMode" value="existing"> Use an existing GitHub repo (it must be empty)</label>
+        <label class="field indent" data-for="existing"><span>Repo</span><select name="existingRepo"><option value="">Loading your repos…</option></select></label>
+        <p id="ghNote" class="fine muted" role="status"></p>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Hosting and database</legend>
+        <div class="row2">
+          <label class="field"><span>Where it runs</span><select name="deployTarget" id="deployTarget"></select></label>
+          <label class="field"><span>Database</span><select name="database" id="database"></select></label>
+        </div>
+        <p id="targetHelp" class="fine muted"></p>
+        <p id="databaseHelp" class="fine muted"></p>
+        <div id="connectBox" class="connect-box" aria-live="polite"></div>
+      </fieldset>
+
+      <label class="check"><input type="checkbox" name="build" checked> Build the first version from the description now</label>
+      <div class="actions">
+        <button type="submit" class="primary" id="create">Create app</button>
+        <span id="newMsg" class="muted" role="status"></span>
+      </div>
+    </form>
+  </dialog>
+</main>
+<script src="dialogs.js"></script>
+<script src="hints.js"></script>
+<script src="bright.js"></script>
+<script src="appspage.js"></script>
+</body>
+</html>

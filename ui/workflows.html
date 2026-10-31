@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bright Chat · Workflows</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bright Chat">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
+<link rel="stylesheet" href="guide.css">
+<link rel="stylesheet" href="workflows.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body>
+<main class="wide">
+  <header>
+    <nav data-site-nav></nav>
+    <button type="button" class="guide-btn" data-guide="guide-text" data-hint="How to use this page" aria-label="How to use this page"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></svg></button>
+  </header>
+  <script src="nav.js"></script>
+
+  <template id="guide-text" data-title="How to use this page">
+    <div class="guide-body">
+      <p>A workflow is the plan an agent follows for a task. Each box is a <b>stage</b>: one helper with a job, the tools it may use and its own instructions. The stages run left to right, and each one is handed what the stages before it found.</p>
+      <ol>
+        <li><b>Pick a workflow</b> from the list, or press <b>New workflow</b> and start from a blank one or the ChatDev dev team (a CEO plans, a Programmer writes, a Reviewer and a Tester check the work).</li>
+        <li><b>Click a box</b> to edit that stage below: what it is called, what it is told to do, which tools it may use and which model it runs on. <b>Earlier</b> and <b>Later</b> move it along the line.</li>
+        <li><b>Add stage</b> puts a ready-made stage in the line: a Planner, a Programmer, a Tester that sends FAIL back to the stage that does the work, a batch Writer and more. Its settings can be changed afterward. <b>Save as template</b> keeps a stage you built for the next workflow, in this browser.</li>
+        <li><b>A stage that checks</b> ticks <i>Says PASS or FAIL</i>. Its summary must begin with one of those words. On FAIL the run goes back to the stage you pick under <i>Send FAIL back to</i>, with what was wrong, and this can happen only so many times before the run stops for a person.</li>
+        <li><b>Describe the workflow</b> in <i>When Jev picks it</i>. Jev reads that sentence to decide whether a new goal fits, so write it the way you would describe the task to a colleague.</li>
+        <li><b>Save</b> writes the file to the server. The next run uses it; nothing needs restarting. Problems are listed above the editor and stop the save until they are fixed.</li>
+      </ol>
+      <p class="muted">The shipped workflows are files in <code>workflows/</code>. A workflow saved here is written there too, so commit it to keep it in the repo. Hover over anything for a short hint.</p>
+    </div>
+  </template>
+
+  <div class="controls wf-bar">
+    <label class="wf-pick" data-hint="The workflow to show and edit">Workflow
+      <select id="wfSel" aria-label="Workflow to edit"></select></label>
+    <button id="wfNew" data-hint="Start a new workflow from a blank stage or the ChatDev dev team">New workflow</button>
+    <button id="wfDelete" class="danger" data-hint="Delete this workflow's file. The fallback workflow can't be deleted">Delete</button>
+    <span class="grow"></span>
+    <button id="wfDiscard" disabled data-hint="Undo every change since the last save">Discard changes</button>
+    <button id="wfSave" class="primary" disabled data-hint="Check the workflow and write it to its file">Save</button>
+    <span class="note" id="msg" role="status"></span>
+  </div>
+
+  <div class="wf-problems card" id="problems" hidden role="alert">
+    <b>Fix these before saving</b>
+    <ul id="problemList"></ul>
+  </div>
+
+  <section class="wf-meta card" id="meta">
+    <label data-hint="The name shown on the Agents page and in run logs">Name
+      <input type="text" id="wfName" maxlength="80" autocomplete="off"></label>
+    <label class="wf-wide" data-hint="The sentence Jev reads to decide whether a goal fits this workflow. Leave it empty and Jev never picks it">When Jev picks it
+      <textarea id="wfWhen" rows="2" maxlength="400" placeholder="a new feature that spans several files, with tests"></textarea></label>
+    <label class="wf-check" data-hint="Used when Jev is not sure which workflow fits. Only one workflow can be the fallback">
+      <input type="checkbox" id="wfFallback"> Use when nothing else fits</label>
+    <span class="muted small" id="wfId"></span>
+  </section>
+
+  <div class="canvas-wrap wf-canvas" id="canvas">
+    <div class="track" id="track">
+      <svg class="arcs" id="arcs" aria-hidden="true">
+        <defs>
+          <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" class="arrow-tip"></path>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+  </div>
+  <p class="muted small wf-hint" id="canvasHint"></p>
+
+  <section class="wf-edit card" id="editor" aria-labelledby="editTitle">
+    <div class="wf-edit-head">
+      <h2 id="editTitle">Stage</h2>
+      <div class="wf-move">
+        <button id="stAdd" data-hint="Add a ready-made stage, such as a Planner, Programmer or Tester, at a place you choose">Add stage</button>
+        <button id="stEarlier" data-hint="Move this stage one place earlier in the run">Earlier</button>
+        <button id="stLater" data-hint="Move this stage one place later in the run">Later</button>
+        <button id="stCopy" data-hint="Add a copy of this stage after it">Duplicate</button>
+        <button id="stDelete" class="danger" data-hint="Remove this stage from the workflow">Remove stage</button>
+        <button id="stSaveTpl" data-hint="Keep this stage's settings as a template in this browser, to add to other workflows">Save as template</button>
+      </div>
+    </div>
+
+    <div class="wf-form">
+      <label data-hint="The job title shown on the stage box, such as CEO or Reviewer">Role
+        <input type="text" id="fRole" maxlength="40" autocomplete="off"></label>
+      <label data-hint="A short name for this stage. Retry and goto lines use it, so it stays unique">Stage id
+        <input type="text" id="fId" maxlength="41" autocomplete="off"></label>
+      <label class="wf-wide" data-hint="An agent does the work. A yes or no stage sends the run one way or the other without an agent. A person stage pauses the run and asks you">Kind of stage
+        <select id="fKind">
+          <option value="agent">Works on the task (an agent)</option>
+          <option value="branch">Yes or no: sends the run one way or the other</option>
+          <option value="human">Asks a person a question (the run waits)</option>
+        </select></label>
+
+      <label class="wf-wide" data-only="agent" data-hint="What the helper is told to do, in its own words. Say what to finish with">Instructions
+        <textarea id="fPrompt" rows="7"></textarea></label>
+
+      <div class="wf-kind wf-wide" data-only="branch" hidden>
+        <label data-hint="Jev answers a yes or no question about the last summary; or the stage looks for some text in it">Decided by
+          <select id="fBy">
+            <option value="ask">Jev answers a yes or no question</option>
+            <option value="contains">The last summary contains some text</option>
+          </select></label>
+        <label data-hint="A yes or no question for Jev about what the last stage said, such as “Did the tests fail?”. Yes if Jev is at least half sure">Question for Jev
+          <input type="text" id="fAsk" maxlength="500" autocomplete="off"></label>
+        <label data-hint="Yes if the last stage's summary has this text, in any case">Text to look for
+          <input type="text" id="fContains" maxlength="200" autocomplete="off"></label>
+      </div>
+
+      <div class="wf-kind wf-wide" data-only="human" hidden>
+        <label data-hint="Shown to the person on the Runs page, and in a browser notification if you allow them">Question for the person
+          <textarea id="fQuestion" rows="3" maxlength="1000"></textarea></label>
+        <label data-hint="One answer per line for the person to pick. Leave empty for a typed answer">Options, one per line
+          <textarea id="fOptions" rows="4" placeholder="empty: the person types an answer"></textarea></label>
+        <label data-hint="The answer taken if nobody answers in time. Options: pick one; a typed answer: the text used">If nobody answers, take
+          <select id="fDefault"></select></label>
+        <label data-hint="The answer taken if nobody answers in time, when there are no options. Empty: nothing">If nobody answers, use this text
+          <input type="text" id="fDefaultText" maxlength="4000" autocomplete="off"></label>
+        <label data-hint="How long the run waits for the person before it takes the default (1 to 1440 minutes)">Wait up to, minutes
+          <input type="number" id="fTimeout" min="1" max="1440" step="1"></label>
+      </div>
+
+      <label data-only="agent" data-hint="Which tools the helper may use. Reads only is safest for planning and review">Tools
+        <select id="fTools">
+          <option value="read">Reads only</option>
+          <option value="check">Reads and runs</option>
+          <option value="all">Everything</option>
+          <option value="none">No tools</option>
+        </select></label>
+      <label data-only="agent" data-hint="How hard the model thinks. Default uses the effort the run was started with">Thinking
+        <select id="fEffort"></select></label>
+
+      <label data-only="agent" data-hint="Pin this stage to one model from the Gateway. Empty: the run's routing picks it">Model
+        <input type="text" id="fModel" maxlength="120" list="modelNames" placeholder="empty: the routing picks" autocomplete="off"></label>
+      <datalist id="modelNames"></datalist>
+      <label data-only="agent" data-hint="A limit on how many model calls this stage may make. 0 means no limit of its own">Most model calls
+        <input type="number" id="fMaxSteps" min="0" max="10000" step="1"></label>
+
+      <label class="wf-check wf-wide" data-only="agent" data-hint="The summary must begin with PASS or FAIL. FAIL sends the run back to a stage you choose">
+        <input type="checkbox" id="fVerdict"> Says PASS or FAIL at the end</label>
+      <div class="wf-verdict wf-wide" id="verdictBox" data-only="agent" hidden>
+        <label data-hint="The stage a FAIL sends the run back to. Only earlier stages can be chosen">Send FAIL back to
+          <select id="fRetry"></select></label>
+        <label data-hint="How many times FAIL may send the run back before it stops for a person (up to 5)">Most retries
+          <input type="number" id="fRetries" min="0" max="5" step="1"></label>
+      </div>
+
+      <label class="wf-check" data-only="agent" data-hint="Sends the request as one half-price batch with no tools, and waits for the answer. Needs a model">
+        <input type="checkbox" id="fBatch"> Send as a half-price batch</label>
+      <label data-only="agent" data-hint="How long to wait for a batch answer before giving up">Wait up to, minutes
+        <input type="number" id="fWait" min="1" max="1440" step="1"></label>
+      <label class="wf-check" data-only="agent" data-hint="Gives the stage the working diff, so it judges the changes directly">
+        <input type="checkbox" id="fDiff"> Show it the working diff</label>
+    </div>
+
+    <div class="wf-goto wf-wide" id="gotoBox" hidden>
+      <b>Where each outcome goes</b>
+      <p class="muted small">Each outcome runs the stage you pick next. “The next stage” is the one below it in the list.</p>
+      <div id="gotoRows"></div>
+    </div>
+
+    <div class="wf-explain">
+      <b>In plain English</b>
+      <ul id="explain"></ul>
+    </div>
+  </section>
+</main>
+
+<dialog id="newDialog" class="card">
+  <form id="newForm" autocomplete="off">
+    <h2>New workflow</h2>
+    <label>Name
+      <input type="text" id="newName" maxlength="80" required></label>
+    <label>Stage id, used in file names and retry lines
+      <input type="text" id="newId" maxlength="41" required placeholder="my-workflow"></label>
+    <fieldset class="wf-start">
+      <legend>Start from</legend>
+      <div id="newStarts"></div>
+    </fieldset>
+    <p class="muted small" id="newErr" hidden></p>
+    <div class="wf-dialog-actions">
+      <button type="button" id="newCancel">Cancel</button>
+      <button type="submit" class="primary">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="stageDialog" class="card">
+  <form id="stageForm" autocomplete="off">
+    <h2>Add a stage</h2>
+    <fieldset class="wf-start">
+      <legend>Stage</legend>
+      <div id="stageChoices"></div>
+    </fieldset>
+    <label>Put it
+      <select id="stageAt"></select></label>
+    <div class="wf-dialog-actions">
+      <button type="button" id="stageCancel">Cancel</button>
+      <button type="submit" class="primary">Add stage</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="dialogs.js"></script>
+<script src="guide.js"></script>
+<script src="hints.js"></script>
+<script src="workflowsModel.js"></script>
+<script src="workflows.js"></script>
+<script src="bright.js"></script>
+</body>
+</html>

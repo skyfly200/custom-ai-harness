@@ -33,6 +33,7 @@ COPY migrations ./migrations
 COPY workflows ./workflows
 # the task runner: only started when HARNESS_RUNS=1 (docs/fly.md)
 COPY runner ./runner
+COPY templates ./templates
 COPY chatdev ./chatdev
 COPY ui ./ui
 COPY scripts/migrate.js scripts/jev-files-mcp.js ./scripts/

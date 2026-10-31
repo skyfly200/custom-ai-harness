@@ -14,6 +14,8 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { RunManager } = require('./runs');
+const templates = require('./templates');
+const hosting = require('./hosting');
 const { listDrivers } = require('./sandbox');
 const ticketFiles = require('./ticketFiles');
 const github = require('./github');
@@ -55,12 +57,25 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
             next();
         });
         // these work on paths of this machine or on the local sandbox, which a shared server doesn't offer
-        app.use(['/runs/browse', '/tickets', '/apps'], (req, res) => res.status(404).json({ error: 'not available on a shared server' }));
+        app.use(['/runs/browse', '/tickets'], (req, res) => res.status(404).json({ error: 'not available on a shared server' }));
+        // apps: a person sees and changes their own. Each app's folder and GitHub repo are their own (see the app checks below);
+        // a new app from a template needs a GitHub repo, and a change runs in a cloud sandbox. Editing an app's settings and
+        // the page-error proposals stay off here, and importing a folder on this machine is refused by the runner itself.
+        const sharedApps = [
+            /^GET \/apps$/, /^GET \/apps\/(templates|hosting)$/, /^POST \/apps\/import(\/detect)?$/, /^POST \/apps\/new$/,
+            /^GET \/apps\/[^/]+$/, /^DELETE \/apps\/[^/]+$/, /^POST \/apps\/[^/]+\/changes$/,
+        ];
+        app.use((req, res, next) => {
+            if (req.path !== '/apps' && !req.path.startsWith('/apps/')) return next();
+            if (sharedApps.some((re) => re.test(`${req.method} ${req.path}`))) return next();
+            return res.status(404).json({ error: 'that is not available on a shared server yet' });
+        });
         app.use('/runs/:id/preview', (req, res) => res.status(404).json({ error: 'previews are not available on a shared server' }));
-        // a run or agent that is not yours does not exist
+        // a run, agent or app that is not yours does not exist
         app.param('id', (req, res, next, id) => {
-            const rec = req.path.startsWith('/agents') ? manager.agents.get(id) : manager.get(id);
-            return rec && rec.owner === req.owner ? next() : res.status(404).json({ error: req.path.startsWith('/agents') ? 'no such agent' : 'no such run' });
+            const kind = req.path.startsWith('/agents') ? 'agent' : req.path.startsWith('/apps') ? 'app' : 'run';
+            const rec = kind === 'agent' ? manager.agents.get(id) : kind === 'app' ? manager.getApp(id) : manager.get(id);
+            return rec && rec.owner === req.owner ? next() : res.status(404).json({ error: `no such ${kind}` });
         });
     }
     // The body a person may send: in a hosted runner the owner is who is asking, and the repo is a GitHub repo, cloned for them
@@ -156,7 +171,14 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         try { res.status(201).json(manager.assign(req.params.id, req.body)); } catch (err) { fail(res, err, /no such agent/.test(err.message) ? 404 : 400); }
     });
     // Apps: registered apps whose own agent changes them, limited to editable paths
-    app.get('/apps', (req, res) => res.json({ apps: manager.listApps() }));
+    app.get('/apps', (req, res) => res.json({ apps: manager.listApps(hosted ? req.owner : undefined) }));
+    // New apps from a template (templates/<id>/): the list, then the builder. Registered before /apps/:id.
+    app.get('/apps/templates', (req, res) => res.json(templates.listTemplates()));
+    app.get('/apps/hosting', (req, res) => res.json(hosting.catalog()));
+    app.post('/apps/new', wrap(async (req, res) => res.status(201).json(await manager.newApp({ ...(req.body || {}), token: req.githubToken || '', owner: hosted ? req.owner : '' }))));
+    // Existing apps: look at a folder or GitHub repo first (read only), then register it. Also before /apps/:id.
+    app.post('/apps/import/detect', wrap(async (req, res) => res.json(await manager.detectImport({ ...(req.body || {}), token: req.githubToken || '' }))));
+    app.post('/apps/import', wrap(async (req, res) => res.status(201).json(await manager.importApp({ ...(req.body || {}), token: req.githubToken || '', owner: hosted ? req.owner : '' }))));
     app.post('/apps', (req, res) => {
         try { res.status(201).json(manager.createApp(req.body)); } catch (err) { fail(res, err); }
     });
@@ -170,18 +192,16 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     app.delete('/apps/:id', (req, res) => {
         try { manager.removeApp(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, /no such/.test(err.message) ? 404 : 409); }
     });
-    app.post('/apps/:id/changes', (req, res) => {
-        try { res.status(201).json(manager.askChange(req.params.id, req.body)); } catch (err) { fail(res, err, /no such app/.test(err.message) ? 404 : 400); }
-    });
+    app.post('/apps/:id/changes', wrap(async (req, res) => res.status(201).json(await manager.startChange(req.params.id, req.body, req.githubToken || ''))));
     // Ship and undo a change to an app (merge on GitHub; undo is a revert pull request)
     app.get('/runs/:id/ship', async (req, res) => {
         try { res.json(await manager.shipStatus(req.params.id)); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 400); }
     });
     app.post('/runs/:id/ship', async (req, res) => {
-        try { res.status(201).json(await manager.shipChange(req.params.id)); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 409); }
+        try { res.status(201).json(await manager.shipChange(req.params.id, { token: req.githubToken || '' })); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 409); }
     });
     app.post('/runs/:id/undo', async (req, res) => {
-        try { res.status(201).json(await manager.undoChange(req.params.id)); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 409); }
+        try { res.status(201).json(await manager.undoChange(req.params.id, { token: req.githubToken || '' })); } catch (err) { fail(res, err, /no such run/.test(err.message) ? 404 : 409); }
     });
     app.post('/apps/:id/proposals', (req, res) => {
         try { res.status(201).json(manager.askProposal(req.params.id, req.body)); } catch (err) { fail(res, err, /no such app/.test(err.message) ? 404 : /already|at most/.test(err.message) ? 429 : 400); }
@@ -219,6 +239,10 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     app.delete('/runs/:id/preview', (req, res) => { manager.stopPreview(req.params.id); res.json({ ok: true }); });
     app.post('/runs/:id/approve', (req, res) => {
         try { manager.approve(req.params.id, req.body?.allow === true); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }
+    });
+    // A person's answer to a human stage of a workflow (one of its options, or text when it has none)
+    app.post('/runs/:id/answer', (req, res) => {
+        try { manager.answer(req.params.id, req.body?.answer); res.json({ ok: true }); } catch (err) { fail(res, err, /nothing is waiting/.test(err.message) ? 409 : 400); }
     });
     app.post('/runs/:id/stop', (req, res) => {
         try { manager.stop(req.params.id); res.json({ ok: true }); } catch (err) { fail(res, err, 409); }

@@ -10,3 +10,4 @@
 .repo-btn { border: none; background: none; color: var(--muted); padding: 1px 6px; font-size: 12px; border-radius: 6px; cursor: pointer; }
 .repo-btn:hover:not(:disabled) { color: var(--text); background: var(--border); }
 .repo-btn:disabled { opacity: .35; cursor: default; }
+.repo-name a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }

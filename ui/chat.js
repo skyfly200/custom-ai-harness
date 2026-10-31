@@ -1138,7 +1138,7 @@ function reasoningHtml(m) {
   const shown = text.length > REASONING_SHOWN ? `${text.slice(0, REASONING_SHOWN)}\n… (${(text.length - REASONING_SHOWN).toLocaleString()} more characters)` : text;
   // the dots hop only while the model is thinking: not once text or a tool call has followed
   const live = isThinking(m);
-  return `<details class="reasoning${live ? ' live' : ''}" data-k="reasoning"><summary>
+  return `<details class="reasoning${live ? ' thinking-now' : ''}" data-k="reasoning"><summary>
       <span class="spark"><i></i><i></i><i></i></span><span>${live ? 'Thinking' : 'Thought'}</span>
       <span class="t">${text.length.toLocaleString()} characters</span></summary><pre>${esc(shown)}</pre></details>`;
 }
@@ -1411,12 +1411,13 @@ function repoFor(c, toolName, args) {
   return Repos.find(reposOf(c), named, kind);
 }
 // Skills on for this chat: its own and its project's
+// A skill switched off on the Skills page is kept but not used
 function skillsOf(c) {
   const ids = new Set([...(c?.skills || []), ...(projectOf(c)?.skills || [])]);
-  return skills.filter(k => ids.has(k.id));
+  return skills.filter(k => ids.has(k.id) && !k.disabled);
 }
 // Skills the model may load itself with use_skill
-const loadableSkills = (c) => ($('skillTool').checked ? skills.filter(k => !skillsOf(c).includes(k)) : []);
+const loadableSkills = (c) => ($('skillTool').checked ? skills.filter(k => !k.disabled && !skillsOf(c).includes(k)) : []);
 
 function contextText(c) {
   const parts = [];
@@ -1899,8 +1900,8 @@ async function runTool(call, c, signal, onChange) {
   }
   onChange();
   if (call.name === 'use_skill') {
-    const k = skills.find(x => x.name === args.name);
-    call.result = k ? k.body : `No skill named "${args.name}". Skills: ${skills.map(x => x.name).join(', ')}`;
+    const k = skills.find(x => x.name === args.name && !x.disabled);
+    call.result = k ? k.body : `No skill named "${args.name}". Skills: ${skills.filter(x => !x.disabled).map(x => x.name).join(', ')}`;
     call.isError = !k;
     call.ms = Date.now() - started;
     return onChange();
@@ -4161,7 +4162,7 @@ function openProjectDialog(id) {
   projectColor = p.color || COLORS[projects.length % COLORS.length];
   drawSwatches();
   const on = new Set(p.skills || []);
-  $('pSkills').innerHTML = skills.map(k => `<label class="check"><input type="checkbox" value="${k.id}"${on.has(k.id) ? ' checked' : ''}> ${esc(k.name)}</label>`).join('')
+  $('pSkills').innerHTML = skills.filter(k => !k.disabled).map(k => `<label class="check"><input type="checkbox" value="${k.id}"${on.has(k.id) ? ' checked' : ''}> ${esc(k.name)}</label>`).join('')
     || '<span class="muted small">No skills yet. Add them from the composer’s skills button.</span>';
   $('pDelete').hidden = theirs || !editingProject;
   if (!theirs) drawProjectAgents(p.id);
@@ -4290,7 +4291,7 @@ function drawKit() {
   if (!chat) return;
   const mine = new Set(chat.skills || []);
   const fromProject = new Set(projectOf(chat)?.skills || []);
-  $('kitSkills').innerHTML = skills.map(k => `<li><label class="check" title="${esc(k.description || k.body.slice(0, 160))}">
+  $('kitSkills').innerHTML = skills.filter(k => !k.disabled).map(k => `<li><label class="check" title="${esc(k.description || k.body.slice(0, 160))}">
       <input type="checkbox" data-skill="${k.id}"${mine.has(k.id) || fromProject.has(k.id) ? ' checked' : ''}${fromProject.has(k.id) ? ' disabled' : ''}>
       <span><b>${esc(k.name)}</b>${fromProject.has(k.id) ? ' <span class="tag">project</span>' : ''}<br><span class="muted small">${esc(k.description || '')}</span></span></label></li>`).join('')
     || '<li class="muted small">No skills yet. Manage skills to add some.</li>';

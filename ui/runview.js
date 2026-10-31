@@ -26,7 +26,9 @@
   function quickLine(run) {
     const ev = run.events || [];
     if (run.status === 'queued') return 'Waiting for its turn to start.';
-    if (run.status === 'waiting' || run.pending) return `Waiting for you to allow or decline: ${cut(first(run.pending?.text), 80) || 'a risky step'}.`;
+    if (run.status === 'waiting' || run.pending) return run.pending?.kind === 'question'
+      ? `Waiting for your answer: ${cut(first(run.pending.text), 80)}`
+      : `Waiting for you to allow or decline: ${cut(first(run.pending?.text), 80) || 'a risky step'}.`;
     if (ACTIVE.has(run.status)) {
       for (let i = ev.length - 1; i >= 0; i--) {
         const e = ev[i], a = e.args || {};
@@ -96,7 +98,7 @@
     });
   }
 
-  const GROUPS = { model: ['model'], tool: ['tool', 'result'], stage: ['stage', 'plan', 'note', 'warning'], approval: ['approval', 'approval_needed'] };
+  const GROUPS = { model: ['model'], tool: ['tool', 'result'], stage: ['stage', 'plan', 'note', 'warning'], approval: ['approval', 'approval_needed', 'question_needed', 'answer'] };
 
   /** f = { type: 'all'|group, tool, stage, errors } */
   function filterEvents(items, f = {}) {

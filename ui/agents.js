@@ -820,6 +820,7 @@ async function loadGithub() {
   try {
     const j = await (await fetch('api/github/status')).json();
     githubOn = Boolean(j.connected);
+    syncGhButtons();
     $('githubNote').textContent = j.connected ? `GitHub: connected as ${j.login || 'you'}.` : 'GitHub is not connected. Public repos can be cloned without it; private repos and pushing need it.';
     $('githubManage').textContent = j.connected ? 'Manage' : 'Connect GitHub';
     $('githubManage').classList.toggle('primary', !j.connected);
@@ -1054,7 +1055,7 @@ function renderAgents() {
   renderLive();
   const a = agentOf(agentSel);
   if (a) {
-    $('agentInfo').innerHTML = `<h3>${AgentIcon.icon(a, 'lg')}${esc(a.name)}</h3><div class="facts"><span>Repo <code>${esc(a.repo)}</code></span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map((r) => `<code>${esc(r)}</code>`).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.model ? `<span>Model ${esc(a.model)}</span>` : a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
+    $('agentInfo').innerHTML = `<h3>${AgentIcon.icon(a, 'lg')}${esc(a.name)}</h3><div class="facts"><span>Repo ${repoCode(a.repo)}</span>${a.moreRepos?.length ? `<span title="Named in every task; the agent works in the repo above">Also ${a.moreRepos.map(repoCode).join(' ')}</span>` : ''}<span>Workflow ${esc(nameOf(a.workflow))}</span>${a.model ? `<span>Model ${esc(a.model)}</span>` : a.profile ? `<span>Routing ${esc(a.profile)}</span>` : ''}${a.effort ? `<span>Effort ${esc(a.effort)}</span>` : ''}${a.sandbox ? `<span>Sandbox ${esc(SANDBOX_NAMES[a.sandbox] || a.sandbox)}</span>` : ''}<span title="What this agent's tasks cost, swarm workers included">Spent ${agentSpend(a.id)}</span>${a.project ? `<span>Chat project <a href="chat#project=${encodeURIComponent(a.project.id)}">${esc(projectName(a.project))}</a></span>` : ''}${a.branch ? `<span>Work so far on <code>${esc(a.branch)}</code></span>` : '<span>No work committed yet</span>'}</div>
       ${a.instructions ? `<div class="instr">${esc(a.instructions)}</div>` : ''}
       <div class="actions"><button type="button" class="primary" data-aact="newrun">New run</button><button type="button" data-aact="edit">Edit</button><button type="button" data-aact="delete" data-hint="Removes the agent. Its tasks stay in the list as ordinary runs and their branches stay in your repo">Delete agent</button></div>`;
   } else if (inAgent) {
@@ -1186,11 +1187,66 @@ let editingAgent = null;
 // Repos beside the default (the Repo field): the whole list is [Repo field, ...agentExtras], and the chips reorder it.
 let agentExtras = [];
 const agentRepoList = () => Repos.fromSpecs([$('agentRepo').value, ...agentExtras]);
+// Add one owner/name (or folder path): the Repo field when it is empty, else the More repos list
+function addAgentSpec(v) {
+  const spec = String(v || '').trim();
+  if (!spec) return;
+  if (!$('agentRepo').value.trim()) $('agentRepo').value = spec;
+  else if (![$('agentRepo').value.trim(), ...agentExtras].includes(spec)) agentExtras.push(spec);
+}
+// A link to the repo on GitHub, or a plain code tag for anything else
+const repoCode = (spec) => {
+  const e = Repos.fromSpecs([spec])[0];
+  const url = e && Repos.isGithub(e) ? Repos.githubUrl(e.full) : '';
+  return url ? `<a href="${esc(url)}" target="_blank" rel="noopener"><code>${esc(spec)}</code></a>` : `<code>${esc(spec)}</code>`;
+};
+
+// Pick repos from the connected GitHub account: 'repo' (the Repo field, one) or 'more' (More repos, several)
+let ghPickInto = 'repo';
+let ghPickAll = [];          // the account's repos, loaded when the picker opens
+let ghPickPicked = new Set();
+function syncGhButtons() {
+  const on = githubOn === true;
+  $('agentGhRepo').hidden = !on;
+  $('agentMoreGh').hidden = !on;
+}
+function drawGhPicker() {
+  const single = ghPickInto === 'repo';
+  const rows = Repos.filterGithub(ghPickAll, $('ghPickFilter').value, single ? [] : agentRepoList());
+  $('ghPickList').innerHTML = rows.length
+    ? rows.map((r) => `<div class="pick-row${ghPickPicked.has(r.full) ? ' on' : ''}" data-full="${esc(r.full)}" role="option" aria-selected="${ghPickPicked.has(r.full)}" tabindex="0"><span class="ico">${r.private ? '🔒' : '◆'}</span><span class="nm">${esc(r.full)}</span>${r.private ? '<span class="tag">private</span>' : ''}</div>`).join('')
+    : `<p class="muted pad">${ghPickAll.length ? 'No repos match.' : 'Your GitHub account has no repos this connection can reach. Check the GitHub section above.'}</p>`;
+  $('ghPickHint').textContent = ghPickPicked.size ? `${ghPickPicked.size} selected` : (single ? 'Click the repo the agent works in.' : 'Click repos to select them.');
+  $('ghPickUse').disabled = !ghPickPicked.size;
+}
+async function openGhPicker(into) {
+  ghPickInto = into;
+  ghPickPicked = new Set();
+  ghPickAll = [];
+  $('ghPickFilter').value = '';
+  $('ghPickTitle').textContent = into === 'repo' ? 'Choose the repo the agent works in' : 'Add GitHub repos';
+  $('ghPickUse').textContent = into === 'repo' ? 'Use this repo' : 'Add';
+  $('ghPickList').innerHTML = '<p class="muted pad">Loading your GitHub repos…</p>';
+  $('ghPickHint').textContent = '';
+  $('ghPickUse').disabled = true;
+  $('ghPicker').showModal();
+  try {
+    const res = await fetch('api/github/repos');
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(j.error || `GitHub answered HTTP ${res.status}`);
+    ghPickAll = j.repos || [];
+  } catch (err) {
+    $('ghPickList').innerHTML = '';
+    $('ghPickHint').textContent = err.message;
+    return;
+  }
+  drawGhPicker();
+}
 // A chat project's repos (GitHub only on a shared server, which cannot read folders on your computer)
 const projectRepoEntries = (link) => Repos.list(chatProjects().find((p) => p.id === link.id)).filter((e) => !hosted || Repos.isGithub(e));
 function drawAgentRepos() {
   const all = agentRepoList();
-  $('agentMoreChips').innerHTML = all.length > 1 ? Repos.chipsHtml(all, { controls: true, esc }) : '';
+  $('agentMoreChips').innerHTML = all.length > 1 ? Repos.chipsHtml(all, { controls: true, links: true, esc }) : '';
   const link = chatProjects().find((p) => p.id === $('agentProject').value);
   const inherited = link ? projectRepoEntries(link) : [];
   const note = $('agentInherit');
@@ -1209,10 +1265,34 @@ async function initAgentDialog() {
   const addExtra = () => {
     const v = $('agentMoreInput').value.trim();
     if (!v) return;
-    if (!$('agentRepo').value.trim()) $('agentRepo').value = v; else if (![$('agentRepo').value.trim(), ...agentExtras].includes(v)) agentExtras.push(v);
+    addAgentSpec(v);
     $('agentMoreInput').value = '';
     drawAgentRepos();
   };
+  $('agentGhRepo').addEventListener('click', () => openGhPicker('repo'));
+  $('agentMoreGh').addEventListener('click', () => openGhPicker('more'));
+  $('ghPickClose').addEventListener('click', () => $('ghPicker').close());
+  $('ghPickFilter').addEventListener('input', drawGhPicker);
+  $('ghPickList').addEventListener('click', (e) => {
+    const row = e.target.closest('.pick-row');
+    if (!row) return;
+    const full = row.dataset.full;
+    if (ghPickInto === 'repo') ghPickPicked = new Set([full]);
+    else if (ghPickPicked.has(full)) ghPickPicked.delete(full); else ghPickPicked.add(full);
+    drawGhPicker();
+  });
+  $('ghPickList').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.closest('.pick-row')?.click(); });
+  $('ghPickUse').addEventListener('click', () => {
+    if (ghPickInto === 'repo') {
+      const [full] = ghPickPicked;
+      setAgentRepos(Repos.fromSpecs([full, ...agentExtras.filter((x) => x !== full)]));
+    } else {
+      for (const full of ghPickPicked) addAgentSpec(full);
+      drawAgentRepos();
+    }
+    ghPickPicked = new Set();
+    $('ghPicker').close();
+  });
   $('agentMoreAdd').addEventListener('click', addExtra);
   $('agentMoreInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addExtra(); } });
   $('agentRepo').addEventListener('input', drawAgentRepos);

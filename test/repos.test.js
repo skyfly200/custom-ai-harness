@@ -156,3 +156,28 @@ test('the chat page picks the repo a tool call names, else the default, and refu
   assert.equal(ctx.repoOf(chat), null);
   assert.deepEqual(ctx.reposOf(chat).map(R.labelOf), ['me/app', 'me/docs']);
 });
+
+test('githubUrl links owner/name to github.com and nothing else', () => {
+  assert.equal(R.githubUrl('skyfly200/custom-ai-harness'), 'https://github.com/skyfly200/custom-ai-harness');
+  assert.equal(R.githubUrl(' a.b/c_d '), 'https://github.com/a.b/c_d');
+  assert.equal(R.githubUrl('/code/x'), '');
+  assert.equal(R.githubUrl('a/b/c'), '');
+  assert.equal(R.githubUrl(''), '');
+});
+
+test('filterGithub matches every word, ignores case and skips repos already attached', () => {
+  const repos = [{ full: 'Acme/Web-App' }, { full: 'acme/api', private: true }, { full: 'me/notes' }];
+  assert.deepEqual(R.filterGithub(repos, 'ACME').map((r) => r.full), ['Acme/Web-App', 'acme/api']);
+  assert.deepEqual(R.filterGithub(repos, 'acme  api').map((r) => r.full), ['acme/api']);
+  assert.deepEqual(R.filterGithub(repos, '', [gh('acme/api')]).map((r) => r.full), ['Acme/Web-App', 'me/notes']);
+  assert.deepEqual(R.filterGithub(null, 'x'), []);
+});
+
+test('chipsHtml links GitHub names only when asked, and leaves folders as text', () => {
+  const entries = [gh('a/b'), dir('/code/x', 'x')];
+  const plain = R.chipsHtml(entries, {});
+  assert.doesNotMatch(plain, /href=/);
+  const linked = R.chipsHtml(entries, { links: true, esc: (s) => String(s) });
+  assert.match(linked, /<a href="https:\/\/github\.com\/a\/b" target="_blank" rel="noopener"[^>]*>a\/b<\/a>/);
+  assert.doesNotMatch(linked, /href="[^"]*x"/);
+});

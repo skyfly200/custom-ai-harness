@@ -568,7 +568,7 @@ button.icon.on { color: var(--accent); }
    messages stay as bubbles on the right, and the composer floats above a soft fade. */
 .log { padding: 22px 16px 28px; gap: 22px; scroll-padding-bottom: 24px; }
 .log > * { max-width: 780px; }
-.msg.assistant { display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 12px; }
+.msg.assistant { display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 20px; }
 .orb-av { grid-column: 1; grid-row: 1 / span 4; position: relative; width: 28px; height: 28px; margin-top: 1px; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #fff 0 9%, var(--glow-a) 24%, var(--glow-b) 52%, var(--glow-c) 78%);
   box-shadow: 0 0 14px -3px var(--glow-b); }
@@ -598,7 +598,7 @@ button.icon.on { color: var(--accent); }
 .msg.assistant > .who { margin-left: -5px; }
 .msg.assistant .bubble { background: none; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 12px;
   padding: 2px 0 4px; font-size: 15px; line-height: 1.65; }
-.msg.assistant .bubble.working { padding: 8px 14px; margin-left: -14px; background: var(--glass); border-color: var(--border); }
+.msg.assistant .bubble.working { padding: 8px 14px; margin-left: 0; background: var(--glass); border-color: var(--border); }
 .msg.user .bubble { border-radius: 18px 18px 5px 18px; padding: 9px 15px; font-size: 15px; line-height: 1.55; }
 .msg.error { padding-left: 42px; }
 .msg.error .who { display: none; }
@@ -616,7 +616,7 @@ button.icon.on { color: var(--accent); }
 .chatbar .title { font-size: 15px; }
 @media (max-width: 760px) {
   .log { padding: 14px 12px 20px; gap: 18px; }
-  .msg.assistant { grid-template-columns: 24px minmax(0, 1fr); column-gap: 9px; }
+  .msg.assistant { grid-template-columns: 24px minmax(0, 1fr); column-gap: 16px; }
   .orb-av { width: 22px; height: 22px; }
   @keyframes orb-orbit { from { transform: rotate(0) translateX(15px); } to { transform: rotate(360deg) translateX(15px); } }
   .msg.assistant .bubble { font-size: 15px; }

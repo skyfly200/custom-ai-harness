@@ -127,15 +127,31 @@
       + 'When you change something outside the default repo, say which repo you used.';
   }
 
-  /** Small chips for a list: the default marked. `controls` adds the up, down, make-default and remove buttons. */
-  function chipsHtml(entries, { controls = false, esc = (s) => String(s) } = {}) {
+  /** The page on github.com for owner/name (or '' for anything else). */
+  function githubUrl(full) {
+    const m = /^([\w.-]+)\/([\w.-]+)$/.exec(String(full || '').trim());
+    return m ? `https://github.com/${m[1]}/${m[2]}` : '';
+  }
+
+  /** The GitHub repos (from the connection's list) whose owner/name matches `q`, skipping those already attached. */
+  function filterGithub(repos, q, attached = []) {
+    const have = new Set(attached.filter(isGithub).map((e) => e.full.toLowerCase()));
+    const words = String(q || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return (repos || []).filter((r) => r && r.full && !have.has(String(r.full).toLowerCase())
+      && words.every((w) => String(r.full).toLowerCase().includes(w)));
+  }
+
+  /** Small chips for a list: the default marked. `controls` adds the up, down, make-default and remove buttons; `links` links GitHub names to github.com. */
+  function chipsHtml(entries, { controls = false, links = false, esc = (s) => String(s) } = {}) {
     if (!entries.length) return '';
     return entries.map((e, i) => {
       const key = esc(keyOf(e));
       const btn = (act, label, title, off) => `<button type="button" class="repo-btn" data-repo-act="${act}" data-repo-key="${key}" title="${esc(title)}" aria-label="${esc(title)}"${off ? ' disabled' : ''}>${label}</button>`;
+      const url = links && isGithub(e) ? githubUrl(e.full) : '';
+      const name = url ? `<a href="${esc(url)}" target="_blank" rel="noopener" title="Open ${esc(e.full)} on GitHub">${esc(labelOf(e))}</a>` : esc(labelOf(e));
       return `<li class="repo-chip${i === 0 ? ' default' : ''}" data-repo-key="${key}">`
         + `<span class="repo-kind" title="${isGithub(e) ? 'A GitHub repo' : 'A git folder on this computer'}">${isGithub(e) ? 'GH' : 'dir'}</span>`
-        + `<span class="repo-name" title="${esc(specOf(e))}">${esc(labelOf(e))}</span>`
+        + `<span class="repo-name" title="${esc(specOf(e))}">${name}</span>`
         + (i === 0 ? '<span class="repo-default" title="Work happens here unless you say otherwise">default</span>' : '')
         + (controls
           ? `<span class="repo-ctl">${i === 0 ? '' : btn('default', 'Make default', 'Make this the default repo')}${btn('up', '↑', 'Move up', i === 0)}${btn('down', '↓', 'Move down', i === entries.length - 1)}${btn('remove', '×', `Remove ${labelOf(e)}`)}</span>`
@@ -160,7 +176,7 @@
     });
   }
 
-  const api = { list, set, effective, isOwn, defaultOf, add, remove, makeDefault, move, find, keyOf, labelOf, specOf, fromSpecs, toSpecs, mergeKeepingFolders, promptText, chipsHtml, bind, isGithub, isLocal };
+  const api = { list, set, effective, isOwn, defaultOf, add, remove, makeDefault, move, find, keyOf, labelOf, specOf, fromSpecs, toSpecs, mergeKeepingFolders, promptText, chipsHtml, bind, isGithub, isLocal, githubUrl, filterGithub };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.Repos = api;
 })(typeof window !== 'undefined' ? window : globalThis);

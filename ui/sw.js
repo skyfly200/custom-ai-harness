@@ -5,7 +5,7 @@
 // that isn't a plain GET: chats, answers and keys are never stored here.
 'use strict';
 
-const CACHE = 'bright-chat-v6';
+const CACHE = 'bright-chat-v7';
 
 function keepable(request) {
   if (request.method !== 'GET') return false;

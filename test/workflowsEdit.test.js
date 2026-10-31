@@ -125,7 +125,8 @@ test('every ready-made stage is a valid stage, and inserting one wires its FAIL 
   for (const t of M.STAGE_TEMPLATES) {
     const s = M.fromTemplate(t, stages, stages.length);
     assert.match(s.id, M.ID_RE, t.key);
-    assert.ok(s.prompt.trim(), t.key);
+    // a yes or no or a person's stage has no instructions for an agent, so only an agent stage needs a prompt
+    if (M.isAgent(s)) assert.ok(s.prompt.trim(), t.key);
     assert.deepEqual(M.problems({ id: 'x', name: 'x', stages: [...stages, s] }).filter((p) => !p.includes('model')), [], t.key);
   }
   const build = M.stage({ id: 'build', role: 'Programmer', tools: 'all', prompt: 'Build.' });

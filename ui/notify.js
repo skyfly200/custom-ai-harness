@@ -9,7 +9,7 @@
   const DEFAULTS = { on: false, approval: true, reply: true };
   const TEXT = {
     approval: { title: 'Needs your approval', body: 'A command is waiting for you to allow or decline it.' },
-    run: { title: 'An agent needs you', body: 'A run is waiting for you to allow or decline a step.' },
+    run: { title: 'An agent needs you', body: 'A run is waiting for you to allow or decline a step or answer a question.' },
     reply: { title: 'Reply ready', body: 'The chat is waiting for your next message.' },
   };
   const PREF_OF = { approval: 'approval', run: 'approval', reply: 'reply' };

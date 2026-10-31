@@ -31,7 +31,7 @@
   // The body the server takes: the same fields, with empty effort and model left out
   const toBody = (w) => ({
     ...w,
-    stages: w.stages.map((s) => ({ ...s, effort: s.effort || null, model: (s.model || '').trim() || null, retryTo: s.verdict ? s.retryTo : null, maxRetries: s.verdict ? s.maxRetries : 0 })),
+    stages: w.stages.map((s) => ({ ...s, effort: s.effort || null, model: (s.model || '').trim() || null, retryTo: M.isAgent(s) && s.verdict ? s.retryTo : null, maxRetries: M.isAgent(s) && s.verdict ? s.maxRetries : 0, goto: M.cleanGoto(s, w.stages) })),
   });
 
   // ---- the workflow list ----
@@ -71,13 +71,22 @@
     const parts = ['<span class="wf-end">Start</span>'];
     wf.stages.forEach((s, i) => {
       if (i) parts.push('<span class="wf-arrow" aria-hidden="true">→</span>');
-      const chips = [SHORT_TOOLS[s.tools]];
-      if (s.effort) chips.push(`${s.effort} thinking`);
-      if (s.model) chips.push(s.model);
-      if (s.canWait) chips.push('batch');
-      if (s.diff) chips.push('diff');
-      if (s.verdict) chips.push('PASS / FAIL');
-      parts.push(`<button class="wf-node${i === sel ? ' on' : ''}${s.verdict ? ' check' : ''}" data-i="${i}" aria-pressed="${i === sel}" data-hint="Edit this stage">
+      const chips = [];
+      if (s.kind === 'branch') chips.push(s.ask ? 'Jev yes / no' : `looks for “${s.contains}”`);
+      else if (s.kind === 'human') chips.push(s.options.length ? `asks: ${s.options.join(' / ')}` : 'asks a person');
+      else {
+        chips.push(SHORT_TOOLS[s.tools]);
+        if (s.effort) chips.push(`${s.effort} thinking`);
+        if (s.model) chips.push(s.model);
+        if (s.canWait) chips.push('batch');
+        if (s.diff) chips.push('diff');
+        if (s.verdict) chips.push('PASS / FAIL');
+      }
+      for (const o of M.outcomesFor(s)) {
+        const to = s.goto?.[o.key];
+        if (to) chips.push(`${o.label} → ${to === 'end' ? 'finish' : (wf.stages.find((t) => t.id === to)?.role || to)}`);
+      }
+      parts.push(`<button class="wf-node${i === sel ? ' on' : ''}${s.verdict || s.kind !== 'agent' ? ' check' : ''}" data-i="${i}" aria-pressed="${i === sel}" data-hint="Edit this stage">
         <span class="wf-num">${i + 1}</span><b>${esc(s.role)}</b><small>${esc(s.id)}</small>
         <span class="chips">${chips.map((c) => `<i>${esc(c)}</i>`).join('')}</span></button>`);
     });
@@ -87,7 +96,7 @@
     drawArcs();
     $('canvasHint').textContent = wf.stages.length === 1
       ? 'Add more stages with the Duplicate button, then arrange them with Earlier and Later.'
-      : 'Arrows show the order the run takes. A dashed arc is a FAIL that sends the work back.';
+      : 'Arrows show the order the run takes. A dashed arc is a FAIL, or a yes, no or person’s answer, that sends the run back. A choice that skips ahead is shown on its box.';
   }
 
   function drawArcs() {
@@ -100,11 +109,17 @@
     svg.setAttribute('height', h);
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
     svg.querySelectorAll('.arc, .arc-label').forEach((n) => n.remove());
+    // a backward arc: each FAIL retry, and each goto that sends the run to an earlier stage, labelled with its outcome
     const back = [];
     wf.stages.forEach((s, i) => {
-      if (!s.verdict || !s.retryTo) return;
-      const j = wf.stages.findIndex((t) => t.id === s.retryTo);
-      if (j >= 0 && j < i) back.push({ from: i, to: j });
+      if (s.verdict && M.isAgent(s) && s.retryTo && !s.goto?.FAIL) {
+        const j = wf.stages.findIndex((t) => t.id === s.retryTo);
+        if (j >= 0 && j < i) back.push({ from: i, to: j, label: 'FAIL' });
+      }
+      for (const [key, to] of Object.entries(s.goto || {})) {
+        const j = wf.stages.findIndex((t) => t.id === to);
+        if (j >= 0 && j < i) back.push({ from: i, to: j, label: key, goto: true });
+      }
     });
     back.forEach((arc, k) => {
       const a = nodes[arc.from]; const b = nodes[arc.to];
@@ -116,8 +131,8 @@
       const d = `M${x1} ${top - 2} C${x1} ${top - lift - 26}, ${x2} ${top - lift - 26}, ${x2} ${b.offsetTop - 4}`;
       // a cubic curve with both ends level reaches 3/4 of its control height at the top, where the label sits
       const apex = top - 0.75 * (lift + 26);
-      svg.insertAdjacentHTML('beforeend', `<path class="arc" d="${d}" marker-end="url(#arrowhead)"></path>
-        <text class="arc-label" x="${(x1 + x2) / 2}" y="${apex - 6}">FAIL</text>`);
+      svg.insertAdjacentHTML('beforeend', `<path class="arc${arc.goto ? ' arc-goto' : ''}" d="${d}" marker-end="url(#arrowhead)"></path>
+        <text class="arc-label${arc.goto ? ' arc-label-goto' : ''}" x="${(x1 + x2) / 2}" y="${apex - 6}">${esc(arc.label)}</text>`);
     });
   }
 
@@ -134,12 +149,42 @@
     const before = choices[Math.max(0, choices.length - 2)];
     $('fRetry').value = s.retryTo && choices.some((t) => t.id === s.retryTo) ? s.retryTo : (before?.id || '');
   }
+  // The Where each outcome goes rows: one select per outcome the stage has, listing the stages and the end
+  function fillGoto(s, i) {
+    const outcomes = M.outcomesFor(s);
+    $('gotoBox').hidden = !outcomes.length;
+    $('gotoRows').innerHTML = outcomes.map((o) => {
+      const cur = s.goto?.[o.key] || '';
+      const choices = [`<option value="">The next stage in the list</option>`,
+        ...wf.stages.map((t) => `<option value="${esc(t.id)}">${esc(t.role)} (${esc(t.id)})</option>`),
+        '<option value="end">Finish the run here</option>'];
+      return `<div class="wf-goto-row"><span><b>${esc(o.label)}</b></span>
+        <select data-goto="${esc(o.key)}" aria-label="Where ${esc(o.label)} goes">${choices.join('').replace(`value="${esc(cur)}"`, `value="${esc(cur)}" selected`)}</select></div>`;
+    }).join('');
+  }
+  function fillKindFields(s) {
+    $('fKind').value = s.kind || 'agent';
+    $('fBy').value = s.contains ? 'contains' : 'ask';
+    $('fAsk').value = s.ask || '';
+    $('fContains').value = s.contains || '';
+    $('fQuestion').value = s.question || '';
+    $('fOptions').value = (s.options || []).join('\n');
+    fillDefaultChoices(s);
+    $('fDefaultText').value = s.options?.length ? '' : (s.defaultOption || '');
+    $('fTimeout').value = s.timeoutMinutes || 60;
+  }
+  // The default answer choices follow the options, so a changed option list is never offered a stale default
+  function fillDefaultChoices(s) {
+    $('fDefault').innerHTML = (s.options || []).map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join('');
+    $('fDefault').value = s.defaultOption || '';
+  }
   function loadForm() {
     const s = wf.stages[sel];
     if (!s) return;
     $('editTitle').textContent = `Stage ${sel + 1}: ${s.role}`;
     $('fRole').value = s.role;
     $('fId').value = s.id;
+    fillKindFields(s);
     $('fPrompt').value = s.prompt;
     $('fTools').value = s.tools;
     $('fEffort').value = s.effort || '';
@@ -154,11 +199,18 @@
     $('stEarlier').disabled = sel === 0;
     $('stLater').disabled = sel === wf.stages.length - 1;
     $('stDelete').disabled = wf.stages.length === 1;
+    fillGoto(s, sel);
     showConditional();
   }
   function showConditional() {
     const s = wf.stages[sel];
-    $('verdictBox').hidden = !s.verdict;
+    const kind = s.kind || 'agent';
+    for (const el of document.querySelectorAll('[data-only]')) el.hidden = el.dataset.only !== kind;
+    $('fAsk').closest('label').hidden = $('fBy').value !== 'ask';
+    $('fContains').closest('label').hidden = $('fBy').value !== 'contains';
+    $('fDefault').closest('label').hidden = !(s.options?.length);
+    $('fDefaultText').closest('label').hidden = Boolean(s.options?.length);
+    $('verdictBox').hidden = !(M.isAgent(s) && s.verdict);
     $('fWait').closest('label').hidden = !s.canWait;
     $('explain').replaceChildren(...M.explain(wf.stages, sel).map((t) => Object.assign(document.createElement('li'), { textContent: t })));
     const problems = M.problems(wf).filter((p) => p.startsWith(s.role) || p.startsWith(`Stage ${sel + 1}`));
@@ -169,14 +221,23 @@
     const prevId = s.id;
     const id = $('fId').value.trim();
     s.role = $('fRole').value;
+    s.kind = $('fKind').value;
     s.prompt = $('fPrompt').value;
+    s.ask = s.kind === 'branch' && $('fBy').value === 'ask' ? ($('fAsk').value.trim() || null) : null;
+    s.contains = s.kind === 'branch' && $('fBy').value === 'contains' ? ($('fContains').value.trim() || null) : null;
+    s.question = $('fQuestion').value.trim();
+    s.options = $('fOptions').value.split('\n').map((o) => o.trim()).filter(Boolean).filter((o, k, all) => all.indexOf(o) === k).slice(0, 6);
+    s.defaultOption = s.options.length ? ($('fDefault').value || s.options[0]) : ($('fDefaultText').value.trim() || null);
+    s.timeoutMinutes = Math.max(1, Math.min(1440, Math.floor(Number($('fTimeout').value)) || 60));
+    s.goto = {};
+    for (const sel2 of document.querySelectorAll('[data-goto]')) if (sel2.value) s.goto[sel2.dataset.goto] = sel2.value;
     s.tools = $('fTools').value;
     s.effort = $('fEffort').value || null;
     s.model = $('fModel').value.trim() || null;
     s.maxSteps = Math.max(0, Math.min(10000, Math.floor(Number($('fMaxSteps').value)) || 0));
     s.verdict = $('fVerdict').checked;
-    s.retryTo = s.verdict ? ($('fRetry').value || null) : null;
-    s.maxRetries = s.verdict ? Math.max(0, Math.min(5, Math.floor(Number($('fRetries').value)) || 0)) : 0;
+    s.retryTo = s.verdict && M.isAgent(s) ? ($('fRetry').value || null) : null;
+    s.maxRetries = s.verdict && M.isAgent(s) ? Math.max(0, Math.min(5, Math.floor(Number($('fRetries').value)) || 0)) : 0;
     s.canWait = $('fBatch').checked;
     s.maxWaitMinutes = Math.max(1, Math.min(1440, Math.floor(Number($('fWait').value)) || 120));
     s.diff = $('fDiff').checked;
@@ -188,6 +249,7 @@
     drawCanvas();
     showConditional();
     fillRetry(wf.stages[sel], sel);
+    fillGoto(wf.stages[sel], sel);
     $('wfSave').disabled = !dirty();
     $('wfDiscard').disabled = !dirty();
     const problems = M.problems(wf);
@@ -226,12 +288,25 @@
     const node = e.target.closest('.wf-node');
     if (node) select(Number(node.dataset.i));
   });
-  for (const id of ['fRole', 'fId', 'fPrompt', 'fModel', 'fMaxSteps', 'fRetries', 'fWait']) {
+  for (const id of ['fRole', 'fId', 'fPrompt', 'fModel', 'fMaxSteps', 'fRetries', 'fWait', 'fAsk', 'fContains', 'fQuestion', 'fDefaultText', 'fTimeout']) {
     $(id).addEventListener('input', () => { readForm(); refresh(); });
   }
-  for (const id of ['fTools', 'fEffort', 'fRetry', 'fVerdict', 'fBatch', 'fDiff']) {
+  $('fOptions').addEventListener('input', () => { readForm(); fillDefaultChoices(wf.stages[sel]); refresh(); });
+  for (const id of ['fTools', 'fEffort', 'fRetry', 'fVerdict', 'fBatch', 'fDiff', 'fBy', 'fDefault']) {
     $(id).addEventListener('change', () => { readForm(); refresh(); loadForm(); });
   }
+  $('gotoRows').addEventListener('change', () => { readForm(); refresh(); });
+  // Changing the kind of a stage gives the new kind the fields it needs, so the form is never empty
+  $('fKind').addEventListener('change', () => {
+    readForm();
+    const s = wf.stages[sel];
+    if (s.kind === 'branch' && !s.ask && !s.contains) s.ask = 'Did the last stage find a problem?';
+    if (s.kind === 'human' && !s.question) s.question = 'Should the run go ahead?';
+    if (s.kind === 'agent' && !String(s.prompt || '').trim()) s.prompt = 'Complete the task. Call finish with what you did.';
+    if (s.kind !== 'agent') s.retryTo = null;
+    refresh();
+    loadForm();
+  });
   $('wfName').addEventListener('input', () => { wf.name = $('wfName').value; refresh(); });
   $('wfWhen').addEventListener('input', () => { wf.when = $('wfWhen').value; refresh(); });
   $('wfFallback').addEventListener('change', () => {
@@ -243,17 +318,14 @@
   $('stCopy').addEventListener('click', () => mutate(() => {
     const at = sel + 1;
     const base = wf.stages[sel];
-    const copy = { ...clone(base), id: M.uniqueId(wf.stages, base.id), role: `${base.role} 2`, retryTo: null };
+    const copy = { ...clone(base), id: M.uniqueId(wf.stages, base.id), role: `${base.role} 2`, retryTo: null, goto: {} };
     wf.stages.splice(at, 0, copy);
     sel = at;
   }));
   $('stDelete').addEventListener('click', async () => {
     const s = wf.stages[sel];
     if (!(await window.ui.confirm(`Remove the ${s.role} stage?`, { ok: 'Remove', danger: true }))) return;
-    mutate(() => {
-      wf.stages.splice(sel, 1);
-      wf.stages = wf.stages.map((t) => (t.retryTo && !wf.stages.some((x) => x.id === t.retryTo) ? { ...t, retryTo: null } : t));
-    });
+    mutate(() => { wf.stages = M.dropStage(wf.stages, sel); });
   });
   $('wfSel').addEventListener('change', () => open($('wfSel').value));
   window.addEventListener('resize', () => drawArcs());

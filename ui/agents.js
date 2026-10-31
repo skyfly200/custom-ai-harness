@@ -122,6 +122,8 @@ function eventHtml(e) {
   }
   if (e.type === 'result') return `<div class="ev"><details data-k="${esc(key)}"${open(key)}><summary>${time}result: ${esc((e.text || '').split('\n')[0].slice(0, 120))}</summary><pre>${esc(e.text)}</pre></details></div>`;
   if (e.type === 'approval_needed') return `<div class="ev approval_needed">${time}Waiting for you: <code>${esc(e.text)}</code> (${esc(e.reason)})</div>`;
+  if (e.type === 'question_needed') return `<div class="ev approval_needed">${time}The workflow asks you: ${esc(e.text)}</div>`;
+  if (e.type === 'answer') return `<div class="ev decided">${time}Answered: <code>${esc(e.text || '(nothing)')}</code> <span class="muted">${esc(e.why || '')}</span></div>`;
   if (e.type === 'approval') return `<div class="ev decided">${time}${e.allowed ? 'Allowed' : 'Declined'}: <code>${esc(e.text)}</code></div>`;
   if (e.type === 'plan') return `<div class="ev stage">${time}<strong>Plan</strong><pre>${esc(e.text)}</pre></div>`;
   if (e.type === 'stage') return `<div class="ev stage">${time}<strong>${esc(e.text)}</strong></div>`;
@@ -171,7 +173,7 @@ function renderDetail(run) {
       if (!id) return `<span class="worker muted">${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} · waiting for what it depends on</span>`;
       return `<button class="worker" data-go="${esc(id)}"><span class="tag ${TAGS[c?.status] || ''}">${esc(NOTE_FOR[c?.status] || c?.status || '?')}</span> ${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} <span class="muted">step ${c?.steps ?? 0}</span></button>`;
     }).join('')}</div></div>` : ''}
-    ${run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
+    ${run.pending?.kind === 'question' ? questionCard(run.pending) : run.pending ? `<div class="approval"><strong>The agent wants to ${run.pending.kind === 'write' ? 'write this file' : 'run this command'}</strong> <span class="muted">(${esc(run.pending.reason)})</span><pre>${esc(run.pending.text)}</pre><div class="actions"><button class="primary" data-act="allow">Allow</button><button data-act="decline">Decline</button></div></div>` : ''}
     ${run.error ? `<div class="result"><span class="tag bad">error</span> ${esc(run.error)}</div>` : ''}
     ${r ? `<div class="result">${run.plan ? '<p class="muted">Plan only: nothing was changed, so there is no branch to review.</p>' : ''}<p class="summary">${esc(r.summary)}</p>${run.landed ? `<p class="muted">${run.landed.ok ? `${run.landed.mode === 'main' ? 'Put straight onto' : 'Merged into'} <code>${esc(run.landed.into)}</code> (${esc(String(run.landed.sha || '').slice(0, 10))})${run.landed.url ? ` · <a href="${esc(run.landed.url)}" target="_blank" rel="noopener">view on GitHub</a>` : ''}.` : `Not landed: ${esc(run.landed.reason)}. The change is still on <code>${esc(run.branch)}</code>.`}</p>` : ''}
       ${run.plan ? '' : r.diffStat ? `<pre>${esc(r.diffStat)}</pre>` : '<p class="muted">No files changed.</p>'}
@@ -500,9 +502,34 @@ $('list').addEventListener('click', (e) => {
   refresh();
 });
 
+// A workflow's question for the person: one button per option, or a typed answer
+function questionCard(p) {
+  const minutes = p.minutes || 60;
+  const fallback = p.defaultOption ? `“${esc(p.defaultOption)}” is taken` : 'the run goes on with an empty answer';
+  const input = p.options?.length
+    ? `<div class="actions">${p.options.map((o) => `<button${o === p.defaultOption ? ' class="primary"' : ''} data-answer="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
+    : `<form class="answer-form" data-answer-form><input type="text" name="answer" maxlength="4000" autocomplete="off" placeholder="Type your answer"> <button class="primary" type="submit">Send</button></form>`;
+  return `<div class="approval question"><strong>The workflow asks you</strong><p>${esc(p.text)}</p>${input}<p class="muted small">If nobody answers in ${minutes} minute${minutes === 1 ? '' : 's'}, ${fallback}.</p></div>`;
+}
+
+$('detail').addEventListener('submit', async (e) => {
+  const form = e.target.closest('[data-answer-form]');
+  if (!form || !selected) return;
+  e.preventDefault();
+  const answer = form.elements.answer.value.trim();
+  if (!answer) return;
+  try { await post(`/${selected}/answer`, { answer }); } catch (err) { ui.toast(err.message || 'Could not send the answer.'); }
+});
+
 $('detail').addEventListener('click', async (e) => {
   const goAgent = e.target.closest('[data-agent]')?.dataset.agent;
   if (goAgent) { e.preventDefault(); chooseAgent(goAgent); return; }
+  const answer = e.target.closest('[data-answer]')?.dataset.answer;
+  if (answer !== undefined && selected) {
+    e.preventDefault();
+    try { await post(`/${selected}/answer`, { answer }); } catch (err) { ui.toast(err.message || 'Could not send the answer.'); }
+    return;
+  }
   const go = e.target.closest('[data-go]')?.dataset.go;
   if (go) { e.preventDefault(); selected = go; location.hash = go; openDetails = new Set(); applyView(); renderList(); refresh(); return; }
   const act = e.target.closest('[data-act]')?.dataset.act;

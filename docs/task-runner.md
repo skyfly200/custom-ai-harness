@@ -194,6 +194,18 @@ Approving pushes the run's branch, opens a pull request and merges it on GitHub 
 
 The widget's **Propose a fix only** (or `POST /apps/:id/proposals` with `kind` `error` or `feedback`, a `note` and the page `context`) runs a change that can only end as an **open pull request**: never merged, never deployed, a draft when it touches sensitive files. A page that hit console errors sends them as the problem; without errors it is a "this is confusing" note. It needs `GITHUB_TOKEN` like shipping; without it the branch is left in the repo and the run log says so. Limits: 3 proposals an hour per app (`RUNNER_PROPOSALS_PER_HOUR`), and the same problem is not proposed again while its earlier proposal is open or running (HTTP 429).
 
+## Wayfinder app (plan, then build)
+
+A run with the workflow **Wayfinder app** plans an app with you and builds it. Describe the app as the goal and pick a repo; the harness runs three kinds of agent (`runner/appFlow.js`):
+
+- **Planner** (Sonnet, medium reasoning) grills you one question at a time as a question card on the run page, reads the repo with `read_file` and `search_code`, and finishes with a Wayfinder ticket draft: `build`, `research` and `decision` tickets, each with the tickets it depends on.
+- **Orchestrator** (Sonnet, medium) walks the draft. It starts a **worker** (Haiku, minimal reasoning, its own branch) for each build or research ticket whose dependencies are done, at most three at once. While they run it asks you the decision tickets, one at a time, so grilling and building happen in parallel. Finished build work is merged into the app's branch, as a swarm merges its parts.
+- **Advisor** (Opus, high reasoning) answers both agents. The planner and orchestrator may ask it a question; the orchestrator must ask it about a failed worker before that ticket is tried again. A ticket is given up after three tries, and what waits on it is left out.
+
+The models are set in `runner/appFlow.js` (`MODELS`), and can be changed with `APP_PLANNER_MODEL`, `APP_ORCHESTRATOR_MODEL`, `APP_ADVISOR_MODEL` and `APP_WORKER_MODEL`. Their cost shows on the run like any other step. On a cloud sandbox a ticket that builds on work already merged is left out (as the swarm does for later waves), so use the local sandbox for an app whose tickets depend on each other.
+
+Not built yet: a board that shows the tickets and their status on the run page (the run's events and `appDraft` hold them for now), and a way to answer a worker's questions from the run page.
+
 ## Cost
 
 Every model call a run makes is priced like the Usage page (the runner reads `/ui/api/model-info`; a cost the provider reports wins). A run record has `cost` (dollars) and `unpricedCalls` (calls to models with no known price, shown as `$1.20+`). A swarm's cost includes its workers.

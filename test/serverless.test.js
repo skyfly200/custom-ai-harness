@@ -72,7 +72,10 @@ test('a short plain request goes to the weak model, with the OpenRouter key', as
     assert.equal(calls[0].url, 'https://openrouter.test/api/v1/chat/completions');
     assert.equal(calls[0].init.headers.authorization, 'Bearer or-test-key');
     assert.equal(calls[0].body.model, 'anthropic/claude-haiku-5.5');
-    assert.deepEqual(calls[0].body.messages, short.messages);
+    // caveman is on by default: its line goes into a system message; the user's text is untouched
+    assert.equal(calls[0].body.messages[0].role, 'system');
+    assert.match(calls[0].body.messages[0].content, /Be terse/);
+    assert.deepEqual(calls[0].body.messages.slice(1), short.messages);
 });
 
 test('tools or a long conversation go to the strong model', async () => {
@@ -206,4 +209,79 @@ test('the Netlify and Vercel adapters answer through the shared handler', async 
         if (saved.o !== undefined) process.env.OPENROUTER_API_KEY = saved.o;
         if (saved.s !== undefined) process.env.SERVERLESS_API_KEY = saved.s;
     }
+});
+
+test('the transforms match the Interceptor: caveman on, switchable; user text never changes', async () => {
+    const { handle } = await load('serverless/core.mjs');
+    const { fetchImpl, calls } = fakeOpenRouter();
+    const res = await handle(chat(short), { ...ENV, HARNESS_CAVEMAN: '0' }, { fetchImpl });
+    assert.equal(res.headers.get('x-harness-transforms'), 'none');
+    assert.deepEqual(calls[0].body.messages, short.messages);
+    await handle(chat(short), ENV, { fetchImpl });
+    assert.match(res.headers.get('x-harness-transforms'), /none/);
+    assert.match(calls[1].body.messages[0].content, /Be terse/);
+    assert.equal(calls[1].body.messages.at(-1).content, 'hi');
+});
+
+test('repeated tool results become a pointer and long ones are shortened, in the same order as the Interceptor', async () => {
+    const { handle } = await load('serverless/core.mjs');
+    const { fetchImpl, calls } = fakeOpenRouter();
+    const big = 'line of log output\n'.repeat(3000); // over the in-repo Headroom limit
+    const messages = [
+        { role: 'user', content: 'read it twice' },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'a', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'a', content: big },
+        { role: 'assistant', content: null, tool_calls: [{ id: 'b', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+        { role: 'tool', tool_call_id: 'b', content: big },
+    ];
+    const res = await handle(chat({ messages, tools: [{ type: 'function', function: { name: 'read' } }] }), ENV, { fetchImpl });
+    const names = decodeURIComponent(res.headers.get('x-harness-transforms'));
+    assert.match(names, /context anchor/);
+    assert.match(names, /headroom/);
+    const sent = calls[0].body.messages;
+    assert.equal(sent.find((m) => m.tool_call_id === 'b').content, '[harness: identical to earlier tool result a; not repeated]');
+    assert.match(sent.find((m) => m.tool_call_id === 'a').content, /truncated by harness/);
+    assert.equal(sent.find((m) => m.role === 'user').content, 'read it twice', 'user text is not changed');
+});
+
+test('a Headroom service compresses tool results only, and a broken service changes nothing', async () => {
+    const { applyTransforms } = await load('serverless/transforms.mjs');
+    const tf = { caveman: false, contextAnchor: false, headroom: true, headroomUrl: '' };
+    const body = {
+        model: 'anthropic/claude-haiku-5.5',
+        messages: [
+            { role: 'user', content: 'go' },
+            { role: 'tool', tool_call_id: 'x', content: 'long output that the service shortens' },
+        ],
+    };
+    const fakeClient = {
+        calls: [],
+        async compress(messages) {
+            this.calls.push(messages);
+            return { compressed: true, messages: [
+                { role: 'user', content: 'go, rewritten by the service' },
+                { role: 'tool', tool_call_id: 'x', content: 'shortened' },
+            ] };
+        },
+    };
+    const out = await applyTransforms(body, tf, { headroomClient: fakeClient });
+    assert.equal(out.applied.includes('headroom service'), true);
+    assert.equal(out.body.messages[0].content, 'go', 'user text is kept from before the service');
+    assert.equal(out.body.messages[1].content, 'shortened');
+
+    const broken = { compress: async () => { throw new Error('down'); } };
+    const kept = await applyTransforms(body, tf, { headroomClient: broken });
+    assert.equal(kept.body.messages[1].content, 'long output that the service shortens');
+
+    const mismatch = { compress: async () => ({ compressed: true, messages: [{ role: 'user', content: 'x' }] }) };
+    const same = await applyTransforms(body, tf, { headroomClient: mismatch });
+    assert.deepEqual(same.body.messages, body.messages);
+});
+
+test('an unreachable HEADROOM_URL still answers the request (the client falls back)', async () => {
+    const { handle } = await load('serverless/core.mjs');
+    const { fetchImpl, calls } = fakeOpenRouter();
+    const res = await handle(chat(short), { ...ENV, HEADROOM_URL: 'http://127.0.0.1:9', HEADROOM_TIMEOUT_MS: '2000' }, { fetchImpl });
+    assert.equal(res.status, 200);
+    assert.equal(calls.length, 1);
 });

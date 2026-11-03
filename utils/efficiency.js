@@ -145,4 +145,89 @@ function byModel(runs) {
     })).sort((a, b) => b.runs - a.runs || a.model.localeCompare(b.model));
 }
 
-module.exports = { REPEAT_LIMIT, WINDOW, STALL_STEPS, emptyTally, createWatch, observeCall, checkStep, tally, primaryModel, byModel, describe };
+/** The numbers one run is compared on. */
+function profile(r) {
+    const eff = r.efficiency || emptyTally();
+    const steps = eff.steps || 0;
+    const cost = Number(r.cost) || 0;
+    const tokens = (r.tokens?.in || 0) + (r.tokens?.out || 0);
+    return {
+        model: primaryModel(r.models),
+        status: r.status,
+        done: r.status === 'done',
+        steps,
+        productive: eff.productive || 0,
+        wasted: eff.wasted || 0,
+        wastedShare: steps ? round(eff.wasted / steps) : null,
+        cost: round(cost),
+        tokens,
+        costPerStep: steps ? round(cost / steps) : null,
+        tokensPerStep: steps ? Math.round(tokens / steps) : null,
+        costPerProductiveStep: eff.productive ? round(cost / eff.productive) : null,
+        loops: eff.loops || 0,
+        escalations: eff.escalations || 0,
+        unpricedCalls: r.unpricedCalls || 0,
+    };
+}
+
+// For each compared number: which way is better
+const METRICS = [
+    ['done', 'Finished', 'high'],
+    ['steps', 'Steps', 'low'],
+    ['productive', 'Steps that moved it on', 'high'],
+    ['wasted', 'Wasted steps', 'low'],
+    ['wastedShare', 'Wasted share of steps', 'low'],
+    ['cost', 'Cost', 'low'],
+    ['tokens', 'Tokens', 'low'],
+    ['costPerStep', 'Cost per step', 'low'],
+    ['tokensPerStep', 'Tokens per step', 'low'],
+    ['costPerProductiveStep', 'Cost per step that moved it on', 'low'],
+    ['loops', 'Loop hints', 'low'],
+    ['escalations', 'Escalations', 'low'],
+];
+
+/**
+ * Two runs of one prompt, side by side. `sameTask` is false when the goals or repos differ,
+ * so the numbers are not like for like. `split` says where the cost gap comes from: more
+ * steps (at the other run's cost per step) or dearer steps (over the same number of steps).
+ */
+function compareRuns(a, b) {
+    const pa = profile(a), pb = profile(b);
+    const sameTask = a.goal === b.goal && (a.repo || null) === (b.repo || null);
+    const rows = METRICS.map(([key, label, better]) => {
+        const x = pa[key], y = pb[key];
+        let winner = null;
+        if (typeof x === 'number' && typeof y === 'number' && x !== y) {
+            winner = (better === 'high') === (x > y) ? 'a' : 'b';
+        } else if (typeof x === 'boolean' && x !== y) winner = x ? 'a' : 'b';
+        return { key, label, a: x, b: y, winner };
+    });
+    let split = null;
+    if (pa.steps && pb.steps && pa.costPerStep !== null && pb.costPerStep !== null) {
+        split = {
+            costGap: round(pa.cost - pb.cost),
+            fromSteps: round((pa.steps - pb.steps) * pb.costPerStep),
+            fromCostPerStep: round(pa.steps * (pa.costPerStep - pb.costPerStep)),
+        };
+    }
+    return { sameTask, a: pa, b: pb, rows, split, verdict: verdict(pa, pb, sameTask) };
+}
+
+function verdict(pa, pb, sameTask) {
+    if (!sameTask) return 'These runs have different goals or repos, so the numbers are not like for like.';
+    const name = (p) => p.model;
+    const usd = (n) => `$${(n || 0).toFixed(4)}`;
+    if (pa.done && pb.done) {
+        const [cheap, dear] = pa.cost <= pb.cost ? [pa, pb] : [pb, pa];
+        if (cheap.cost === dear.cost) return `Both finished for ${usd(cheap.cost)}; ${name(pa)} wasted ${pa.wasted} of ${pa.steps} steps, ${name(pb)} wasted ${pb.wasted} of ${pb.steps}.`;
+        const less = dear.cost ? Math.round((1 - cheap.cost / dear.cost) * 100) : 0;
+        return `Both finished. ${name(cheap)} cost ${usd(cheap.cost)}, ${less}% less than ${name(dear)} (${usd(dear.cost)}), with ${cheap.wasted} wasted steps against ${dear.wasted}.`;
+    }
+    if (pa.done !== pb.done) {
+        const ok = pa.done ? pa : pb, other = pa.done ? pb : pa;
+        return `${name(ok)} finished; ${name(other)} ended as ${other.status} after ${other.steps} steps and ${usd(other.cost)}.`;
+    }
+    return `Neither finished (${name(pa)}: ${pa.status}, ${name(pb)}: ${pb.status}).`;
+}
+
+module.exports = { REPEAT_LIMIT, WINDOW, STALL_STEPS, emptyTally, createWatch, observeCall, checkStep, tally, primaryModel, byModel, describe, profile, compareRuns };

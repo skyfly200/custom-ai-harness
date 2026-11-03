@@ -48,6 +48,8 @@ Set them in the Netlify or Vercel dashboard (Site settings → Environment varia
 
 ## Deploy
 
+The step-by-step version, with the Headroom Sprite as an optional step, is in the [README](../README.md#serverless-setup-netlify-or-vercel).
+
 **Netlify:** connect the repository. `netlify.toml` sets the publish folder to `serverless/public` (a short landing page) and the functions folder to `netlify/functions`. Set the variables above, then deploy. The API is at `https://<site>/v1/chat/completions`.
 
 **Vercel:** import the repository as a project with no build step. `vercel.json` rewrites `/v1/*` and `/healthz` to the Edge function in `api/v1/`. Set the variables above, then deploy.
@@ -60,6 +62,19 @@ curl https://<your-site>/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Say hi"}]}' -i
 ```
+
+## Headroom on a Fly Sprite
+
+Headroom's compression server is the Python `headroom proxy`, which the functions cannot run. `scripts/headroom-sprite.mjs` runs it on a [Fly Sprite](https://sprites.dev) instead:
+
+- `setup` creates the sprite `harness-headroom` (override with `HEADROOM_SPRITE_NAME`), installs `headroom-ai[proxy]==0.42.0` in a virtualenv at `/opt/headroom`, and creates a service `headroom` that runs `headroom proxy --host 0.0.0.0 --port 8787`. Its URL is public, and the proxy checks `HEADROOM_PROXY_TOKEN` on every `/v1` call. Without the token the proxy would accept any caller.
+- The host gets `HEADROOM_URL` (the sprite's URL), `HEADROOM_API_KEY` (the same token; the client sends it as `X-Headroom-Proxy-Token`) and `HEADROOM_TIMEOUT_MS=8000`. The longer timeout allows for a sprite waking from sleep.
+- Sprites sleep when idle and wake on the next request to their URL. The first request after a sleep is slow. If it runs past `HEADROOM_TIMEOUT_MS`, that request goes on uncompressed; nothing fails.
+- `status` prints the URL and each service's state.
+
+Needs Node 24 on the machine that runs `setup` (the `@fly/sprites` SDK), a `SPRITES_TOKEN`, and the same `HEADROOM_PROXY_TOKEN` on every run of `setup`, since it sets the token on the service. The host never runs the script, only calls the URL.
+
+Not yet checked against a live sprite: that the service restarts by itself after the sprite wakes, and the exact wake time. Check both after the first `setup` (send a request, wait past the sprite's idle time, send another, and look at `x-harness-transforms`).
 
 ## Limits to know
 

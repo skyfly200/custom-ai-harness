@@ -11,7 +11,7 @@ kill_timeout = "30s"     # a deploy waits this long for the runner to commit run
   HARNESS_REQUIRE_LOGIN = "1"
   HARNESS_PUBLIC_URL = "https://ai.skylerfly.com"
   HARNESS_DATA_DIR = "/app/data"
-  HARNESS_IDLE_STOP_MIN = "30"   # sleep after 30 idle minutes; the Stop button on the Dashboard does it now
+  HARNESS_IDLE_STOP_MIN = "5"   # sleep after 5 idle minutes; the Stop button on the Dashboard does it now
   # secrets (DATABASE_URL, NEON_AUTH_BASE_URL, HARNESS_ADMINS, HARNESS_ADMIN_EMAILS,
   # LITELLM_MASTER_KEY, OPENROUTER_API_KEY, OAUTH_PROVIDERS="google,github" once GitHub sign-in is set up in Neon...) are set with `fly secrets set`, never here
 

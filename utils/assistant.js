@@ -57,7 +57,7 @@ function systemPrompt({ name, owner, notes, today }) {
 /**
  * @param {object} opts
  * @param {object} opts.store      fileStore() or memoryStore()
- * @param {function} opts.ask      async (messages, { conversation }) => reply text
+ * @param {function} opts.ask      async (messages, { conversation, owner }) => reply text; owner is who to bill
  * @param {string} [opts.owner]    the person the assistant works for (their name in prompts)
  * @param {string} [opts.name]     what the assistant calls itself
  */
@@ -105,7 +105,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
         return null;
     }
 
-    async function chat(key, message) {
+    async function chat(key, message, owner) {
         const s = load();
         const history = s.conversations[key] || [];
         const today = new Date(now()).toISOString().slice(0, 10);
@@ -116,7 +116,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
         ];
         let reply;
         try {
-            reply = String((await ask(messages, { conversation: key })) || '').trim();
+            reply = String((await ask(messages, { conversation: key, owner })) || '').trim();
         } catch (err) {
             return `I could not get an answer just now (${err.message}). Try again in a moment.`;
         }
@@ -130,7 +130,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
     }
 
     /** Answers one message in `conversation` (any string: "web:Skyler", "telegram:123"). Resolves to the text to send back. */
-    function handle(conversation, text) {
+    function handle(conversation, text, { owner: who } = {}) {
         const key = String(conversation || 'web').slice(0, 120);
         const message = String(text || '').trim().slice(0, MAX_TEXT_CHARS);
         if (!message) return Promise.resolve('');
@@ -140,7 +140,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
                 const out = command(key, cmd[1].toLowerCase(), cmd[2].trim());
                 if (out !== null) return out;
             }
-            return chat(key, message);
+            return chat(key, message, who || owner);
         });
     }
 
@@ -171,11 +171,11 @@ function errorText(body) {
 
 /**
  * The model call for the assistant: a loopback POST to this Interceptor's /v1/chat/completions, signed as the
- * owner (utils/internalAuth.js), so routing, usage and the owner's credential all apply as for any chat.
+ * the person it bills (the logged-in owner on the web page, else ASSISTANT_OWNER), so routing, usage and their credential apply as for any chat.
  */
 function loopbackAsk({ owner, port = 3000, profile = '', fetchImpl = fetch, timeoutMs = Number(process.env.ASSISTANT_TIMEOUT_MS) || 300000 }) {
-    return async (messages) => {
-        const headers = { 'content-type': 'application/json', ...internalAuth.headersFor(owner) };
+    return async (messages, { owner: who } = {}) => {
+        const headers = { 'content-type': 'application/json', ...internalAuth.headersFor(who || owner) };
         if (profile) headers['x-harness-profile'] = profile;
         const res = await fetchImpl(`http://127.0.0.1:${port}/v1/chat/completions`, {
             method: 'POST',

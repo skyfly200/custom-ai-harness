@@ -490,7 +490,8 @@ app.post('/ui/api/assistant/message', async (req, res) => {
     const text = req.body && req.body.text;
     if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'send {"text": "..."}' });
     const conversation = assistantWebKey(req);
-    res.json({ conversation, reply: await assistantApp.handle(conversation, text) });
+    // the logged-in owner's key pays (ASSISTANT_OWNER when logins are off)
+    res.json({ conversation, reply: await assistantApp.handle(conversation, text, { owner: personOf(req) || undefined }) });
 });
 // With logins on, the Usage page counts only the signed-in person's own requests, admins' included (the All users view
 // has everyone's). The routing log is each member's own too; admins see the whole install's, to run it.

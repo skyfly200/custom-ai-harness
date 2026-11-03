@@ -1,6 +1,6 @@
 # Personal assistant
 
-A personal assistant is one agent that keeps notes and remembers each conversation. You can reach it on the **Assistant** page (`/ui/assistant.html`), on Telegram, and in Slack. Every channel goes through the same routing, so the model it uses is whatever your routing picks, and its usage is billed to the owner like any chat.
+A personal assistant is one agent that keeps notes and remembers each conversation. You can reach it on the **Assistant** page (`/ui/assistant.html`), on Telegram, and in Slack. Every channel goes through the same routing, so the model it uses is whatever your routing picks. On the web page the logged-in owner's key pays; on Telegram and Slack the configured `ASSISTANT_OWNER` pays.
 
 ## Commands
 

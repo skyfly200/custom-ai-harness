@@ -129,3 +129,23 @@ test('loopbackAsk turns an error status into an error the assistant reports', as
     const a = assistant.createAssistant({ store: assistant.memoryStore(), ask, owner: 'S' });
     assert.match(await a.handle('web:S', 'hi'), /could not get an answer just now/);
 });
+
+test('a web message bills the logged-in person; a channel message bills the configured owner', async () => {
+    const billed = [];
+    const a = assistant.createAssistant({
+        store: assistant.memoryStore(),
+        ask: async (messages, { owner }) => { billed.push(owner); return 'ok'; },
+        owner: 'Skyler',
+    });
+    await a.handle('web:Dana', 'hi', { owner: 'Dana' });
+    await a.handle('telegram:42', 'hi');
+    assert.deepEqual(billed, ['Dana', 'Skyler']);
+});
+
+test('loopbackAsk signs the request for the person it is told to bill', async () => {
+    let headers = null;
+    const ask = assistant.loopbackAsk({ owner: 'Skyler', fetchImpl: async (url, init) => { headers = init.headers; return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] })); } });
+    await ask([], { owner: 'Dana' });
+    assert.equal(headers['x-harness-internal-user'], 'Dana');
+    assert.equal(headers['x-harness-internal-sig'], internalAuth.sign('Dana'));
+});

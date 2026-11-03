@@ -186,4 +186,22 @@ async function updatePullBranch({ dir, branch, pr, token = '', git = run, fetchI
     return { number: pr.number, url: data.html_url || `https://github.com/${want}/pull/${pr.number}`, branch: head.ref, head: headSha };
 }
 
-module.exports = { parse, ensureClone, refreshClone, authArgs, createRepo, cloneRepo, pushDefault, pushBranch, openPullRequest, landRemote, updatePullBranch, listClones, personDir, cloneDir, BRANCH };
+/**
+ * Fetch a pull request's head and the repo's default branch from GitHub into the clone, as refs/remotes/pr/<number> and
+ * refs/remotes/pr/base, with the person's token (on this machine only). A cloud sandbox has no remote and no token, so
+ * these refs are sent to it in its bundle instead. The pull request must be in the clone's own repo. Resolves the two ref
+ * names. `git` is injectable for tests.
+ */
+async function fetchPullRefs({ dir, pr, token = '', git = run }) {
+    const origin = parse((await git(['config', '--get', 'remote.origin.url'], { cwd: dir })).trim());
+    const want = `${pr.owner}/${pr.name}`;
+    if (`${origin.owner}/${origin.name}`.toLowerCase() !== want.toLowerCase()) throw new Error(`pull request #${pr.number} is in ${want}, not in this run's repo (${origin.owner}/${origin.name})`);
+    const head = `refs/remotes/pr/${pr.number}`;
+    const base = 'refs/remotes/pr/base';
+    await git(['fetch', '--quiet', '--no-tags', 'origin', `+pull/${pr.number}/head:${head}`], { cwd: dir, token });
+    // the default branch as it is now, which may be ahead of the checkout the run starts from
+    await git(['fetch', '--quiet', '--no-tags', 'origin', `+HEAD:${base}`], { cwd: dir, token });
+    return [head, base];
+}
+
+module.exports = { parse, ensureClone, refreshClone, authArgs, createRepo, cloneRepo, pushDefault, pushBranch, openPullRequest, landRemote, updatePullBranch, fetchPullRefs, listClones, personDir, cloneDir, BRANCH };

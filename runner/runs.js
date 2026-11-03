@@ -651,10 +651,29 @@ class RunManager {
         return { sandbox: live.sandbox, outcome };
     }
 
+    /**
+     * The refs of the pull request a task names, fetched into the run's clone with the person's token, for a cloud
+     * sandbox's bundle. Resolves null when the task names none or the fetch fails (the sandbox then tries itself, and
+     * the brief says so). Never throws.
+     */
+    async hostPrRefs(run) {
+        const pr = prBrief.findPulls(run.goal)[0];
+        if (!pr || !run.repo) return null;
+        try {
+            return await this.gitHub.fetchPullRefs({ dir: run.repo, pr, token: this.tokenFor(run) });
+        } catch (err) {
+            this.event(run, { type: 'note', text: `Could not fetch pull request #${pr.number} from GitHub: ${err.message.split('\n')[0].slice(0, 200)}` });
+            return null;
+        }
+    }
+
     async plainRun(run, live, nextN) {
         if (run.agent && !run.base && !run.carriesOn) await this.startFromAgent(run);
         // a part carried on from an earlier one takes the branch as it stands, with that part's work on it
-        live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind: run.sandbox || this.sandboxKind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
+        const kind = run.sandbox || this.sandboxKind;
+        // a cloud sandbox cannot reach GitHub itself, so the pull request the task names is fetched here, with the person's token
+        const extraRefs = !run.carriesOn && isCloud(kind) ? await this.hostPrRefs(run) : null;
+        live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD', extraRefs });
         const sandbox = live.sandbox;
         run.base = sandbox.base;
         if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; this.save(run); this.startCheckpoints(run, live); }

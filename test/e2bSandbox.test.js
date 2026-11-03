@@ -238,3 +238,47 @@ test('a base that is not a branch tip is still sent whole', async () => {
     await box.destroy();
     git(repo, 'reset', '-q', '--hard', 'HEAD~1');
 });
+
+test('a cloud sandbox gets the pull request the runner fetched here, and fetches nothing itself', async () => {
+    // GitHub stands in as a bare repo: a url.insteadOf maps the github.com origin onto it, as the other tests do
+    const bare = path.join(root, 'gh.git');
+    git(root, 'init', '--bare', '-q', bare);
+    git(bare, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+    git(repo, 'push', '-q', bare, 'main');
+    git(repo, 'checkout', '-q', '-b', 'pr7');
+    fs.writeFileSync(path.join(repo, 'c.js'), 'exports.c = 1;\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'pr 7');
+    const prHead = git(repo, 'rev-parse', 'HEAD').trim();
+    git(repo, 'push', '-q', bare, 'pr7:refs/pull/7/head');
+    git(repo, 'checkout', '-q', 'main');
+    git(repo, 'branch', '-D', 'pr7', '-q');
+    const clone = path.join(root, 'host-clone');
+    git(root, 'clone', '-q', bare, clone);
+    const url = 'https://github.com/skyfly200/custom-ai-harness.git';
+    git(clone, 'remote', 'set-url', 'origin', url);
+    git(clone, 'config', `url.${bare}.insteadOf`, url);
+    // the runner fetches with the token here; the sandbox has neither a remote nor a token
+    const { fetchPullRefs } = require('../runner/github');
+    const refs = await fetchPullRefs({ dir: clone, pr: { owner: 'skyfly200', name: 'custom-ai-harness', number: 7 } });
+    assert.deepEqual(refs, ['refs/remotes/pr/7', 'refs/remotes/pr/base']);
+    assert.equal(git(clone, 'rev-parse', 'refs/remotes/pr/7').trim(), prHead);
+    // a pull request from another repo is refused before anything is fetched
+    await assert.rejects(fetchPullRefs({ dir: clone, pr: { owner: 'skyfly200', name: 'VirtuaHost', number: 7 } }), /not in this run's repo/);
+
+    const box = await E2BSandbox.create({ repo: clone, branch: 'harness/pr7', base: git(clone, 'rev-parse', 'main').trim(), extraRefs: refs });
+    assert.equal((await box.git(['rev-parse', 'refs/remotes/pr/7'])).trim(), prHead);
+    assert.ok((await box.git(['rev-parse', '--verify', 'refs/remotes/pr/base'])).trim());
+    assert.equal((await box.git(['remote'])).trim(), '');
+    // a merge the agent commits itself needs an identity in the sandbox
+    assert.equal((await box.git(['config', 'user.email'])).trim(), 'runner@localhost');
+    await box.git(['-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'agent commit']);
+
+    // the brief finds the PR already there, so it does not fetch (the sandbox has no way to) and checks it out
+    const notes = [];
+    const brief = await require('../runner/prBrief').prepare({ sandbox: box, run: { goal: `fix ${url.replace('.git', '')}/pull/7`, repo: clone, branch: 'harness/pr7' }, local: false, note: (t) => notes.push(t) });
+    assert.match(brief, /git merge refs\/remotes\/pr\/base/);
+    assert.equal((await box.git(['rev-parse', 'HEAD'])).trim(), prHead);
+    assert.match(notes.join('\n'), /Fetched skyfly200\/custom-ai-harness#7/);
+    box.kill?.();
+});

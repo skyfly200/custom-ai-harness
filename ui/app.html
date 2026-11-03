@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bright Chat · App</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
+<link rel="stylesheet" href="appspage.css">
+</head>
+<body>
+<main class="apps-page app-view">
+  <header>
+    <nav data-site-nav></nav>
+  </header>
+  <script src="nav.js"></script>
+
+  <p class="fine"><a href="apps.html">← Apps</a></p>
+  <h1 id="appName">Loading…</h1>
+  <p id="appSub" class="muted fine"></p>
+
+  <div class="tabs" role="tablist" aria-label="App">
+    <button type="button" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+    <button type="button" role="tab" data-tab="history" aria-selected="false">Git history</button>
+    <button type="button" role="tab" data-tab="chat" aria-selected="false">Chat</button>
+    <button type="button" role="tab" data-tab="runs" aria-selected="false">Runs</button>
+  </div>
+
+  <section class="card tab-panel" data-panel="overview">
+    <dl id="facts" class="facts"></dl>
+    <div class="actions">
+      <a class="button" id="editLink" href="apps.html">Edit settings</a>
+      <button type="button" id="askBtn" class="primary">Ask for a change</button>
+      <button type="button" id="deleteBtn">Delete app</button>
+    </div>
+    <h3>Add the chat widget to the app</h3>
+    <p class="fine muted">Paste this into any page the app serves. It adds a button that asks this app's agent for a change from that page, by typing or speaking.</p>
+    <pre class="snippet" id="snippet"></pre>
+  </section>
+
+  <section class="card tab-panel" data-panel="history" hidden>
+    <p id="branchLine" class="fine muted"></p>
+    <ol id="commits" class="commits"><li class="muted">Loading…</li></ol>
+  </section>
+
+  <section class="card tab-panel" data-panel="chat" hidden>
+    <p class="fine muted">Ask for a change in plain words. Each change runs as a task on Agents, with a preview and a diff to ship or undo.</p>
+    <div id="thread" class="thread" aria-live="polite"></div>
+    <form id="composer" class="composer" autocomplete="off">
+      <textarea name="request" rows="3" maxlength="4000" placeholder="What should be different?" aria-label="What should be different?"></textarea>
+      <div class="actions">
+        <button type="button" id="mic" hidden>🎙 Speak</button>
+        <button type="submit" class="primary">Send</button>
+        <span id="composeMsg" class="muted fine" role="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="card tab-panel" data-panel="runs" hidden>
+    <div id="runList" class="run-list"><p class="muted">Loading…</p></div>
+  </section>
+</main>
+<script src="dialogs.js"></script>
+<script src="bright.js"></script>
+<script>
+  // The chat widget on this page is for this app (agent-widget.js reads it)
+  window.HARNESS_WIDGET = { app: new URLSearchParams(location.search).get('id') || '' };
+</script>
+<script src="agent-widget.js" defer></script>
+<script src="appview.js" defer></script>
+</body>
+</html>

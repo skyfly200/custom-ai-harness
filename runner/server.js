@@ -64,7 +64,7 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
         // page-error proposals stay off here, and importing a folder on this machine is refused by the runner itself.
         const sharedApps = [
             /^GET \/apps$/, /^GET \/apps\/(templates|hosting)$/, /^POST \/apps\/import(\/detect)?$/, /^POST \/apps\/new$/,
-            /^GET \/apps\/[^/]+$/, /^PATCH \/apps\/[^/]+$/, /^DELETE \/apps\/[^/]+$/, /^POST \/apps\/[^/]+\/changes$/,
+            /^GET \/apps\/[^/]+$/, /^GET \/apps\/[^/]+\/history$/, /^PATCH \/apps\/[^/]+$/, /^DELETE \/apps\/[^/]+$/, /^POST \/apps\/[^/]+\/changes$/,
         ];
         app.use((req, res, next) => {
             if (req.path !== '/apps' && !req.path.startsWith('/apps/')) return next();
@@ -186,6 +186,9 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     app.get('/apps/:id', (req, res) => {
         const a = manager.getApp(req.params.id);
         return a ? res.json(a) : fail(res, new Error('no such app'), 404);
+    });
+    app.get('/apps/:id/history', (req, res) => {
+        try { res.json(manager.appHistory(req.params.id, req.query.limit)); } catch (err) { fail(res, err, /no such app/.test(err.message) ? 404 : 400); }
     });
     app.patch('/apps/:id', wrap(async (req, res) => res.json(await manager.editApp(req.params.id, req.body, { owner: req.owner || '', token: req.githubToken || '' }))));
     app.delete('/apps/:id', (req, res) => {

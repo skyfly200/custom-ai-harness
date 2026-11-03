@@ -28,6 +28,12 @@ Everything the chat page does: projects, skills, commands, tools, MCP servers an
 
 **Dictation through the harness.** With `OPENROUTER_API_KEY` set, `/ui/api/stt` sends the recording to OpenRouter's [speech-to-text models](https://openrouter.ai/collections/speech-to-text-models); it starts on the cheap Mistral Voxtral Mini Transcribe. `STT_URL` points it at another OpenAI-style server instead (Groq's free Whisper, OpenAI, a local Whisper, or a model in LiteLLM at `http://localhost:4000/v1`). The page records in short stretches, ends one when you pause, and adds each transcript to the message box. On Android (where the recognizer keeps repeating, or drops a phrase if a pause comes too soon) it listens **one phrase at a time**: it ends each phrase on a pause and starts a fresh recognizer for the next, instead of one long session. If an error is descriptive it is shown in plain words (`[object Object]` never appears), and a recognizer that returns empty too many times gives up with a message rather than looping. The speech model uses the same OpenRouter credential as the read-aloud voice (connect it once on the Users page or with `OPENROUTER_API_KEY`), a slow server is cut off after 45 seconds with a plain "timed out" message rather than a raw error, and a proxy error is shown in words instead of its HTML.
 
+## Memory
+
+Memory is a list of short notes kept for you across every chat (`utils/memory.js`, `user_data` key `harness-memory`, or `memory.json` without a database). Open a chat's Options, Context tab to see them, add one, edit one in place, or forget it with ×. The "Remember across chats" box turns it off for the page; the notes stay saved.
+
+When it is on, the notes go into the system prompt with their ids, and the model gets two tools: `memory_save` (adds a note, or changes one when given an `id`) and `memory_forget`. The model is asked to save only what you ask it to remember or a lasting preference, and never secrets. Limits: 200 notes, 500 characters each; a repeat of a note already kept is not added twice. Routes: `GET/POST /ui/api/memory`, `POST /ui/api/memory/:id`, `DELETE /ui/api/memory/:id`.
+
 ## Chat tools: MCP servers and git repos
 
 The chat page can give the model tools. While it answers, the model can call them, see what they return, and keep going. Each call shows in the reply as a line you can click to see what was sent and what came back.

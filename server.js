@@ -46,6 +46,7 @@ const mcpCatalog = require('./utils/mcpCatalog');
 const userMcpMod = require('./utils/userMcp');
 const userPrefs = require('./utils/userPrefs');
 const prompts = require('./utils/prompts');
+const memory = require('./utils/memory');
 const credit = require('./utils/credit');
 const userCredentials = require('./utils/userCredentials');
 const credentialTicket = require('./utils/credentialTicket');
@@ -760,6 +761,27 @@ app.post('/ui/api/prompts/:id/restore', memberOrLocalJson, async (req, res) => {
 });
 app.delete('/ui/api/prompts/:id', memberOrLocal, async (req, res) => {
     try { await prompts.remove(promptOwner(req), req.params.id); res.json({ ok: true }); } catch (err) { promptError(res, err); }
+});
+// Memory: notes the person keeps across every chat (utils/memory.js). The chat page reads them into the
+// system prompt and lets the model save or forget them through the tools below.
+const memoryOwner = (req) => (req.harnessLogin ? ownerOf(req) : memory.LOCAL);
+const memoryError = (res, err) => res.status(err.status || 500).json({ error: err.message });
+app.get('/ui/api/memory', memberOrLocal, async (req, res) => {
+    try {
+        const notes = await memory.list(memoryOwner(req));
+        res.json({ notes, promptText: memory.promptText(notes), maxNotes: memory.MAX_NOTES, maxChars: memory.MAX_TEXT });
+    } catch (err) { memoryError(res, err); }
+});
+// {text}: adds a note (a repeat of one already kept returns that note)
+app.post('/ui/api/memory', memberOrLocalJson, async (req, res) => {
+    try { res.json(await memory.add(memoryOwner(req), req.body || {})); } catch (err) { memoryError(res, err); }
+});
+// {text}: changes a note's text
+app.post('/ui/api/memory/:id', memberOrLocalJson, async (req, res) => {
+    try { res.json(await memory.update(memoryOwner(req), req.params.id, req.body || {})); } catch (err) { memoryError(res, err); }
+});
+app.delete('/ui/api/memory/:id', memberOrLocal, async (req, res) => {
+    try { await memory.remove(memoryOwner(req), req.params.id); res.json({ ok: true }); } catch (err) { memoryError(res, err); }
 });
 // The messages to send a model (through /v1/chat/completions, billed to the person) to improve a prompt
 app.post('/ui/api/prompts-improve', memberOrLocalJson, (req, res) => {

@@ -654,7 +654,7 @@ class RunManager {
     async plainRun(run, live, nextN) {
         if (run.agent && !run.base && !run.carriesOn) await this.startFromAgent(run);
         // a part carried on from an earlier one takes the branch as it stands, with that part's work on it
-        live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind: run.sandbox || this.sandboxKind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
+        live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind: run.sandbox || this.sandboxKind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD', runId: run.id, owner: run.owner || '' });
         const sandbox = live.sandbox;
         run.base = sandbox.base;
         if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; this.save(run); this.startCheckpoints(run, live); }

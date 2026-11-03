@@ -202,6 +202,20 @@ Every model call a run makes is priced like the Usage page (the runner reads `/u
 
 The Dashboard shows run spend per day, stacked by the four agents that spent most (the rest are "Other"). A run counts on the day it started.
 
+**Sandbox and machine cost (admin Usage page).** The runner keeps a ledger of every cloud sandbox it opens and kills (`runs/sandbox-ledger.json`: driver, sandbox id, run, person, open and close times; no code or output). The admin Usage page (`/ui/usage-users.html`, "Sandboxes and machines") charts it per day and per kind, priced with the rates from `SANDBOX_RATES` (a JSON string) or `sandbox-rates.json` in the data folder:
+
+```json
+{ "e2b": { "vcpuSec": 0.000014, "gibSec": 0.0000045, "cpus": 2, "memMb": 512 },
+  "sprites": { "vcpuSec": 0.00001, "gibSec": 0.000004, "cpus": 1, "memMb": 1024 },
+  "machines": { "shared-1x-256": 0.00000075 } }
+```
+
+E2B's list rates are the defaults (per second, per vCPU and per GiB). Sprites and Fly Machines have no default rate, so they show as unpriced until one is set. These are estimates from open and close times, so compare them with the provider's invoice.
+
+Fly Machines: with `FLY_API_TOKEN` set as a Fly secret (a token that can read the app's machines), the runner samples the app's machines every `FLY_SAMPLE_MIN` minutes (default 5) through the Machines API and records the ones running. A sleeping Machine is not sampled, because the sampler runs inside the Machine.
+
+A sandbox still open when the runner restarts is closed at the restart and marked `recovered`, since nothing says when it really ended. Endpoints: `GET /runs/sandbox-usage?days=N` on the runner, `GET /ui/api/admin/infra-usage?days=N` on the Interceptor (admins only).
+
 ## Repo suggestions
 
 The repo fields (Agents, and chat Options > Tools and project settings) suggest git repos found on this computer. The harness looks in `REPO_SCAN_ROOTS` (folders separated by `;` on Windows, `:` elsewhere); if that is unset, in `RUNNER_ROOTS` and `HARNESS_FILE_ROOTS`; if those are unset too, in the folder that holds the harness and common code folders in your home folder (`code`, `projects`, `dev`, `src`, `repos`, `Documents/GitHub`). It goes three folders deep and does not look inside a repo. Typing a path still works. A hosted server never scans its own disk: there the fields suggest the GitHub repos you connected.

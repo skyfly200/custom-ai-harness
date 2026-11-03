@@ -32,6 +32,17 @@
 .check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }
 .workers { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .worker { text-align: left; }
+/* the ticket board of a Wayfinder app run (RunView.appBoard) */
+.app-board .ticket-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 8px; }
+.ticket-col h4 { margin: 0 0 6px; font-size: 13px; }
+.ticket-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ticket { border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 8px; font-size: 13px; }
+.ticket-running { border-color: var(--accent, #6b8cff); }
+.ticket-needs_advice { border-color: var(--warn, #c98a00); }
+.ticket-title { font-weight: 600; }
+.ticket-meta, .ticket-decision { margin-top: 4px; }
+.ticket-files { font-size: 11px; max-height: 120px; overflow: auto; }
+.ticket-link { margin-top: 6px; }
 
 /* Repo picker */
 .repo-input { display: flex; gap: 6px; }

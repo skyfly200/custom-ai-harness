@@ -107,7 +107,7 @@ function renderList() {
   setHtml('list', list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <i class="sdot ${TAGS[r.status] || 'live'}${ACTIVE.has(r.status) ? ' pulse' : ''}" title="${esc(statusWord(r))}"></i>
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${AgentIcon.icon(agentOf(r.agent))}${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${r.prState ? `${PrState.chip(r.prState)} ` : ''}${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${AgentIcon.icon(agentOf(r.agent))}${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'app' ? '<span class="tag">app</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${r.prState ? `${PrState.chip(r.prState)} ` : ''}${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
 }
 
 function eventHtml(e) {
@@ -168,6 +168,7 @@ function renderDetail(run) {
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
     ${run.legs ? `<p class="muted">Carried on ${run.legs === 1 ? 'once' : `${run.legs} times`} after running out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}; every part worked on this one branch.</p>` : ''}
     ${run.debugRun && runs.some((x) => x.id === run.debugRun) ? `<p class="muted">Auto debug (or a retry) started <a href="#${esc(run.debugRun)}" data-go="${esc(run.debugRun)}">${esc(run.debugRun)}</a>.</p>` : ''}
+    ${run.kind === 'app' ? RunView.appBoard(run, runs) : ''}
     ${run.children?.length ? `<div class="result"><strong>Workers</strong><div class="workers">${run.children.map((id, i) => {
       const c = runs.find((x) => x.id === id);
       if (!id) return `<span class="worker muted">${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} · waiting for what it depends on</span>`;

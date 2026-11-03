@@ -183,5 +183,34 @@
     return out;
   }
 
-  return { isError, filesChanged, quickLine, summarize, annotate, filterEvents, searchText, help, HELP, actionsFor };
+  const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const COLUMNS = [
+    ['running', 'Running'], ['needs_advice', 'Needs advice'], ['todo', 'Waiting'], ['done', 'Done'], ['failed', 'Given up'], ['skipped', 'Left out'],
+  ];
+  const TICKET_NOTE = { running: 'a worker is on it', needs_advice: 'failed; the advisor is needed before another try', todo: 'not started yet', done: '', failed: '', skipped: '' };
+
+  /**
+   * The ticket board of a Wayfinder app run (run.appTickets, kept by runner/appFlow.js):
+   * one card per ticket in its column, with its attempts, decision, the files its merged work changed,
+   * and a link to the worker run. `runs` is the list the page has, to find worker ids.
+   */
+  function appBoard(run, runs = []) {
+    const tickets = Array.isArray(run.appTickets) ? run.appTickets : [];
+    if (!tickets.length) return '';
+    const counts = {};
+    for (const t of tickets) counts[t.status] = (counts[t.status] || 0) + 1;
+    const card = (t) => {
+      const worker = t.child ? runs.find((x) => x.id === t.child) : null;
+      const files = t.diffStat ? `<pre class="ticket-files">${escHtml(t.diffStat)}</pre>` : '';
+      const decision = t.decision !== null && t.decision !== undefined ? `<div class="ticket-decision">Decided: ${escHtml(t.decision || 'left open by the person')}</div>` : '';
+      const tries = t.attempts ? `<span class="muted"> · try ${escHtml(t.attempts)}</span>` : '';
+      const note = t.note || TICKET_NOTE[t.status] || '';
+      const link = t.child ? `<button class="ticket-link" data-go="${escHtml(t.child)}">${worker ? 'open its worker' : 'worker'}</button>` : '';
+      return `<li class="ticket ticket-${escHtml(t.status)}"><div class="ticket-title">${escHtml(t.title)}${tries}</div><div class="ticket-meta"><span class="tag">${escHtml(t.kind)}</span> ${note ? `<span class="muted">${escHtml(note)}</span>` : ''}</div>${decision}${files}${link}</li>`;
+    };
+    const cols = COLUMNS.filter(([k]) => counts[k]).map(([k, label]) => `<section class="ticket-col"><h4>${escHtml(label)} <span class="muted">${counts[k]}</span></h4><ul>${tickets.filter((t) => t.status === k).map(card).join('')}</ul></section>`);
+    return `<div class="result app-board"><strong>Ticket board</strong><div class="ticket-cols">${cols.join('')}</div></div>`;
+  }
+
+  return { isError, filesChanged, quickLine, summarize, annotate, filterEvents, searchText, help, HELP, actionsFor, appBoard };
 }));

@@ -63,3 +63,26 @@ test('every workflow file and the built-in ways of working have a plain explanat
   for (const id of ['auto', 'swarm', 'chatdev']) assert.ok(RV.help(id).what);
   assert.match(RV.help({ id: 'mine', when: 'a thing', stages: [{ role: 'A' }, { role: 'B' }] }).what, /A → B/);
 });
+
+test('the Wayfinder app board groups tickets by state, escapes text and links each worker', () => {
+  const run = { appTickets: [
+    { id: 'a', kind: 'build', title: 'Scaffold <b>', status: 'done', attempts: 1, note: 'merged', depends_on: [], decision: null, child: 'w1', diffStat: ' server.js | 4 ++--' },
+    { id: 'db', kind: 'decision', title: 'Which database', status: 'done', attempts: 0, note: 'decided', depends_on: [], decision: 'Postgres & friends', child: null, diffStat: '' },
+    { id: 'api', kind: 'build', title: 'API', status: 'needs_advice', attempts: 2, note: 'failed (tests)', depends_on: ['db'], decision: null, child: 'w2', diffStat: '' },
+    { id: 'ui', kind: 'build', title: 'UI', status: 'skipped', attempts: 0, note: 'needs “api”', depends_on: ['api'], decision: null, child: null, diffStat: '' },
+  ] };
+  const html = RV.appBoard(run, [{ id: 'w1' }]);
+  assert.match(html, /Ticket board/);
+  assert.match(html, /<h4>Done <span class="muted">2<\/span>/);
+  assert.match(html, /<h4>Needs advice/);
+  assert.match(html, /<h4>Left out/);
+  assert.doesNotMatch(html, /<h4>Running/);
+  assert.match(html, /Scaffold &lt;b&gt;/);
+  assert.doesNotMatch(html, /<b>/);
+  assert.match(html, /Decided: Postgres &amp; friends/);
+  assert.match(html, /data-go="w1"/);
+  assert.match(html, /data-go="w2"/);
+  assert.match(html, /try 2/);
+  assert.match(html, /server\.js \| 4 \+\+--/);
+  assert.equal(RV.appBoard({ appTickets: [] }), '');
+});

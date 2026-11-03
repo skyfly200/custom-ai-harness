@@ -1069,7 +1069,7 @@ class RunManager {
      * { mode: 'create', repo: 'name' } (a new private repo on the person's account) or { mode: 'existing', repo:
      * 'owner/name' } (an empty repo on GitHub, cloned into the folder). `token` is the person's GitHub token here.
      */
-    async newApp({ template, name, description, answers = {}, parent, build = true, github = {}, deployTarget, database, token = '', owner = '' } = {}) {
+    async newApp({ template, name, description, answers = {}, parent, build = true, github = {}, deployTarget, database, agent = null, token = '', owner = '' } = {}) {
         const t = templates.loadTemplate(String(template || ''));
         const mode = String(github?.mode || 'local');
         if (!['local', 'create', 'existing'].includes(mode)) throw new Error('the repo must be local, create or existing');
@@ -1122,6 +1122,7 @@ class RunManager {
             devCommand: t.devCommand, testCommand: t.testCommand, previewPort: t.previewPort, deploy: t.deploy,
             githubRepo, baseBranch: githubRepo ? 'main' : null, ...hostingChoice, owner: this.hosted ? String(owner) : null,
         });
+        this.attachAgent(app, agent);
         const text = templates.cleanText(description, 300);
         // the first version is a change run; on a shared server it can be refused (limits), and the app is still made
         let run = null;
@@ -1129,7 +1130,7 @@ class RunManager {
         if (build && text) {
             try { run = this.askChange(app.id, { request: `Build the first version: ${text}` }); } catch (err) { buildError = err.message; }
         }
-        return { app, run, buildError };
+        return { app: this.apps.get(app.id), run, buildError };
     }
     /** A shared server's folder for one person's repos and apps (made if it is not there yet). */
     personRoot(owner) {
@@ -1173,7 +1174,7 @@ class RunManager {
      * comes from the detection. With `addFiles`, the CI workflow, the deploy workflow, fly.toml and DEPLOY.md are written
      * for the chosen host and database, but only where the repo does not already have that file; nothing is committed.
      */
-    async importApp({ source = 'local', folder, repo, parent, name, editablePaths, deployTarget, database, installCommand, testCommand, devCommand, previewPort, addFiles = true, token = '', owner = '' } = {}) {
+    async importApp({ source = 'local', folder, repo, parent, name, editablePaths, deployTarget, database, installCommand, testCommand, devCommand, previewPort, addFiles = true, agent = null, token = '', owner = '' } = {}) {
         let real;
         let cloned = null;
         if (this.hosted && source !== 'github') throw new Error(SHARED_LOCAL_IMPORT);
@@ -1219,6 +1220,7 @@ class RunManager {
                 name: appName, repo: real, editablePaths: editablePaths ?? found.editablePaths, ...commands, previewPort: previewPort ?? found.previewPort,
                 deploy: 'merge', githubRepo, ...choice, owner: this.hosted ? String(owner) : null,
             });
+            this.attachAgent(app, agent);
             const added = [];
             const skipped = [];
             if (addFiles) {
@@ -1231,13 +1233,53 @@ class RunManager {
                     added.push(f.path);
                 }
             }
-            return { app, detection: found, added, skipped };
+            return { app: this.apps.get(app.id), detection: found, added, skipped };
         } catch (err) {
             if (cloned) fs.rmSync(cloned, { recursive: true, force: true });
             throw err;
         }
     }
     updateApp(id, cfg) { return this.apps.update(id, cfg || {}, cfg?.repo !== undefined ? this.checkRepo(cfg.repo) : null); }
+
+    /**
+     * An app's agent, chosen when the app is made or imported: none (`null`), an agent already made for this app's
+     * folder, or a new one made now in that folder. Its changes are tasks of that agent, so each builds on the last.
+     */
+    attachAgent(app, agent) {
+        if (!agent || agent.mode === 'none' || (agent.mode !== 'new' && !agent.id)) return app;
+        let id;
+        if (agent.mode === 'new') {
+            id = this.createAgent({ name: templates.cleanText(agent.name, 60) || `${app.name} agent`, repo: app.repo, owner: app.owner || undefined }).id;
+        } else {
+            const found = this.agents.get(String(agent.id));
+            if (!found) throw new Error('no such agent');
+            if (this.hosted && found.owner !== app.owner) throw new Error('that agent is not yours');
+            if (found.repo !== app.repo) {
+                // an agent with no tasks has nothing to lose: it moves to this app's folder. One with tasks stays with its work.
+                if (this.tasksOf(found.id).length) throw new Error(`${found.name} has tasks in another folder; pick an agent for ${app.name}'s folder, or make a new one`);
+                this.updateAgent(found.id, { repo: app.repo });
+            }
+            id = found.id;
+        }
+        return this.apps.update(app.id, { agent: id }, null);
+    }
+
+    /** The app's git history: its latest commits on the checked out branch, newest first. Empty when the folder has no commits yet. */
+    appHistory(id, limit = 40) {
+        const app = this.apps.get(id);
+        if (!app) throw new Error('no such app');
+        const n = Math.min(Math.max(Number(limit) || 40, 1), 200);
+        const sep = '\x1f';
+        let out = '';
+        try { out = execFileSync('git', ['-C', app.repo, 'log', `-n${n}`, `--format=%H${sep}%an${sep}%aI${sep}%s`], { encoding: 'utf8', timeout: 10000 }); } catch { out = ''; }
+        const commits = out.split('\n').filter(Boolean).map((line) => {
+            const [sha, author, date, ...subject] = line.split(sep);
+            return { sha, author, date, subject: subject.join(sep) };
+        });
+        let branch = null;
+        try { branch = execFileSync('git', ['-C', app.repo, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', timeout: 5000 }).trim() || null; } catch { branch = null; }
+        return { branch, commits };
+    }
 
     /**
      * Edit an app's settings. On a shared server an app's folder is its GitHub repo: a folder on this machine is refused,
@@ -1287,7 +1329,9 @@ class RunManager {
         const picked = workflow === null || workflow === undefined || workflow === '' ? 'change-app' : String(workflow);
         if (['swarm', 'chatdev', 'app'].includes(picked)) throw new Error('a change runs one workflow: Swarm, ChatDev and the Wayfinder app are for one-off runs');
         if (this.hosted && !app.owner) throw new Error('this app has no owner on the shared server: import it again');
-        const summary = this.create({ goal, repo: app.repo, workflow: picked, app: app.id, editable: app.editablePaths, test: app.testCommand || undefined, maxMinutes: 30, proposal, owner: app.owner || undefined });
+        // the app's agent (if it still exists) carries the change: its last task's commit is the start, as for any agent task
+        const agent = app.agent && this.agents.get(app.agent) ? app.agent : undefined;
+        const summary = this.create({ goal, repo: app.repo, workflow: picked, app: app.id, editable: app.editablePaths, test: app.testCommand || undefined, maxMinutes: 30, proposal, owner: app.owner || undefined, agent });
         return summary;
     }
 

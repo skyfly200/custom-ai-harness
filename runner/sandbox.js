@@ -233,12 +233,12 @@ const HOST_TMP = (name) => path.join(os.tmpdir(), `harness-${process.pid}-${Date
  * repo yet. `until` is the commit the sandbox already has, if any: what is packed
  * then is only what came after it.
  */
-async function packRepo(repo, commit, until = null) {
+async function packRepo(repo, commit, until = null, extraRefs = []) {
     const file = HOST_TMP('base.bundle');
     try {
         // a ref of its own, so a commit that is not a branch tip still packs with its full history
         await git(repo, ['update-ref', PACK_REF, commit]);
-        await git(repo, ['bundle', 'create', '-q', file, PACK_REF, ...(until ? ['--not', until] : [])]);
+        await git(repo, ['bundle', 'create', '-q', file, PACK_REF, ...extraRefs, ...(until ? ['--not', until] : [])]);
         const bytes = fs.readFileSync(file);
         return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     } finally {
@@ -279,7 +279,7 @@ class CloudSandbox {
      * keeps the work it committed); if it has none, the branch starts at `base`
      * as it did the first time.
      */
-    static async create({ repo, branch, base = 'HEAD', adapt = null, template = null, lifetimeMs = SANDBOX_LIFETIME_MS }) {
+    static async create({ repo, branch, base = 'HEAD', adapt = null, template = null, lifetimeMs = SANDBOX_LIFETIME_MS, extraRefs = null }) {
         let top, commit, start = null;
         try {
             top = (await git(repo, ['rev-parse', '--show-toplevel'])).trim();
@@ -295,6 +295,12 @@ class CloudSandbox {
         // a branch that is where it started has nothing of its own to send: send it all
         if (start === commit) start = null;
         const from = start || commit;
+        // refs the runner here fetched for the run (a pull request's head, the default branch): they travel in the
+        // bundle under the same names, since the sandbox has no remote and no GitHub token of its own
+        const sent = [];
+        for (const ref of extraRefs || []) {
+            if (await git(top, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).then(() => true, () => false)) sent.push(ref);
+        }
         const sandbox = await this.open({ template, lifetimeMs });
         const box = new this({ sandbox, repo: top, branch, base: commit });
         try {
@@ -302,9 +308,13 @@ class CloudSandbox {
             await sandbox.files.makeDir(box.dir);
             await box.exec('command -v git >/dev/null 2>&1 || (command -v apt-get >/dev/null 2>&1 && sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git)', { timeoutMs: 300000 });
             // a carried-on branch is sent whole: the new sandbox has nothing, not even the base, to build on
-            await sandbox.files.write(remote, await packRepo(top, from));
+            await sandbox.files.write(remote, await packRepo(top, from, null, sent));
             await box.git(['init', '-q', '.']);
+            // the agent's own commits (a merge it resolves, say) need an identity; this is the one commit() uses
+            await box.git(['config', 'user.name', 'Bright Chat runner']);
+            await box.git(['config', 'user.email', 'runner@localhost']);
             await box.git(['fetch', '-q', remote, `${PACK_REF}:refs/heads/${branch}`]);
+            for (const ref of sent) await box.git(['fetch', '-q', remote, `${ref}:${ref}`]);
             await box.git(['symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
             await box.git(['reset', '-q', '--hard', 'HEAD']);
             await sandbox.files.remove(remote).catch(() => {});

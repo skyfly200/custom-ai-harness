@@ -18,8 +18,12 @@ const configured = (env = process.env) => Boolean(managementKey(env));
  */
 const DEFAULT_LIMIT_USD = 10;
 const DEFAULT_LIFETIME_DAYS = 30;
-const limitUsd = (env = process.env) => { const n = Number(env.OPENROUTER_USER_KEY_LIMIT); return Number.isFinite(n) && n > 0 ? n : DEFAULT_LIMIT_USD; };
-const lifetimeDays = (env = process.env) => { const n = Number(env.OPENROUTER_USER_KEY_DAYS); return Number.isFinite(n) && n > 0 ? n : DEFAULT_LIFETIME_DAYS; };
+// The admin's setting (ui/settings.html, utils/settings.js) comes next after the env var, then the defaults.
+let policy = { limitUsd: null, lifetimeDays: null };
+const setPolicy = (p = {}) => { policy = { limitUsd: p.limitUsd ?? null, lifetimeDays: p.lifetimeDays ?? null }; };
+const positive = (v) => { const n = Number(v); return v !== undefined && v !== null && v !== '' && Number.isFinite(n) && n > 0 ? n : null; };
+const limitUsd = (env = process.env) => positive(env.OPENROUTER_USER_KEY_LIMIT) || positive(policy.limitUsd) || DEFAULT_LIMIT_USD;
+const lifetimeDays = (env = process.env) => positive(env.OPENROUTER_USER_KEY_DAYS) || positive(policy.lifetimeDays) || DEFAULT_LIFETIME_DAYS;
 
 async function call(method, path, body, { env = process.env, fetchFn = fetch } = {}) {
     const mk = managementKey(env);
@@ -65,4 +69,4 @@ async function revoke(hash, opts = {}) {
     }
 }
 
-module.exports = { configured, limitUsd, lifetimeDays, create, revoke, DEFAULT_LIMIT_USD, DEFAULT_LIFETIME_DAYS };
+module.exports = { configured, limitUsd, lifetimeDays, setPolicy, create, revoke, DEFAULT_LIMIT_USD, DEFAULT_LIFETIME_DAYS };

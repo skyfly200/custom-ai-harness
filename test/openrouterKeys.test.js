@@ -37,3 +37,18 @@ test('a bad value falls back to the default', () => {
     assert.equal(keys.limitUsd({ OPENROUTER_USER_KEY_LIMIT: 'lots' }), 10);
     assert.equal(keys.lifetimeDays({ OPENROUTER_USER_KEY_DAYS: '-1' }), 30);
 });
+
+test('the admin setting applies when no env var is set; the env var wins', async () => {
+    const keysMod = require('../utils/openrouterKeys');
+    keysMod.setPolicy({ limitUsd: 25, lifetimeDays: 90 });
+    assert.equal(keysMod.limitUsd(base), 25);
+    assert.equal(keysMod.lifetimeDays(base), 90);
+    assert.equal(keysMod.limitUsd({ ...base, OPENROUTER_USER_KEY_LIMIT: '4' }), 4);
+    const t = Date.parse('2026-11-03T00:00:00Z');
+    const f = fake();
+    await keysMod.create('dee', { env: base, fetchFn: f.fetchFn, now: () => t });
+    assert.equal(f.calls[0].body.limit, 25);
+    assert.equal(f.calls[0].body.expires_at, '2027-02-01T00:00:00Z');
+    keysMod.setPolicy({});
+    assert.equal(keysMod.limitUsd(base), 10);
+});

@@ -17,3 +17,5 @@ users.json
 .neon
 .env.local
 prompts.json
+assistant.json
+assistant.json.tmp

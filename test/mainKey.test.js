@@ -122,3 +122,16 @@ test('the proxy tells the renewal when OpenRouter refuses the main key, and stil
         assert.equal(refused, 1);
     } finally { server.close(); }
 });
+
+test('the main key follows the admin setting unless its own env vars are set', async () => {
+    const keysMod = require('../utils/openrouterKeys');
+    keysMod.setPolicy({ limitUsd: 15, lifetimeDays: 60 });
+    const env = { ...base(), OPENROUTER_MAIN_KEY_FILE: tmp() };
+    const { calls, fetchFn } = fake();
+    const r = mainKey.create({ env, store: mainKey.createStore({ env }), fetchFn, now: () => Date.parse('2026-11-03T00:00:00Z') });
+    await r.start(); r.stop();
+    const body = calls.find((c) => c.method === 'POST').body;
+    assert.equal(body.limit, 15);
+    assert.equal(body.expires_at, '2027-01-02T00:00:00Z');
+    keysMod.setPolicy({});
+});

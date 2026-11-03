@@ -64,6 +64,8 @@ On Fly, one Machine runs the Gateway, Router, Interceptor and, with `HARNESS_RUN
 
 Files: `Dockerfile.fly`, `fly.toml`, `docker/fly-start.js`, `neon.ts`. Plans and reasoning: [hosted app plan](docs/hosted-app-plan.md). Steps: [Run it on Fly.io](docs/fly.md), [Neon](docs/neon.md).
 
+Serverless variant: `serverless/core.mjs` runs on Netlify (`netlify/functions/`) or Vercel (`api/v1/`) with no LiteLLM, Router or database, sending requests straight to OpenRouter with a plain rule-based model choice. Details and limits in [Serverless harness](docs/serverless.md).
+
 ## Sign-in, billing and storage
 
 Sign-in is invite-only. `utils/oauth.js` hands Google or GitHub sign-in to Neon Auth and the harness decides who may enter. Named logins and a break-glass admin password (`HARNESS_ADMINS`) work without a database.

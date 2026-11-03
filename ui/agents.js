@@ -759,7 +759,7 @@ function fillWorkflowOptions() {
   const a = agentOf(agentSel);
   const head = a ? `<option value="agent">Same as ${esc(a.name)} (${esc(nameOf(a.workflow))})</option>` : '<option value="auto">Jev picks (auto)</option>';
   const recipes = workflowList.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join('');
-  const extra = a ? '' : '<option value="swarm">Swarm (several agents at once)</option><option value="chatdev">ChatDev (in a cloud sandbox)</option>';
+  const extra = a ? '' : '<option value="swarm">Swarm (several agents at once)</option><option value="app">Wayfinder app (plan with questions, then build)</option><option value="chatdev">ChatDev (in a cloud sandbox)</option>';
   sel.innerHTML = head + recipes + extra;
   sel.value = [...sel.options].some((o) => o.value === keep) ? keep : sel.options[0].value;
 }
@@ -783,13 +783,13 @@ async function initWorkflows() {
 }
 
 // the plain explanation of the chosen way of working, and a table of all of them to compare
-const WF_ORDER = ['auto', ...['quick-answer', 'research', 'review', 'general', 'fix-bug', 'build-feature', 'build-audit', 'refactor', 'audit-refactor', 'change-app'], 'swarm', 'chatdev'];
+const WF_ORDER = ['auto', ...['quick-answer', 'research', 'review', 'general', 'fix-bug', 'build-feature', 'build-audit', 'refactor', 'audit-refactor', 'change-app'], 'app', 'swarm', 'chatdev'];
 function wfEntries() {
   const known = workflowList.map((w) => ({ id: w.id, name: w.name, help: RunView.help(w), stages: w.stages.map((x) => x.role) }));
-  const extra = [{ id: 'swarm', name: 'Swarm', help: RunView.help('swarm'), stages: ['Planner', 'Workers', 'Reviewer'] }, { id: 'chatdev', name: 'ChatDev', help: RunView.help('chatdev'), stages: [] }];
+  const extra = [{ id: 'app', name: 'Wayfinder app', help: RunView.help('app'), stages: ['Planner', 'Orchestrator', 'Workers'] }, { id: 'swarm', name: 'Swarm', help: RunView.help('swarm'), stages: ['Planner', 'Workers', 'Reviewer'] }, { id: 'chatdev', name: 'ChatDev', help: RunView.help('chatdev'), stages: [] }];
   const all = [{ id: 'auto', name: 'Jev picks (auto)', help: RunView.help('auto'), stages: [] }, ...known, ...extra];
   const sorted = all.sort((a, b) => (WF_ORDER.indexOf(a.id) + 1 || 99) - (WF_ORDER.indexOf(b.id) + 1 || 99));
-  return agentOf(agentSel) ? sorted.filter((w) => !['auto', 'swarm', 'chatdev'].includes(w.id)) : sorted;
+  return agentOf(agentSel) ? sorted.filter((w) => !['auto', 'swarm', 'chatdev', 'app'].includes(w.id)) : sorted;
 }
 function drawWorkflowHelp() {
   const entries = wfEntries();

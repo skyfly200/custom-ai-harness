@@ -105,4 +105,5 @@ Node tests in `test/*.test.js` (`node --test`), Router tests in `test/test_route
 | A UI page | `ui/<page>.html` and its `.js` |
 | Database tables | `migrations/`, `utils/chatSync.js` |
 | Agent runs | `runner/` |
+| The personal assistant (web page, Telegram, Slack) | `utils/assistant.js`, `utils/assistantChannels.js`, `ui/assistant.html`; [Personal assistant](docs/assistant.md) |
 | Deployment | `Dockerfile*`, `docker/`, `fly.toml`, `scripts/start-all.js` |

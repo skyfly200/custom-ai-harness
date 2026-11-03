@@ -109,7 +109,7 @@ def use_federation() -> None:
     if not key:
         sys.exit("OPENROUTER_FEDERATION_POLICY_ID and HARNESS_USER_CREDENTIALS need OPENROUTER_PROXY_KEY or LITELLM_MASTER_KEY in .env")
     os.environ["OPENROUTER_API_KEY"] = key
-    os.environ["OPENROUTER_API_BASE"] = (env("OPENROUTER_PROXY_URL") or "http://harness:3000").rstrip("/") + "/openrouter-proxy/v1"
+    os.environ["OPENROUTER_API_BASE"] = (env("OPENROUTER_PROXY_URL") or "http://127.0.0.1:3000").rstrip("/") + "/openrouter-proxy/v1"
 
 
 if __name__ == "__main__":

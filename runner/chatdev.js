@@ -54,7 +54,7 @@ async function executeChatDev(manager, run, live) {
 
 async function work(manager, run, live, { kind, graph, runKey, model }) {
     const env = envFile({ harnessUrl: process.env.CHATDEV_HARNESS_URL, apiKey: runKey.key, model });
-    const sandbox = await sandboxes.createSandbox({ kind, repo: run.repo, dir: path.join(manager.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
+    const sandbox = await sandboxes.createSandbox({ kind, repo: run.repo, dir: path.join(manager.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD', runId: run.id, owner: run.owner || '' });
     live.sandbox = sandbox;
     run.base = sandbox.base;
     run.sandboxId = sandbox.id;

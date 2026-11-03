@@ -25,6 +25,7 @@ const path = require('path');
 const posix = path.posix;
 const { spawn, execFile } = require('child_process');
 const { PowerShellSession } = require('../utils/powershellSession');
+const { ledger } = require('./sandboxLedger');
 
 const MAX_OUTPUT = 20000;
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -279,7 +280,7 @@ class CloudSandbox {
      * keeps the work it committed); if it has none, the branch starts at `base`
      * as it did the first time.
      */
-    static async create({ repo, branch, base = 'HEAD', adapt = null, template = null, lifetimeMs = SANDBOX_LIFETIME_MS, extraRefs = null }) {
+    static async create({ repo, branch, base = 'HEAD', adapt = null, template = null, lifetimeMs = SANDBOX_LIFETIME_MS, extraRefs = null, runId = '', owner = '' }) {
         let top, commit, start = null;
         try {
             top = (await git(repo, ['rev-parse', '--show-toplevel'])).trim();
@@ -302,6 +303,8 @@ class CloudSandbox {
             if (await git(top, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).then(() => true, () => false)) sent.push(ref);
         }
         const sandbox = await this.open({ template, lifetimeMs });
+        // the ledger has the open time from here; destroy() or destroySandboxById() closes it
+        ledger().begin({ driver: this.kind, id: sandbox.sandboxId, runId, owner });
         const box = new this({ sandbox, repo: top, branch, base: commit });
         try {
             const remote = `/tmp/harness-base-${sandbox.sandboxId}.bundle`;
@@ -321,6 +324,7 @@ class CloudSandbox {
             return box;
         } catch (err) {
             await sandbox.kill().catch(() => {});
+            ledger().end(this.kind, sandbox.sandboxId);
             throw err;
         }
     }
@@ -439,6 +443,7 @@ class CloudSandbox {
     async destroy() {
         this.handle?.kill?.().catch(() => {});
         await this.sandbox.kill().catch(() => {});
+        ledger().end(this.kind, this.id);
     }
 }
 
@@ -547,7 +552,10 @@ async function attachSandbox({ kind = process.env.RUNNER_SANDBOX || 'local', ...
 /** Delete a cloud sandbox by id, for a run whose sandbox outlived its process. */
 async function destroySandboxById(kind, id) {
     const id2 = normalizeKind(kind);
-    if (id2 && DRIVERS[id2].cloud && id) await DRIVERS[id2].class.destroyById(id);
+    if (id2 && DRIVERS[id2].cloud && id) {
+        await DRIVERS[id2].class.destroyById(id);
+        ledger().end(id2, id);
+    }
 }
 
 module.exports = { LocalSandbox, CloudSandbox, E2BSandbox, SpritesSandbox, DRIVERS, driverFor, normalizeKind, isCloud, listDrivers, destroySandboxById, createSandbox, attachSandbox, MAX_OUTPUT, trimOutput };

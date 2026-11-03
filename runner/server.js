@@ -17,10 +17,15 @@ const { RunManager } = require('./runs');
 const templates = require('./templates');
 const hosting = require('./hosting');
 const { listDrivers } = require('./sandbox');
+const { ledger, configureLedger } = require('./sandboxLedger');
+const sandboxCosts = require('./sandboxCosts');
+const { startSampler } = require('./flyMachines');
 const ticketFiles = require('./ticketFiles');
 const github = require('./github');
 
 const ROOT = path.join(__dirname, '..');
+// Prices for the sandbox usage page: SANDBOX_RATES, else sandbox-rates.json in the data folder (read on each request)
+const ratesFile = () => path.join(process.env.HARNESS_DATA_DIR || ROOT, 'sandbox-rates.json');
 
 function defaultRoots(env) {
     const extra = (env.RUNNER_ROOTS || '').split(path.delimiter).filter(Boolean);
@@ -101,6 +106,12 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     app.get('/runs/repos', (req, res) => res.json(hosted ? { repos: git.listClones(reposBase, req.owner), roots: [], hosted: true } : { repos: manager.repos(), roots: manager.roots, hosted: false }));
     // the sandbox drivers a run can pick, and whether each one's key is set
     app.get('/runs/sandboxes', (req, res) => res.json({ default: manager.sandboxKind, drivers: listDrivers() }));
+    // What the cloud sandboxes and Fly Machines cost, from the ledger and the rates: for the admin page (days=0: everything kept)
+    app.get('/runs/sandbox-usage', (req, res) => {
+        const days = Math.max(0, parseInt(req.query.days, 10) || 0);
+        const { rates, source, error } = sandboxCosts.loadRates({ file: ratesFile() });
+        res.json(sandboxCosts.report(ledger(), { days, rates, source, error }));
+    });
     app.get('/runs/browse', (req, res) => {
         try { res.json(manager.browse(req.query.path)); } catch (err) { fail(res, err); }
     });
@@ -289,8 +300,11 @@ if (require.main === module) {
     if (hosted && !process.env.RUNNER_TOKEN) throw new Error('RUNNER_HOSTED needs RUNNER_TOKEN: the runner trusts the Interceptor\'s word about whose request it is. Refusing to start.');
     const reposBase = process.env.RUNNER_REPOS_DIR || path.join(process.env.HARNESS_DATA_DIR || ROOT, 'repos');
     if (hosted) fs.mkdirSync(reposBase, { recursive: true });
+    const runsDir = process.env.RUNNER_DIR || path.join(ROOT, 'runs');
+    // every cloud sandbox opened or killed from here on is recorded for the usage page (before any run can start one)
+    configureLedger({ file: path.join(runsDir, 'sandbox-ledger.json') });
     const manager = new RunManager({
-        dir: process.env.RUNNER_DIR || path.join(ROOT, 'runs'),
+        dir: runsDir,
         roots: hosted ? [reposBase] : defaultRoots(process.env),
         hosted,
         token: process.env.RUNNER_TOKEN || '',
@@ -318,6 +332,11 @@ if (require.main === module) {
     }
     createApp(manager, { token: process.env.RUNNER_TOKEN || '', port, hosted, reposBase }).listen(port, process.env.RUNNER_HOST || '127.0.0.1', () => {
         console.log(`Task runner on port ${port}; repos in: ${manager.roots.join(', ')}; sandbox: ${manager.sandboxKind}`);
+        // Fly Machines of this app, sampled while this Machine is awake (needs FLY_API_TOKEN; FLY_APP_NAME is set by Fly)
+        if (process.env.FLY_API_TOKEN && process.env.FLY_APP_NAME) {
+            startSampler({ ledger: ledger(), app: process.env.FLY_APP_NAME, token: process.env.FLY_API_TOKEN, intervalMs: (Number(process.env.FLY_SAMPLE_MIN) || 5) * 60 * 1000, onError: (err) => console.warn(`Fly Machines sampling: ${err.message}`) });
+            console.log(`Sampling Fly Machines of ${process.env.FLY_APP_NAME} for the usage page.`);
+        }
         const resuming = manager.resumeInterrupted({ delayMs: Number(process.env.RUNNER_RESUME_DELAY_MS) || 5000 });
         if (resuming) console.log(`Resuming ${resuming} interrupted run(s) that are set to auto-continue.`);
         // pull request state for the runs that have one (every RUNNER_PR_WATCH_MIN minutes, 0 turns it off)

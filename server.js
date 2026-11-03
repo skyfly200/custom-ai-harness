@@ -522,6 +522,21 @@ app.get('/ui/api/admin/usage', localOnly, async (req, res) => {
     res.json(out);
 });
 
+// What the task runner's cloud sandboxes (E2B, Fly Sprites) and Fly Machines cost, for admins: the runner's own
+// report (/runs/sandbox-usage, from its ledger and rates). Unavailable when Agents are off or the runner is not answering.
+app.get('/ui/api/admin/infra-usage', localOnly, async (req, res) => {
+    const days = Math.max(0, parseInt(req.query.days, 10) || 0);
+    if (runsOff()) return res.json({ available: false, reason: RUNS_OFF_MESSAGE });
+    const headers = { ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}), 'x-runner-owner': (req.harnessUser && req.harnessUser.name) || 'admin' };
+    try {
+        const upstream = await fetch(`${RUNNER_URL}/runs/sandbox-usage?days=${days}`, { headers, signal: AbortSignal.timeout(15000) });
+        if (!upstream.ok) throw new Error(`the task runner answered ${upstream.status}`);
+        res.json({ available: true, ...(await upstream.json()) });
+    } catch (err) {
+        res.json({ available: false, reason: `The task runner is not answering (${err.cause?.code || err.message}).` });
+    }
+});
+
 app.get('/ui/api/events', (req, res) => {
     res.json(monitor.recentEvents(Math.min(parseInt(req.query.limit, 10) || 50, 200), logScope(req)));
 });

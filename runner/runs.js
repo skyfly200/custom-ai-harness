@@ -692,7 +692,7 @@ class RunManager {
         const kind = run.sandbox || this.sandboxKind;
         // a cloud sandbox cannot reach GitHub itself, so the pull request the task names is fetched here, with the person's token
         const extraRefs = !run.carriesOn && isCloud(kind) ? await this.hostPrRefs(run) : null;
-        live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD', extraRefs });
+        live.sandbox = await (run.carriesOn ? attachSandbox : createSandbox)({ kind, repo: run.repo, dir: path.join(this.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD', extraRefs, runId: run.id, owner: run.owner || '' });
         const sandbox = live.sandbox;
         run.base = sandbox.base;
         if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; this.save(run); this.startCheckpoints(run, live); }

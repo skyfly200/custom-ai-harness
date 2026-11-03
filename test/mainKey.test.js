@@ -35,18 +35,24 @@ test('first start issues the harness\'s own key, saves it, and puts it where the
     const r = mainKey.create({ env, store: mainKey.createStore({ env }), fetchFn });
     await r.start(); r.stop();
     assert.equal(env.OPENROUTER_API_KEY, 'sk-or-v1-main1main1main1main1');
-    assert.deepEqual(calls.filter((c) => c.method === 'POST').map((c) => c.body), [{ name: 'harness: main', limit: 50 }]);
+    const posted = calls.filter((c) => c.method === 'POST').map((c) => c.body);
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].name, 'harness: main');
+    assert.equal(posted[0].limit, 50);
+    assert.match(posted[0].expires_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/, 'defaults to a 30-day expiry');
     assert.equal(calls[0].auth, `Bearer ${MGMT}`);
     assert.equal(calls.some((c) => c.method === 'DELETE'), false, 'nothing deleted: the pasted key\'s hash is unknown');
     assert.equal(JSON.parse(fs.readFileSync(env.OPENROUTER_MAIN_KEY_FILE, 'utf8')).hash, 'mh1');
 });
 
-test('no limit configured: none is sent (the main key is not capped at the per-user default)', async () => {
+test('no limit or lifetime configured: the main key gets the $10 limit and a 30-day expiry', async () => {
     const env = { ...base(), OPENROUTER_MAIN_KEY_FILE: tmp() };
     const { calls, fetchFn } = fake();
-    const r = mainKey.create({ env, store: mainKey.createStore({ env }), fetchFn });
+    const r = mainKey.create({ env, store: mainKey.createStore({ env }), fetchFn, now: () => Date.parse('2026-11-03T00:00:00Z') });
     await r.start(); r.stop();
-    assert.deepEqual(calls.find((c) => c.method === 'POST').body, { name: 'harness: main' });
+    const body = calls.find((c) => c.method === 'POST').body;
+    assert.equal(body.limit, 10);
+    assert.equal(body.expires_at, '2026-12-03T00:00:00Z');
 });
 
 test('a restart loads the saved key and does not issue another while it is good', async () => {

@@ -70,6 +70,7 @@ class AppStore {
         if (has('deployHook') && out.deployHook && !/^https?:\/\//i.test(out.deployHook)) throw new Error('deployHook must be an http(s) URL');
         if (out.githubRepo && !/^[\w.-]+\/[\w.-]+$/.test(out.githubRepo)) throw new Error('GitHub repo must look like owner/name');
         if (out.baseBranch && !/^[\w./-]+$/.test(out.baseBranch)) throw new Error('base branch has odd characters');
+        if (has('agent')) out.agent = cfg.agent ? clean(cfg.agent, 80) : null;
         if (has('deployTarget')) out.deployTarget = hosting.targetId(cfg.deployTarget);
         if (has('database')) out.database = hosting.databaseId(cfg.database);
         if (has('deploy')) {

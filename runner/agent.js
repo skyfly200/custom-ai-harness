@@ -5,6 +5,8 @@
 // fallbacks all apply.
 'use strict';
 
+const efficiency = require('../utils/efficiency');
+
 const SYSTEM = `You are a software engineer working alone in a git workspace on a copy of the user's repository. Complete the task you are given, using the tools.
 
 Rules:
@@ -95,6 +97,7 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
     const messages = [{ role: 'system', content: system }, { role: 'user', content: `Task:\n${run.goal}${firstContext ? `\n\n${firstContext}` : ''}` }];
     let nudges = 0, wrapped = false;
     const recent = [];
+    const watch = efficiency.createWatch();
     const soft = run.softSteps === undefined ? SOFT_STEPS : Number(run.softSteps) || 0;
     // maxSteps of 0 means no step limit: only the deadline and the stop button end it.
     const last = run.maxSteps > 0 ? run.maxSteps : Infinity;
@@ -114,7 +117,8 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
         emit({ type: 'model', text: msg.content || '', calls: (msg.tool_calls || []).length, usage: reply.usage, model: reply.model, route: reply.route, ms: reply.ms, messages: messages.length });
         messages.push({ role: 'assistant', content: msg.content ?? '', ...(msg.tool_calls?.length ? { tool_calls: msg.tool_calls } : {}) });
         if (!msg.tool_calls?.length) {
-            if (++nudges > 2) return { status: 'finished', summary: msg.content || 'The model stopped without a summary.' };
+            if (++nudges > 2) { emit({ type: 'step-end', progress: true }); return { status: 'finished', summary: msg.content || 'The model stopped without a summary.' }; }
+            emit({ type: 'step-end', progress: false });
             messages.push({ role: 'user', content: 'Use a tool to continue, or call finish if you are done.' });
             continue;
         }
@@ -125,6 +129,7 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
             const results = await Promise.all(calls.map(call => runTool(call, toolArgs(call), tools, emit, messages, recent)));
             for (let i = 0; i < calls.length; i++) {
                 messages.push({ role: 'tool', tool_call_id: calls[i].id, content: results[i].text });
+                efficiency.observeCall(watch, `${calls[i].function.name}:${calls[i].function.arguments}`, results[i].text);
                 ran++;
             }
             if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
@@ -133,9 +138,19 @@ async function runAgent({ run, tools, chat, emit, firstContext = '', system = SY
             if (run.stopped()) break;
             const result = await runTool(call, toolArgs(call), tools, emit, messages, recent);
             messages.push({ role: 'tool', tool_call_id: call.id, content: result.text });
+            efficiency.observeCall(watch, `${call.function.name}:${call.function.arguments}`, result.text);
             ran += 1;
-            if (result.finished) return { status: 'finished', summary: result.text };
+            if (result.finished) { emit({ type: 'step-end', progress: true }); return { status: 'finished', summary: result.text }; }
             if (run.stopped()) return { status: 'stopped', summary: 'Stopped by a person.' };
+        }
+        // Did this step get anything new? A stalled or looping run gets a hint, then asks for more effort.
+        const progressed = watch.progress;
+        emit({ type: 'step-end', progress: progressed });
+        const hint = efficiency.checkStep(watch);
+        if (hint) {
+            emit({ type: 'loop', level: hint.level, step, text: hint.text });
+            messages.push({ role: 'user', content: hint.text });
+            if (hint.level === 'escalate') run.onLoop?.(hint);
         }
         // Nearly out of steps: say so while there is still one to write the summary with.
         if (!wrapped && last !== Infinity && last - step === WRAP_UP_AT && ran === msg.tool_calls.length) {

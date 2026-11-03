@@ -148,6 +148,16 @@
             <label title="Give up when a reply stops arriving for this long. 0 waits forever.">Stall limit (s) <input type="number" id="timeoutStall" min="0" step="10" value="130"></label>
           </div>
         </fieldset>
+        <fieldset data-tab="context" class="memory-box">
+          <legend>Memory</legend>
+          <label class="check" title="The model reads these notes in every chat, and can save or forget them when you ask it to. Notes are yours alone and shared by all your chats."><input type="checkbox" id="memory" checked> Remember across chats</label>
+          <div class="muted small" id="memoryCount"></div>
+          <ul class="mem-list" id="memoryList"></ul>
+          <span class="repo-row">
+            <input type="text" id="memoryNew" placeholder="A fact or preference to remember" autocomplete="off">
+            <button type="button" id="memoryAdd" class="mini">Add</button>
+          </span>
+        </fieldset>
         <fieldset data-tab="context">
           <legend>Context</legend>
           <label>Project <select id="chatProject"></select></label>

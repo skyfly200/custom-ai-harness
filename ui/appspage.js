@@ -21,7 +21,7 @@
       <div class="app-info"><strong>${esc(a.name)}</strong><span class="muted fine">${esc(a.repo)}</span>
         <span class="muted fine">Hosting: ${esc(label(hosting.targets, a.deployTarget))} · Database: ${esc(label(hosting.databases, a.database))}${a.githubRepo ? ` · GitHub: ${esc(a.githubRepo)}` : ''}</span>
         <span class="muted fine">Edits only: ${esc(a.editablePaths.join(', '))}${a.testCommand ? ` · tests: ${esc(a.testCommand)}` : ''}</span></div>
-      <div class="actions"><button type="button" data-act="edit">Edit</button><button type="button" class="primary" data-act="change">Ask for a change</button></div>
+      <div class="actions"><a class="button" href="app.html?id=${esc(a.id)}">Open</a><button type="button" data-act="edit">Edit</button><button type="button" class="primary" data-act="change">Ask for a change</button><button type="button" data-act="delete">Delete</button></div>
     </div>`).join('') : '<p class="muted">No apps yet. Start one with New app.</p>';
   }
 
@@ -108,7 +108,13 @@
   }
 
   async function loadApps() {
-    try { apps = (await api('GET', '')).apps; paintApps(); } catch (err) { $('#appList').innerHTML = `<p class="muted">${esc(err.message)}</p>`; }
+    try {
+      apps = (await api('GET', '')).apps;
+      paintApps();
+      // the app page's "Edit settings" link opens the dialog here
+      const want = location.hash.match(/^#edit=(.+)$/)?.[1];
+      if (want && apps.some((a) => a.id === want)) { history.replaceState(null, '', location.pathname); openEdit(apps.find((a) => a.id === want)); }
+    } catch (err) { $('#appList').innerHTML = `<p class="muted">${esc(err.message)}</p>`; }
   }
 
   async function loadTemplates() {
@@ -143,6 +149,48 @@
     else if (e.target.name === 'deployTarget' || e.target.name === 'database') paintChoices();
   });
 
+  // ---- Agent: none, an agent already made (any folder with no tasks yet moves to this app), or a new one ----
+  let agentList = [];
+  async function loadAgents() {
+    try {
+      const r = await fetch('/ui/api/agents', { credentials: 'same-origin' });
+      agentList = (await r.json().catch(() => ({}))).agents || [];
+    } catch { agentList = []; }
+    paintAgentPicks();
+  }
+  function paintAgentPicks() {
+    for (const sel of document.querySelectorAll('select[data-agent-pick]')) {
+      const picked = sel.value;
+      sel.innerHTML = '<option value="">No agent: changes start from the repo</option><option value="new">New agent…</option>'
+        + agentList.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}${a.taskCount ? ` (${a.taskCount} task${a.taskCount === 1 ? '' : 's'})` : ''}</option>`).join('');
+      sel.value = picked || '';
+      paintAgentNew(sel.form);
+    }
+  }
+  function paintAgentNew(form) {
+    const sel = form?.elements.agent;
+    const box = form?.querySelector('[data-agent-new]');
+    if (box) box.hidden = sel?.value !== 'new';
+  }
+  /** What the form sends for the agent: none (null), a new one with its name, or an existing one by id. */
+  function agentChoice(f) {
+    const v = f.elements.agent.value;
+    if (!v) return null;
+    if (v === 'new') return { mode: 'new', name: f.elements.agentName.value.trim() || undefined };
+    return { mode: 'existing', id: v };
+  }
+  document.addEventListener('change', (e) => { if (e.target.name === 'agent') paintAgentNew(e.target.form); });
+
+  /** Delete an app: its change runs stay on Agents. Refused while a change runs. */
+  async function removeApp(app) {
+    if (!await ui.confirm(`Delete ${app.name}? Its change runs stay on Agents, and its repo and any agent are not touched.`)) return;
+    try {
+      await api('DELETE', `/${app.id}`);
+      ui.toast(`${app.name} is deleted.`);
+      loadApps();
+    } catch (err) { ui.toast(err.message, { kind: 'error' }); }
+  }
+
   $('#newApp').addEventListener('click', () => {
     const f = $('#newForm');
     f.reset();
@@ -158,6 +206,7 @@
     const app = apps.find((a) => a.id === btn?.closest('.app-row')?.dataset.id);
     if (!app || !btn) return;
     if (btn.dataset.act === 'edit') return openEdit(app);
+    if (btn.dataset.act === 'delete') return removeApp(app);
     const request = await ui.prompt(`What should ${app.name} do differently?`, { ok: 'Start change', placeholder: 'Add a dark mode toggle' });
     if (!request) return;
     try {
@@ -193,6 +242,7 @@
         template: t.id, name: f.elements.name.value, description: f.elements.description.value,
         parent: f.elements.parent.value.trim() || undefined, answers, build: f.elements.build.checked,
         github: repoChoice(f), deployTarget: f.elements.deployTarget.value, database: f.elements.database.value,
+        agent: agentChoice(f),
       });
       if (run) { location.href = `agents.html#${run.id}`; return; }
       $('#newDialog').close();
@@ -411,6 +461,7 @@
       devCommand: f.elements.devCommand.value.trim(),
       previewPort: looked.previewPort,
       addFiles: f.elements.addFiles.checked,
+      agent: agentChoice(f),
     };
     btn.disabled = true;
     msg.textContent = 'Importing…';
@@ -430,4 +481,5 @@
   loadTemplates();
   loadHosting();
   loadRoots();
+  loadAgents();
 })();

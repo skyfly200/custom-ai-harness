@@ -1,0 +1,4 @@
+# Serverless harness on Netlify: see docs/serverless.md.
+[build]
+  publish = "serverless/public"
+  functions = "netlify/functions"

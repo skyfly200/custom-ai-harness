@@ -61,6 +61,7 @@ const EFFORTS = new Set(['min', 'low', 'medium', 'high', 'max']);
 const SPEEDS = new Set(['fast', 'batch']);
 const OVERNIGHT_WAIT_MINUTES = 24 * 60;
 const escalation = require('./escalate');
+const efficiency = require('../utils/efficiency');
 const { Headroom } = require('./headroom');
 const settings = require('../utils/settings');
 // One Headroom server for every run on this runner: it starts on the first long output and stays up
@@ -313,6 +314,11 @@ class RunManager {
             .sort((a, b) => b.created.localeCompare(a.created)).map((r) => this.summary(r));
     }
 
+    /** Per model (the one that made most calls): runs, success, cost per success, wasted share, loops. */
+    modelEfficiency(owner) {
+        return efficiency.byModel(this.list(owner));
+    }
+
     /** The run, or the part of it that is working now if it has been carried on. */
     get(id) { return this.active.get(id) || this.runs.get(id) || null; }
 
@@ -471,6 +477,7 @@ class RunManager {
             outOfSteps: null, partialText: null, partialSummary: null,
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
             steps: 0, tokens: { in: 0, out: 0 }, cost: 0, unpricedCalls: 0, pending: null, events: [], result: null, error: null,
+            efficiency: efficiency.emptyTally(),
         };
         this.runs.set(id, run);
         if (landing !== 'branch' && this.hosted) this.landTokens.set(id, String(cfg.landToken));
@@ -519,6 +526,8 @@ class RunManager {
             const m = (run.models ||= {})[key] ||= { calls: 0, in: 0, out: 0, cost: 0 };
             m.calls += 1; m.in += e.usage.prompt_tokens || 0; m.out += e.usage.completion_tokens || 0; m.cost += c.cost;
         }
+        // steps that made progress, wasted steps and their cost, hints and escalations (utils/efficiency.js)
+        efficiency.tally(run.efficiency ||= efficiency.emptyTally(), entry);
         this.save(run);
     }
 
@@ -1613,6 +1622,8 @@ class RunManager {
                 else outcome = await runAgent({
                     run: { goal: run.goal, softSteps: run.softSteps, maxSteps: Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity) === Infinity ? 0 : Math.min(stage.maxSteps || Infinity, run.maxSteps || Infinity), deadline, stopped: () => live.stopped, overBudget: () => run.maxCost > 0 && (run.cost || 0) - (run.costFrom || 0) >= run.maxCost },
                     tools, system: systemFor(stage, { plan: run.plan }), emit: (e) => this.event(run, { ...e, stage: stage.id }),
+                    // a hint did not get the stage moving: climb one effort rung (as a failure does), within the run's limits
+                    onLoop: () => { if (escalation.canClimb(run, stageEffort)) this.escalate(run, stageEffort, 'it was going round in circles'); },
                     firstContext: `${context}${brief ? `\n\n${brief}` : ''}${handoff ? `\n\nWhat earlier stages found or did:\n${handoff}` : ''}`,
                     chat: (messages, defs) => this.chat(run, messages, defs, nextN(), stageEffort, stage.model),
                 });
@@ -1778,6 +1789,7 @@ class RunManager {
             ...run, continues, carriesOn: run.id, briefGiven: false, resumeNote,
             result: null, error: null, pending: null, events: [], steps: 0,
             tokens: { in: run.tokens.in, out: run.tokens.out }, cost: run.cost || 0, unpricedCalls: run.unpricedCalls || 0, models: run.models || {},
+            efficiency: { ...(run.efficiency || efficiency.emptyTally()) },
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
             outOfSteps: null, partialText: null, partialSummary: run.partialSummary || null, interrupted: null,
             // an automatic resume counts against autoMax; a person pressing Continue starts the count again

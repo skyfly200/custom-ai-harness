@@ -96,6 +96,8 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     };
 
     app.get('/runs', (req, res) => res.json({ runs: manager.list(hosted ? req.owner : undefined) }));
+    // before /runs/:id so "efficiency" is not read as a run id
+    app.get('/runs/efficiency', (req, res) => res.json({ models: manager.modelEfficiency(hosted ? req.owner : undefined) }));
     app.get('/runs/repos', (req, res) => res.json(hosted ? { repos: git.listClones(reposBase, req.owner), roots: [], hosted: true } : { repos: manager.repos(), roots: manager.roots, hosted: false }));
     // the sandbox drivers a run can pick, and whether each one's key is set
     app.get('/runs/sandboxes', (req, res) => res.json({ default: manager.sandboxKind, drivers: listDrivers() }));

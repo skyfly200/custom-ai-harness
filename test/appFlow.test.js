@@ -161,6 +161,12 @@ test('the orchestrator starts Haiku workers, asks the decision in between, and m
     assert.match(world.children[2].cfg.goal, /Postgres/);
     assert.deepEqual(world.merges, ['harness/w1', 'harness/w3']);
     assert.equal(world.children[0].cfg.parent, 'r1');
+    // the board on the run: every ticket with its state, and the files its merged worker changed
+    const board = Object.fromEntries(world.run.appTickets.map((t) => [t.id, t]));
+    assert.deepEqual(world.run.appTickets.map((t) => [t.id, t.status]), [['db', 'done'], ['first', 'done'], ['api', 'done'], ['look', 'done']]);
+    assert.equal(board.db.decision, 'Postgres');
+    assert.equal(board.api.child, 'w3');
+    assert.equal(board.first.diffStat, '');   // the fake worker reports no diff stat
     assert.equal(world.calls[0].model, MODELS.orchestrator);
     assert.equal(world.calls[0].effort, EFFORTS.orchestrator);
 });

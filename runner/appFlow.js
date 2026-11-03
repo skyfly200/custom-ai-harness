@@ -249,6 +249,14 @@ async function traverse(ctx, draft) {
     const cloud = ctx.cloud;
     const list = () => tickets.map((t) => `- ${t.id} (${t.kind}, ${t.status}${t.attempts ? `, attempt ${t.attempts}` : ''}): ${t.title}${t.note ? ` — ${t.note}` : ''}`).join('\n');
 
+    // the board the run page shows: each ticket's state now, saved on the run after every change
+    const publish = () => {
+        run.appTickets = tickets.map((t) => ({
+            id: t.id, kind: t.kind, title: t.title, status: t.status, attempts: t.attempts, note: t.note,
+            depends_on: t.depends_on, decision: t.decision, child: t.child, diffStat: t.diffStat || '', result: t.result ? String(t.result).slice(0, 400) : null,
+        }));
+        manager.save(run);
+    };
     // a finished worker's branch goes into the app's branch, as the swarm merges its parts
     const merge = async (t, child) => {
         if (cloud && sandbox.importBranches) await sandbox.importBranches([child.branch]);
@@ -256,6 +264,7 @@ async function traverse(ctx, draft) {
             await sandbox.git(['-c', 'user.name=Bright Chat runner', '-c', 'user.email=runner@localhost', 'merge', '--no-ff', '-q', '-m', `Merge ${child.branch}: ${t.title}`, child.branch]);
             t.status = 'done';
             t.note = 'merged';
+            t.diffStat = child.result?.diffStat || '';
             manager.event(run, { type: 'note', text: `Merged “${t.title}” (${child.branch}).` });
         } catch (err) {
             await sandbox.git(['merge', '--abort']).catch(() => {});
@@ -282,6 +291,7 @@ async function traverse(ctx, draft) {
             await merge(t, child);
         }
         cascade(tickets, byId);
+        publish();
     };
     const running = () => tickets.filter((t) => t.status === 'running').length;
     const pendingWork = () => tickets.some((t) => ['todo', 'running', 'needs_advice'].includes(t.status));
@@ -312,7 +322,7 @@ async function traverse(ctx, draft) {
         t.adviceFresh = false;
         (run.children ||= []).push(child.id);
         manager.event(run, { type: 'note', text: `Started a worker for “${t.title}” (try ${t.attempts}).` });
-        manager.save(run);
+        publish();
         return `Started a worker for ${t.id} (try ${t.attempts}).`;
     };
 
@@ -350,6 +360,7 @@ async function traverse(ctx, draft) {
                     t.status = 'done';
                     t.note = got.answer ? `decided: ${got.answer}` : 'left open by the person';
                     cascade(tickets, byId);
+                    publish();
                 }
                 return { text: got.answer ? `The person answered: ${got.answer}` : 'The person did not answer; the workers will choose the simplest option.' };
             }
@@ -395,6 +406,8 @@ async function executeAppFlow(manager, run, live) {
     run.appDraft = { goal: draft.goal, tickets: draft.tickets.map(({ id, kind, title, depends_on }) => ({ id, kind, title, depends_on })) };
     manager.save(run);
 
+    run.appTickets = draft.tickets.map((t) => ({ id: t.id, kind: t.kind, title: t.title, status: t.status, attempts: 0, note: null, depends_on: t.depends_on, decision: null, child: null, diffStat: '', result: null }));
+    manager.save(run);
     const built = await traverse(ctx, draft);
     if (live.stopped) {
         for (const id of run.children || []) { try { manager.stop(id); } catch { /* already finished */ } }

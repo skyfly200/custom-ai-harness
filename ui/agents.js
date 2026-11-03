@@ -372,21 +372,62 @@ $('statusCard').addEventListener('click', async (e) => {
 
 // Preview: the run's dev server. Drawn outside the detail pane so the form keeps what you typed.
 let previewFor = null;
+let previewApp = null; // the app's own dev server command and port, when this run belongs to an app
+const previewPhase = new Map(); // run id -> last shown phase, so the log box opens once per change
 const PREVIEW_KEY = 'harness-preview-command';
+// One clear state at a time: not running, starting, running, or stopped (with the reason).
 async function drawPreview(run) {
   const panel = $('previewPanel');
   const ok = run && run.kind === 'run' && !run.plan && (!run.sandbox || run.sandbox === 'local') && run.status !== 'queued';
   panel.hidden = !ok;
-  if (!ok) { previewFor = null; return; }
+  if (!ok) { previewFor = null; previewApp = null; return; }
   if (previewFor !== run.id) {
     previewFor = run.id;
-    try { $('previewCmd').value = localStorage.getItem(PREVIEW_KEY) || ''; } catch { $('previewCmd').value = ''; }
+    previewApp = null;
+    if (run.app) {
+      try { previewApp = (await (await fetch(`api/apps/${encodeURIComponent(run.app)}`)).json()); } catch { previewApp = null; }
+    }
+    const saved = (() => { try { return localStorage.getItem(PREVIEW_KEY) || ''; } catch { return ''; } })();
+    $('previewCmd').value = previewApp?.devCommand ? '' : saved;
+    $('previewCmd').placeholder = previewApp?.devCommand || 'npm run dev -- --port {port}';
+    $('runAppCmdBox').open = !previewApp?.devCommand;
     $('previewMsg').textContent = '';
   }
   const st = await api(`/${run.id}/preview`).catch(() => ({ running: false }));
+  const appCmd = previewApp?.devCommand || '';
+  const state = $('runAppState');
+  const help = $('runAppHelp');
+  const open = $('runAppOpen');
+  const start = $('previewStart');
+  if (st.running && st.ready) {
+    state.textContent = 'Running'; state.className = 'tag ok';
+    help.textContent = 'The app answers on this machine and shows this run\'s work, not the main branch. Open it to look, then ship or undo the change.';
+  } else if (st.running) {
+    state.textContent = 'Starting…'; state.className = 'tag';
+    help.textContent = 'Waiting for the app to answer. If it takes long, the log shows what it is doing.';
+  } else if (st.url) {
+    state.textContent = 'Stopped'; state.className = 'tag bad';
+    help.textContent = `The app stopped${st.exited === null || st.exited === undefined ? '' : ` (exit code ${st.exited})`}. The log below says why. Run it again once that is fixed.`;
+  } else {
+    state.textContent = 'Not running'; state.className = 'tag';
+    help.textContent = 'Start the app to look at this change before you ship it. Starting it does not change the repo.';
+  }
+  open.hidden = !(st.running && st.url);
+  if (st.url) open.href = st.url;
   $('previewStop').hidden = !st.running;
-  $('previewStart').disabled = Boolean(st.running);
-  $('previewInfo').innerHTML = st.url ? `<p>${st.running ? (st.ready ? '<span class="tag ok">running</span>' : '<span class="tag">starting</span>') : `<span class="tag bad">exited (${esc(st.exited)})</span>`} <a href="${esc(st.url)}" target="_blank" rel="noopener">${esc(st.url)}</a> <code>${esc(st.command)}</code></p><pre>${esc((st.log || []).join('\n'))}</pre>` : '';
+  $('previewRestart').hidden = !st.running;
+  start.hidden = Boolean(st.running);
+  start.textContent = st.url && !st.running ? 'Run again' : 'Run the app';
+  $('runAppCmd').innerHTML = st.command
+    ? `${st.running ? 'Running' : 'Last ran'} <code>${esc(st.command)}</code>${st.port ? ` on port ${esc(st.port)}` : ''}`
+    : (appCmd ? `This app starts with <code>${esc(appCmd)}</code>` : 'No command yet. Open "Change the command" to set one.');
+  // open the log when the state changes to a stop or a start that has not answered; a person's own choice stays otherwise
+  const phase = st.running ? (st.ready ? 'running' : 'starting') : (st.url ? 'stopped' : 'none');
+  if (previewPhase.get(run.id) !== phase) {
+    previewPhase.set(run.id, phase);
+    $('runAppLogBox').open = phase === 'stopped' || phase === 'starting';
+  }
+  $('previewLog').textContent = (st.log || []).join('\n') || 'No log yet.';
 }
 // Ship and undo: only for a change to a registered app. Shows what the checks found, and the
 // buttons stay off while something blocks it.
@@ -424,10 +465,16 @@ async function shipAction(path, ask) {
 $('shipBtn').addEventListener('click', () => shipAction('ship', 'Merge this change into the app on GitHub? Its normal pipeline then deploys it.'));
 $('undoBtn').addEventListener('click', () => shipAction('undo', 'Open and merge a revert pull request for this change?'));
 
-$('previewForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const command = $('previewCmd').value.trim();
+// Run, Restart and Enter in the command box all start the app. An empty command uses the app's own
+// dev server command; a run without an app needs one typed.
+async function startPreview() {
   if (!selected) return;
+  const command = $('previewCmd').value.trim();
+  if (!command && !previewApp?.devCommand) {
+    $('runAppCmdBox').open = true;
+    $('previewMsg').textContent = 'Type the command that starts the app first.';
+    return;
+  }
   try { if (command) localStorage.setItem(PREVIEW_KEY, command); } catch { /* fine */ }
   const start = (approved) => fetch(`api/runs/${selected}/preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command, approved }) });
   try {
@@ -435,7 +482,8 @@ $('previewForm').addEventListener('submit', async (e) => {
     let res = await start(false);
     let body = await res.json().catch(() => ({}));
     if (res.status === 409 && body.needsApproval) {
-      if (!await ui.confirm(`${body.error}\n\nRun this command in the workspace?\n${command}`)) { $('previewMsg').textContent = ''; return; }
+      const shown = command || previewApp?.devCommand || '';
+      if (!await ui.confirm(`${body.error}\n\nRun this command in the workspace?\n${shown}`)) { $('previewMsg').textContent = ''; return; }
       res = await start(true);
       body = await res.json().catch(() => ({}));
     }
@@ -444,11 +492,22 @@ $('previewForm').addEventListener('submit', async (e) => {
     previewFor = null;
     await drawPreview(await api(`/${selected}`));
   } catch (err) { $('previewMsg').textContent = err.message; }
+}
+$('previewStart').addEventListener('click', () => startPreview());
+$('previewForm').addEventListener('submit', (e) => { e.preventDefault(); startPreview(); });
+$('previewRestart').addEventListener('click', async () => {
+  try {
+    $('previewMsg').textContent = 'Restarting…';
+    await fetch(`api/runs/${selected}/preview`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+    previewFor = null;
+    await startPreview();
+  } catch (err) { $('previewMsg').textContent = err.message; }
 });
 $('previewStop').addEventListener('click', async () => {
   try {
     await fetch(`api/runs/${selected}/preview`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
     previewFor = null;
+    $('previewMsg').textContent = '';
     await drawPreview(await api(`/${selected}`));
   } catch (err) { $('previewMsg').textContent = err.message; }
 });

@@ -15,6 +15,13 @@ A second, smaller way to run the harness: Node serverless functions that send Op
   4. Rules: a request with `tools`, or with more than `HARNESS_STRONG_CHARS` (default 8000) characters of message text, goes to the strong model. Everything else goes to the weak model.
   
   Every reply carries `x-harness-model` and `x-harness-route` (`pinned`, `requested`, `tier`, `tools`, `long`, `short`).
+- **Transforms** (same as the Interceptor, `serverless/transforms.mjs`), in the Interceptor's order:
+  1. **caveman**: the terse-output line is added to the system prompt (`utils/messageTransforms.js`).
+  2. **Context anchor**: a tool result identical to an earlier one becomes a pointer to the first copy.
+  3. **Headroom**: long tool results are shortened from the middle (the in-repo rule the Docker stack uses).
+  4. **Headroom service** (optional): the `headroom-ai` TypeScript client (`HeadroomClient`) sends the tool results to a `headroom proxy` at `HEADROOM_URL` for real compression. If the URL is unset or the proxy does not answer, the request goes on after step 3.
+
+  User text is never changed. Each reply lists the transforms it used in `x-harness-transforms`.
 - **Limits:** request bodies over `HARNESS_MAX_BYTES` (default 1 MB) get 413. OpenRouter has `HARNESS_TIMEOUT_MS` (default 25 s) to start answering, otherwise 504; a stream is not cut after that. A network failure to OpenRouter is 502. OpenRouter's own error statuses (429, 402, and so on) are returned as they came.
 
 What this does **not** do yet: the chat web pages, usage logs, per-person logins, MCP tools, the task runner, and the Anthropic `/v1/messages` format. Those live in the Interceptor and stay on the LiteLLM stack. Claude Code and other Anthropic-format clients should keep using the LiteLLM stack until an Anthropic route is added here.
@@ -31,6 +38,9 @@ What this does **not** do yet: the chat web pages, usage logs, per-person logins
 | `HARNESS_STRONG_CHARS` | `8000` | Length that counts as long |
 | `HARNESS_TIMEOUT_MS` | `25000` | Wait for OpenRouter to start answering |
 | `HARNESS_MAX_BYTES` | `1000000` | Largest request body |
+| `HARNESS_CAVEMAN`, `HARNESS_CONTEXT_ANCHOR`, `HARNESS_HEADROOM` | on | Set `0` to turn a transform off (the Settings page in the Docker stack) |
+| `HEADROOM_URL` | (empty) | Address of a `headroom proxy` (`pip install "headroom-ai[proxy]"`, run `headroom proxy`). Empty means no Headroom service |
+| `HEADROOM_TIMEOUT_MS` | `5000` | How long the Headroom service may take before the request goes on uncompressed |
 | `HARNESS_SITE_URL`, `HARNESS_SITE_NAME` | (empty), `Custom AI Harness` | Sent to OpenRouter as `HTTP-Referer` and `X-Title` |
 | `OPENROUTER_URL` | `https://openrouter.ai/api/v1` | Only to point at another OpenRouter-compatible base |
 
@@ -56,8 +66,10 @@ curl https://<your-site>/v1/chat/completions \
 - The adapters are **not yet run against a live Netlify or Vercel deployment.** The tests cover the handler and check the adapters' exports; the platform wiring (Netlify `config.path`, Vercel rewrites and the Edge runtime) needs one real deploy to confirm.
 - Platform time limits apply on top of `HARNESS_TIMEOUT_MS`. Long answers stream, but a stream that runs past the platform's maximum duration is cut by the platform.
 - Each request is independent: there is no usage log, no per-person spending cap and no rate limit. Set a spending limit on the OpenRouter key.
+- The Headroom service needs a server. Netlify and Vercel cannot run the Python `headroom proxy`, so run it somewhere reachable (a small VM, or the Fly machine) and set `HEADROOM_URL`. Without it only the in-repo transforms run, which is what the Docker stack does for chat.
+- The `headroom-ai` package is also the name of the Python package. Its npm version (0.42.0) is the same project and matches the Python one; this repo uses only its TypeScript client.
 - The heuristic is not a classifier. For a smart route, use the LiteLLM stack with the Router.
 
 ## Tests
 
-`test/serverless.test.js` (`node --test test/serverless.test.js`) covers access, model choice, streaming, limits, upstream errors and both adapters, with a fake OpenRouter.
+`test/serverless.test.js` (`node --test test/serverless.test.js`) covers access, model choice, transforms, streaming, limits, upstream errors and both adapters, with a fake OpenRouter and a fake Headroom client.

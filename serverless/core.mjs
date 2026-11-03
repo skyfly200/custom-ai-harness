@@ -9,7 +9,10 @@
 //
 // Access: every /v1 call needs SERVERLESS_API_KEY (Bearer or x-api-key). Without it the
 // deployment refuses to serve, so an unset key never leaves an open paid proxy.
+// Request transforms (caveman, context anchor, Headroom) match the Interceptor: serverless/transforms.mjs.
 // See docs/serverless.md for the design and the limits.
+
+import { readTransforms, applyTransforms } from './transforms.mjs';
 
 export const DEFAULT_STRONG = 'anthropic/claude-sonnet-5.5';
 export const DEFAULT_WEAK = 'anthropic/claude-haiku-5.5';
@@ -115,7 +118,7 @@ async function readJson(request, maxBytes) {
     }
 }
 
-async function chatCompletions(request, cfg, fetchImpl) {
+async function chatCompletions(request, cfg, fetchImpl, env, headroomClient) {
     const parsed = await readJson(request, cfg.maxBytes);
     if (parsed.error) return parsed.error;
     const body = parsed.body;
@@ -123,6 +126,8 @@ async function chatCompletions(request, cfg, fetchImpl) {
 
     const picked = pickModel(body, request.headers, cfg);
     if (picked.error) return errorResponse(400, picked.error);
+
+    const transformed = await applyTransforms({ ...body, model: picked.model }, readTransforms(env), { headroomClient });
 
     const headers = {
         'content-type': 'application/json',
@@ -138,7 +143,7 @@ async function chatCompletions(request, cfg, fetchImpl) {
         upstream = await fetchImpl(`${cfg.base}/chat/completions`, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ ...body, model: picked.model }),
+            body: JSON.stringify(transformed.body),
             signal: controller.signal,
         });
     } catch (err) {
@@ -153,6 +158,7 @@ async function chatCompletions(request, cfg, fetchImpl) {
         'cache-control': 'no-store',
         'x-harness-model': picked.model,
         'x-harness-route': picked.route,
+        'x-harness-transforms': encodeURIComponent(transformed.applied.join(', ') || 'none'),
     };
     return new Response(upstream.body, { status: upstream.status, headers: out });
 }
@@ -168,7 +174,7 @@ export function routeOf(request) {
  * The whole serverless harness. `env` is the host's environment (process.env);
  * `fetchImpl` is injectable for tests.
  */
-export async function handle(request, env = {}, { fetchImpl = fetch } = {}) {
+export async function handle(request, env = {}, { fetchImpl = fetch, headroomClient } = {}) {
     const cfg = readConfig(env);
     const path = routeOf(request);
 
@@ -187,7 +193,7 @@ export async function handle(request, env = {}, { fetchImpl = fetch } = {}) {
     }
     if (path === '/v1/chat/completions') {
         if (request.method !== 'POST') return errorResponse(405, 'use POST', 'invalid_request_error');
-        return chatCompletions(request, cfg, fetchImpl);
+        return chatCompletions(request, cfg, fetchImpl, env, headroomClient);
     }
     return errorResponse(404, `no route for ${request.method} ${path}`, 'not_found');
 }

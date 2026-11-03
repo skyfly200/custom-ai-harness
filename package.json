@@ -33,6 +33,7 @@
     "dotenv": "^18.0.3",
     "e2b": "^2.59.0",
     "express": "^5.2.1",
+    "headroom-ai": "^0.42.0",
     "http-proxy-middleware": "^4.2.0",
     "pg": "^8.23.1",
     "uv": "^1.4.0"

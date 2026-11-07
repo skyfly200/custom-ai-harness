@@ -471,6 +471,15 @@ app.post('/ui/api/server/stop', localJsonOnly, (req, res) => {
     idle.requestStop(`asked by ${(req.harnessUser && req.harnessUser.name) || 'an admin'}`);
     res.json({ stopping: true });
 });
+// Adds idle time before it sleeps: {"minutes": 30} (1 to 240), counted on top of the countdown already running
+app.post('/ui/api/server/extend', localJsonOnly, (req, res) => {
+    if (!idle.status().canStop) return res.status(409).json({ error: 'this server has no way to stop itself (it is not running under the Fly launcher)' });
+    if (!idle.status().canExtend) return res.status(409).json({ error: 'this server does not sleep by itself, so there is nothing to extend' });
+    const minutes = Number(req.body && req.body.minutes);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 240) return res.status(400).json({ error: 'send {"minutes": 1 to 240}' });
+    idle.extend(minutes * 60 * 1000);
+    res.json(idle.status());
+});
 
 // Whose request this is, for the usage log and the routing log: the signed-in person's name, '' when logins are off
 const personOf = (req) => (req.harnessLogin && req.harnessUser ? req.harnessUser.name : '');

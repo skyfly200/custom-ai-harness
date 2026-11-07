@@ -87,3 +87,59 @@ test('stop is requested once, and the status counts down', () => {
     assert.equal(n, 1);
     assert.equal(idle.status().stopping, true);
 });
+
+test('extend adds idle time before the stop, on top of the countdown already running', () => {
+    const c = clock(); let stopped = null;
+    const idle = create({ minutes: 30, stop: (why) => { stopped = why; }, now: c.now });
+    c.advance(20 * MIN);
+    assert.equal(idle.status().stopsInMs, 10 * MIN);
+    assert.equal(idle.extend(30 * MIN), true);
+    assert.equal(idle.status().stopsInMs, 40 * MIN);
+    assert.equal(idle.status().totalMs, 60 * MIN);
+    assert.equal(idle.status().extraMs, 30 * MIN);
+    c.advance(39 * MIN); idle.check();
+    assert.equal(stopped, null);
+    c.advance(2 * MIN); idle.check();
+    assert.match(stopped, /idle for 61 minutes/);
+});
+
+test('extend is capped at four hours in all, and does nothing without a sleep timer', () => {
+    const c = clock();
+    const idle = create({ minutes: 30, stop: () => {}, now: c.now });
+    for (let i = 0; i < 20; i++) idle.extend(60 * MIN);
+    assert.equal(idle.status().extraMs, 4 * 60 * MIN);
+    const never = create({ minutes: 0, stop: () => {}, now: c.now });
+    assert.equal(never.extend(30 * MIN), false);
+    assert.equal(never.status().canExtend, false);
+    const noStop = create({ minutes: 30, stop: null, now: c.now });
+    assert.equal(noStop.extend(30 * MIN), false);
+});
+
+test('any use of the server clears the extension', () => {
+    const c = clock();
+    const idle = create({ minutes: 30, stop: () => {}, now: c.now });
+    idle.extend(30 * MIN);
+    const mw = idle.middleware;
+    const res = new EventEmitter();
+    mw(req('POST', '/v1/messages'), res, () => {});
+    res.emit('close');
+    assert.equal(idle.status().extraMs, 0);
+    assert.equal(idle.status().stopsInMs, 30 * MIN);
+});
+
+test('a running job keeps it awake and restarts the clock when it finishes', () => {
+    const c = clock(); let stopped = null; let jobs = true;
+    const idle = create({ minutes: 30, stop: (why) => { stopped = why; }, busy: [() => jobs], now: c.now });
+    c.advance(25 * MIN); idle.check();
+    assert.equal(idle.status().busy, true);
+    assert.equal(idle.status().stopsInMs, null);
+    c.advance(60 * MIN); idle.check();
+    assert.equal(stopped, null);
+    jobs = false;
+    idle.check();
+    assert.equal(idle.status().stopsInMs, 30 * MIN);
+    c.advance(29 * MIN); idle.check();
+    assert.equal(stopped, null);
+    c.advance(2 * MIN); idle.check();
+    assert.match(stopped, /idle for 31 minutes/);
+});

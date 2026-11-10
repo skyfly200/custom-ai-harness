@@ -109,3 +109,13 @@ def test_main_key_renewal_points_the_gateway_at_the_harness_proxy(monkeypatch):
     gateway_start.use_federation()
     assert os.environ["OPENROUTER_API_BASE"].endswith("/openrouter-proxy/v1")
     monkeypatch.delenv("OPENROUTER_API_KEY"); monkeypatch.delenv("OPENROUTER_API_BASE")
+
+
+def test_federation_falls_back_to_this_pc_not_the_docker_name(monkeypatch):
+    for k in ("OPENROUTER_PROXY_URL", "OPENROUTER_API_BASE", "OPENROUTER_API_KEY", "OPENROUTER_FEDERATION_POLICY_ID"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("OPENROUTER_FEDERATION_POLICY_ID", "pol_1")
+    monkeypatch.setenv("OPENROUTER_PROXY_KEY", "sk-proxy")
+    gateway_start.use_federation()
+    assert os.environ["OPENROUTER_API_BASE"] == "http://127.0.0.1:3000/openrouter-proxy/v1"
+    monkeypatch.delenv("OPENROUTER_API_KEY"); monkeypatch.delenv("OPENROUTER_API_BASE")

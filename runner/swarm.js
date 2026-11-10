@@ -39,7 +39,7 @@ function parsePlan(text, goal) {
 async function executeSwarm(manager, run, live) {
     const { createSandbox, isCloud } = require('./sandbox');
     const path = require('path');
-    const sandbox = await createSandbox({ kind: run.sandbox || manager.sandboxKind, repo: run.repo, dir: path.join(manager.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD' });
+    const sandbox = await createSandbox({ kind: run.sandbox || manager.sandboxKind, repo: run.repo, dir: path.join(manager.dir, run.id, 'work'), branch: run.branch, base: run.base || 'HEAD', runId: run.id, owner: run.owner || '' });
     live.sandbox = sandbox;
     run.base = sandbox.base;
     if (isCloud(sandbox.kind)) { run.sandboxId = sandbox.id; manager.save(run); }

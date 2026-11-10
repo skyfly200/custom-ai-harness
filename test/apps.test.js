@@ -166,3 +166,35 @@ test('an app with a running change cannot be removed; an idle one can', async ()
     assert.equal((await call('DELETE', `/apps/${appRow.id}`)).status, 200);
     assert.equal((await call('GET', '/apps')).body.apps.length, 0);
 });
+
+test('an app shows its git history, and takes an agent chosen or made for its folder', async () => {
+    const made = await call('POST', '/apps', { name: 'Notes', repo, editablePaths: ['ui/**'] });
+    assert.equal(made.status, 201);
+    const id = made.body.id;
+    const history = await call('GET', `/apps/${id}/history`);
+    assert.equal(history.status, 200);
+    assert.equal(history.body.branch, 'main');
+    assert.equal(history.body.commits[0].subject, 'start');
+    assert.match(history.body.commits[0].sha, /^[0-9a-f]{40}$/);
+    assert.equal((await call('GET', '/apps/nope/history')).status, 404);
+
+    // an agent for this folder, made with the app; then picked for another app in the same folder
+    const linked = manager.attachAgent(made.body, { mode: 'new', name: 'Notes helper' });
+    assert.ok(linked.agent);
+    assert.equal(manager.getAgent(linked.agent).name, 'Notes helper');
+    assert.throws(() => manager.attachAgent(made.body, { mode: 'existing', id: 'nope' }), /no such agent/);
+    const other = await call('POST', '/apps', { name: 'Other', repo, editablePaths: ['ui/**'] });
+    const picked = manager.attachAgent(other.body, { mode: 'existing', id: linked.agent });
+    assert.equal(picked.agent, linked.agent);
+    // no agent: the link is cleared by an edit (the Edit dialog sends agent: null)
+    assert.equal((await call('PATCH', `/apps/${id}`, { agent: null })).body.agent, null);
+    // an agent with no tasks yet moves to the folder of the app it is picked for
+    const elsewhere = path.join(reposDir, 'elsewhere');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    git(elsewhere, 'init', '-q');
+    const fresh = manager.createAgent({ name: 'Fresh', repo: elsewhere });
+    assert.equal(manager.attachAgent(other.body, { mode: 'existing', id: fresh.id }).agent, fresh.id);
+    assert.equal(manager.getAgent(fresh.id).repo, repo);
+    assert.equal((await call('DELETE', `/apps/${other.body.id}`)).status, 200);
+    assert.equal((await call('DELETE', `/apps/${id}`)).status, 200);
+});

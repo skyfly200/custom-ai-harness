@@ -132,6 +132,7 @@
     'audit-refactor': { what: 'A refactorer works and an auditor keeps checking, round after round, until nothing is left to fix.', use: 'A large or risky clean-up across many files.', feel: 'The dearest and slowest single-branch option.' },
     'change-app': { what: 'Changes a registered app from inside it, then a verifier runs its tests so you can preview and ship it.', use: 'Ask for a button, layout, filter or wording change in one of your apps.', feel: 'Moderate; ends with a live preview.' },
     swarm: { what: 'A planner splits the goal into parts, several agents work at once on their own branches, the branches are merged and a reviewer checks the whole.', use: 'A big goal with parts that are mostly independent.', feel: 'Dearest: several agents paid at once, but quicker than doing the parts in turn.' },
+    app: { what: 'You describe the app and a planner grills you one question at a time, then writes a ticket plan. An orchestrator asks you the open decisions while worker agents build the independent tickets on their own branches, which are merged as they finish.', use: 'A new app you want planned with questions and then built, ticket by ticket.', feel: 'Slow, since it asks you questions; the workers run in the background. Uses the advisor (Opus) when a worker gets stuck.' },
     chatdev: { what: 'Hands the goal to ChatDev, an outside team of role-playing agents, in a cloud sandbox with its models routed through this harness.', use: 'Building something from scratch. Needs ChatDev set up on the server.', feel: 'Slow and dear; experimental.' },
   };
 
@@ -182,5 +183,34 @@
     return out;
   }
 
-  return { isError, filesChanged, quickLine, summarize, annotate, filterEvents, searchText, help, HELP, actionsFor };
+  const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const COLUMNS = [
+    ['running', 'Running'], ['needs_advice', 'Needs advice'], ['todo', 'Waiting'], ['done', 'Done'], ['failed', 'Given up'], ['skipped', 'Left out'],
+  ];
+  const TICKET_NOTE = { running: 'a worker is on it', needs_advice: 'failed; the advisor is needed before another try', todo: 'not started yet', done: '', failed: '', skipped: '' };
+
+  /**
+   * The ticket board of a Wayfinder app run (run.appTickets, kept by runner/appFlow.js):
+   * one card per ticket in its column, with its attempts, decision, the files its merged work changed,
+   * and a link to the worker run. `runs` is the list the page has, to find worker ids.
+   */
+  function appBoard(run, runs = []) {
+    const tickets = Array.isArray(run.appTickets) ? run.appTickets : [];
+    if (!tickets.length) return '';
+    const counts = {};
+    for (const t of tickets) counts[t.status] = (counts[t.status] || 0) + 1;
+    const card = (t) => {
+      const worker = t.child ? runs.find((x) => x.id === t.child) : null;
+      const files = t.diffStat ? `<pre class="ticket-files">${escHtml(t.diffStat)}</pre>` : '';
+      const decision = t.decision !== null && t.decision !== undefined ? `<div class="ticket-decision">Decided: ${escHtml(t.decision || 'left open by the person')}</div>` : '';
+      const tries = t.attempts ? `<span class="muted"> · try ${escHtml(t.attempts)}</span>` : '';
+      const note = t.note || TICKET_NOTE[t.status] || '';
+      const link = t.child ? `<button class="ticket-link" data-go="${escHtml(t.child)}">${worker ? 'open its worker' : 'worker'}</button>` : '';
+      return `<li class="ticket ticket-${escHtml(t.status)}"><div class="ticket-title">${escHtml(t.title)}${tries}</div><div class="ticket-meta"><span class="tag">${escHtml(t.kind)}</span> ${note ? `<span class="muted">${escHtml(note)}</span>` : ''}</div>${decision}${files}${link}</li>`;
+    };
+    const cols = COLUMNS.filter(([k]) => counts[k]).map(([k, label]) => `<section class="ticket-col"><h4>${escHtml(label)} <span class="muted">${counts[k]}</span></h4><ul>${tickets.filter((t) => t.status === k).map(card).join('')}</ul></section>`);
+    return `<div class="result app-board"><strong>Ticket board</strong><div class="ticket-cols">${cols.join('')}</div></div>`;
+  }
+
+  return { isError, filesChanged, quickLine, summarize, annotate, filterEvents, searchText, help, HELP, actionsFor, appBoard };
 }));

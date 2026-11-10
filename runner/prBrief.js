@@ -44,11 +44,16 @@ async function prepare({ sandbox, run, local, note = () => {} }) {
         }
         const remote = local ? 'origin' : `https://github.com/${pr.owner}/${pr.name}.git`;
         const ref = `refs/remotes/pr/${pr.number}`;
-        await sandbox.git(['fetch', '--quiet', remote, `pull/${pr.number}/head:${ref}`]);
-        // the default branch as it is now, which may be ahead of the checkout this run was made from
         const baseRef = 'refs/remotes/pr/base';
-        await sandbox.git(['fetch', '--quiet', remote, `HEAD:${baseRef}`]).catch(() => {});
-        const hasBase = await sandbox.git(['rev-parse', '--verify', '--quiet', baseRef]).then(() => true, () => false);
+        const has = (name) => sandbox.git(['rev-parse', '--verify', '--quiet', name]).then(() => true, () => false);
+        // a cloud sandbox has no remote and no token: the runner fetched these refs here and sent them in the bundle
+        const sent = !local && await has(ref);
+        if (!sent) {
+            await sandbox.git(['fetch', '--quiet', remote, `pull/${pr.number}/head:${ref}`]);
+            // the default branch as it is now, which may be ahead of the checkout this run was made from
+            await sandbox.git(['fetch', '--quiet', remote, `HEAD:${baseRef}`]).catch(() => {});
+        }
+        const hasBase = await has(baseRef);
         const sha = (await sandbox.git(['rev-parse', ref])).trim();
         let where;
         if (local && sandbox.dir) {

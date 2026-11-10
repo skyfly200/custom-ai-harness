@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serverless harness</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 40rem; }
+  code { font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<h1>Serverless harness</h1>
+<p>An OpenAI-compatible API that sends each request straight to OpenRouter.</p>
+<ul>
+  <li><code>POST /v1/chat/completions</code></li>
+  <li><code>GET /v1/models</code></li>
+  <li><code>GET /healthz</code></li>
+</ul>
+<p>Calls need the key set as <code>SERVERLESS_API_KEY</code>. See the repository's docs/serverless.md.</p>
+</body>
+</html>

@@ -337,6 +337,9 @@ const cache = new Map();                 // id -> chat
 let chat = null;                         // the open chat
 const running = new Map();               // chat id -> { controller, reply }
 let toolInfo = null;                     // MCP servers and tool definitions (GET /ui/api/tools)
+let memoryNotes = [];                    // the person's notes across chats (GET api/memory)
+let memoryPrompt = '';                   // the same notes as system-prompt text, from the server
+let memoryMax = { notes: 200, chars: 500 };
 
 function newChatObject() {
   return { id: uid(), title: '', created: Date.now(), updated: Date.now(), system: '', notes: '', messages: [] };
@@ -434,7 +437,7 @@ function chatTitle(c) {
 // ---------------------------------------------------------------------------
 // Preferences (model, voice) shared by every chat
 // ---------------------------------------------------------------------------
-const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttEngine', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll', 'shellInRepo'];
+const PREF_FIELDS = ['maxTokens', 'temperature', 'stream', 'timeoutFirst', 'timeoutStall', 'speakClear', 'sttEngine', 'sttLang', 'autoSend', 'ttsEngine', 'voice', 'serverModel', 'serverVoice', 'rate', 'pitch', 'volume', 'autoSpeak', 'handsFree', 'maxToolRounds', 'autoName', 'autoScroll', 'shellInRepo', 'memory'];
 const prefs = store.get(PREF_KEY, {});
 // carry over the old page's toolbar
 for (const id of ['maxTokens', 'temperature']) {
@@ -1422,6 +1425,7 @@ function contextText(c) {
   if (p?.instructions?.trim()) parts.push(`Instructions for the project "${p.name}":\n\n${p.instructions.trim()}`);
   if (c.system?.trim()) parts.push(c.system.trim());
   if (c.notes?.trim()) parts.push(`Context notes from the user:\n\n${c.notes.trim()}`);
+  if (prefs.memory !== false && memoryPrompt) parts.push(memoryPrompt);
   for (const k of skillsOf(c)) parts.push(`Skill "${k.name}" is on. Follow it:\n\n${k.body.trim()}`);
   const more = loadableSkills(c);
   if (more.length) {
@@ -1924,6 +1928,28 @@ async function runTool(call, c, signal, onChange) {
       call.isError = true;
       call.ms = Date.now() - started;
     }
+    return onChange();
+  }
+  if (call.name === 'memory_save' || call.name === 'memory_forget') {
+    // The notes kept across chats (utils/memory.js); the page keeps its copy in step
+    try {
+      if (call.name === 'memory_forget') {
+        await memoryCall('DELETE', `api/memory/${encodeURIComponent(args.id || '')}`);
+        call.result = `Forgot the note ${args.id}.`;
+      } else if (args.id) {
+        const n = await memoryCall('POST', `api/memory/${encodeURIComponent(args.id)}`, { text: args.text });
+        call.result = `Changed the note ${n.id} to: ${n.text}`;
+      } else {
+        const n = await memoryCall('POST', 'api/memory', { text: args.text });
+        call.result = n.existing ? `Already remembered (${n.id}): ${n.text}` : `Saved to memory (${n.id}): ${n.text}`;
+      }
+      call.isError = false;
+      await loadMemory();
+    } catch (err) {
+      call.result = `Error: could not change memory (${err.message})`;
+      call.isError = true;
+    }
+    call.ms = Date.now() - started;
     return onChange();
   }
   let confirmed = false;
@@ -2792,6 +2818,7 @@ function activeTools(c) {
   const list = serverTools(c);
   // a chat with an advisor set may call it for a second opinion
   if (advisorOf(c)) list.push({ ...ADVISOR_TOOL });
+  if (prefs.memory !== false) list.push(...MEMORY_TOOLS.map(t => ({ ...t })));
   const more = loadableSkills(c);
   if (more.length) {
     list.push({ type: 'function', function: {
@@ -2802,6 +2829,84 @@ function activeTools(c) {
   }
   return list;
 }
+
+// ---------------------------------------------------------------------------
+// Memory: notes kept across every chat (utils/memory.js). The model reads them in its system prompt and
+// may save or forget them through these two tools; the Context tab lists them and lets the person edit them.
+// ---------------------------------------------------------------------------
+const MEMORY_TOOLS = [
+  { type: 'function', function: {
+    name: 'memory_save',
+    description: 'Save a short note to the user\'s memory, which every chat sees. Use it when the user asks you to remember something or states a lasting preference or fact. Pass id to change an existing note instead of adding one. Never save secrets.',
+    parameters: { type: 'object', properties: { text: { type: 'string', description: 'One short fact or preference, in plain words' }, id: { type: 'string', description: 'The id of a note to change (optional)' } }, required: ['text'] },
+  } },
+  { type: 'function', function: {
+    name: 'memory_forget',
+    description: 'Remove a note from the user\'s memory by its id, from the Memory list in the prompt. Use it when the user asks you to forget something or a note is wrong.',
+    parameters: { type: 'object', properties: { id: { type: 'string', description: 'The id of the note, as in the Memory list' } }, required: ['id'] },
+  } },
+];
+
+async function memoryCall(method, path, body) {
+  const res = await fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+  return j;
+}
+
+async function loadMemory() {
+  try {
+    const res = await fetch('api/memory');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const j = await res.json();
+    memoryNotes = j.notes || [];
+    memoryPrompt = j.promptText || '';
+    memoryMax = { notes: j.maxNotes || memoryMax.notes, chars: j.maxChars || memoryMax.chars };
+  } catch { /* keep what the page had */ }
+  drawMemory();
+}
+
+function drawMemory() {
+  if (!$('memoryList')) return;
+  $('memoryCount').textContent = memoryNotes.length ? `${memoryNotes.length} of ${memoryMax.notes} notes` : 'No notes yet.';
+  $('memoryList').innerHTML = memoryNotes.map(n => `<li data-id="${esc(n.id)}">`
+    + `<input type="text" class="mem-text" value="${esc(n.text)}" maxlength="${memoryMax.chars}" aria-label="Note">`
+    + '<button type="button" class="mini mem-del" title="Forget this note" aria-label="Forget this note">×</button></li>').join('');
+  $('memoryNew').maxLength = memoryMax.chars;
+}
+
+$('memoryList').addEventListener('change', async (e) => {
+  const li = e.target.closest('li[data-id]');
+  if (!li || !e.target.classList.contains('mem-text')) return;
+  const text = e.target.value.trim();
+  if (!text) { drawMemory(); return toast('A note cannot be empty. Use × to forget it.'); }
+  try {
+    await memoryCall('POST', `api/memory/${encodeURIComponent(li.dataset.id)}`, { text });
+    await loadMemory();
+  } catch (err) { toast(`Could not save the note (${err.message})`); drawMemory(); }
+});
+
+$('memoryList').addEventListener('click', async (e) => {
+  const li = e.target.closest('li[data-id]');
+  if (!li || !e.target.classList.contains('mem-del')) return;
+  try {
+    await memoryCall('DELETE', `api/memory/${encodeURIComponent(li.dataset.id)}`);
+    await loadMemory();
+  } catch (err) { toast(`Could not forget the note (${err.message})`); }
+});
+
+async function addMemory() {
+  const text = $('memoryNew').value.trim();
+  if (!text) return;
+  try {
+    const n = await memoryCall('POST', 'api/memory', { text });
+    $('memoryNew').value = '';
+    if (n.existing) toast('Already in memory');
+    await loadMemory();
+  } catch (err) { toast(`Could not save the note (${err.message})`); }
+}
+$('memoryAdd').addEventListener('click', addMemory);
+$('memoryNew').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addMemory(); } });
 
 async function loadTools() {
   try {
@@ -4862,6 +4967,7 @@ fetch('api/model-stats').then(r => r.json()).then(({ models }) => { quickStats =
 applyPrefs(); drawHandsFree();
 loadModelInfo();
 loadTools();
+loadMemory();
 loadGithub();
 loadRoutings();
 // /chat#c=ID (the Dashboard's recent chats) opens that chat; the old #chat=ID form still does

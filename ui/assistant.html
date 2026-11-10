@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bright Chat · Assistant</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<meta name="theme-color" content="#0d0b18">
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bright.css">
+<link rel="stylesheet" href="nav.css">
+<link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="mobile.css">
+<link rel="stylesheet" href="assistant.css">
+</head>
+<body>
+<main class="assistant-page">
+  <header>
+    <nav data-site-nav></nav>
+  </header>
+  <script src="dialogs.js"></script>
+  <script src="nav.js"></script>
+
+  <p class="muted lead">Your assistant keeps notes and remembers this conversation. The same assistant answers on Telegram and Slack when those are set up. Send <code>/remember TEXT</code> to save a note, <code>/notes</code> to list them, <code>/forget N</code> to drop one, and <code>/reset</code> to start a new conversation.</p>
+
+  <div class="split">
+    <section class="card thread" aria-label="Conversation">
+      <div id="log" class="log" aria-live="polite"></div>
+      <form id="form" class="composer" autocomplete="off">
+        <textarea id="text" rows="2" maxlength="8000" placeholder="Ask anything, or send /help" aria-label="Message"></textarea>
+        <button id="send" class="primary" type="submit">Send</button>
+      </form>
+      <p id="status" class="muted small" role="status"></p>
+    </section>
+
+    <aside class="card side" aria-label="Notes and channels">
+      <h3 class="sub">Channels</h3>
+      <ul id="channels" class="plain"></ul>
+      <h3 class="sub">Notes</h3>
+      <ol id="notes" class="plain"></ol>
+      <p id="empty" class="muted small hidden">No notes yet. Use <code>/remember TEXT</code>.</p>
+    </aside>
+  </div>
+</main>
+<script src="assistant.js"></script>
+<script src="sleepcard.js" defer></script>
+</body>
+</html>

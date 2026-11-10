@@ -32,6 +32,42 @@ function wantsOllama(argv, env) {
     return /^(1|true|yes|on)$/i.test(String(env.START_OLLAMA || '').trim());
 }
 
+/** This PC's address for the harness's /openrouter-proxy. `harness` is the Docker Compose name and does not resolve here. */
+const LOCAL_PROXY = 'http://127.0.0.1:3000';
+function localProxyUrl(env, warnings = []) {
+    const raw = String(env.OPENROUTER_PROXY_URL || '').trim();
+    if (!raw) return LOCAL_PROXY;
+    let host;
+    try { host = new URL(raw).hostname; } catch { warnings.push(`OPENROUTER_PROXY_URL=${raw} is not a web address; using ${LOCAL_PROXY}.`); return LOCAL_PROXY; }
+    if (host === 'harness') {
+        warnings.push(`OPENROUTER_PROXY_URL=${raw} is the Docker address and does not resolve on this PC; using ${LOCAL_PROXY}. `
+            + 'Remove that line from .env to silence this.');
+        return LOCAL_PROXY;
+    }
+    return raw.replace(/\/+$/, '');
+}
+
+/** Settings that only make sense on the hosted server (Fly, Docker with a domain). They change how this PC behaves, so say so. */
+function hostedLeftovers(env) {
+    const on = v => /^(1|true|yes|on)$/i.test(String(v || '').trim());
+    const out = [];
+    const pub = String(env.HARNESS_PUBLIC_URL || '').trim();
+    if (pub) {
+        let host = '';
+        try { host = new URL(pub).hostname; } catch { host = pub; }
+        if (!/^(localhost|127\.0\.0\.1)$/.test(host)) {
+            out.push(`.env sets HARNESS_PUBLIC_URL=${pub}, a hosted address. It is only for sign-in on a server; remove it from .env to run this PC as itself.`);
+        }
+    }
+    if (on(env.HARNESS_REQUIRE_LOGIN)) out.push('.env sets HARNESS_REQUIRE_LOGIN=1, so this PC asks for a login. Remove it from .env unless you want logins here.');
+    if (env.HARNESS_OLD_HOSTS) out.push('.env sets HARNESS_OLD_HOSTS, which redirects requests from old server addresses. It is only for a hosted server; remove it from .env here.');
+    if (on(env.HARNESS_USER_CREDENTIALS)) out.push('.env sets HARNESS_USER_CREDENTIALS, which needs the hosted sign-in setup. Remove it from .env to run locally.');
+    if (/\bharness(:\d+)?\b/.test(String(env.OPENROUTER_API_BASE || ''))) {
+        out.push(`.env sets OPENROUTER_API_BASE=${env.OPENROUTER_API_BASE}, the Docker address. Remove it from .env; the Gateway works without it.`);
+    }
+    return out;
+}
+
 /**
  * The commands to run. Returns { commands, warnings }.
  * opts: platform, env, argv, exists (relative path -> bool), ollamaRunning (bool)
@@ -67,13 +103,18 @@ function buildCommands(opts = {}) {
     // Federation: the Gateway calls OpenRouter through the Interceptor, which holds the short-lived tokens
     if ((env.OPENROUTER_FEDERATION_POLICY_ID && env.OPENROUTER_FEDERATION_POLICY_ID.trim()) || /^(1|true|yes|on)$/i.test(env.HARNESS_USER_CREDENTIALS || '') || (/^(1|true|yes|on)$/i.test(env.OPENROUTER_MAIN_KEY_RENEW || '') && (env.OPENROUTER_MANAGEMENT_KEY || '').trim())) {
         const key = env.OPENROUTER_PROXY_KEY || env.LITELLM_MASTER_KEY;
+        const proxy = localProxyUrl(env, warnings);
         const gateway = commands[0];
         gateway.env = {
             ...gateway.env,
             OPENROUTER_API_KEY: key,
-            OPENROUTER_API_BASE: `${(env.OPENROUTER_PROXY_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '')}/openrouter-proxy/v1`,
+            OPENROUTER_API_BASE: `${proxy}/openrouter-proxy/v1`,
+            OPENROUTER_PROXY_URL: proxy,
         };
+        // The Router calls the same proxy (router.py reads OPENROUTER_PROXY_URL)
+        commands[1].env = { ...commands[1].env, OPENROUTER_PROXY_URL: proxy };
     }
+    warnings.push(...hostedLeftovers(env));
 
     if (wantsOllama(argv, env)) {
         if (opts.ollamaRunning) warnings.push('Ollama is already running, so it is not started again.');

@@ -16,6 +16,7 @@
     agents: '<rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V4.5M9 13v1M15 13v1"/><circle cx="12" cy="3.6" r="1"/>',
     workflows: '<rect x="3" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="16" width="7" height="5" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/><path d="M10 5.5h2a2 2 0 0 1 2 2v7a2 2 0 0 0 2 2M6.5 8v8"/>',
     prompts: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
+    assistant: '<rect x="4" y="7" width="16" height="12" rx="4"/><path d="M12 3v4M9 12.5h.01M15 12.5h.01M9.5 16h5"/>',
     tools: '<path d="M14.5 6.5a4 4 0 0 0 4.9 5.2L10 21l-3-3 9.3-9.4a4 4 0 0 0-1.8-2.1z"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     skills: '<path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-6.1-5.1-1.9 5.1-1.9z"/><path d="M19 16.5v4M17 18.5h4"/>',
@@ -39,6 +40,7 @@
     // the less-used pages sit under More on desktop; the phone menu lists every page flat
     { id: 'workflows', label: 'Workflows', href: 'workflows', files: ['workflows.html'], group: 'more', hint: 'The plan each agent follows, as stages you can edit' },
     { id: 'prompts', label: 'Prompts', href: 'prompts', files: ['prompts.html'], group: 'more', hint: 'Saved prompts for agents: write, improve and reuse them' },
+    { id: 'assistant', label: 'Assistant', href: 'assistant', files: ['assistant.html'], group: 'more', hint: 'Your personal assistant: notes and a conversation, also on Telegram and Slack' },
     { id: 'skills', label: 'Skills', href: 'skills', files: ['skills.html'], group: 'more', hint: 'Named instructions you switch on in chat: write, edit and import them' },
     { id: 'tools', label: 'Tools', href: 'tools', files: ['tools.html'], group: 'more', hint: 'The MCP servers the chat page can use' },
     { id: 'usage', label: 'Usage', href: 'usage', files: ['usage.html', 'usage-users.html'], group: 'more', hint: 'Tokens used, by client, model and service' },

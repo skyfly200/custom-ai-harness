@@ -1,0 +1,48 @@
+/* The sleep countdown card (ui/sleepcard.js): an inline card on the Dashboard, a floating one elsewhere.
+   Colours come from the shared tokens (bright.css); the card works in light and dark. */
+.sleep-card { --sc-size: 56px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0 4px;
+  padding: 10px 14px; border-radius: 16px; background: var(--glass, color-mix(in srgb, var(--panel, #fff) 80%, transparent));
+  border: 1px solid var(--line, rgba(127,127,127,.25)); box-shadow: 0 10px 30px -18px var(--glow-b, #66f); color: inherit; }
+.sleep-card[hidden] { display: none; }
+.sleep-card .sc-face { position: relative; width: var(--sc-size); height: var(--sc-size); flex: none; padding: 0; border: 0;
+  background: transparent; border-radius: 50%; cursor: default; display: grid; place-items: center; }
+.sleep-card .sc-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sleep-card .sc-track { fill: none; stroke: color-mix(in srgb, currentColor 14%, transparent); stroke-width: 5; }
+.sleep-card .sc-arc { fill: none; stroke: var(--glow-b, #6aa8ff); stroke-width: 5; stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear, stroke .3s; }
+.sleep-card .sc-short { position: relative; font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.sleep-card .sc-body { display: grid; gap: 4px; min-width: 0; flex: 1 1 200px; }
+.sleep-card .sc-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sleep-card .sc-note { font-size: 13px; }
+.sleep-card .sc-dot { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--glow-d, #f0a); box-shadow: 0 0 8px var(--glow-d, #f0a); }
+.sleep-card .sc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.sleep-card .sc-actions button { font-size: 13px; padding: 5px 10px; }
+.sleep-card .sc-actions button:disabled { opacity: .5; }
+
+/* a job keeps the server awake: full ring in the accent colour, pulsing dot */
+.sleep-card[data-kind=busy] .sc-arc { stroke: var(--glow-d, #f0a); }
+.sleep-card[data-kind=busy] .sc-dot { display: inline-block; animation: sc-pulse 1.6s ease-in-out infinite; }
+.sleep-card[data-kind=on] .sc-arc { stroke: var(--glow-c, #5ecf9a); }
+.sleep-card[data-kind=stopping] .sc-arc { stroke: color-mix(in srgb, currentColor 30%, transparent); }
+/* under five minutes the ring turns warm */
+.sleep-card[data-kind=counting][data-warn=true] .sc-arc { stroke: var(--glow-d, #f0a); }
+@keyframes sc-pulse { 50% { opacity: .35; transform: scale(.8); } }
+
+/* the floating card: a small ring in the corner; the panel opens on hover, focus or a tap */
+.sleep-float { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 64px); right: 14px; z-index: 60; margin: 0;
+  padding: 0; background: transparent; border: 0; box-shadow: none; flex-wrap: nowrap; align-items: flex-start; gap: 0; width: auto; }
+.sleep-float .sc-face { --sc-size: 46px; cursor: pointer; border-radius: 50%; background: color-mix(in srgb, var(--panel, #fff) 85%, transparent);
+  box-shadow: 0 8px 22px -12px var(--glow-b, #66f); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.sleep-float .sc-face .sc-short { font-size: 11px; }
+.sleep-float .sc-face:focus-visible { outline: 2px solid var(--glow-b, #6aa8ff); outline-offset: 3px; }
+.sleep-float .sc-body { display: none; position: absolute; top: 0; right: 56px; width: min(280px, calc(100vw - 96px));
+  padding: 12px; border-radius: 14px; background: var(--panel, #fff); border: 1px solid var(--line, rgba(127,127,127,.25));
+  box-shadow: 0 16px 40px -18px rgba(0,0,0,.45); }
+.sleep-float:hover .sc-body, .sleep-float:focus-within .sc-body, .sleep-float.open .sc-body { display: grid; }
+
+/* phones: no hover, so a tap opens the panel; keep it clear of the top bar */
+@media (max-width: 760px) {
+  .sleep-float { right: 10px; top: calc(env(safe-area-inset-top, 0px) + 58px); }
+  .sleep-float .sc-body { right: 54px; width: min(260px, calc(100vw - 80px)); }
+}
+@media (prefers-reduced-motion: reduce) { .sleep-card .sc-arc { transition: none; } .sleep-card[data-kind=busy] .sc-dot { animation: none; } }

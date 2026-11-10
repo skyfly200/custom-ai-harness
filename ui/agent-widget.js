@@ -23,11 +23,18 @@ function buildContext({ page, title, element, selection, errors }) {
   return ctx;
 }
 
-if (typeof module !== 'undefined') module.exports = { describe, buildContext };
+/** Speech to text: a transcript added after what is typed, with one space between. */
+function appendSpeech(text, transcript) {
+  const a = String(text ?? '').replace(/\s+$/, '');
+  const b = String(transcript ?? '').trim();
+  return a && b ? `${a} ${b}` : a || b;
+}
+
+if (typeof module !== 'undefined') module.exports = { describe, buildContext, appendSpeech };
 
 if (typeof document !== 'undefined') (() => {
   const script = document.currentScript;
-  const appId = script?.dataset.app || '';
+  const appId = script?.dataset.app || window.HARNESS_WIDGET?.app || ''; // a page can name its app in window.HARNESS_WIDGET (the app's own view does)
   const appName = script?.dataset.appName || '';
   const api = (p) => new URL(`api/${p}`, script?.src || location.href).href;
   const errors = [];
@@ -40,6 +47,26 @@ if (typeof document !== 'undefined') (() => {
   let timer = null;
   const el = (tag, props = {}, html = '') => Object.assign(document.createElement(tag), props, html ? { innerHTML: html } : {});
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // Speech to text (Chrome, Edge, Safari; Firefox has none). start() returns a stop function, or null when unsupported.
+  // Other scripts on the page (the app view's Speak button) use the same helper as window.HarnessSST.
+  const SpeechCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  window.HarnessSST = {
+    supported: () => Boolean(SpeechCtor),
+    append: appendSpeech,
+    start({ onText, onEnd, onError, lang } = {}) {
+      if (!SpeechCtor) return null;
+      const rec = new SpeechCtor();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = lang || navigator.language || 'en-US';
+      rec.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) onText?.(e.results[i][0].transcript); };
+      rec.onerror = (e) => onError?.(e.error || 'error');
+      rec.onend = () => onEnd?.();
+      rec.start();
+      return () => rec.stop();
+    },
+  };
 
   const style = el('style', {}, `
     .aw-btn { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; padding: 8px 14px; border-radius: 999px; border: 0; cursor: pointer; font: 600 13px system-ui, sans-serif; color: #fff; background: linear-gradient(135deg, #8b5cf6, #ec4899); box-shadow: 0 4px 14px rgba(0,0,0,.25); }
@@ -56,7 +83,7 @@ if (typeof document !== 'undefined') (() => {
   const panel = el('div', { className: 'aw-panel', hidden: true }, `
     <strong class="aw-title">Ask for a change</strong>
     <textarea placeholder="What should be different on this page?"></textarea>
-    <div class="aw-row"><button type="button" class="aw-pick">Pick an element</button><span class="aw-picked"></span></div>
+    <div class="aw-row"><button type="button" class="aw-pick">Pick an element</button><span class="aw-picked"></span><button type="button" class="aw-mic" hidden title="Speak the change instead of typing it">🎙 Speak</button></div>
     <div class="aw-row" style="margin-top:8px"><button type="button" class="aw-go">Start the change</button><button type="button" class="aw-prop" title="The agent writes a fix and opens a pull request for a person to review. Nothing is merged or deployed.">Propose a fix only</button><button type="button" class="aw-close">Close</button></div>
     <div class="aw-note" aria-live="polite"></div>`);
   const q = (s) => panel.querySelector(s);
@@ -80,6 +107,22 @@ if (typeof document !== 'undefined') (() => {
   });
   btn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
   q('.aw-close').addEventListener('click', () => { panel.hidden = true; stopPicking(); });
+
+  const mic = q('.aw-mic');
+  if (window.HarnessSST.supported()) {
+    mic.hidden = false;
+    let stopListening = null;
+    mic.addEventListener('click', () => {
+      if (stopListening) return stopListening();
+      const ta = q('textarea');
+      stopListening = window.HarnessSST.start({
+        onText: (t) => { ta.value = appendSpeech(ta.value, t); },
+        onEnd: () => { stopListening = null; mic.textContent = '🎙 Speak'; },
+        onError: (err) => { q('.aw-note').textContent = `Speech: ${err}`; },
+      });
+      mic.textContent = '■ Stop';
+    });
+  }
 
   async function poll(id) {
     clearTimeout(timer);

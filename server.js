@@ -834,7 +834,7 @@ app.delete('/ui/api/me/credential', async (req, res) => {
 });
 
 // Admin: issue (or replace) a person's key through OpenRouter's Management API, or take it back. These keys bill the
-// owner's account, each capped at OPENROUTER_USER_KEY_LIMIT (default $10) and expiring after OPENROUTER_USER_KEY_DAYS (default 30). /ui/api/users/* is admin-only at the login gate. The
+// owner's account, each capped at OPENROUTER_USER_KEY_LIMIT (default $5) and expiring after OPENROUTER_USER_KEY_DAYS (default 30). /ui/api/users/* is admin-only at the login gate. The
 // hourly sweep replaces the ones that lapse; the management key itself never leaves the server.
 app.post('/ui/api/users/:name/managed-key', async (req, res) => {
     if (!db.enabled()) return res.status(503).json({ error: 'issuing keys needs the hosted database' });

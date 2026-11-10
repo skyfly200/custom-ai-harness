@@ -37,7 +37,7 @@ const DEFAULTS = Object.freeze({
     guardDenyAt: null,        // ...at which it is blocked outright; null: Jev alone never blocks
     shellInRepo: true,        // a chat linked to a git repo may run commands in it (guarded; the chat page asks you)
     langfuseContent: langfuse.contentDefault(), // Langfuse (utils/langfuse.js): log prompts and replies too; off: only model, tokens, cost and tags
-    keyLimitUsd: 10,          // spending limit in dollars on each OpenRouter key the harness issues (users' and the main key); OPENROUTER_USER_KEY_LIMIT in .env wins
+    keyLimitUsd: 5,           // spending limit in dollars on each OpenRouter key the harness issues (users' and the main key); OPENROUTER_USER_KEY_LIMIT in .env wins
     keyDays: 30,              // days until each issued key expires; it is renewed about a day before that; OPENROUTER_USER_KEY_DAYS in .env wins
 });
 

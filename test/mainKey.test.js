@@ -45,13 +45,13 @@ test('first start issues the harness\'s own key, saves it, and puts it where the
     assert.equal(JSON.parse(fs.readFileSync(env.OPENROUTER_MAIN_KEY_FILE, 'utf8')).hash, 'mh1');
 });
 
-test('no limit or lifetime configured: the main key gets the $10 limit and a 30-day expiry', async () => {
+test('no limit or lifetime configured: the main key gets the $5 limit and a 30-day expiry', async () => {
     const env = { ...base(), OPENROUTER_MAIN_KEY_FILE: tmp() };
     const { calls, fetchFn } = fake();
     const r = mainKey.create({ env, store: mainKey.createStore({ env }), fetchFn, now: () => Date.parse('2026-11-03T00:00:00Z') });
     await r.start(); r.stop();
     const body = calls.find((c) => c.method === 'POST').body;
-    assert.equal(body.limit, 10);
+    assert.equal(body.limit, 5);
     assert.equal(body.expires_at, '2026-12-03T00:00:00Z');
 });
 

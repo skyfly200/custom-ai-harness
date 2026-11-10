@@ -12,11 +12,11 @@ const fail = (message, status = 502) => Object.assign(new Error(message), { stat
 const managementKey = (env = process.env) => trim(env.OPENROUTER_MANAGEMENT_KEY);
 const configured = (env = process.env) => Boolean(managementKey(env));
 /**
- * Every key made here carries a USD spending limit (OPENROUTER_USER_KEY_LIMIT, default $10) and an expiry
+ * Every key made here carries a USD spending limit (OPENROUTER_USER_KEY_LIMIT, default $5) and an expiry
  * (OPENROUTER_USER_KEY_DAYS, default 30). Nothing is issued without both. The owners of those keys renew them before
  * they lapse (utils/userCredentials.js sweep, utils/mainKey.js tick), so a key is never open-ended.
  */
-const DEFAULT_LIMIT_USD = 10;
+const DEFAULT_LIMIT_USD = 5;
 const DEFAULT_LIFETIME_DAYS = 30;
 // The admin's setting (ui/settings.html, utils/settings.js) comes next after the env var, then the defaults.
 let policy = { limitUsd: null, lifetimeDays: null };

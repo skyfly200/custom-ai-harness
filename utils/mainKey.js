@@ -1,6 +1,6 @@
 // The owner's main OpenRouter key (the one that pays for the Gateway, Router and admins), renewed through the
 // Management API (utils/openrouterKeys.js). Opt in with OPENROUTER_MAIN_KEY_RENEW=1 plus OPENROUTER_MANAGEMENT_KEY.
-// The harness then holds a key it issued itself (name "harness: main", OPENROUTER_MAIN_KEY_LIMIT dollars, default $10,
+// The harness then holds a key it issued itself (name "harness: main", OPENROUTER_MAIN_KEY_LIMIT dollars, default $5,
 // and OPENROUTER_MAIN_KEY_DAYS days, default 30), keeps it in the database when there is one (encrypted, utils/userCredentials.js)
 // or in data/openrouter-main-key.json, and swaps in a fresh one before it lapses or when OpenRouter refuses it. The
 // Gateway and Router reach OpenRouter through /openrouter-proxy, so they follow the swap without a restart. The key you

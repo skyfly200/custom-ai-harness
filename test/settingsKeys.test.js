@@ -10,8 +10,8 @@ process.env.HARNESS_SETTINGS_FILE = FILE;
 const settings = require('../utils/settings');
 const keys = require('../utils/openrouterKeys');
 
-test('defaults are $10 and 30 days', () => {
-    assert.equal(settings.DEFAULTS.keyLimitUsd, 10);
+test('defaults are $5 and 30 days', () => {
+    assert.equal(settings.DEFAULTS.keyLimitUsd, 5);
     assert.equal(settings.DEFAULTS.keyDays, 30);
 });
 
@@ -33,9 +33,9 @@ test('bad values are refused and change nothing', () => {
     assert.equal(settings.get().keyLimitUsd, 12);
 });
 
-test('reset goes back to $10 and 30 days', () => {
+test('reset goes back to $5 and 30 days', () => {
     settings.update({ keyLimitUsd: 50, keyDays: 7 });
     settings.reset();
-    assert.equal(keys.limitUsd({}), 10);
+    assert.equal(keys.limitUsd({}), 5);
     assert.equal(keys.lifetimeDays({}), 30);
 });

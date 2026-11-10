@@ -108,7 +108,8 @@ test('loopbackAsk calls this server as the owner, signed, and reads the reply', 
     try {
         const ask = assistant.loopbackAsk({ owner: 'Skyler', port: server.address().port, profile: 'work' });
         const reply = await ask([{ role: 'user', content: 'hi' }]);
-        assert.equal(reply, 'hello back');
+        assert.equal(reply.content, 'hello back');
+        assert.deepEqual(reply.tool_calls, []);
         assert.equal(got.url, '/v1/chat/completions');
         assert.equal(got.method, 'POST');
         assert.equal(got.body.stream, false);

@@ -38,6 +38,12 @@ Startup prints `Assistant channels: Telegram polling, Slack off` and warns about
 
 The bot answers direct messages, and in channels it answers when mentioned (`@assistant …`). Slack resends an event it thinks was missed; the copy is acknowledged and not answered twice.
 
+## Tools
+
+The assistant can call the MCP tools that chat uses (`mcp-servers.json`, managed on the Tools page). It sees the same list, so adding a server there gives the assistant its tools too. Shell and repo tools are not offered to it.
+
+A tool whose server is set to ask first (`askBefore`) does not run on its own. The assistant names the call and waits: send `/yes` to allow it or `/no` to decline. Until you answer, other messages in that conversation are held. Tools on servers that do not ask run straight away, up to six steps per message.
+
 ## Security
 
 - Channel routes sit before the login gate, and each checks its own proof: Telegram a secret header, Slack a signature over the raw body with a five-minute clock window. Messages from anyone else are ignored.
@@ -46,7 +52,7 @@ The bot answers direct messages, and in channels it answers when mentioned (`@as
 
 ## Not built yet
 
-- The assistant cannot yet use the harness's tools (MCP, repos, agents) on its own. It answers from its model and its notes.
+- Repo and agent tools are not offered to the assistant yet. Google Calendar, Gmail, Docs, Trello and text services need MCP servers configured before the assistant can use them.
 - Telegram and Slack are stub-tested only; they have not been run against the real APIs.
 - Notes are one shared list for the owner; there is no per-channel separation or search.
 

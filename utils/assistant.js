@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const internalAuth = require('./internalAuth');
+const tooling = require('./assistantTools');
 
 const MAX_HISTORY = 40; // messages kept per conversation
 const MAX_NOTES = 200;
@@ -16,7 +17,7 @@ const MAX_TEXT_CHARS = 8000;
 const HELP = 'Commands: /reset (start a new conversation; notes are kept), /remember TEXT (save a note), '
     + '/notes (list notes), /forget N (drop note N), /help.';
 
-const emptyState = () => ({ nextNoteId: 1, notes: [], conversations: {} });
+const emptyState = () => ({ nextNoteId: 1, notes: [], conversations: {}, pending: {} });
 
 /** A JSON file store. A file that exists but does not parse throws, so a save never replaces it with an empty state. */
 function fileStore(file) {
@@ -60,8 +61,9 @@ function systemPrompt({ name, owner, notes, today }) {
  * @param {function} opts.ask      async (messages, { conversation, owner }) => reply text; owner is who to bill
  * @param {string} [opts.owner]    the person the assistant works for (their name in prompts)
  * @param {string} [opts.name]     what the assistant calls itself
+ * @param {object|function} [opts.tools] the MCP manager (or a function returning it) whose tools the model may call
  */
-function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = () => Date.now(), maxHistory = MAX_HISTORY }) {
+function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = () => Date.now(), maxHistory = MAX_HISTORY, tools = null }) {
     let state = null;
     const queues = new Map(); // conversation -> last queued job, so one conversation's turns run in order
     const load = () => { if (!state) state = store.load(); return state; };
@@ -108,18 +110,36 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
     async function chat(key, message, owner) {
         const s = load();
         const history = s.conversations[key] || [];
-        const today = new Date(now()).toISOString().slice(0, 10);
-        const messages = [
-            { role: 'system', content: systemPrompt({ name, owner, notes: s.notes, today }) },
-            ...history.map(({ role, content }) => ({ role, content })),
-            { role: 'user', content: message },
-        ];
-        let reply;
+        const pending = s.pending[key];
+        const word = message.toLowerCase();
+        if (pending && word !== '/yes' && word !== '/no') {
+            return `${tooling.describePending(pending)} Send /yes to allow it or /no to decline.`;
+        }
+        const manager = typeof tools === 'function' ? tools() : tools;
+        let out;
         try {
-            reply = String((await ask(messages, { conversation: key, owner })) || '').trim();
+            if (manager && manager.start) await manager.start();
+            if (pending) {
+                out = await tooling.resume({ pending, approve: word === '/yes', ask, manager, owner, conversation: key });
+            } else {
+                const today = new Date(now()).toISOString().slice(0, 10);
+                const messages = [
+                    { role: 'system', content: systemPrompt({ name, owner, notes: s.notes, today }) },
+                    ...history.map(({ role, content }) => ({ role, content })),
+                    { role: 'user', content: message },
+                ];
+                out = await tooling.drive({ messages, ask, manager, owner, conversation: key });
+            }
         } catch (err) {
             return `I could not get an answer just now (${err.message}). Try again in a moment.`;
         }
+        if (out.pending) {
+            s.pending[key] = out.pending;
+            persist();
+            return `${tooling.describePending(out.pending)} Send /yes to allow it or /no to decline.`;
+        }
+        delete s.pending[key];
+        const reply = String(out.reply || '').trim();
         if (!reply) return 'The model sent an empty answer. Try again, or send /reset.';
         const stamp = now();
         const turn = [...history, { role: 'user', content: message, at: stamp }, { role: 'assistant', content: reply, at: stamp }].slice(-maxHistory);
@@ -174,19 +194,20 @@ function errorText(body) {
  * the person it bills (the logged-in owner on the web page, else ASSISTANT_OWNER), so routing, usage and their credential apply as for any chat.
  */
 function loopbackAsk({ owner, port = 3000, profile = '', fetchImpl = fetch, timeoutMs = Number(process.env.ASSISTANT_TIMEOUT_MS) || 300000 }) {
-    return async (messages, { owner: who } = {}) => {
+    return async (messages, { owner: who, tools } = {}) => {
         const headers = { 'content-type': 'application/json', ...internalAuth.headersFor(who || owner) };
         if (profile) headers['x-harness-profile'] = profile;
         const res = await fetchImpl(`http://127.0.0.1:${port}/v1/chat/completions`, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ messages, stream: false }),
+            body: JSON.stringify(tools && tools.length ? { messages, stream: false, tools, tool_choice: 'auto' } : { messages, stream: false }),
             signal: AbortSignal.timeout(timeoutMs),
         });
         const text = await res.text();
         if (!res.ok) throw new Error(`the harness answered ${res.status}: ${errorText(text)}`);
         const body = JSON.parse(text);
-        return (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) || '';
+        const msg = (body.choices && body.choices[0] && body.choices[0].message) || {};
+        return { content: msg.content || '', tool_calls: msg.tool_calls || [] };
     };
 }
 

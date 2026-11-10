@@ -93,6 +93,7 @@ const assistantApp = assistant.createAssistant({
     ask: assistant.loopbackAsk({ owner: ASSISTANT_OWNER, port: 3000, profile: process.env.ASSISTANT_PROFILE || '' }),
     owner: ASSISTANT_OWNER,
     name: process.env.ASSISTANT_NAME || 'Assistant',
+    tools: () => mcp, // the MCP tools chat uses; read at each turn, so a reload is picked up
 });
 const assistantChannelsApp = assistantChannels.createChannels({ assistant: assistantApp });
 app.post('/ui/api/assistant/telegram', express.json({ limit: '1mb' }), (req, res) => assistantChannelsApp.telegramWebhookHandler(req, res));

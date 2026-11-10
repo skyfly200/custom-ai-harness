@@ -7,6 +7,7 @@
 const { globToRegExp } = require('./repoTools');
 
 const { withRepoArg } = require('./repoArg');
+const appBot = require('./githubAppBot');
 const API = () => String(process.env.GITHUB_API_URL || 'https://api.github.com').replace(/\/+$/, '');
 const MAX_OUTPUT = 60000;
 const MAX_LINES = 2000;
@@ -312,7 +313,10 @@ async function call({ token, repo, name, args = {}, confirmed = false, fetchFn =
         case 'github_create_pull_request': {
             const meta = args.base ? null : await get(`/repos/${full}`);
             const body = { title: str(args.title, 'title', 256), head: checkRef(args.head), base: args.base ? checkRef(args.base) : meta.default_branch, body: String(args.body || ''), draft: args.draft === true };
-            const r = await get(`/repos/${full}/pulls`, { method: 'POST', body });
+            // opened as the agent's GitHub App when it is installed on this repo, else as the person; the person's token is the fallback
+            const bot = await appBot.botToken(parseRepo(repo), { fetchFn });
+            let r = bot ? await api(bot.token, `/repos/${full}/pulls`, { fetchFn, method: 'POST', body }).catch((err) => { if ([401, 403, 404].includes(err.status)) return null; throw err; }) : null;
+            if (!r) r = await get(`/repos/${full}/pulls`, { method: 'POST', body });
             return `opened pull request #${r.number}: ${r.html_url}`;
         }
     }

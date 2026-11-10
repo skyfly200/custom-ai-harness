@@ -6,6 +6,7 @@
 'use strict';
 
 const { execFile } = require('child_process');
+const appBot = require('../utils/githubAppBot');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -106,16 +107,21 @@ async function pushBranch({ dir, branch, token, git = run }) {
 async function openPullRequest({ dir, branch, token, title, body = '', base = '', draft = false, git = run, fetchImpl = fetch, apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com' }) {
     const pushed = await pushBranch({ dir, branch, token, git });
     const { owner, name } = parse((await git(['remote', 'get-url', 'origin'], { cwd: dir })).trim());
-    const api = async (method, route, payload) => {
+    // the pull request is opened as the agent's GitHub App when it is installed on the repo (its own identity), else as the person
+    const bot = await appBot.botToken({ owner, name }, { fetchFn: fetchImpl });
+    const api = async (method, route, payload, auth = token) => {
         const res = await fetchImpl(`${apiUrl.replace(/\/$/, '')}${route}`, {
-            method, headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'harness-runner' },
+            method, headers: { authorization: `Bearer ${auth}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'harness-runner' },
             ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(30000),
         });
         const data = await res.json().catch(() => ({}));
         return { ok: res.ok, status: res.status, data };
     };
     const target = base || (await api('GET', `/repos/${owner}/${name}`)).data.default_branch || 'main';
-    const made = await api('POST', `/repos/${owner}/${name}/pulls`, { title: String(title).slice(0, 200), head: branch, base: target, body, draft });
+    const newPull = { title: String(title).slice(0, 200), head: branch, base: target, body, draft };
+    let made = bot ? await api('POST', `/repos/${owner}/${name}/pulls`, newPull, bot.token) : null;
+    // the app may lack Pull requests: write, so the person's token is the fallback
+    if (!made || (!made.ok && [401, 403, 404].includes(made.status))) made = await api('POST', `/repos/${owner}/${name}/pulls`, newPull);
     if (made.ok) return { number: made.data.number, url: made.data.html_url, base: target, existed: false, pushed };
     if (made.status === 422) {
         const open = await api('GET', `/repos/${owner}/${name}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}`);

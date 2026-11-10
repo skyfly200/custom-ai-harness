@@ -116,6 +116,52 @@ These settings only last for that window. Other tools such as Cursor, Aider, Con
 - **Every strong request shows fallbacks.** The strong model is the local engine on port 8000 (Tier 1). When it isn't running, each strong request falls through to the OpenRouter models, which is expected but slower.
 - **A request seems stuck.** It now fails with a **timeout** instead of hanging: after 5 minutes with no answer from the Gateway, or 2 minutes of silence in the middle of a reply. Both limits are in the Interceptor settings on the Settings page.
 
+## Serverless setup (Netlify or Vercel)
+
+A second way to run the harness, parallel to the Docker and Fly setup above. It runs on Netlify or Vercel as Node functions and sends each request straight to OpenRouter, with no LiteLLM, Router or database. The LiteLLM stack keeps working unchanged. Details: [Serverless harness](docs/serverless.md).
+
+What you get: `POST /v1/chat/completions` (OpenAI format, streamed), `GET /v1/models`, and `GET /healthz`. The same request transforms as the Docker stack run first: caveman, context anchor and Headroom. Headroom's real compression, when you want it, runs as a Fly Sprite that sleeps when idle.
+
+### What you need
+
+1. An **OpenRouter** key (`OPENROUTER_API_KEY`). Set a spending limit on it.
+2. A **random access key** for your clients (`SERVERLESS_API_KEY`). Make one with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+3. A **Netlify** or **Vercel** account, with this repository connected.
+4. Optional, for real Headroom compression: a **Fly.io** account with a Sprites token (`SPRITES_TOKEN`) and Node 24 on your own machine.
+
+### Steps
+
+1. **Deploy the functions.**
+   - *Netlify:* New site, import this repository. The settings come from `netlify.toml` (publish folder `serverless/public`, functions in `netlify/functions`). No build command.
+   - *Vercel:* Add New Project, import this repository, no build step. `vercel.json` rewrites `/v1/*` to the Edge function in `api/v1/`.
+2. **Set the environment variables** in the site or project settings, then redeploy:
+   - `OPENROUTER_API_KEY`, `SERVERLESS_API_KEY` (required; without them every `/v1` call answers 503).
+   - `HARNESS_STRONG_MODEL` and `HARNESS_WEAK_MODEL` if you want other models than `anthropic/claude-sonnet-5.5` and `anthropic/claude-haiku-5.5`.
+   - Leave the Headroom variables for step 4, or skip step 4 entirely.
+3. **Check it answers:** open `https://<your-site>/healthz`. It should show `{"ok":true}`. Then call the API:
+   ```bash
+   curl https://<your-site>/v1/chat/completions \
+     -H "Authorization: Bearer $SERVERLESS_API_KEY" -H "Content-Type: application/json" \
+     -d '{"messages":[{"role":"user","content":"Say hi"}]}'
+   ```
+   Point an OpenAI-compatible client at `https://<your-site>/v1` with that key.
+4. **Optional: Headroom on a Sprite.** Headroom's compression server is Python, so it runs on Fly Sprites rather than on the functions:
+   ```bash
+   # on your own machine, Node 24 or newer, in the repo folder
+   npm install
+   export SPRITES_TOKEN=...            # from your Fly account
+   export HEADROOM_PROXY_TOKEN=$(node scripts/headroom-sprite.mjs token)   # save this value
+   node scripts/headroom-sprite.mjs setup
+   ```
+   `setup` creates a sprite named `harness-headroom`, installs `headroom-ai[proxy]` 0.42.0 in it, starts the proxy on port 8787 with your token, and prints three lines. Put them in the site's environment variables: `HEADROOM_URL`, `HEADROOM_API_KEY` and `HEADROOM_TIMEOUT_MS`. Then redeploy.
+   - The sprite sleeps when idle and wakes on the next request, which takes a few seconds. A request that arrives during that wait goes on uncompressed; nothing fails.
+   - Check it with `node scripts/headroom-sprite.mjs status`. Run `setup` again with the same token to update it.
+5. **Switch things off if you need to:** `HARNESS_CAVEMAN=0`, `HARNESS_CONTEXT_ANCHOR=0` or `HARNESS_HEADROOM=0`.
+
+### What is not on the serverless setup yet
+
+The chat web pages, usage logs, sign-in, MCP tools, the task runner and Claude Code's Anthropic format stay on the Docker or Fly stack. Use the serverless setup as a plain OpenAI-compatible endpoint for now.
+
 ## More detail
 
 Everything past the quick start lives in `docs/`. Each page starts with a one-line summary of what it covers.
@@ -132,6 +178,7 @@ Everything past the quick start lives in `docs/`. Each page starts with a one-li
 | [Task runner](docs/task-runner.md) | Agents that do a whole task: workflows, swarm, E2B cloud sandboxes |
 | [ChatDev](docs/chatdev.md) | Run the ChatDev multi-agent tool in a Fly Sprite with its models routed through the harness |
 | [Run it on a server](docs/server-docker.md) | Docker, Oracle and Google Cloud free tiers, Tailscale, `HARNESS_MODE` and local models |
+| [Serverless harness](docs/serverless.md) | Netlify or Vercel functions with no LiteLLM: settings, transforms, the Headroom Sprite, limits |
 | [Run it on Fly.io](docs/fly.md) | One Machine, Neon, your own domain, start and stop to save cost |
 | [Phone and installable app](docs/phone-and-app.md) | Install Bright Chat as an app, and a Cloudflare tunnel for your phone |
 | [Named logins and API keys](docs/logins.md) | `HARNESS_REQUIRE_LOGIN`, admins and per-program keys |

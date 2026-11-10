@@ -46,6 +46,7 @@ const mcpCatalog = require('./utils/mcpCatalog');
 const userMcpMod = require('./utils/userMcp');
 const userPrefs = require('./utils/userPrefs');
 const prompts = require('./utils/prompts');
+const memory = require('./utils/memory');
 const credit = require('./utils/credit');
 const userCredentials = require('./utils/userCredentials');
 const credentialTicket = require('./utils/credentialTicket');
@@ -81,6 +82,22 @@ const app = express();
 app.use((req, res, next) => { if (req.url.startsWith('/api/')) req.url = `/ui${req.url}`; next(); });
 app.use(require('./utils/oldHosts').oldHostsRedirect());
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
+// The assistant (utils/assistant.js) over Telegram and Slack. The channel webhooks sit before the login gate:
+// each checks its own secret or signature and answers only people on its allowlist (utils/assistantChannels.js).
+// The model call is a loopback request signed as ASSISTANT_OWNER (utils/internalAuth.js).
+const assistant = require('./utils/assistant');
+const assistantChannels = require('./utils/assistantChannels');
+const ASSISTANT_OWNER = process.env.ASSISTANT_OWNER || 'assistant';
+const assistantApp = assistant.createAssistant({
+    store: assistant.fileStore(process.env.ASSISTANT_FILE || path.join(__dirname, 'assistant.json')),
+    ask: assistant.loopbackAsk({ owner: ASSISTANT_OWNER, port: 3000, profile: process.env.ASSISTANT_PROFILE || '' }),
+    owner: ASSISTANT_OWNER,
+    name: process.env.ASSISTANT_NAME || 'Assistant',
+    tools: () => mcp, // the MCP tools chat uses; read at each turn, so a reload is picked up
+});
+const assistantChannelsApp = assistantChannels.createChannels({ assistant: assistantApp });
+app.post('/ui/api/assistant/telegram', express.json({ limit: '1mb' }), (req, res) => assistantChannelsApp.telegramWebhookHandler(req, res));
+app.post('/ui/api/assistant/slack', express.raw({ type: '*/*', limit: '1mb' }), (req, res) => assistantChannelsApp.slackWebhookHandler(req, res));
 // Sleep after HARNESS_IDLE_STOP_MIN idle minutes, and the Dashboard's Stop button. Only where something can act on
 // a stop: the Fly launcher (HARNESS_STOP_VIA_PARENT) asks its parent to stop everything and exit cleanly.
 const schedules = serverSchedules.enabled() ? serverSchedules.create() : null;
@@ -455,9 +472,37 @@ app.post('/ui/api/server/stop', localJsonOnly, (req, res) => {
     idle.requestStop(`asked by ${(req.harnessUser && req.harnessUser.name) || 'an admin'}`);
     res.json({ stopping: true });
 });
+// Adds idle time before it sleeps: {"minutes": 30} (1 to 240), counted on top of the countdown already running
+app.post('/ui/api/server/extend', localJsonOnly, (req, res) => {
+    if (!idle.status().canStop) return res.status(409).json({ error: 'this server has no way to stop itself (it is not running under the Fly launcher)' });
+    if (!idle.status().canExtend) return res.status(409).json({ error: 'this server does not sleep by itself, so there is nothing to extend' });
+    const minutes = Number(req.body && req.body.minutes);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 240) return res.status(400).json({ error: 'send {"minutes": 1 to 240}' });
+    idle.extend(minutes * 60 * 1000);
+    res.json(idle.status());
+});
 
 // Whose request this is, for the usage log and the routing log: the signed-in person's name, '' when logins are off
 const personOf = (req) => (req.harnessLogin && req.harnessUser ? req.harnessUser.name : '');
+// The assistant's model calls are billed to ASSISTANT_OWNER, so with logins on only that person (or an admin) may use the page
+const assistantWebKey = (req) => `web:${personOf(req) || 'local'}`;
+const canUseAssistant = (req) => !req.harnessLogin || personOf(req) === ASSISTANT_OWNER || req.harnessUser.role === 'admin';
+app.get('/ui/api/assistant', (req, res) => {
+    if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });
+    res.json({ ...assistantApp.summary(), notes: assistantApp.notes(), channels: assistantChannelsApp.status(), problems: assistantChannelsApp.problems });
+});
+app.get('/ui/api/assistant/history', (req, res) => {
+    if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });
+    res.json({ conversation: assistantWebKey(req), messages: assistantApp.history(assistantWebKey(req)) });
+});
+app.post('/ui/api/assistant/message', async (req, res) => {
+    if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });
+    const text = req.body && req.body.text;
+    if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'send {"text": "..."}' });
+    const conversation = assistantWebKey(req);
+    // the logged-in owner's key pays (ASSISTANT_OWNER when logins are off)
+    res.json({ conversation, reply: await assistantApp.handle(conversation, text, { owner: personOf(req) || undefined }) });
+});
 // With logins on, the Usage page counts only the signed-in person's own requests, admins' included (the All users view
 // has everyone's). The routing log is each member's own too; admins see the whole install's, to run it.
 const ownScope = (req) => (req.harnessLogin && req.harnessUser ? { user: req.harnessUser.name } : {});
@@ -486,6 +531,21 @@ app.get('/ui/api/admin/usage', localOnly, async (req, res) => {
         try { out.credit = await credit.all(); } catch (err) { out.creditError = err.message; }
     }
     res.json(out);
+});
+
+// What the task runner's cloud sandboxes (E2B, Fly Sprites) and Fly Machines cost, for admins: the runner's own
+// report (/runs/sandbox-usage, from its ledger and rates). Unavailable when Agents are off or the runner is not answering.
+app.get('/ui/api/admin/infra-usage', localOnly, async (req, res) => {
+    const days = Math.max(0, parseInt(req.query.days, 10) || 0);
+    if (runsOff()) return res.json({ available: false, reason: RUNS_OFF_MESSAGE });
+    const headers = { ...(process.env.RUNNER_TOKEN ? { 'x-runner-token': process.env.RUNNER_TOKEN } : {}), 'x-runner-owner': (req.harnessUser && req.harnessUser.name) || 'admin' };
+    try {
+        const upstream = await fetch(`${RUNNER_URL}/runs/sandbox-usage?days=${days}`, { headers, signal: AbortSignal.timeout(15000) });
+        if (!upstream.ok) throw new Error(`the task runner answered ${upstream.status}`);
+        res.json({ available: true, ...(await upstream.json()) });
+    } catch (err) {
+        res.json({ available: false, reason: `The task runner is not answering (${err.cause?.code || err.message}).` });
+    }
 });
 
 app.get('/ui/api/events', (req, res) => {
@@ -760,6 +820,27 @@ app.post('/ui/api/prompts/:id/restore', memberOrLocalJson, async (req, res) => {
 });
 app.delete('/ui/api/prompts/:id', memberOrLocal, async (req, res) => {
     try { await prompts.remove(promptOwner(req), req.params.id); res.json({ ok: true }); } catch (err) { promptError(res, err); }
+});
+// Memory: notes the person keeps across every chat (utils/memory.js). The chat page reads them into the
+// system prompt and lets the model save or forget them through the tools below.
+const memoryOwner = (req) => (req.harnessLogin ? ownerOf(req) : memory.LOCAL);
+const memoryError = (res, err) => res.status(err.status || 500).json({ error: err.message });
+app.get('/ui/api/memory', memberOrLocal, async (req, res) => {
+    try {
+        const notes = await memory.list(memoryOwner(req));
+        res.json({ notes, promptText: memory.promptText(notes), maxNotes: memory.MAX_NOTES, maxChars: memory.MAX_TEXT });
+    } catch (err) { memoryError(res, err); }
+});
+// {text}: adds a note (a repeat of one already kept returns that note)
+app.post('/ui/api/memory', memberOrLocalJson, async (req, res) => {
+    try { res.json(await memory.add(memoryOwner(req), req.body || {})); } catch (err) { memoryError(res, err); }
+});
+// {text}: changes a note's text
+app.post('/ui/api/memory/:id', memberOrLocalJson, async (req, res) => {
+    try { res.json(await memory.update(memoryOwner(req), req.params.id, req.body || {})); } catch (err) { memoryError(res, err); }
+});
+app.delete('/ui/api/memory/:id', memberOrLocal, async (req, res) => {
+    try { await memory.remove(memoryOwner(req), req.params.id); res.json({ ok: true }); } catch (err) { memoryError(res, err); }
 });
 // The messages to send a model (through /v1/chat/completions, billed to the person) to improve a prompt
 app.post('/ui/api/prompts-improve', memberOrLocalJson, (req, res) => {
@@ -1874,6 +1955,10 @@ if (require.main === module) {
     app.listen(3000, () => {
         console.log('Harness interceptor active on port 3000');
         if (schedules) { schedules.start(); console.log('Scheduled messages run on the server'); }
+        const channelStatus = assistantChannelsApp.status();
+        if (channelStatus.telegram !== 'off' || channelStatus.slack !== 'off') console.log(`Assistant channels: Telegram ${channelStatus.telegram}, Slack ${channelStatus.slack}`);
+        for (const problem of assistantChannelsApp.problems) console.warn(`Assistant channels: ${problem}`);
+        assistantChannelsApp.start();
     });
     if (mainKeyRenewal) {
         if (!openrouterAuth.proxyKey()) console.warn('OPENROUTER_MAIN_KEY_RENEW needs LITELLM_MASTER_KEY or OPENROUTER_PROXY_KEY so the Gateway and Router can reach OpenRouter through this server');

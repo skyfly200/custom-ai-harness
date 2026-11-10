@@ -194,6 +194,18 @@ Approving pushes the run's branch, opens a pull request and merges it on GitHub 
 
 The widget's **Propose a fix only** (or `POST /apps/:id/proposals` with `kind` `error` or `feedback`, a `note` and the page `context`) runs a change that can only end as an **open pull request**: never merged, never deployed, a draft when it touches sensitive files. A page that hit console errors sends them as the problem; without errors it is a "this is confusing" note. It needs `GITHUB_TOKEN` like shipping; without it the branch is left in the repo and the run log says so. Limits: 3 proposals an hour per app (`RUNNER_PROPOSALS_PER_HOUR`), and the same problem is not proposed again while its earlier proposal is open or running (HTTP 429).
 
+## Wayfinder app (plan, then build)
+
+A run with the workflow **Wayfinder app** plans an app with you and builds it. Describe the app as the goal and pick a repo; the harness runs three kinds of agent (`runner/appFlow.js`):
+
+- **Planner** (Sonnet, medium reasoning) grills you one question at a time as a question card on the run page, reads the repo with `read_file` and `search_code`, and finishes with a Wayfinder ticket draft: `build`, `research` and `decision` tickets, each with the tickets it depends on.
+- **Orchestrator** (Sonnet, medium) walks the draft. It starts a **worker** (Haiku, minimal reasoning, its own branch) for each build or research ticket whose dependencies are done, at most three at once. While they run it asks you the decision tickets, one at a time, so grilling and building happen in parallel. Finished build work is merged into the app's branch, as a swarm merges its parts.
+- **Advisor** (Opus, high reasoning) answers both agents. The planner and orchestrator may ask it a question; the orchestrator must ask it about a failed worker before that ticket is tried again. A ticket is given up after three tries, and what waits on it is left out.
+
+The models are set in `runner/appFlow.js` (`MODELS`), and can be changed with `APP_PLANNER_MODEL`, `APP_ORCHESTRATOR_MODEL`, `APP_ADVISOR_MODEL` and `APP_WORKER_MODEL`. Their cost shows on the run like any other step. On a cloud sandbox a ticket that builds on work already merged is left out (as the swarm does for later waves), so use the local sandbox for an app whose tickets depend on each other.
+
+Not built yet: a board that shows the tickets and their status on the run page (the run's events and `appDraft` hold them for now), and a way to answer a worker's questions from the run page.
+
 ## Cost
 
 Every model call a run makes is priced like the Usage page (the runner reads `/ui/api/model-info`; a cost the provider reports wins). A run record has `cost` (dollars) and `unpricedCalls` (calls to models with no known price, shown as `$1.20+`). A swarm's cost includes its workers.
@@ -201,6 +213,20 @@ Every model call a run makes is priced like the Usage page (the runner reads `/u
 **Cost limit.** `maxCost` (dollars, on a run, on an agent, or on a task) stops a run when it has spent that much. It ends as `incomplete` with `outOfBudget: true` and shows as "cost limit"; Continue carries it on with the whole limit again, like steps and minutes. A call that is already running finishes, so a run can go a little over. 0 or blank means no limit. On a swarm each worker gets the limit; the swarm's own planner and reviewer count against it too.
 
 The Dashboard shows run spend per day, stacked by the four agents that spent most (the rest are "Other"). A run counts on the day it started.
+
+**Sandbox and machine cost (admin Usage page).** The runner keeps a ledger of every cloud sandbox it opens and kills (`runs/sandbox-ledger.json`: driver, sandbox id, run, person, open and close times; no code or output). The admin Usage page (`/ui/usage-users.html`, "Sandboxes and machines") charts it per day and per kind, priced with the rates from `SANDBOX_RATES` (a JSON string) or `sandbox-rates.json` in the data folder:
+
+```json
+{ "e2b": { "vcpuSec": 0.000014, "gibSec": 0.0000045, "cpus": 2, "memMb": 512 },
+  "sprites": { "vcpuSec": 0.00001, "gibSec": 0.000004, "cpus": 1, "memMb": 1024 },
+  "machines": { "shared-1x-256": 0.00000075 } }
+```
+
+E2B's list rates are the defaults (per second, per vCPU and per GiB). Sprites and Fly Machines have no default rate, so they show as unpriced until one is set. These are estimates from open and close times, so compare them with the provider's invoice.
+
+Fly Machines: with `FLY_API_TOKEN` set as a Fly secret (a token that can read the app's machines), the runner samples the app's machines every `FLY_SAMPLE_MIN` minutes (default 5) through the Machines API and records the ones running. A sleeping Machine is not sampled, because the sampler runs inside the Machine.
+
+A sandbox still open when the runner restarts is closed at the restart and marked `recovered`, since nothing says when it really ended. Endpoints: `GET /runs/sandbox-usage?days=N` on the runner, `GET /ui/api/admin/infra-usage?days=N` on the Interceptor (admins only).
 
 ## Repo suggestions
 

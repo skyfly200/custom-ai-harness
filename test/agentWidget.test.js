@@ -16,3 +16,11 @@ test('the context holds the page, the picked element, the selection and the last
     assert.deepEqual(buildContext({ page: '/', title: '', element: null, selection: ' ', errors: [] }), { page: '/', title: '' });
     assert.equal(buildContext({ page: 'x'.repeat(999), title: '' }).page.length, 300);
 });
+
+test('speech is added after what is typed, with one space, and empty parts are skipped', () => {
+    const { appendSpeech } = require('../ui/agent-widget');
+    assert.equal(appendSpeech('Make the button blue.  ', ' Then move it  '), 'Make the button blue. Then move it');
+    assert.equal(appendSpeech('', 'Dark mode'), 'Dark mode');
+    assert.equal(appendSpeech('Hi', '   '), 'Hi');
+    assert.equal(appendSpeech(null, undefined), '');
+});

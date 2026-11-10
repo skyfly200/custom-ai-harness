@@ -37,3 +37,28 @@ main.apps-page { max-width: 880px; }
 .connect-box code { font-size: 12px; overflow-wrap: anywhere; }
 .connect-box p { margin: 0; }
 .newdlg input:not([type=radio]):not([type=checkbox]) { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--field-border); background: var(--bg); color: var(--text); width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* App view (ui/app.html): tabs, facts, git history, chat thread and runs */
+main.app-view h1 { font-size: 20px; margin: 6px 0 2px; }
+main.app-view .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 0; border-bottom: 1px solid var(--border); }
+main.app-view .tabs button { font: inherit; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted, inherit); cursor: pointer; }
+main.app-view .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+main.app-view .tab-panel[hidden] { display: none; }
+main.app-view .tab-panel h3 { font-size: 14px; margin: 18px 0 4px; }
+main.app-view .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 13px; }
+main.app-view .facts dt { color: var(--muted, inherit); }
+main.app-view .facts dd { margin: 0; min-width: 0; }
+main.app-view .facts code, main.app-view .commits code, main.app-view .snippet { font-size: 12px; overflow-wrap: anywhere; }
+main.app-view .snippet { white-space: pre-wrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin: 0; }
+main.app-view .commits { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+main.app-view .thread { display: flex; flex-direction: column; gap: 12px; max-height: 50vh; overflow-y: auto; margin: 10px 0; }
+main.app-view .turn { display: flex; flex-direction: column; gap: 6px; }
+main.app-view .bubble { max-width: 85%; padding: 8px 12px; border-radius: 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 2px; }
+main.app-view .bubble.me { align-self: flex-end; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+main.app-view .bubble.agent { align-self: flex-start; border: 1px solid var(--border); }
+main.app-view .composer { display: flex; flex-direction: column; gap: 8px; }
+main.app-view .composer textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--field-border); background: var(--bg); color: var(--text); }
+main.app-view .composer .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+main.app-view .runs { width: 100%; border-collapse: collapse; font-size: 13px; }
+main.app-view .runs th, main.app-view .runs td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+@media (max-width: 600px) { main.app-view .facts { grid-template-columns: 1fr; } main.app-view .facts dt { margin-top: 6px; } }

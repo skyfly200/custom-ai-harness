@@ -46,7 +46,8 @@ Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Ev
 | Usage | `usage.html`, `usage.js`, `costs.js`; admins: `usage-users.html`, `usage-users.js`, `userUsage.js` | Cost and savings per layer; your own requests with logins on, everyone's per person for admins |
 | Tools | `tools.html`, `tools.js` | MCP servers, with a guided setup for catalog entries that need a key or folder |
 | Runs, Agents | `runs.html`, `agents.html`, `agents.js`, `agentBoard.js`, `apps.js` | Task runner, agents, in-app apps (`agent-widget.js`) |
-| Apps | `apps.html`, `appspage.js`, `templates/` | The Apps page: your apps (Edit reuses the import dialog), new ones from a template (`runner/templates.js`), and existing repos (`runner/importDetect.js`, Import existing app) |
+| Apps | `apps.html`, `appspage.js`, `templates/` | The Apps page: your apps (Edit reuses the import dialog; Delete), new ones from a template (`runner/templates.js`), and existing repos (`runner/importDetect.js`, Import existing app). New and Import pick or make the app's agent |
+| App view | `app.html`, `appview.js` | One app: settings, git history (`GET /apps/:id/history`), chat (asks for changes), runs, and the chat widget (`agent-widget.js`, which also takes speech) |
 | Prompts | `prompts.html`, `prompts.js`, `promptlib.js` (`window.Prompts`, also used by the Agents page) | Saved prompts for agents: variables, versions, starters, "improve" through a model; server side `utils/prompts.js` (`user_data` key `prompts`, or `prompts.json`) |
 | Users | `users.html`, `users.js` | Logins, invites, guests, credentials |
 
@@ -54,7 +55,7 @@ Static pages in `ui/`, served by the Interceptor at `/ui` with no build step. Ev
 
 ## Task runner
 
-`runner/server.js` exposes runs over HTTP. `runner/runs.js` manages them, `runner/agent.js` is the model loop, `runner/tools.js` the tool set (each call checked through `/v1/guard`, with approvals on the Runs page), and `runner/sandbox.js` the sandbox drivers: local git worktree, E2B, and Fly Sprites (`runner/sprites.js`). On top: `workflows/*.json` with `utils/workflows.js`, `runner/swarm.js` (planner, parallel workers, merge, reviewer), `runner/escalate.js` (retry on a stronger tier), `runner/tickets.js` and `runner/ticketFiles.js` (wayfinder tickets), `runner/apps.js`, `runner/preview.js` and `runner/ship.js` (in-app agents: preview, ship as PR, undo), `runner/github.js`, and `runner/chatdev.js`. See [Task runner](docs/task-runner.md) and [ChatDev](docs/chatdev.md).
+`runner/server.js` exposes runs over HTTP. `runner/runs.js` manages them, `runner/agent.js` is the model loop, `runner/tools.js` the tool set (each call checked through `/v1/guard`, with approvals on the Runs page), and `runner/sandbox.js` the sandbox drivers: local git worktree, E2B, and Fly Sprites (`runner/sprites.js`). On top: `workflows/*.json` with `utils/workflows.js`, `runner/swarm.js` (planner, parallel workers, merge, reviewer), `runner/appFlow.js` (Wayfinder app: planner grills, orchestrator runs Haiku workers, Opus advisor), `runner/escalate.js` (retry on a stronger tier), `runner/tickets.js` and `runner/ticketFiles.js` (wayfinder tickets), `runner/apps.js`, `runner/preview.js` and `runner/ship.js` (in-app agents: preview, ship as PR, undo), `runner/github.js`, and `runner/chatdev.js`. See [Task runner](docs/task-runner.md) and [ChatDev](docs/chatdev.md).
 
 ## Hosted setup
 
@@ -63,6 +64,8 @@ On Fly, one Machine runs the Gateway, Router, Interceptor and, with `HARNESS_RUN
 ![Hosted deployment: Fly proxy, Fly Machine with four processes, Neon, OpenRouter, sandboxes and GitHub](docs/architecture/hosted.svg)
 
 Files: `Dockerfile.fly`, `fly.toml`, `docker/fly-start.js`, `neon.ts`. Plans and reasoning: [hosted app plan](docs/hosted-app-plan.md). Steps: [Run it on Fly.io](docs/fly.md), [Neon](docs/neon.md).
+
+Serverless variant: `serverless/core.mjs` runs on Netlify (`netlify/functions/`) or Vercel (`api/v1/`) with no LiteLLM, Router or database, sending requests straight to OpenRouter with a plain rule-based model choice. Details and limits in [Serverless harness](docs/serverless.md).
 
 ## Sign-in, billing and storage
 
@@ -103,4 +106,5 @@ Node tests in `test/*.test.js` (`node --test`), Router tests in `test/test_route
 | A UI page | `ui/<page>.html` and its `.js` |
 | Database tables | `migrations/`, `utils/chatSync.js` |
 | Agent runs | `runner/` |
+| The personal assistant (web page, Telegram, Slack) | `utils/assistant.js`, `utils/assistantChannels.js`, `ui/assistant.html`; [Personal assistant](docs/assistant.md) |
 | Deployment | `Dockerfile*`, `docker/`, `fly.toml`, `scripts/start-all.js` |

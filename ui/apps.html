@@ -97,6 +97,13 @@
           <label class="field"><span>Dev server</span><input name="devCommand" maxlength="500" spellcheck="false" placeholder="none"></label>
         </details>
 
+        <fieldset class="group" data-mode="import">
+          <legend>Agent</legend>
+          <label class="field" data-mode="import"><span>Agent</span><select name="agent" data-agent-pick></select></label>
+          <label class="field" data-agent-new hidden><span>New agent's name</span><input name="agentName" maxlength="60" placeholder="Note board helper" spellcheck="false"></label>
+          <p class="fine muted" data-mode="import">The agent makes this app's changes as its tasks, so each change starts where the last one left off. Its folder is this app's folder.</p>
+        </fieldset>
+
         <label class="check" data-mode="import"><input type="checkbox" name="addFiles" checked> Add the CI workflow and DEPLOY.md for these choices, where the repo does not have them</label>
         <div class="actions">
           <button type="submit" class="primary" id="importGo">Import app</button>
@@ -145,6 +152,13 @@
         <div id="connectBox" class="connect-box" aria-live="polite"></div>
       </fieldset>
 
+      <fieldset class="group">
+        <legend>Agent</legend>
+        <label class="field"><span>Agent</span><select name="agent" data-agent-pick></select></label>
+        <label class="field" data-agent-new hidden><span>New agent's name</span><input name="agentName" maxlength="60" placeholder="Note board helper" spellcheck="false"></label>
+        <p class="fine muted">The agent makes this app's changes as its tasks, so each change starts where the last one left off. Its folder is this app's folder.</p>
+      </fieldset>
+
       <label class="check"><input type="checkbox" name="build" checked> Build the first version from the description now</label>
       <div class="actions">
         <button type="submit" class="primary" id="create">Create app</button>
@@ -157,5 +171,6 @@
 <script src="hints.js"></script>
 <script src="bright.js"></script>
 <script src="appspage.js"></script>
+<script src="sleepcard.js" defer></script>
 </body>
 </html>

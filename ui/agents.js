@@ -107,7 +107,7 @@ function renderList() {
   setHtml('list', list.map((r) => `<button class="run-item${r.id === selected ? ' on' : ''}" data-id="${esc(r.id)}">
     <i class="sdot ${TAGS[r.status] || 'live'}${ACTIVE.has(r.status) ? ' pulse' : ''}" title="${esc(statusWord(r))}"></i>
     <span class="goal">${esc(r.goal.split('\n')[0])}</span>
-    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${AgentIcon.icon(agentOf(r.agent))}${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${r.prState ? `${PrState.chip(r.prState)} ` : ''}${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
+    <span class="meta">${!agentSel && agentOf(r.agent) ? `<span class="agent-tag">${AgentIcon.icon(agentOf(r.agent))}${esc(agentOf(r.agent).name)}</span> · ` : ''}${r.kind === 'swarm' ? '<span class="tag">swarm</span> ' : r.kind === 'app' ? '<span class="tag">app</span> ' : r.kind === 'chatdev' ? '<span class="tag">chatdev</span> ' : ''}${r.parent ? '↳ ' : ''}<span class="tag ${TAGS[r.status] || ''}">${esc(statusWord(r))}</span> ${r.prState ? `${PrState.chip(r.prState)} ` : ''}${esc(r.repo.split(/[\\/]/).pop())} · ${ago(r.created)}</span></button>`).join(''));
 }
 
 function eventHtml(e) {
@@ -168,6 +168,7 @@ function renderDetail(run) {
     ${run.debugOf ? `<p class="muted">Debugging <a href="#${esc(run.debugOf)}" data-go="${esc(run.debugOf)}">the run that failed</a>. It was told what went wrong there.</p>` : ''}
     ${run.legs ? `<p class="muted">Carried on ${run.legs === 1 ? 'once' : `${run.legs} times`} after running out of ${run.outOfBudget ? 'budget' : run.outOfSteps ? 'steps' : 'time'}; every part worked on this one branch.</p>` : ''}
     ${run.debugRun && runs.some((x) => x.id === run.debugRun) ? `<p class="muted">Auto debug (or a retry) started <a href="#${esc(run.debugRun)}" data-go="${esc(run.debugRun)}">${esc(run.debugRun)}</a>.</p>` : ''}
+    ${run.kind === 'app' ? RunView.appBoard(run, runs) : ''}
     ${run.children?.length ? `<div class="result"><strong>Workers</strong><div class="workers">${run.children.map((id, i) => {
       const c = runs.find((x) => x.id === id);
       if (!id) return `<span class="worker muted">${esc(run.parts?.[i]?.title || `Part ${i + 1}`)} · waiting for what it depends on</span>`;
@@ -372,21 +373,62 @@ $('statusCard').addEventListener('click', async (e) => {
 
 // Preview: the run's dev server. Drawn outside the detail pane so the form keeps what you typed.
 let previewFor = null;
+let previewApp = null; // the app's own dev server command and port, when this run belongs to an app
+const previewPhase = new Map(); // run id -> last shown phase, so the log box opens once per change
 const PREVIEW_KEY = 'harness-preview-command';
+// One clear state at a time: not running, starting, running, or stopped (with the reason).
 async function drawPreview(run) {
   const panel = $('previewPanel');
   const ok = run && run.kind === 'run' && !run.plan && (!run.sandbox || run.sandbox === 'local') && run.status !== 'queued';
   panel.hidden = !ok;
-  if (!ok) { previewFor = null; return; }
+  if (!ok) { previewFor = null; previewApp = null; return; }
   if (previewFor !== run.id) {
     previewFor = run.id;
-    try { $('previewCmd').value = localStorage.getItem(PREVIEW_KEY) || ''; } catch { $('previewCmd').value = ''; }
+    previewApp = null;
+    if (run.app) {
+      try { previewApp = (await (await fetch(`api/apps/${encodeURIComponent(run.app)}`)).json()); } catch { previewApp = null; }
+    }
+    const saved = (() => { try { return localStorage.getItem(PREVIEW_KEY) || ''; } catch { return ''; } })();
+    $('previewCmd').value = previewApp?.devCommand ? '' : saved;
+    $('previewCmd').placeholder = previewApp?.devCommand || 'npm run dev -- --port {port}';
+    $('runAppCmdBox').open = !previewApp?.devCommand;
     $('previewMsg').textContent = '';
   }
   const st = await api(`/${run.id}/preview`).catch(() => ({ running: false }));
+  const appCmd = previewApp?.devCommand || '';
+  const state = $('runAppState');
+  const help = $('runAppHelp');
+  const open = $('runAppOpen');
+  const start = $('previewStart');
+  if (st.running && st.ready) {
+    state.textContent = 'Running'; state.className = 'tag ok';
+    help.textContent = 'The app answers on this machine and shows this run\'s work, not the main branch. Open it to look, then ship or undo the change.';
+  } else if (st.running) {
+    state.textContent = 'Starting…'; state.className = 'tag';
+    help.textContent = 'Waiting for the app to answer. If it takes long, the log shows what it is doing.';
+  } else if (st.url) {
+    state.textContent = 'Stopped'; state.className = 'tag bad';
+    help.textContent = `The app stopped${st.exited === null || st.exited === undefined ? '' : ` (exit code ${st.exited})`}. The log below says why. Run it again once that is fixed.`;
+  } else {
+    state.textContent = 'Not running'; state.className = 'tag';
+    help.textContent = 'Start the app to look at this change before you ship it. Starting it does not change the repo.';
+  }
+  open.hidden = !(st.running && st.url);
+  if (st.url) open.href = st.url;
   $('previewStop').hidden = !st.running;
-  $('previewStart').disabled = Boolean(st.running);
-  $('previewInfo').innerHTML = st.url ? `<p>${st.running ? (st.ready ? '<span class="tag ok">running</span>' : '<span class="tag">starting</span>') : `<span class="tag bad">exited (${esc(st.exited)})</span>`} <a href="${esc(st.url)}" target="_blank" rel="noopener">${esc(st.url)}</a> <code>${esc(st.command)}</code></p><pre>${esc((st.log || []).join('\n'))}</pre>` : '';
+  $('previewRestart').hidden = !st.running;
+  start.hidden = Boolean(st.running);
+  start.textContent = st.url && !st.running ? 'Run again' : 'Run the app';
+  $('runAppCmd').innerHTML = st.command
+    ? `${st.running ? 'Running' : 'Last ran'} <code>${esc(st.command)}</code>${st.port ? ` on port ${esc(st.port)}` : ''}`
+    : (appCmd ? `This app starts with <code>${esc(appCmd)}</code>` : 'No command yet. Open "Change the command" to set one.');
+  // open the log when the state changes to a stop or a start that has not answered; a person's own choice stays otherwise
+  const phase = st.running ? (st.ready ? 'running' : 'starting') : (st.url ? 'stopped' : 'none');
+  if (previewPhase.get(run.id) !== phase) {
+    previewPhase.set(run.id, phase);
+    $('runAppLogBox').open = phase === 'stopped' || phase === 'starting';
+  }
+  $('previewLog').textContent = (st.log || []).join('\n') || 'No log yet.';
 }
 // Ship and undo: only for a change to a registered app. Shows what the checks found, and the
 // buttons stay off while something blocks it.
@@ -424,10 +466,16 @@ async function shipAction(path, ask) {
 $('shipBtn').addEventListener('click', () => shipAction('ship', 'Merge this change into the app on GitHub? Its normal pipeline then deploys it.'));
 $('undoBtn').addEventListener('click', () => shipAction('undo', 'Open and merge a revert pull request for this change?'));
 
-$('previewForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const command = $('previewCmd').value.trim();
+// Run, Restart and Enter in the command box all start the app. An empty command uses the app's own
+// dev server command; a run without an app needs one typed.
+async function startPreview() {
   if (!selected) return;
+  const command = $('previewCmd').value.trim();
+  if (!command && !previewApp?.devCommand) {
+    $('runAppCmdBox').open = true;
+    $('previewMsg').textContent = 'Type the command that starts the app first.';
+    return;
+  }
   try { if (command) localStorage.setItem(PREVIEW_KEY, command); } catch { /* fine */ }
   const start = (approved) => fetch(`api/runs/${selected}/preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command, approved }) });
   try {
@@ -435,7 +483,8 @@ $('previewForm').addEventListener('submit', async (e) => {
     let res = await start(false);
     let body = await res.json().catch(() => ({}));
     if (res.status === 409 && body.needsApproval) {
-      if (!await ui.confirm(`${body.error}\n\nRun this command in the workspace?\n${command}`)) { $('previewMsg').textContent = ''; return; }
+      const shown = command || previewApp?.devCommand || '';
+      if (!await ui.confirm(`${body.error}\n\nRun this command in the workspace?\n${shown}`)) { $('previewMsg').textContent = ''; return; }
       res = await start(true);
       body = await res.json().catch(() => ({}));
     }
@@ -444,11 +493,22 @@ $('previewForm').addEventListener('submit', async (e) => {
     previewFor = null;
     await drawPreview(await api(`/${selected}`));
   } catch (err) { $('previewMsg').textContent = err.message; }
+}
+$('previewStart').addEventListener('click', () => startPreview());
+$('previewForm').addEventListener('submit', (e) => { e.preventDefault(); startPreview(); });
+$('previewRestart').addEventListener('click', async () => {
+  try {
+    $('previewMsg').textContent = 'Restarting…';
+    await fetch(`api/runs/${selected}/preview`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
+    previewFor = null;
+    await startPreview();
+  } catch (err) { $('previewMsg').textContent = err.message; }
 });
 $('previewStop').addEventListener('click', async () => {
   try {
     await fetch(`api/runs/${selected}/preview`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' });
     previewFor = null;
+    $('previewMsg').textContent = '';
     await drawPreview(await api(`/${selected}`));
   } catch (err) { $('previewMsg').textContent = err.message; }
 });
@@ -759,7 +819,7 @@ function fillWorkflowOptions() {
   const a = agentOf(agentSel);
   const head = a ? `<option value="agent">Same as ${esc(a.name)} (${esc(nameOf(a.workflow))})</option>` : '<option value="auto">Jev picks (auto)</option>';
   const recipes = workflowList.map((w) => `<option value="${esc(w.id)}" title="${esc(`Fits: ${w.when}. Stages: ${w.stages.map((s) => s.role).join(' → ')}`)}">${esc(w.name)} (${w.stages.length} ${w.stages.length === 1 ? 'stage' : 'stages'})</option>`).join('');
-  const extra = a ? '' : '<option value="swarm">Swarm (several agents at once)</option><option value="chatdev">ChatDev (in a cloud sandbox)</option>';
+  const extra = a ? '' : '<option value="swarm">Swarm (several agents at once)</option><option value="app">Wayfinder app (plan with questions, then build)</option><option value="chatdev">ChatDev (in a cloud sandbox)</option>';
   sel.innerHTML = head + recipes + extra;
   sel.value = [...sel.options].some((o) => o.value === keep) ? keep : sel.options[0].value;
 }
@@ -783,13 +843,13 @@ async function initWorkflows() {
 }
 
 // the plain explanation of the chosen way of working, and a table of all of them to compare
-const WF_ORDER = ['auto', ...['quick-answer', 'research', 'review', 'general', 'fix-bug', 'build-feature', 'build-audit', 'refactor', 'audit-refactor', 'change-app'], 'swarm', 'chatdev'];
+const WF_ORDER = ['auto', ...['quick-answer', 'research', 'review', 'general', 'fix-bug', 'build-feature', 'build-audit', 'refactor', 'audit-refactor', 'change-app'], 'app', 'swarm', 'chatdev'];
 function wfEntries() {
   const known = workflowList.map((w) => ({ id: w.id, name: w.name, help: RunView.help(w), stages: w.stages.map((x) => x.role) }));
-  const extra = [{ id: 'swarm', name: 'Swarm', help: RunView.help('swarm'), stages: ['Planner', 'Workers', 'Reviewer'] }, { id: 'chatdev', name: 'ChatDev', help: RunView.help('chatdev'), stages: [] }];
+  const extra = [{ id: 'app', name: 'Wayfinder app', help: RunView.help('app'), stages: ['Planner', 'Orchestrator', 'Workers'] }, { id: 'swarm', name: 'Swarm', help: RunView.help('swarm'), stages: ['Planner', 'Workers', 'Reviewer'] }, { id: 'chatdev', name: 'ChatDev', help: RunView.help('chatdev'), stages: [] }];
   const all = [{ id: 'auto', name: 'Jev picks (auto)', help: RunView.help('auto'), stages: [] }, ...known, ...extra];
   const sorted = all.sort((a, b) => (WF_ORDER.indexOf(a.id) + 1 || 99) - (WF_ORDER.indexOf(b.id) + 1 || 99));
-  return agentOf(agentSel) ? sorted.filter((w) => !['auto', 'swarm', 'chatdev'].includes(w.id)) : sorted;
+  return agentOf(agentSel) ? sorted.filter((w) => !['auto', 'swarm', 'chatdev', 'app'].includes(w.id)) : sorted;
 }
 function drawWorkflowHelp() {
   const entries = wfEntries();

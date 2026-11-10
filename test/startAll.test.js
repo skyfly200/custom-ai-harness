@@ -52,3 +52,39 @@ test('with federation on, the Gateway is pointed at the Interceptor\'s OpenRoute
     const plain = buildCommands({ platform: 'linux', env: {}, argv: [], exists: () => true }).commands[0];
     assert.equal(plain.env.OPENROUTER_API_KEY, undefined);
 });
+
+test('a Docker-only proxy address in .env is replaced with this PC\'s harness, with a warning', () => {
+    const env = { OPENROUTER_FEDERATION_POLICY_ID: 'pol_1', OPENROUTER_PROXY_KEY: 'k', OPENROUTER_PROXY_URL: 'http://harness:3000/' };
+    const r = buildCommands({ platform: 'win32', env, argv: [], exists: everything });
+    assert.equal(r.commands[0].env.OPENROUTER_API_BASE, 'http://127.0.0.1:3000/openrouter-proxy/v1');
+    assert.equal(r.commands[0].env.OPENROUTER_PROXY_URL, 'http://127.0.0.1:3000');
+    assert.equal(r.commands[1].env.OPENROUTER_PROXY_URL, 'http://127.0.0.1:3000', 'the Router uses the same address');
+    assert.ok(r.warnings.some(w => /Docker address/.test(w) && /harness:3000/.test(w)));
+});
+
+test('a deliberate proxy address is kept as typed', () => {
+    const env = { OPENROUTER_FEDERATION_POLICY_ID: 'pol_1', OPENROUTER_PROXY_KEY: 'k', OPENROUTER_PROXY_URL: 'http://127.0.0.1:4010/' };
+    const r = buildCommands({ platform: 'linux', env, argv: [], exists: everything });
+    assert.equal(r.commands[0].env.OPENROUTER_API_BASE, 'http://127.0.0.1:4010/openrouter-proxy/v1');
+    assert.deepStrictEqual(r.warnings, []);
+});
+
+test('hosted settings left in .env produce a warning on this PC', () => {
+    const env = { HARNESS_PUBLIC_URL: 'https://agents.skylerfly.com', HARNESS_REQUIRE_LOGIN: '1', HARNESS_OLD_HOSTS: 'old.example.com' };
+    const r = buildCommands({ platform: 'linux', env, argv: [], exists: everything });
+    assert.ok(r.warnings.some(w => /HARNESS_PUBLIC_URL=https:\/\/agents\.skylerfly\.com/.test(w)));
+    assert.ok(r.warnings.some(w => /HARNESS_REQUIRE_LOGIN=1/.test(w)));
+    assert.ok(r.warnings.some(w => /HARNESS_OLD_HOSTS/.test(w)));
+});
+
+test('a localhost HARNESS_PUBLIC_URL is not flagged', () => {
+    const r = buildCommands({ platform: 'linux', env: { HARNESS_PUBLIC_URL: 'http://localhost:3000' }, argv: [], exists: everything });
+    assert.deepStrictEqual(r.warnings, []);
+});
+
+test('the Gateway falls back to this PC, not the Docker name, when the Langfuse path runs gateway-start.py', () => {
+    const KEYS = { LANGFUSE_PUBLIC_KEY: 'pk-lf-1', LANGFUSE_SECRET_KEY: 'sk-lf-1', OPENROUTER_FEDERATION_POLICY_ID: 'pol_1', OPENROUTER_PROXY_KEY: 'k' };
+    const gw = buildCommands({ platform: 'linux', env: KEYS, argv: [], exists: everything }).commands[0];
+    assert.match(gw.command, /gateway-start\.py/);
+    assert.equal(gw.env.OPENROUTER_PROXY_URL, 'http://127.0.0.1:3000');
+});

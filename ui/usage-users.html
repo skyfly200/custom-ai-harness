@@ -69,6 +69,45 @@
   </div>
   <div class="sub muted fine" id="priceNote" style="margin-top:8px"></div>
 
+  <section id="infra" class="infra">
+    <div class="detail-head">
+      <h2>Sandboxes and machines</h2>
+      <div class="seg" id="infraRange" role="group" aria-label="Time range for sandboxes and machines">
+        <button data-days="7" data-hint="The last 7 days">7 days</button><button data-days="30" data-hint="The last 30 days">30 days</button><button data-days="0" data-hint="Everything kept">All time</button>
+      </div>
+    </div>
+    <p class="sub muted fine" id="infraNote">Cloud sandboxes the task runner opened (E2B, Fly Sprites) and Fly Machines of this app, priced with the rates below. Estimates, not the bill: compare with the provider's invoice.</p>
+    <p class="notice" id="infraNotice" role="status" hidden></p>
+    <div class="grid" id="infraTiles"></div>
+    <h3>Per day</h3>
+    <div class="card chart-card">
+      <div class="legend" id="infraLegend"></div>
+      <div class="chart-scroll"><svg id="infraChart" class="chart" role="img" aria-label="Sandbox and machine cost per day, one band per kind"></svg></div>
+    </div>
+    <h3>By kind</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Kind</th><th class="r">Spans</th><th class="r">Hours</th><th class="r">Cost</th><th class="r">Unpriced</th></tr></thead>
+        <tbody id="infraDrivers"></tbody>
+      </table>
+    </div>
+    <h3>By person</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Person</th><th class="r">Spans</th><th class="r">Hours</th><th class="r">Cost</th></tr></thead>
+        <tbody id="infraOwners"></tbody>
+      </table>
+    </div>
+    <h3>Latest</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Started</th><th>Kind</th><th>Name or id</th><th>Size</th><th class="r">Minutes</th><th class="r">Cost</th><th>State</th></tr></thead>
+        <tbody id="infraRecent"></tbody>
+      </table>
+    </div>
+    <div class="sub muted fine" id="infraRates" style="margin-top:12px"></div>
+  </section>
+
   <section id="detail" hidden>
     <div class="detail-head">
       <h2 id="detailName"></h2>
@@ -103,7 +142,9 @@
 <script src="hints.js"></script>
 <script src="costs.js"></script>
 <script src="userUsage.js"></script>
+<script src="infraUsage.js"></script>
 <script src="usage-users.js"></script>
 <script src="bright.js"></script>
+<script src="sleepcard.js" defer></script>
 </body>
 </html>

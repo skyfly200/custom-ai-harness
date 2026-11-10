@@ -915,7 +915,7 @@ app.delete('/ui/api/me/credential', async (req, res) => {
 });
 
 // Admin: issue (or replace) a person's key through OpenRouter's Management API, or take it back. These keys bill the
-// owner's account, each capped at OPENROUTER_USER_KEY_LIMIT. /ui/api/users/* is admin-only at the login gate. The
+// owner's account, each capped at OPENROUTER_USER_KEY_LIMIT (default $5) and expiring after OPENROUTER_USER_KEY_DAYS (default 30). /ui/api/users/* is admin-only at the login gate. The
 // hourly sweep replaces the ones that lapse; the management key itself never leaves the server.
 app.post('/ui/api/users/:name/managed-key', async (req, res) => {
     if (!db.enabled()) return res.status(503).json({ error: 'issuing keys needs the hosted database' });
@@ -933,9 +933,12 @@ app.delete('/ui/api/users/:name/managed-key', async (req, res) => {
     try { await userCredentials.remove(req.params.name); res.json({ credential: { set: false } }); } catch (err) { res.status(500).json({ error: err.message }); }
 });
 if (db.enabled() && require('./utils/openrouterKeys').configured()) {
-    setInterval(() => {
+    // Renews issued keys before they expire. Runs at startup too: a sleeping server may have missed the window.
+    const sweepManagedKeys = () => {
         userCredentials.managedOwners().then((names) => names.reduce((p, n) => p.then(() => userCredentials.check(n)), Promise.resolve())).catch(() => {});
-    }, 3600000).unref();
+    };
+    sweepManagedKeys();
+    setInterval(sweepManagedKeys, 3600000).unref();
 }
 
 // The Interceptor settings a member may change for their own requests (the rest are admin-only)

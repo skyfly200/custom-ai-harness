@@ -11,9 +11,19 @@ const fail = (message, status = 502) => Object.assign(new Error(message), { stat
 
 const managementKey = (env = process.env) => trim(env.OPENROUTER_MANAGEMENT_KEY);
 const configured = (env = process.env) => Boolean(managementKey(env));
-/** USD limit for each issued key (OPENROUTER_USER_KEY_LIMIT, default 5) and days until it expires (unset: no expiry). */
-const limitUsd = (env = process.env) => { const n = Number(env.OPENROUTER_USER_KEY_LIMIT); return Number.isFinite(n) && n > 0 ? n : 5; };
-const lifetimeDays = (env = process.env) => { const n = Number(env.OPENROUTER_USER_KEY_DAYS); return Number.isFinite(n) && n > 0 ? n : 0; };
+/**
+ * Every key made here carries a USD spending limit (OPENROUTER_USER_KEY_LIMIT, default $5) and an expiry
+ * (OPENROUTER_USER_KEY_DAYS, default 30). Nothing is issued without both. The owners of those keys renew them before
+ * they lapse (utils/userCredentials.js sweep, utils/mainKey.js tick), so a key is never open-ended.
+ */
+const DEFAULT_LIMIT_USD = 5;
+const DEFAULT_LIFETIME_DAYS = 30;
+// The admin's setting (ui/settings.html, utils/settings.js) comes next after the env var, then the defaults.
+let policy = { limitUsd: null, lifetimeDays: null };
+const setPolicy = (p = {}) => { policy = { limitUsd: p.limitUsd ?? null, lifetimeDays: p.lifetimeDays ?? null }; };
+const positive = (v) => { const n = Number(v); return v !== undefined && v !== null && v !== '' && Number.isFinite(n) && n > 0 ? n : null; };
+const limitUsd = (env = process.env) => positive(env.OPENROUTER_USER_KEY_LIMIT) || positive(policy.limitUsd) || DEFAULT_LIMIT_USD;
+const lifetimeDays = (env = process.env) => positive(env.OPENROUTER_USER_KEY_DAYS) || positive(policy.lifetimeDays) || DEFAULT_LIFETIME_DAYS;
 
 async function call(method, path, body, { env = process.env, fetchFn = fetch } = {}) {
     const mk = managementKey(env);
@@ -36,16 +46,15 @@ async function call(method, path, body, { env = process.env, fetchFn = fetch } =
     return json;
 }
 
-/** Make a key named for `owner`. Resolves { key, hash, expires } (expires: ms since 1970, or null). The secret comes back only now. */
+/** Make a key named for `owner` with a spending limit and an expiry. Resolves { key, hash, expires } (expires: ms since 1970). The secret comes back only now. */
 async function create(owner, opts = {}) {
     const env = opts.env || process.env;
     const now = (opts.now || Date.now)();
-    const days = lifetimeDays(env);
-    const expires = days ? now + days * 24 * 3600 * 1000 : null;
+    const expires = now + lifetimeDays(env) * 24 * 3600 * 1000;
     const json = await call('POST', '', {
         name: `harness: ${owner}`,
-        ...(opts.noLimit ? {} : { limit: limitUsd(env) }),
-        ...(expires ? { expires_at: new Date(expires).toISOString().replace(/\.\d+Z$/, 'Z') } : {}),
+        limit: limitUsd(env),
+        expires_at: new Date(expires).toISOString().replace(/\.\d+Z$/, 'Z'),
     }, opts);
     const key = json.data?.key || json.key;
     const hash = json.data?.hash || json.hash;
@@ -60,4 +69,4 @@ async function revoke(hash, opts = {}) {
     }
 }
 
-module.exports = { configured, limitUsd, lifetimeDays, create, revoke };
+module.exports = { configured, limitUsd, lifetimeDays, setPolicy, create, revoke, DEFAULT_LIMIT_USD, DEFAULT_LIFETIME_DAYS };

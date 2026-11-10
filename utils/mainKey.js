@@ -1,7 +1,7 @@
 // The owner's main OpenRouter key (the one that pays for the Gateway, Router and admins), renewed through the
 // Management API (utils/openrouterKeys.js). Opt in with OPENROUTER_MAIN_KEY_RENEW=1 plus OPENROUTER_MANAGEMENT_KEY.
-// The harness then holds a key it issued itself (name "harness: main", OPENROUTER_MAIN_KEY_LIMIT dollars if set,
-// OPENROUTER_MAIN_KEY_DAYS days if set), keeps it in the database when there is one (encrypted, utils/userCredentials.js)
+// The harness then holds a key it issued itself (name "harness: main", OPENROUTER_MAIN_KEY_LIMIT dollars, default $5,
+// and OPENROUTER_MAIN_KEY_DAYS days, default 30), keeps it in the database when there is one (encrypted, utils/userCredentials.js)
 // or in data/openrouter-main-key.json, and swaps in a fresh one before it lapses or when OpenRouter refuses it. The
 // Gateway and Router reach OpenRouter through /openrouter-proxy, so they follow the swap without a restart. The key you
 // pasted in .env is never deleted by the harness (it does not know its hash): delete it at openrouter.ai once you trust this.
@@ -49,7 +49,7 @@ function create({ env = process.env, store, fetchFn = fetch, now = Date.now, aut
     async function renew({ force = false } = {}) {
         if (!force && now() - lastRenew < 3600000) return false; // at most once an hour
         lastRenew = now();
-        const made = await keys.create('main', { env: { ...env, OPENROUTER_USER_KEY_LIMIT: env.OPENROUTER_MAIN_KEY_LIMIT, OPENROUTER_USER_KEY_DAYS: env.OPENROUTER_MAIN_KEY_DAYS }, fetchFn, now, noLimit: !Number(env.OPENROUTER_MAIN_KEY_LIMIT) });
+        const made = await keys.create('main', { env: { ...env, OPENROUTER_USER_KEY_LIMIT: env.OPENROUTER_MAIN_KEY_LIMIT, OPENROUTER_USER_KEY_DAYS: env.OPENROUTER_MAIN_KEY_DAYS }, fetchFn, now });
         const old = rec;
         rec = { key: made.key, hash: made.hash, expires: made.expires };
         await store.save(rec);          // saved before the old key is deleted: a failure here leaves a working key

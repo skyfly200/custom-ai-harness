@@ -84,6 +84,16 @@
         </div>
       </div>
 
+      <div class="group" role="group" aria-labelledby="gKeys">
+        <h3 class="group-title" id="gKeys">Issued OpenRouter keys</h3>
+        <div class="group-grid">
+          <label class="field"><span data-hint="Spending limit on each OpenRouter key the harness issues to a person or for the main key. Once a key reaches it, OpenRouter refuses more calls on that key. Set OPENROUTER_USER_KEY_LIMIT in .env to override this.">Limit per key (USD)</span>
+            <input type="number" name="keyLimitUsd" min="0.01" step="0.5"><small>Applies to keys issued from now on, and to the renewal of existing ones.</small></label>
+          <label class="field"><span data-hint="Days until each issued key expires. The harness renews a key about a day before it expires. Set OPENROUTER_USER_KEY_DAYS in .env to override this.">Expires after (days)</span>
+            <input type="number" name="keyDays" min="1" max="365" step="1"><small>Renewed automatically a day before expiry.</small></label>
+        </div>
+      </div>
+
       <div class="group" role="group" aria-labelledby="gTransforms">
         <h3 class="group-title" id="gTransforms">Prompt transforms</h3>
         <div class="group-grid switches">

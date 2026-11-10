@@ -7,6 +7,7 @@ const path = require('path');
 const tiers = require('./tiers');
 const jevQuestions = require('./jevQuestions');
 const langfuse = require('./langfuse');
+const openrouterKeys = require('./openrouterKeys');
 
 const FILE = process.env.HARNESS_SETTINGS_FILE || path.join(__dirname, '..', 'harness-settings.json');
 
@@ -36,6 +37,8 @@ const DEFAULTS = Object.freeze({
     guardDenyAt: null,        // ...at which it is blocked outright; null: Jev alone never blocks
     shellInRepo: true,        // a chat linked to a git repo may run commands in it (guarded; the chat page asks you)
     langfuseContent: langfuse.contentDefault(), // Langfuse (utils/langfuse.js): log prompts and replies too; off: only model, tokens, cost and tags
+    keyLimitUsd: 5,           // spending limit in dollars on each OpenRouter key the harness issues (users' and the main key); OPENROUTER_USER_KEY_LIMIT in .env wins
+    keyDays: 30,              // days until each issued key expires; it is renewed about a day before that; OPENROUTER_USER_KEY_DAYS in .env wins
 });
 
 // Each setting's check: returns the cleaned value or throws with a readable message.
@@ -97,6 +100,12 @@ const VALIDATORS = {
         return n;
     },
     shellInRepo: bool('shellInRepo'),
+    keyLimitUsd: (v) => {
+        const n = Number(v);
+        if (v === null || v === '' || !Number.isFinite(n) || n <= 0 || n > 10000) throw new Error('keyLimitUsd must be a dollar amount above 0 (up to 10000)');
+        return n;
+    },
+    keyDays: int('keyDays', 1, 365),
     guardDenyAt: (v) => {
         if (v === null || v === '') return null;
         const n = Number(v);
@@ -131,6 +140,11 @@ function envOverrides(env = process.env) {
 
 let current = { ...DEFAULTS };
 
+/** Hand the issued-key policy to utils/openrouterKeys.js (env vars still win there). */
+function applyKeyPolicy() {
+    openrouterKeys.setPolicy({ limitUsd: current.keyLimitUsd, lifetimeDays: current.keyDays });
+}
+
 function load() {
     current = { ...DEFAULTS };
     try {
@@ -140,6 +154,7 @@ function load() {
         }
     } catch {}
     Object.assign(current, envOverrides());
+    applyKeyPolicy();
 }
 
 function get() {
@@ -154,12 +169,14 @@ function update(changes) {
         next[k] = VALIDATORS[k](v);
     }
     current = next;
+    applyKeyPolicy();
     save();
     return current;
 }
 
 function reset() {
     current = { ...DEFAULTS, ...envOverrides() };
+    applyKeyPolicy();
     try { fs.unlinkSync(FILE); } catch {}
     return current;
 }

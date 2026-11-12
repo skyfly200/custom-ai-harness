@@ -2,6 +2,10 @@
 
 A personal assistant is one agent that keeps notes and remembers each conversation. You can reach it on the **Assistant** page (`/ui/assistant.html`), on Telegram, and in Slack. Every channel goes through the same routing, so the model it uses is whatever your routing picks. On the web page the logged-in owner's key pays; on Telegram and Slack the configured `ASSISTANT_OWNER` pays.
 
+## Floating assistant
+
+Every page with the site menu has an **Assistant** button in the bottom-left corner. It opens the same conversation as the Assistant page, so a message sent from either shows in both. Each message also carries the page you are on (its path, title, and any text you had selected). The panel shows that as "On: ...", and the model sees it for that one turn only; it is not saved in the history. Only the owner (or an admin, with logins on) gets the button.
+
 ## Commands
 
 | Send | Does |
@@ -56,4 +60,4 @@ A tool whose server is set to ask first (`askBefore`) does not run on its own. T
 - Telegram and Slack are stub-tested only; they have not been run against the real APIs.
 - Notes are one shared list for the owner; there is no per-channel separation or search.
 
-Code: `utils/assistant.js` (notes, conversations, loopback call), `utils/assistantChannels.js` (Telegram and Slack), `ui/assistant.html`, and the routes in `server.js` (`/ui/api/assistant*`). Tests: `test/assistant.test.js`, `test/assistantChannels.test.js`.
+Code: `utils/assistant.js` (notes, conversations, page context, loopback call), `ui/assistant-dock.js` (the floating button, added by `ui/nav.js`), `utils/assistantChannels.js` (Telegram and Slack), `ui/assistant.html`, and the routes in `server.js` (`/ui/api/assistant*`). Tests: `test/assistant.test.js`, `test/assistantChannels.test.js`, `test/assistantDock.test.js`.

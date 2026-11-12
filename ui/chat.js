@@ -330,6 +330,8 @@ let projects = store.get(PROJECTS_KEY, []);   // [{id, name, color, instructions
 let sharedProjects = [];   // projects other people shared with this account: [{id, name, color, instructions, owner, role}] (never stored in the browser)
 const findProject = (id) => projects.find(p => p.id === id) || sharedProjects.find(p => p.id === id);
 let skills = store.get(SKILLS_KEY, []);       // [{id, name, description, body}]
+// Skills the assistant saved on the server join the list once fetched (ui/serverSkills.js)
+window.ServerSkills?.load(skills).then(list => { if (list.length !== skills.length) skills = list; });
 let commands = store.get(COMMANDS_KEY, []);   // [{id, name, description, body, model, effort}]
 let schedules = store.get(SCHEDULES_KEY, []); // [{id, name, prompt, repeat, next, target, project, last}]
 const unseen = new Set();                // chats that finished a reply while not open

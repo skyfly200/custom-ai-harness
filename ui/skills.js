@@ -42,7 +42,7 @@
       const r = await fetch('api/agents', { headers: { accept: 'application/json' } });
       agents = r.ok ? (await r.json()).agents || [] : null;
     } catch { agents = null; }
-    skills = read(KEYS.skills, []);
+    skills = await (window.ServerSkills?.load(read(KEYS.skills, [])) ?? read(KEYS.skills, []));
     projects = read(KEYS.projects, []);
     selected = skills[0]?.id ?? null;
     paintAll();

@@ -17,10 +17,31 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="calm.css">
+<style>
+/* Dashboard: one status line first, then the agents, and the detail folded away */
+.dash { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+.focus { display: flex; align-items: center; gap: 14px; padding: 16px 18px; margin: 2px 0 4px; border-left: 3px solid var(--off); }
+.focus[data-state=ok] { border-left-color: var(--ok); }
+.focus[data-state=warn] { border-left-color: var(--warn); }
+.focus[data-state=bad] { border-left-color: var(--bad); }
+.focus .dot { width: 12px; height: 12px; }
+.focus-title { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+.focus[data-state=warn] .focus-title { color: var(--warn); }
+.focus[data-state=bad] .focus-title { color: var(--bad); }
+.focus-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.fold { margin-top: 20px; }
+.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: '\25B8'; color: var(--muted); font-size: 12px; width: 10px; transition: transform .15s; }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold > summary h2 { margin: 0; }
+.fold > summary:hover h2 { color: var(--accent); }
+.fold > .card, .fold > .grid, .fold > .table-wrap { margin-top: 8px; }
+</style>
 <link rel="stylesheet" href="mobile.css">
 </head>
 <body>
-<main>
+<main class="dash">
   <header>
     <nav data-site-nav></nav>
     <span class="muted" id="updated" data-hint="This page refreshes itself every few seconds">Loading…</span>
@@ -29,24 +50,22 @@
 
   <div id="sleepSlot" data-hint="How long until the server sleeps, and what keeps it awake. Hover the ring to stop it now or extend the time"></div>
 
-  <h2 data-hint="Each part of the harness and whether it answers. Optional parts can be off">Components</h2>
-  <div class="grid" id="components"></div>
-
-  <h2 id="sinceHead" data-hint="Counts reset when the Interceptor (npm start) restarts">Since start</h2>
-  <div class="grid" id="stats"></div>
+  <div class="card focus" id="focus" data-state="checking" aria-live="polite">
+    <span class="dot" id="focusDot"></span>
+    <div class="focus-text"><div class="focus-title" id="focusTitle">Checking the harness…</div><div class="focus-sub" id="focusSub"></div></div>
+  </div>
 
   <h2 data-hint="Your persistent agents and one-off runs: who is working, what needs your decision, what finished lately. The Agents page has the full detail"><a href="agents.html">Agents</a> <span class="muted" id="agentSummary"></span></h2>
   <div id="agentDown" class="card notice" hidden></div>
   <div class="card approvals" id="needs" hidden></div>
   <div class="grid agent-grid" id="agentCards"><div class="card sub muted">Loading…</div></div>
+
   <div class="two home agent-lower">
     <section>
       <h2 data-hint="Runs and tasks that are queued, running or waiting for you, and the latest ones that ended">Runs</h2>
       <div class="card list" id="agentRuns"><div class="sub muted">Loading…</div></div>
     </section>
     <section>
-      <h2 data-hint="What runs cost per day, stacked by agent. A run counts on the day it started, with its swarm workers">Run spend, last 7 days</h2>
-      <div class="card spend" id="spend"><div class="sub muted">Loading…</div></div>
       <h2 data-hint="Hands a task to one of your agents. It starts from where that agent's last task left off">Give an agent a task</h2>
       <form class="card" id="quickTask" autocomplete="off">
         <label class="field"><span>Agent</span><select name="agent" id="quickAgent"></select></label>
@@ -69,7 +88,22 @@
     </section>
   </div>
 
-  <h2 data-hint="The latest requests, newest first, with where they went and why">Recent requests</h2>
+  <details class="fold" id="componentsFold">
+    <summary><h2 data-hint="Each part of the harness and whether it answers. Optional parts can be off">Components</h2></summary>
+    <div class="grid" id="components"></div>
+  </details>
+
+  <details class="fold" id="spendFold">
+    <summary><h2 data-hint="What runs cost per day, stacked by agent. A run counts on the day it started, with its swarm workers">Run spend, last 7 days</h2></summary>
+    <div class="card spend" id="spend"><div class="sub muted">Loading…</div></div>
+  </details>
+
+  <details class="fold" id="sinceFold">
+    <summary><h2 id="sinceHead" data-hint="Counts reset when the Interceptor (npm start) restarts">Since start</h2></summary>
+    <div class="grid" id="stats"></div>
+  </details>
+
+  <details class="fold" id="eventsFold"><summary><h2 data-hint="The latest requests, newest first, with where they went and why">Recent requests</h2></summary>
   <div class="table-wrap">
     <table>
       <thead><tr>
@@ -78,8 +112,9 @@
       <tbody id="events"><tr><td colspan="6" class="muted">No requests yet.</td></tr></tbody>
     </table>
   </div>
+  </details>
 
-  <h2 data-hint="Shell commands and file writes agents asked about before running them (POST /v1/guard; the Claude Code hook is .claude/hooks/guard.js)">Command guard</h2>
+  <details class="fold" id="guardFold"><summary><h2 data-hint="Shell commands and file writes agents asked about before running them (POST /v1/guard; the Claude Code hook is .claude/hooks/guard.js)">Command guard</h2></summary>
   <div class="table-wrap">
     <table>
       <thead><tr>
@@ -88,6 +123,7 @@
       <tbody id="guard"><tr><td colspan="4" class="muted">No checks yet.</td></tr></tbody>
     </table>
   </div>
+  </details>
 </main>
 
 <script src="dialogs.js"></script>
@@ -125,7 +161,44 @@ const STAT_HINTS = {
   'Timed out': 'Requests that took too long and were failed instead of hanging',
 };
 
+// The one line at the top: what needs attention first, then what is running
+const focusState = { components: null, needs: 0, active: 0, agentsOff: false };
+let componentsChecked = false;
+function renderFocus() {
+  const card = $('focus');
+  const comps = focusState.components;
+  const down = comps ? comps.filter(c => !c.ok && !c.optional) : [];
+  let state, title, sub;
+  if (!comps) { state = 'checking'; title = 'Checking the harness…'; sub = ''; }
+  else if (down.length) {
+    state = 'bad';
+    title = down.length === 1 ? `${down[0].name} is down` : `${down.length} parts are down`;
+    sub = 'Requests can fail until it is back. The details are under Components.';
+  } else if (focusState.needs) {
+    state = 'warn';
+    title = `${focusState.needs} ${focusState.needs === 1 ? 'decision is' : 'decisions are'} waiting for you`;
+    sub = 'An agent has paused until you Allow or Decline below.';
+  } else if (focusState.agentsOff) {
+    state = 'warn';
+    title = 'Agents are off';
+    sub = 'Start the task runner to use agents. Chat and routing still work.';
+  } else {
+    state = 'ok';
+    const up = comps.filter(c => c.ok).length;
+    title = 'Everything is running';
+    sub = `${up} part${up === 1 ? '' : 's'} up${focusState.active ? ` · ${focusState.active} agent run${focusState.active === 1 ? '' : 's'} going` : ' · no agent runs going'}`;
+  }
+  card.dataset.state = state;
+  $('focusTitle').textContent = title;
+  $('focusSub').textContent = sub;
+  $('focusDot').className = `dot ${state === 'ok' ? 'ok' : state === 'bad' ? 'bad' : state === 'warn' ? 'warn' : 'off'}`;
+}
+
 function renderComponents(components) {
+  focusState.components = components;
+  renderFocus();
+  // Open the folded list on the first look if anything is down; after that the reader decides
+  if (!componentsChecked) { componentsChecked = true; $('componentsFold').open = components.some(c => !c.ok && !c.optional); }
   $('components').innerHTML = components.map(c => {
     const state = c.ok ? 'ok' : c.optional ? 'off' : 'bad';
     const label = c.ok ? `Up · ${c.ms} ms` : c.optional ? 'Off (optional)' : `Down · ${esc(c.error || 'HTTP ' + c.status)}`;
@@ -365,6 +438,8 @@ async function loadAgents() {
     const [r, a] = await Promise.all([getJSON('api/runs'), getJSON('api/agents')]);
     $('agentDown').hidden = true;
     const b = AgentBoard.board(r.runs, a.agents);
+    Object.assign(focusState, { needs: b.needs.length, active: b.totals.active, agentsOff: false });
+    renderFocus();
     renderNeeds(b.needs);
     window.Notify?.watchRuns(r.runs);
     renderAgentCards(b);
@@ -373,6 +448,8 @@ async function loadAgents() {
     renderSpend(r.runs, a.agents);
     $('agentSummary').textContent = `${b.totals.active ? `${b.totals.active} running` : 'none running'} · ${spendText(b.totals.cost, b.totals.unpriced)} spent on runs${b.needs.length ? ` · ${b.needs.length} need${b.needs.length === 1 ? 's' : ''} you` : ''}`;
   } catch (err) {
+    Object.assign(focusState, { needs: 0, active: 0, agentsOff: true });
+    renderFocus();
     $('agentDown').hidden = false;
     $('agentDown').textContent = `Task runner unreachable: ${err.message}`;
     $('agentCards').innerHTML = '';

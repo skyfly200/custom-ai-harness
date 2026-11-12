@@ -88,12 +88,16 @@ app.get('/healthz', (req, res) => res.type('text').send('ok'));
 const assistant = require('./utils/assistant');
 const assistantChannels = require('./utils/assistantChannels');
 const ASSISTANT_OWNER = process.env.ASSISTANT_OWNER || 'assistant';
+const assistantHarness = require('./utils/assistantHarness');
+const assistantHarnessTools = assistantHarness.createHarnessTools({ profiles });
 const assistantApp = assistant.createAssistant({
     store: assistant.fileStore(process.env.ASSISTANT_FILE || path.join(__dirname, 'assistant.json')),
     ask: assistant.loopbackAsk({ owner: ASSISTANT_OWNER, port: 3000, profile: process.env.ASSISTANT_PROFILE || '' }),
     owner: ASSISTANT_OWNER,
     name: process.env.ASSISTANT_NAME || 'Assistant',
-    tools: () => mcp, // the MCP tools chat uses; read at each turn, so a reload is picked up
+    // the MCP tools chat uses (read at each turn, so a reload is picked up) and the harness's own tools:
+    // routing, agents, apps (utils/assistantHarness.js). Changes to them wait for the owner's /yes.
+    tools: () => assistantHarness.combine(mcp, assistantHarnessTools),
 });
 const assistantChannelsApp = assistantChannels.createChannels({ assistant: assistantApp });
 app.post('/ui/api/assistant/telegram', express.json({ limit: '1mb' }), (req, res) => assistantChannelsApp.telegramWebhookHandler(req, res));

@@ -58,6 +58,7 @@ function systemPrompt({ name, owner, notes, today, page = null }) {
         `You are ${name}, a personal assistant for ${owner}. ${owner} can reach you on the web page, Telegram or Slack.`,
         'Reply in plain text that reads well in a chat app: short paragraphs, few lists, no tables.',
         `Today is ${today}.`,
+        'You can read and change the routing strategies, the agents and the apps with your tools, and draft skills. Changes wait for the owner to send /yes.',
     ];
     if (notes.length) {
         lines.push(`Notes ${owner} asked you to keep (use them without repeating them back):`);

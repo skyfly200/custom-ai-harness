@@ -49,7 +49,7 @@ The assistant also has the harness's own tools (`utils/assistantHarness.js`):
 - **Routing:** list the strategies; create one or change one by id.
 - **Agents:** list them; create one on a repo; change one. Needs `HARNESS_RUNS=1`.
 - **Apps:** list them; register one (with the files an agent may edit); change one. Needs `HARNESS_RUNS=1`.
-- **Skills:** `draft_skill` writes the SKILL.md text into the reply. Skills live in each browser's storage, so the assistant cannot save one; copy it into the Skills page.
+- **Skills:** list them; save one (a name, a description and the instructions) to `skills.json` on the server (`SKILLS_FILE` to move it). Saving needs approval.
 
 Reads run at once. Every create or change waits for `/yes`, like an MCP tool set to ask first.
 
@@ -65,7 +65,7 @@ A tool whose server is set to ask first (`askBefore`) does not run on its own. T
 
 ## Not built yet
 
-- Shell and repo tools are still not offered to the assistant. Google Calendar, Gmail, Docs, Trello and text services need MCP servers configured before the assistant can use them.
+- Shell and repo tools are still not offered to the assistant. Skills the assistant saves are not shown on the Skills page yet (`GET /ui/api/assistant/skills`). Google Calendar, Gmail, Docs, Trello and text services need MCP servers configured before the assistant can use them.
 - Telegram and Slack are stub-tested only; they have not been run against the real APIs.
 - Notes are one shared list for the owner; there is no per-channel separation or search.
 

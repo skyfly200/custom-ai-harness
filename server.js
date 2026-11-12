@@ -89,7 +89,9 @@ const assistant = require('./utils/assistant');
 const assistantChannels = require('./utils/assistantChannels');
 const ASSISTANT_OWNER = process.env.ASSISTANT_OWNER || 'assistant';
 const assistantHarness = require('./utils/assistantHarness');
-const assistantHarnessTools = assistantHarness.createHarnessTools({ profiles });
+const skillStore = require('./utils/skillStore');
+const serverSkills = skillStore.createSkillStore({ store: skillStore.fileStore(process.env.SKILLS_FILE || path.join(__dirname, 'skills.json')) });
+const assistantHarnessTools = assistantHarness.createHarnessTools({ profiles, skills: serverSkills });
 const assistantApp = assistant.createAssistant({
     store: assistant.fileStore(process.env.ASSISTANT_FILE || path.join(__dirname, 'assistant.json')),
     ask: assistant.loopbackAsk({ owner: ASSISTANT_OWNER, port: 3000, profile: process.env.ASSISTANT_PROFILE || '' }),
@@ -494,6 +496,11 @@ const canUseAssistant = (req) => !req.harnessLogin || personOf(req) === ASSISTAN
 app.get('/ui/api/assistant', (req, res) => {
     if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });
     res.json({ ...assistantApp.summary(), notes: assistantApp.notes(), channels: assistantChannelsApp.status(), problems: assistantChannelsApp.problems });
+});
+// The skills the assistant saved on the server (the owner only, like the rest of the assistant)
+app.get('/ui/api/assistant/skills', (req, res) => {
+    if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });
+    res.json({ skills: serverSkills.list() });
 });
 app.get('/ui/api/assistant/history', (req, res) => {
     if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });

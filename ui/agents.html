@@ -20,10 +20,11 @@
 <link rel="stylesheet" href="repos.css">
 <link rel="stylesheet" href="vendor/xterm/xterm.css">
 <link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="focus.css">
 <link rel="stylesheet" href="mobile.css">
 </head>
 <body>
-<main>
+<main class="dash">
   <header>
     <nav data-site-nav></nav>
     <span class="muted" id="updated">Loading…</span>
@@ -67,11 +68,13 @@
   <div id="agentInfo" class="card agent-info" hidden></div>
 
   <div id="appsBox">
-  <h2 data-hint="An app is a repo you can ask for changes. The agent may edit only the paths you list, runs the app's tests, and the result is a branch with a live preview, like any run">Apps</h2>
-  <div class="card" id="appBar">
-    <div id="appList"></div>
-    <div class="actions"><button type="button" id="appAdd">Register an app</button></div>
-  </div>
+  <details class="fold" id="appsFold">
+    <summary><h2 data-hint="An app is a repo you can ask for changes. The agent may edit only the paths you list, runs the app's tests, and the result is a branch with a live preview, like any run">Apps</h2></summary>
+    <div class="card" id="appBar">
+      <div id="appList"></div>
+      <div class="actions"><button type="button" id="appAdd">Register an app</button></div>
+    </div>
+  </details>
   </div>
   <dialog id="appDialog" class="picker agentdlg" aria-label="App">
     <form id="appForm" autocomplete="off">

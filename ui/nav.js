@@ -281,6 +281,14 @@
     if (!chat) { build(nav); renderBar(); }
     render();
     loadMe();
+    // The floating assistant (ui/assistant-dock.js) on every page with the nav; the Assistant page has its own.
+    if (!/\/assistant\.html$/.test(location.pathname) && !document.querySelector('script[data-assistant-dock]')) {
+      const dock = document.createElement('script');
+      dock.src = 'assistant-dock.js';
+      dock.defer = true;
+      dock.dataset.assistantDock = '';
+      document.body.append(dock);
+    }
   }
   // Chat's flat list handles its own clicks here, since chat.js only opens and closes the menu
   if (chat && nav) nav.addEventListener('click', (e) => { const b = e.target.closest('[data-act]'); if (b) act(b.dataset.act); });

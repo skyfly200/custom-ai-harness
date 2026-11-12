@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="focus.css">
 <link rel="stylesheet" href="mobile.css">
 <style>
 .orCard { display: flex; align-items: center; gap: 12px; }
@@ -61,7 +62,8 @@
   </section>
 
   <section id="inviteSection" hidden>
-    <h2>Invited people</h2>
+    <details class="fold" id="inviteSectionFold">
+      <summary><h2>Invited people</h2></summary>
     <div class="card">
       <p class="muted" style="margin-top:0" id="inviteNote">People you invite can sign in with Google or GitHub using this email address. Nobody else can.</p>
       <table id="inviteTable" style="width:100%;border-collapse:collapse"></table>
@@ -71,6 +73,7 @@
         <div class="field"><span>&nbsp;</span><button class="primary">Invite</button></div>
       </form>
     </div>
+    </details>
   </section>
 
   <h2 id="keysHead">API keys</h2>
@@ -86,12 +89,15 @@
   </div>
 
   <section id="guestSection" hidden>
-    <h2>Guest credit</h2>
+    <details class="fold" id="guestSectionFold">
+      <summary><h2>Guest credit</h2></summary>
     <div class="card"><p id="guestState" style="margin:0"></p></div>
+    </details>
   </section>
 
   <section id="pwSection" hidden>
-    <h2>Change my password</h2>
+    <details class="fold" id="pwSectionFold">
+      <summary><h2>Change my password</h2></summary>
     <div class="card">
       <form id="pw" class="form" autocomplete="off">
         <label class="field"><span>Current password</span><input name="current" type="password" required autocomplete="current-password"></label>
@@ -100,6 +106,7 @@
         <div class="field"><span>&nbsp;</span><button class="primary">Change password</button></div>
       </form>
     </div>
+    </details>
   </section>
 </main>
 <script src="dialogs.js"></script>

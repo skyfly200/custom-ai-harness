@@ -17,27 +17,7 @@
 <link rel="stylesheet" href="bright.css">
 <link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="calm.css">
-<style>
-/* Dashboard: one status line first, then the agents, and the detail folded away */
-.dash { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
-.focus { display: flex; align-items: center; gap: 14px; padding: 16px 18px; margin: 2px 0 4px; border-left: 3px solid var(--off); }
-.focus[data-state=ok] { border-left-color: var(--ok); }
-.focus[data-state=warn] { border-left-color: var(--warn); }
-.focus[data-state=bad] { border-left-color: var(--bad); }
-.focus .dot { width: 12px; height: 12px; }
-.focus-title { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
-.focus[data-state=warn] .focus-title { color: var(--warn); }
-.focus[data-state=bad] .focus-title { color: var(--bad); }
-.focus-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
-.fold { margin-top: 20px; }
-.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; }
-.fold > summary::-webkit-details-marker { display: none; }
-.fold > summary::before { content: '\25B8'; color: var(--muted); font-size: 12px; width: 10px; transition: transform .15s; }
-.fold[open] > summary::before { transform: rotate(90deg); }
-.fold > summary h2 { margin: 0; }
-.fold > summary:hover h2 { color: var(--accent); }
-.fold > .card, .fold > .grid, .fold > .table-wrap { margin-top: 8px; }
-</style>
+<link rel="stylesheet" href="focus.css">
 <link rel="stylesheet" href="mobile.css">
 </head>
 <body>

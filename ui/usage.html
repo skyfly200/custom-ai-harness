@@ -17,10 +17,11 @@
 <link rel="stylesheet" href="nav.css">
 <link rel="stylesheet" href="usage.css">
 <link rel="stylesheet" href="calm.css">
+<link rel="stylesheet" href="focus.css">
 <link rel="stylesheet" href="mobile.css">
 </head>
 <body>
-<main>
+<main class="dash">
   <header>
     <nav data-site-nav></nav>
     <span class="muted" id="updated">Loading…</span>
@@ -42,7 +43,8 @@
   <p class="notice" id="scope" role="status" hidden></p>
   <div class="grid" id="tiles"></div>
 
-  <h2 data-hint="What the same work would have cost sent straight to a Claude model, and what each part of the harness took off">Savings vs Claude</h2>
+  <details class="fold" id="savingsFold">
+  <summary><h2 data-hint="What the same work would have cost sent straight to a Claude model, and what each part of the harness took off">Savings vs Claude</h2></summary>
   <div class="card chart-card savings">
     <div class="controls">
       <span class="muted">Compared with</span>
@@ -80,6 +82,7 @@
     </details>
     <div class="sub muted fine" id="saveNote"></div>
   </div>
+  </details>
 
   <h2>Over time</h2>
   <div class="card chart-card">
@@ -88,6 +91,8 @@
     <div class="sub muted fine" id="timelineNote"></div>
   </div>
 
+  <details class="fold" id="flowFold">
+  <summary><h2>Flow and routes</h2></summary>
   <h2>Flow through the harness</h2>
   <div class="card chart-card">
     <div class="chart-scroll"><svg id="flow" class="chart" role="img" aria-label="Flow of tokens through the harness"></svg></div>
@@ -101,6 +106,8 @@
     <div class="sub muted fine">"Asked for" is the model the Router or client picked; "Served by" is the one that answered after any Gateway fallbacks. Bands are coloured by the service that answered.</div>
   </div>
 
+  </details>
+
   <div class="two">
     <section>
       <h2>By model</h2>
@@ -112,7 +119,8 @@
     </section>
   </div>
 
-  <h2>Table</h2>
+  <details class="fold" id="rowsFold">
+  <summary><h2>All requests</h2></summary>
   <div class="table-wrap">
     <table>
       <thead><tr><th data-hint="The program that sent the requests">Client</th><th data-hint="How the model was picked: Router, pinned, client's choice or Router down">Route</th><th data-hint="The model the Router or client picked">Asked for</th><th data-hint="The model that answered, after any fallbacks">Served by</th><th data-hint="Who ran the model: OpenRouter, Groq, Ollama…">Service</th><th class="r">Requests</th><th class="r">Input</th><th class="r" data-hint="Input the provider read from its cache, usually cheaper">Cached input</th><th class="r">Output</th><th class="r" data-hint="Tokens times the price of the model that answered, with cached input at the provider's cache price">Cost</th></tr></thead>
@@ -120,6 +128,7 @@
       <tfoot id="rowsTotal"></tfoot>
     </table>
   </div>
+  </details>
   <div class="sub muted fine" style="margin-top:8px">Counts come from the usage each reply reports, read the same way the chat page and the dashboard read it (<code>ui/tokens.js</code>), so the three always agree. Values marked ~ are estimates (about 4 characters a token, from the request that was sent and the text that came back) for replies that had none, such as OpenAI streams without <code>stream_options.include_usage</code>. Costs are worked out for the model that answered from OpenRouter's own prices for OpenRouter models, else the Gateway's price list (LiteLLM's <code>/v1/model/info</code>), with cached input at the provider's cache price (a tenth of the input price for Claude when the list doesn't say). Free and local models cost nothing, and models with no listed price show ?. Totals are kept across restarts, in <code>harness-usage.json</code> or, on a hosted server, in the database. With logins on, this page counts only your own requests; admins see everyone on <a href="usage-users.html">All users</a>.</div>
 </main>
 <div id="tip" class="tip" hidden></div>

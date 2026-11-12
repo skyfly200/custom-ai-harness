@@ -549,6 +549,9 @@ function render() {
   $('updated').textContent = `Updated ${new Date().toLocaleTimeString()} · ${since}${noPrices}`;
 }
 
+// A folded section draws its charts when it opens, since a closed one has no size yet
+document.querySelectorAll('.fold').forEach(d => d.addEventListener('toggle', () => { if (d.open && state.data) render(); }));
+
 let priceStatus = { ok: true };
 async function loadPrices() {
   try {

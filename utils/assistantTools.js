@@ -23,7 +23,7 @@ function parseArgs(text) {
 }
 
 /** Runs the calls and appends one tool message per call. `confirmed` is true only after the owner said /yes. */
-async function execute(calls, { manager, messages, confirmed }) {
+async function execute(calls, { manager, messages, confirmed, owner }) {
     for (const call of calls) {
         const name = call.function && call.function.name;
         const args = parseArgs(call.function && call.function.arguments);
@@ -31,7 +31,7 @@ async function execute(calls, { manager, messages, confirmed }) {
         if (args === null) text = 'Error: the tool arguments were not a JSON object';
         else {
             try {
-                const result = await manager.call(name, args, { confirmed });
+                const result = await manager.call(name, args, { confirmed, owner });
                 text = truncate(String(result.text || ''));
             } catch (err) {
                 text = `Error: ${err.message}`;
@@ -56,7 +56,7 @@ async function drive({ messages, ask, manager, owner, conversation, steps = 0 })
         if (calls.some((c) => manager.needsApproval(c.function.name))) {
             return { pending: { calls, messages: messages.slice(), steps } };
         }
-        await execute(calls, { manager, messages, confirmed: false });
+        await execute(calls, { manager, messages, confirmed: false, owner });
     }
     return { reply: 'I stopped after several tool steps without a final answer. Ask again with a narrower request.' };
 }
@@ -64,7 +64,7 @@ async function drive({ messages, ask, manager, owner, conversation, steps = 0 })
 /** Continues a run that was waiting for approval: /yes runs its calls, /no tells the model they were declined. */
 async function resume({ pending, approve, ask, manager, owner, conversation }) {
     const messages = pending.messages.slice();
-    if (approve) await execute(pending.calls, { manager, messages, confirmed: true });
+    if (approve) await execute(pending.calls, { manager, messages, confirmed: true, owner });
     else for (const call of pending.calls) messages.push({ role: 'tool', tool_call_id: call.id, content: DECLINED });
     return drive({ messages, ask, manager, owner, conversation, steps: pending.steps });
 }

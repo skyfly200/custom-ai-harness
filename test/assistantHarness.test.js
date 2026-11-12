@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 
 const assistant = require('../utils/assistant');
 const { createHarnessTools, combine } = require('../utils/assistantHarness');
+const skillStore = require('../utils/skillStore');
 
 // A stand-in for utils/profiles.js: the same list/replace shape, kept in memory.
 function fakeProfiles(initial = []) {
@@ -46,11 +47,11 @@ test('reads list routing strategies and agents without asking', async () => {
 
 test('every change needs approval, and a change without it is refused', async () => {
     const tools = createHarnessTools({ profiles: fakeProfiles(), fetchImpl: fakeRunner({}).fetchImpl });
-    for (const name of ['save_routing_strategy', 'create_agent', 'update_agent', 'create_app', 'update_app']) {
+    for (const name of ['save_routing_strategy', 'create_agent', 'update_agent', 'create_app', 'update_app', 'save_skill']) {
         assert.equal(tools.needsApproval(name), true, name);
         await assert.rejects(tools.call(name, { name: 'x', repo: 'a/b', id: 'x' }), /needs the person's approval/);
     }
-    assert.equal(tools.needsApproval('draft_skill'), false);
+    assert.equal(tools.needsApproval('list_skills'), false);
 });
 
 test('a routing strategy can be created, then changed by id', async () => {
@@ -85,11 +86,19 @@ test('an app change goes to the runner as a PATCH, and a missing runner is expla
     await assert.rejects(down.call('list_apps', {}), /not answering \(ECONNREFUSED\)/);
 });
 
-test('draft_skill returns the text and saves nothing', async () => {
-    const tools = createHarnessTools({ profiles: fakeProfiles(), fetchImpl: fakeRunner({}).fetchImpl });
-    const out = JSON.parse((await tools.call('draft_skill', { name: 'review-pr', description: 'Review a PR', instructions: 'Check tests.' })).text);
-    assert.match(out.text, /^---\nname: review-pr\n/);
-    assert.match(out.note, /Not saved/);
+test('a skill is saved on the server after approval, and changed by name', async () => {
+    const skills = skillStore.createSkillStore({ store: skillStore.memoryStore() });
+    const tools = createHarnessTools({ profiles: fakeProfiles(), skills, fetchImpl: fakeRunner({}).fetchImpl });
+    assert.equal(tools.needsApproval('save_skill'), true);
+    await assert.rejects(tools.call('save_skill', { name: 'review-pr', instructions: 'x' }), /needs the person's approval/);
+    const made = JSON.parse((await tools.call('save_skill', { name: 'review-pr', description: 'Review a PR', instructions: 'Check tests.' }, { confirmed: true })).text);
+    assert.equal(made.updated, 'created');
+    const again = JSON.parse((await tools.call('save_skill', { name: 'review-pr', instructions: 'Check tests and docs.' }, { confirmed: true })).text);
+    assert.equal(again.updated, 'changed');
+    assert.equal(skills.list().length, 1);
+    assert.equal(skills.list()[0].body, 'Check tests and docs.');
+    const listed = JSON.parse((await tools.call('list_skills', {})).text);
+    assert.deepEqual(listed, [{ id: made.id, name: 'review-pr', description: 'Review a PR' }]);
 });
 
 test('the assistant asks before a harness change and applies it on /yes', async () => {

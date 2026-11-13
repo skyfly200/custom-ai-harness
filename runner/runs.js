@@ -318,6 +318,17 @@ class RunManager {
             .sort((a, b) => b.created.localeCompare(a.created)).map((r) => this.summary(r));
     }
 
+    /**
+     * The runs of one comparison group, and how the first two compare. Null when the group
+     * has fewer than two runs visible to this owner.
+     */
+    compareReport(group, owner) {
+        const runs = this.list(owner).filter((r) => r.compare === group);
+        if (runs.length < 2) return null;
+        const [a, b] = runs.slice().sort((x, y) => x.created.localeCompare(y.created));
+        return { id: group, runs, comparison: efficiency.compareRuns(a, b) };
+    }
+
     /** Per model (the one that made most calls): runs, success, cost per success, wasted share, loops. */
     modelEfficiency(owner) {
         return efficiency.byModel(this.list(owner));
@@ -483,6 +494,8 @@ class RunManager {
             status: 'queued', created: new Date().toISOString(), started: null, ended: null,
             steps: 0, tokens: { in: 0, out: 0 }, cost: 0, unpricedCalls: 0, pending: null, events: [], result: null, error: null,
             efficiency: efficiency.emptyTally(),
+            // a run made for a side-by-side comparison: the group id it belongs to (see compareReport)
+            compare: cfg.compare ? String(cfg.compare).slice(0, 40) : null,
         };
         this.runs.set(id, run);
         if (landing !== 'branch' && this.hosted) this.landTokens.set(id, String(cfg.landToken));

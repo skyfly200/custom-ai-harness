@@ -86,3 +86,14 @@ The measurements tell us which of these holds for our models. A workflow stage t
 
 - Is a cost per success the right headline, or do you want cost per *accepted* change (one the person merged)?
 - Should a loop hint ever stop a run, or only nudge it? Right now it only nudges, and escalates at most the effort rungs a run already allows.
+
+## Comparing two models on one prompt
+
+`POST /runs/compare` (via `/ui/api/runs/compare`) takes one task and two different models. It starts two runs with the same goal and repo, each tagged with a comparison id. `GET /runs/compare/:id` then gives both runs and `utils/efficiency.js` `compareRuns`:
+
+- **Like for like.** `sameTask` is false when the goals or repos differ. The verdict says so instead of comparing.
+- **Per number, a winner:** finished, steps, steps that moved the work on, wasted steps and share, cost, tokens, cost and tokens per step, cost per productive step, loop hints, escalations.
+- **Where the cost gap comes from.** The gap is split exactly into `fromSteps` (the difference in step count, priced at the other run's cost per step) and `fromCostPerStep` (the same number of steps, each dearer or cheaper). That answers "is the stronger model cheaper because it needs fewer steps, or because each of its calls is smaller?"
+- **Verdict** in plain words, for example "weak-x finished for $0.1000, 67% less than strong-y".
+
+Limits: the two runs are real runs, so they are not identical. Sandbox timing, the model's own choices and any random step can differ. One comparison is an anecdote; several prompts on the same pair of models is evidence. A comparison also does not check that the two changes are equally good. The reviewer still does that.

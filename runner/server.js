@@ -103,6 +103,19 @@ function createApp(manager, { token = '', port = 3100, hosted = false, reposBase
     app.get('/runs', (req, res) => res.json({ runs: manager.list(hosted ? req.owner : undefined) }));
     // before /runs/:id so "efficiency" is not read as a run id
     app.get('/runs/efficiency', (req, res) => res.json({ models: manager.modelEfficiency(hosted ? req.owner : undefined) }));
+    // Two runs of one prompt on two models, started together; /runs/compare/:id compares them
+    app.post('/runs/compare', wrap(async (req, res) => {
+        const body = await prepare(req);
+        const models = [...new Set((Array.isArray(body.models) ? body.models : []).map((m) => String(m || '').trim()).filter(Boolean))];
+        if (models.length !== 2) return fail(res, new Error('a comparison needs two different models'));
+        const group = `c${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
+        const runs = models.map((model) => manager.create({ ...body, models: undefined, model, compare: group }));
+        res.status(201).json({ id: group, runs: runs.map((r) => manager.summary(r)) });
+    }));
+    app.get('/runs/compare/:id', (req, res) => {
+        const report = manager.compareReport(req.params.id, hosted ? req.owner : undefined);
+        return report ? res.json(report) : fail(res, new Error('no comparison with two runs by that id'), 404);
+    });
     app.get('/runs/repos', (req, res) => res.json(hosted ? { repos: git.listClones(reposBase, req.owner), roots: [], hosted: true } : { repos: manager.repos(), roots: manager.roots, hosted: false }));
     // the sandbox drivers a run can pick, and whether each one's key is set
     app.get('/runs/sandboxes', (req, res) => res.json({ default: manager.sandboxKind, drivers: listDrivers() }));

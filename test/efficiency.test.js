@@ -117,3 +117,43 @@ test('the agent loop hints, then escalates, when a model keeps repeating itself'
     assert.ok(events.some(e => e.type === 'step-end' && e.progress === false));
     assert.ok(lastHistoryHints >= 1, 'the hints were in the model history it was sent');
 });
+
+function run(model, { status = 'done', steps = 4, productive = 3, cost = 0.1, tokens = 1000, goal = 'fix the bug', repo = 'x/y' } = {}) {
+    return {
+        goal, repo, status, cost, tokens: { in: tokens - 100, out: 100 }, models: { [model]: { calls: steps } },
+        efficiency: { steps, productive, wasted: steps - productive, wastedCost: 0, loops: 0, escalations: 0 },
+        created: '2026-11-03T00:00:00Z',
+    };
+}
+
+test('compareRuns: both finished, the cheaper one wins and the gap splits into steps and cost per step', () => {
+    const cheap = run('weak-x', { steps: 4, productive: 4, cost: 0.1 });
+    const dear = run('strong-y', { steps: 6, productive: 5, cost: 0.3 });
+    const c = E.compareRuns(cheap, dear);
+    assert.equal(c.sameTask, true);
+    assert.match(c.verdict, /weak-x cost \$0\.1000, 67% less than strong-y/);
+    const cost = c.rows.find(r => r.key === 'cost');
+    assert.equal(cost.winner, 'a');
+    const steps = c.rows.find(r => r.key === 'steps');
+    assert.equal(steps.winner, 'a');
+    // costGap = fromSteps + fromCostPerStep, exactly
+    assert.ok(Math.abs(c.split.costGap - (c.split.fromSteps + c.split.fromCostPerStep)) < 1e-6);
+    assert.equal(c.split.costGap, -0.2);
+});
+
+test('compareRuns: one finished and one did not', () => {
+    const c = E.compareRuns(run('weak-x', { status: 'incomplete' }), run('strong-y'));
+    assert.match(c.verdict, /strong-y finished; weak-x ended as incomplete/);
+    assert.equal(c.rows.find(r => r.key === 'done').winner, 'b');
+});
+
+test('compareRuns: different goals are flagged as not like for like', () => {
+    const c = E.compareRuns(run('weak-x'), run('strong-y', { goal: 'something else' }));
+    assert.equal(c.sameTask, false);
+    assert.match(c.verdict, /not like for like/);
+});
+
+test('compareRuns: equal numbers have no winner', () => {
+    const c = E.compareRuns(run('weak-x'), run('strong-y'));
+    assert.equal(c.rows.find(r => r.key === 'cost').winner, null);
+});

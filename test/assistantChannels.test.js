@@ -213,3 +213,81 @@ test('polling reads updates, answers the allowed chat, and stops when asked', as
     assert.deepEqual(offsets, [0, 11]);
     assert.deepEqual(sent, [{ chat_id: '42', text: 'got it' }]);
 });
+
+// ---- Discord ----
+
+class FakeSocket {
+    constructor(url) { this.url = url; this.sent = []; this.closed = false; FakeSocket.last = this; }
+    send(data) { this.sent.push(JSON.parse(data)); }
+    close() { this.closed = true; if (this.onclose) this.onclose(); }
+    deliver(packet) { this.onmessage({ data: JSON.stringify(packet) }); }
+}
+
+test('a Discord direct message from an allowed user is answered; a server message needs a mention', () => {
+    const users = new Set(['U1']);
+    const dm = { author: { id: 'U1' }, channel_id: 'D1', content: 'hello' };
+    assert.deepEqual(channels.discordMessage(dm, users, 'BOT'), { conversation: 'discord:D1', channel: 'D1', text: 'hello', user: 'U1' });
+    const quiet = { author: { id: 'U1' }, channel_id: 'C1', guild_id: 'G1', content: 'hello' };
+    assert.equal(channels.discordMessage(quiet, users, 'BOT'), null);
+    const mention = { author: { id: 'U1' }, channel_id: 'C1', guild_id: 'G1', content: '<@!BOT> status please', mentions: [{ id: 'BOT' }] };
+    assert.equal(channels.discordMessage(mention, users, 'BOT').text, 'status please');
+    assert.equal(channels.discordMessage({ ...dm, author: { id: 'U2' } }, users, 'BOT'), null);
+    assert.equal(channels.discordMessage({ ...dm, author: { id: 'U1', bot: true } }, users, 'BOT'), null);
+});
+
+test('a Discord reply is posted with the bot token, and a long reply is split', async () => {
+    const posts = [];
+    const fetchImpl = async (url, init) => { posts.push({ url, auth: init.headers.authorization, body: JSON.parse(init.body).content }); return jsonRes({ id: '1' }); };
+    await channels.sendDiscord({ token: 'T0', channel: 'C9', text: 'short', fetchImpl });
+    assert.deepEqual(posts[0], { url: 'https://discord.com/api/v10/channels/C9/messages', auth: 'Bot T0', body: 'short' });
+    const long = `${'a'.repeat(1200)}\n${'b'.repeat(1200)}`;
+    posts.length = 0;
+    await channels.sendDiscord({ token: 'T0', channel: 'C9', text: long, fetchImpl });
+    assert.equal(posts.length, 2);
+    assert.ok(posts.every((p) => p.body.length <= 1900));
+});
+
+test('a Discord send error names Discord, not the token', async () => {
+    const fetchImpl = async () => jsonRes({ message: 'Missing Access', code: 50001 }, 403);
+    await assert.rejects(channels.sendDiscord({ token: 'SECRET', channel: 'C', text: 'x', fetchImpl }), (err) => err.message === 'Discord send: Missing Access' && !err.message.includes('SECRET'));
+});
+
+test('the Discord gateway identifies with the intents, answers an allowed DM, and stops cleanly', async () => {
+    const posts = [];
+    const fetchImpl = async (url, init) => { posts.push({ url, body: JSON.parse(init.body) }); return jsonRes({ id: '2' }); };
+    const assistant = fakeAssistant('pong');
+    const logs = [];
+    const ch = channels.createChannels({
+        assistant,
+        env: { DISCORD_BOT_TOKEN: 'DTOK', DISCORD_ALLOWED_USER_IDS: 'U1' },
+        fetchImpl,
+        log: (m) => logs.push(m),
+        WebSocketImpl: FakeSocket,
+    });
+    assert.equal(ch.status().discord, 'gateway');
+    ch.start();
+    const socket = FakeSocket.last;
+    assert.match(socket.url, /gateway\.discord\.gg/);
+    socket.deliver({ op: 10, d: { heartbeat_interval: 600000 } });
+    assert.equal(socket.sent[0].op, 2);
+    assert.equal(socket.sent[0].d.token, 'DTOK');
+    assert.equal(socket.sent[0].d.intents, 37377); // GUILDS, GUILD_MESSAGES, DIRECT_MESSAGES, MESSAGE_CONTENT
+    socket.deliver({ op: 0, t: 'READY', s: 1, d: { user: { id: 'BOT' } } });
+    assert.match(logs.join('\n'), /connected as bot BOT/);
+
+    socket.deliver({ op: 0, t: 'MESSAGE_CREATE', s: 2, d: { author: { id: 'U1' }, channel_id: 'D7', content: 'hey' } });
+    socket.deliver({ op: 0, t: 'MESSAGE_CREATE', s: 3, d: { author: { id: 'U9' }, channel_id: 'D8', content: 'who am I talking to' } });
+    for (let i = 0; i < 20 && posts.length === 0; i += 1) await tick();
+    assert.deepEqual(assistant.calls, [{ conversation: 'discord:D7', text: 'hey' }]);
+    assert.deepEqual(posts, [{ url: 'https://discord.com/api/v10/channels/D7/messages', body: { content: 'pong' } }]);
+    assert.equal(logs.filter((m) => /Discord user U9/.test(m)).length, 1);
+
+    ch.stop();
+    assert.equal(socket.closed, true);
+});
+
+test('Discord with a token but no allowed users says so and stays off', () => {
+    const ch = channels.createChannels({ assistant: fakeAssistant(), env: { DISCORD_BOT_TOKEN: 'T' }, fetchImpl: async () => jsonRes({}), log: () => {}, WebSocketImpl: FakeSocket });
+    assert.equal(ch.status().discord, 'off');
+    assert.ok(ch.problems.some((p) => /DISCORD_ALLOWED_USER_IDS/.test(p)));
+});

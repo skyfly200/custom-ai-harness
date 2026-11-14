@@ -35,10 +35,11 @@
     }
 
     function renderChannels(channels, problems) {
-        const labels = { telegram: { webhook: 'Telegram (webhook)', polling: 'Telegram (polling)', off: 'Telegram: off' }, slack: { events: 'Slack', off: 'Slack: off' } };
+        const labels = { telegram: { webhook: 'Telegram (webhook)', polling: 'Telegram (polling)', off: 'Telegram: off' }, slack: { events: 'Slack', off: 'Slack: off' }, discord: { gateway: 'Discord', off: 'Discord: off' } };
         const items = [
             labels.telegram[channels.telegram] || `Telegram: ${channels.telegram}`,
             labels.slack[channels.slack] || `Slack: ${channels.slack}`,
+            labels.discord[channels.discord] || `Discord: ${channels.discord}`,
             ...problems,
         ];
         $('channels').replaceChildren(...items.map((label) => {

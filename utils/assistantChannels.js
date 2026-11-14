@@ -11,6 +11,12 @@ const crypto = require('crypto');
 const TELEGRAM_MAX = 4000; // Telegram allows 4096 characters per message
 const SLACK_MAX = 3900; // Slack's text limit is far larger; keep replies readable
 const SLACK_SKEW_SECONDS = 300;
+const DISCORD_MAX = 1900; // Discord allows 2000 characters per message
+const DISCORD_GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
+const DISCORD_API = 'https://discord.com/api/v10';
+// GUILDS, GUILD_MESSAGES, DIRECT_MESSAGES, and MESSAGE_CONTENT (privileged: enable it in the Discord developer portal)
+const DISCORD_INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
+const ALLOWLIST_VAR = { Telegram: 'TELEGRAM_ALLOWED_CHAT_IDS', Slack: 'SLACK_ALLOWED_USER_IDS', Discord: 'DISCORD_ALLOWED_USER_IDS' };
 
 const list = (value) => new Set(String(value || '').split(',').map((s) => s.trim()).filter(Boolean));
 
@@ -104,6 +110,97 @@ async function sendSlack({ token, channel, text, thread, fetchImpl = fetch }) {
     }
 }
 
+// ---- Discord ----
+
+/** Discord's bot gateway: a direct message, or a server message that mentions the bot. */
+function discordAddressed(event, botId) {
+    if (!event || !event.author) return false;
+    if (!event.guild_id) return true;
+    return Boolean(botId && Array.isArray(event.mentions) && event.mentions.some((u) => u && u.id === botId));
+}
+
+/** A message from an allowed user that is addressed to the bot, or null. */
+function discordMessage(event, allowedUsers, botId) {
+    if (!event || !event.author || event.author.bot || !allowedUsers.has(event.author.id)) return null;
+    if (!discordAddressed(event, botId)) return null;
+    const raw = String(event.content || '');
+    const text = (botId ? raw.replace(new RegExp(`<@!?${botId}>`, 'g'), '') : raw).trim();
+    if (!text) return null;
+    return { conversation: `discord:${event.channel_id}`, channel: event.channel_id, text, user: event.author.id };
+}
+
+async function sendDiscord({ token, channel, text, fetchImpl = fetch }) {
+    for (const piece of chunks(text, DISCORD_MAX)) {
+        const res = await fetchImpl(`${DISCORD_API}/channels/${channel}/messages`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bot ${token}` },
+            body: JSON.stringify({ content: piece }),
+        });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(`Discord send: ${data.message || `HTTP ${res.status}`}`);
+        }
+    }
+}
+
+/**
+ * Keeps a connection to Discord's gateway open and calls onMessage(event, botId) for each message event.
+ * Heartbeats, identifies, and reconnects after a drop. WebSocketImpl defaults to Node's global WebSocket.
+ */
+function discordGateway({ token, onMessage, WebSocketImpl = globalThis.WebSocket, url = DISCORD_GATEWAY, log = () => {}, reconnectMs = 5000 }) {
+    let ws = null;
+    let seq = null;
+    let heart = null;
+    let retry = null;
+    let stopped = false;
+    let botId = null;
+    const send = (op, d) => { if (ws) ws.send(JSON.stringify({ op, d })); };
+
+    function handle(packet) {
+        if (packet.s !== undefined && packet.s !== null) seq = packet.s;
+        if (packet.op === 10) {
+            clearInterval(heart);
+            heart = setInterval(() => send(1, seq), packet.d.heartbeat_interval);
+            send(2, { token, intents: DISCORD_INTENTS, properties: { os: process.platform, browser: 'harness', device: 'harness' } });
+        } else if (packet.op === 0 && packet.t === 'READY') {
+            botId = packet.d.user && packet.d.user.id;
+            log(`Discord: connected${botId ? ` as bot ${botId}` : ''}`);
+        } else if (packet.op === 0 && packet.t === 'MESSAGE_CREATE') {
+            onMessage(packet.d, botId);
+        } else if (packet.op === 1) {
+            send(1, seq);
+        } else if (packet.op === 7 || packet.op === 9) {
+            if (ws) ws.close(); // Discord asks for a reconnect, or the session is invalid: start over
+        }
+    }
+
+    function connect() {
+        ws = new WebSocketImpl(url);
+        ws.onmessage = (ev) => {
+            let packet;
+            try { packet = JSON.parse(String(ev.data)); } catch { return; }
+            handle(packet);
+        };
+        ws.onclose = () => {
+            clearInterval(heart);
+            heart = null;
+            if (!stopped) retry = setTimeout(connect, reconnectMs);
+        };
+        ws.onerror = () => {};
+    }
+
+    connect();
+    return {
+        botId: () => botId,
+        stop() {
+            stopped = true;
+            clearInterval(heart);
+            clearTimeout(retry);
+            if (ws) ws.close();
+        },
+    };
+}
+
 /**
  * @param {object} opts
  * @param {object} opts.assistant  createAssistant() from utils/assistant.js
@@ -111,9 +208,10 @@ async function sendSlack({ token, channel, text, thread, fetchImpl = fetch }) {
  * @param {function} [opts.fetchImpl]
  * @param {function} [opts.log]
  */
-function createChannels({ assistant, env = process.env, fetchImpl = fetch, log = (m) => console.warn(m), now = () => Date.now(), pollSeconds = 25 }) {
+function createChannels({ assistant, env = process.env, fetchImpl = fetch, log = (m) => console.warn(m), now = () => Date.now(), pollSeconds = 25, WebSocketImpl = globalThis.WebSocket }) {
     const tg = { token: env.TELEGRAM_BOT_TOKEN || '', chats: list(env.TELEGRAM_ALLOWED_CHAT_IDS), secret: env.TELEGRAM_WEBHOOK_SECRET || '' };
     const sl = { token: env.SLACK_BOT_TOKEN || '', signing: env.SLACK_SIGNING_SECRET || '', users: list(env.SLACK_ALLOWED_USER_IDS) };
+    const dc = { token: env.DISCORD_BOT_TOKEN || '', users: list(env.DISCORD_ALLOWED_USER_IDS) };
     const problems = [];
     const telegramOn = Boolean(tg.token);
     const slackOn = Boolean(sl.token || sl.signing);
@@ -121,6 +219,8 @@ function createChannels({ assistant, env = process.env, fetchImpl = fetch, log =
     if (slackOn && !(sl.token && sl.signing && sl.users.size)) problems.push('Slack: needs SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET and SLACK_ALLOWED_USER_IDS');
     const telegram = telegramOn && tg.chats.size > 0;
     const slack = slackOn && Boolean(sl.token && sl.signing && sl.users.size);
+    if (dc.token && !dc.users.size) problems.push('Discord: DISCORD_ALLOWED_USER_IDS is empty, so nobody can use the bot');
+    const discord = Boolean(dc.token && dc.users.size);
     const telegramWebhook = telegram && Boolean(tg.secret);
     let polling = false;
     let stopped = false;
@@ -140,7 +240,7 @@ function createChannels({ assistant, env = process.env, fetchImpl = fetch, log =
         const key = `${kind}:${id}`;
         if (noted.has(key)) return;
         noted.add(key);
-        log(`Assistant: ignored a message from ${kind} ${id} (not on the allowlist; add it to ${kind.startsWith('Telegram') ? 'TELEGRAM_ALLOWED_CHAT_IDS' : 'SLACK_ALLOWED_USER_IDS'} to allow it)`);
+        log(`Assistant: ignored a message from ${kind} ${id} (not on the allowlist; add it to ${ALLOWLIST_VAR[kind.split(' ')[0]]} to allow it)`);
     }
     function telegramUpdate(update) {
         const chatId = update && update.message && update.message.chat && update.message.chat.id;
@@ -194,7 +294,19 @@ function createChannels({ assistant, env = process.env, fetchImpl = fetch, log =
     }
 
     /** Starts long polling (Telegram, without a webhook secret). Safe to call once; a no-op otherwise. */
+    // Discord's gateway connection is opened by start() and closed by stop()
+    let gateway = null;
+    function discordEvent(event, botId) {
+        const m = discordMessage(event, dc.users, botId);
+        if (!m) {
+            if (event && event.author && !event.author.bot && !dc.users.has(event.author.id) && discordAddressed(event, botId)) refused('Discord user', event.author.id);
+            return;
+        }
+        answer(m.conversation, m.text, (text) => sendDiscord({ token: dc.token, channel: m.channel, text, fetchImpl }));
+    }
+
     function start() {
+        if (discord && !gateway) gateway = discordGateway({ token: dc.token, onMessage: discordEvent, log, WebSocketImpl });
         if (!telegram || telegramWebhook || polling) return false;
         polling = true;
         telegramCall(tg.token, 'deleteWebhook', { drop_pending_updates: false }, fetchImpl)
@@ -203,7 +315,10 @@ function createChannels({ assistant, env = process.env, fetchImpl = fetch, log =
         return true;
     }
 
-    function stop() { stopped = true; }
+    function stop() {
+        stopped = true;
+        if (gateway) gateway.stop();
+    }
 
     return {
         problems,
@@ -216,12 +331,17 @@ function createChannels({ assistant, env = process.env, fetchImpl = fetch, log =
             slack: slack ? 'events' : 'off',
             telegramChats: tg.chats.size,
             slackUsers: sl.users.size,
+            discord: discord ? 'gateway' : 'off',
+            discordUsers: dc.users.size,
         }),
     };
 }
 
 module.exports = {
     createChannels,
+    discordMessage,
+    sendDiscord,
+    discordGateway,
     telegramMessage,
     slackSignatureOk,
     slackMessage,

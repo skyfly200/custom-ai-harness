@@ -57,6 +57,15 @@ The assistant can call the MCP tools that chat uses (`mcp-servers.json`, managed
 
 A tool whose server is set to ask first (`askBefore`) does not run on its own. The assistant names the call and waits: send `/yes` to allow it or `/no` to decline. Until you answer, other messages in that conversation are held. Tools on servers that do not ask run straight away, up to six steps per message.
 
+### Discord
+
+1. Create an application at the [Discord developer portal](https://discord.com/developers/applications), then add a bot on its Bot page. Copy the bot token into `DISCORD_BOT_TOKEN`.
+2. On the Bot page, turn on **Message Content Intent** (the bot cannot read messages without it).
+3. Invite the bot to a server with the scopes `bot` and the permissions to read and send messages. Use OAuth2 > URL Generator.
+4. Put the Discord user ids of the people who may talk to it in `DISCORD_ALLOWED_USER_IDS` (Discord settings > Advanced > Developer Mode, then right-click a user > Copy User ID).
+
+Discord needs no public address: the server keeps an outbound connection to Discord's gateway. The bot answers direct messages, and in a server channel it answers when mentioned. Replies longer than 1,900 characters are split.
+
 ## Security
 
 - Channel routes sit before the login gate, and each checks its own proof: Telegram a secret header, Slack a signature over the raw body with a five-minute clock window. Messages from anyone else are ignored.
@@ -66,7 +75,7 @@ A tool whose server is set to ask first (`askBefore`) does not run on its own. T
 ## Not built yet
 
 - Shell and repo tools are still not offered to the assistant. Skills the assistant saves are not shown on the Skills page yet (`GET /ui/api/assistant/skills`). Google Calendar, Gmail, Docs, Trello and text services need MCP servers configured before the assistant can use them.
-- Telegram and Slack are stub-tested only; they have not been run against the real APIs.
+- Telegram, Slack and Discord are stub-tested only; they have not been run against the real APIs.
 - Notes are one shared list for the owner; there is no per-channel separation or search.
 
 Code: `utils/assistant.js` (notes, conversations, page context, loopback call), `ui/assistant-dock.js` (the floating button, added by `ui/nav.js`), `utils/assistantChannels.js` (Telegram and Slack), `ui/assistant.html`, and the routes in `server.js` (`/ui/api/assistant*`). Tests: `test/assistant.test.js`, `test/assistantChannels.test.js`, `test/assistantDock.test.js`.

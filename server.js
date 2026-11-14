@@ -504,7 +504,9 @@ app.get('/ui/api/assistant/skills', (req, res) => {
 });
 app.get('/ui/api/assistant/history', (req, res) => {
     if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });
-    res.json({ conversation: assistantWebKey(req), messages: assistantApp.history(assistantWebKey(req)) });
+    const conversation = assistantWebKey(req);
+    // pending: the tool call waiting for /yes or /no, so the page can show Allow and Decline buttons
+    res.json({ conversation, messages: assistantApp.history(conversation), pending: assistantApp.pending(conversation) });
 });
 app.post('/ui/api/assistant/message', async (req, res) => {
     if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });
@@ -513,7 +515,8 @@ app.post('/ui/api/assistant/message', async (req, res) => {
     const conversation = assistantWebKey(req);
     // the logged-in owner's key pays (ASSISTANT_OWNER when logins are off)
     // context: the page the person is on (from the floating assistant), used for this turn only
-    res.json({ conversation, reply: await assistantApp.handle(conversation, text, { owner: personOf(req) || undefined, context: req.body.context }) });
+    const reply = await assistantApp.handle(conversation, text, { owner: personOf(req) || undefined, context: req.body.context });
+    res.json({ conversation, reply, pending: assistantApp.pending(conversation) });
 });
 // With logins on, the Usage page counts only the signed-in person's own requests, admins' included (the All users view
 // has everyone's). The routing log is each member's own too; admins see the whole install's, to run it.

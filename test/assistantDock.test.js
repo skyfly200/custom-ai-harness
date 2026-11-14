@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const assistant = require('../utils/assistant');
-const { gatherContext } = require('../ui/assistant-dock.js');
+const { gatherContext, liftFor, ICONS, GAP } = require('../ui/assistant-dock.js');
 
 test('the dock sends the page path with its hash, the title and the selection', () => {
     assert.deepEqual(
@@ -45,4 +45,39 @@ test('the page the person is on reaches the model for that turn only, not the sa
 test('without a context the prompt is what it was before', () => {
     const plain = assistant.systemPrompt({ name: 'Max', owner: 'Skyler', notes: [], today: '2026-11-12' });
     assert.doesNotMatch(plain, /page they are on|sent this from the harness app/);
+});
+
+test('the button keeps to its corner when nothing covers it', () => {
+    assert.equal(liftFor([], 800), GAP);
+    assert.equal(liftFor(undefined, 800), GAP);
+});
+
+test('the button sits above a bar that covers the bottom-left corner', () => {
+    // the chat composer: full width, the bottom 90px of an 800px window
+    assert.equal(liftFor([{ left: 0, right: 1200, top: 710, bottom: 800, width: 1200, height: 90 }], 800), 90 + GAP / 2);
+    // the higher of two bars wins
+    const side = { left: 0, right: 270, top: 640, bottom: 800, width: 270, height: 160 };
+    const compose = { left: 270, right: 1200, top: 710, bottom: 800, width: 930, height: 90 };
+    assert.equal(liftFor([side, compose], 800), 160 + GAP / 2, 'the composer starts right of the button, so only the sidebar footer counts');
+});
+
+test('bars that are hidden, off to the side, or not at the bottom are ignored', () => {
+    const vh = 800;
+    assert.equal(liftFor([{ left: -270, right: 0, top: 640, bottom: 800, width: 270, height: 160 }], vh), GAP, 'a sidebar slid off the screen');
+    assert.equal(liftFor([{ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }], vh), GAP, 'display: none');
+    assert.equal(liftFor([{ left: 0, right: 400, top: 100, bottom: 300, width: 400, height: 200 }], vh), GAP, 'a box in the middle of the page');
+    assert.equal(liftFor([{ left: 0, right: 400, top: 900, bottom: 1000, width: 400, height: 100 }], vh), GAP, 'below the window');
+});
+
+test('the lift never pushes the button above the middle of the window', () => {
+    assert.equal(liftFor([{ left: 0, right: 400, top: 50, bottom: 800, width: 400, height: 750 }], 800), 400);
+});
+
+test('the button is an icon: every icon is an inline, decorative svg in the line style', () => {
+    for (const [name, svg] of Object.entries(ICONS)) {
+        assert.match(svg, /^<svg viewBox="0 0 24 24"/, name);
+        assert.match(svg, /aria-hidden="true"/, name);
+        assert.doesNotMatch(svg, /<script|on\w+=/i, name);
+    }
+    assert.ok(ICONS.assistant && ICONS.close, 'an icon for closed and one for open');
 });

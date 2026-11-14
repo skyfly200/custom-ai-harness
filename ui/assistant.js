@@ -56,39 +56,59 @@
         return info;
     }
 
+    // A tool call waiting for /yes or /no: show the question with Allow and Decline, so nobody has to type /yes
+    const ask = $('ask');
+    function setPending(question) {
+        ask.classList.toggle('hidden', !question);
+        $('askText').textContent = question || '';
+        if (question) log.scrollTop = log.scrollHeight;
+    }
+
     async function loadHistory() {
-        const { messages } = await api('api/assistant/history');
+        const { messages, pending } = await api('api/assistant/history');
         log.replaceChildren();
         for (const m of messages) bubble(m.role === 'user' ? 'user' : 'assistant', m.content);
         if (!messages.length) bubble('assistant', 'Hello. Ask me anything, or send /help for the commands.');
+        setPending(pending);
     }
 
-    form.addEventListener('submit', async (event) => {
+    form.addEventListener('submit', (event) => {
         event.preventDefault();
         const message = text.value.trim();
         if (!message) return;
         text.value = '';
+        sendMessage(message);
+    });
+    $('allow').addEventListener('click', () => sendMessage('/yes'));
+    $('decline').addEventListener('click', () => sendMessage('/no'));
+
+    async function sendMessage(message) {
         send.disabled = true;
+        $('allow').disabled = true;
+        $('decline').disabled = true;
         bubble('user', message);
         const pending = bubble('assistant', 'Thinking…', 'pending');
         status.textContent = '';
         try {
-            const { reply } = await api('api/assistant/message', {
+            const { reply, pending: waiting } = await api('api/assistant/message', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ text: message }),
             });
             pending.textContent = reply;
             pending.classList.remove('pending');
+            setPending(waiting);
             if (/^Saved note|^Forgot note|^Started a new/.test(reply)) refresh().catch(() => {});
         } catch (err) {
             pending.textContent = `Could not send: ${err.message}`;
             pending.classList.add('error');
         } finally {
             send.disabled = false;
+            $('allow').disabled = false;
+            $('decline').disabled = false;
             text.focus();
         }
-    });
+    }
 
     text.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {

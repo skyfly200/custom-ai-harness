@@ -121,8 +121,22 @@ Optional, higher-level operation built on top of the Model Layer. State lives on
   * **Open questions:** one repo per app or a monorepo of apps; whether the chat key is a harness user key or a separate app credential with its own cap; auth for the generated app's own users (none at first: owner-only behind the harness login); how much of the first build is automated versus a guided conversation. **Partly built:** the Apps page (nav after Chat) lists your apps and starts a new one from `templates/web-app` in a New app dialog (step a and the first half of step b): it fills the template in, puts it in a local git repo under an allowed root or makes or links a GitHub repo (`create` makes a private repo on your account; `existing` clones an empty one), adds the CI workflow and a deploy workflow for the chosen host (Vercel, Netlify or Fly.io) and database (Neon or Supabase) with a DEPLOY.md listing what to connect (no credentials are created or stored), registers it, and runs the first build from the description as a change run. Not yet: the GitHub App in place of your token, the per-app chat key and chat panel wiring, deploy behind Allow, the cost estimate, and more templates.
   * **Deploy backends, planned: Cloudflare Durable Objects.** Cloudflare Durable Objects (planned). Stateful, single-owner objects at the edge: one object per room, board or user, with its own storage (SQLite-backed) and WebSockets. It fits apps that need live state coordinated in one place (a shared board, a chat room, a counter per user), which Vercel, Netlify and Fly.io do not give without a separate database. Planned as a deploy target beside Vercel, Netlify and Fly.io: a Worker template with a wrangler.toml that declares the Durable Object classes, a deploy workflow that runs `wrangler deploy` with CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets, and DEPLOY.md steps for the Cloudflare account. The object storage would replace Neon or Supabase for that app, so the database choice would be hidden for it. Not built: no template or deploy code yet.
 
+# Add-on: Personal Assistant
+
+One agent with notes and a memory, on the web, Telegram, Slack and Discord ([docs](docs/assistant.md)).
+
+* ✅ **Floating assistant on every page:** a round orb button with an icon in the bottom-left corner (`ui/assistant-dock.js`), shared conversation with the Assistant page, the page you are on sent for that turn. It moves above the chat composer and the chat sidebar's footer, and shows a close icon while open.
+* ✅ **Allow and Decline for tool calls:** a dot on the button while a call waits for `/yes` or `/no`, and the request with Allow and Decline buttons in the panel and on the Assistant page (`pending` on `GET /ui/api/assistant/history` and `POST /ui/api/assistant/message`).
+* **Streamed replies in the panel:** the panel waits for the whole reply; stream it the way the chat page does.
+* **Markdown in replies:** replies are plain text; render them with `ui/markdown.js` (still never raw HTML from the model).
+* **A keyboard shortcut** to open and close the panel from any page.
+* **Unread dot:** show on the button when a reply arrived from the Assistant page or another tab since the panel was last open.
+* **Notes, per channel and searchable:** today notes are one shared list for the owner.
+* **Shell and repo tools for the assistant**, behind Allow like the harness tools.
+* **Test Telegram, Slack and Discord against the real APIs** (stub-tested only).
+
 # Bugs
-* **Allow Tool Call messages should surface and show a clear indicator of user input being needed
+* **Allow Tool Call messages should surface and show a clear indicator of user input being needed.** The chat page opens a waiting call and marks it "Needs your input"; the assistant now has the same (see Personal Assistant above).
 
 # Additional
 

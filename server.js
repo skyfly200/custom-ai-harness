@@ -1971,7 +1971,7 @@ if (require.main === module) {
         console.log('Harness interceptor active on port 3000');
         if (schedules) { schedules.start(); console.log('Scheduled messages run on the server'); }
         const channelStatus = assistantChannelsApp.status();
-        if (channelStatus.telegram !== 'off' || channelStatus.slack !== 'off') console.log(`Assistant channels: Telegram ${channelStatus.telegram}, Slack ${channelStatus.slack}`);
+        if (channelStatus.telegram !== 'off' || channelStatus.slack !== 'off' || channelStatus.discord !== 'off') console.log(`Assistant channels: Telegram ${channelStatus.telegram}, Slack ${channelStatus.slack}, Discord ${channelStatus.discord}`);
         for (const problem of assistantChannelsApp.problems) console.warn(`Assistant channels: ${problem}`);
         assistantChannelsApp.start();
     });

@@ -1,5 +1,6 @@
 // The assistant page: a conversation with the owner's assistant (utils/assistant.js), its notes and its channels.
-// Replies are shown as plain text, never as HTML.
+// Replies are drawn as Markdown with ui/markdown.js, which escapes every piece of model text before it adds a tag
+// (links open only http(s) and mailto); your own messages and the notes stay plain text.
 (() => {
     const $ = (id) => document.getElementById(id);
     const log = $('log');
@@ -18,11 +19,28 @@
     function bubble(role, content, extra) {
         const el = document.createElement('div');
         el.className = `bubble ${role}${extra ? ` ${extra}` : ''}`;
-        el.textContent = content;
+        draw(el, content);
         log.appendChild(el);
         log.scrollTop = log.scrollHeight;
         return el;
     }
+
+    function draw(el, content) {
+        const md = window.Markdown;
+        const asMd = md && el.classList.contains('assistant') && !el.classList.contains('pending') && !el.classList.contains('error');
+        el.classList.toggle('md', Boolean(asMd));
+        if (asMd) el.innerHTML = md.render(content);
+        else el.textContent = content;
+    }
+
+    // the Copy button on a code block in a reply
+    log.addEventListener('click', async (event) => {
+        const b = event.target.closest('.copy-code');
+        if (!b) return;
+        const code = b.closest('.code')?.querySelector('pre')?.textContent || '';
+        try { await navigator.clipboard.writeText(code); b.textContent = 'Copied'; } catch { b.textContent = 'Could not copy'; }
+        setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+    });
 
     function renderNotes(notes) {
         const list = $('notes');
@@ -95,13 +113,13 @@
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ text: message }),
             });
-            pending.textContent = reply;
             pending.classList.remove('pending');
+            draw(pending, reply);
             setPending(waiting);
             if (/^Saved note|^Forgot note|^Started a new/.test(reply)) refresh().catch(() => {});
         } catch (err) {
-            pending.textContent = `Could not send: ${err.message}`;
             pending.classList.add('error');
+            draw(pending, `Could not send: ${err.message}`);
         } finally {
             send.disabled = false;
             $('allow').disabled = false;

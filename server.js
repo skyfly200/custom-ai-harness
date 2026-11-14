@@ -518,6 +518,29 @@ app.post('/ui/api/assistant/message', async (req, res) => {
     const reply = await assistantApp.handle(conversation, text, { owner: personOf(req) || undefined, context: req.body.context });
     res.json({ conversation, reply, pending: assistantApp.pending(conversation) });
 });
+// The same as /message, streamed as server-sent events (the floating assistant): {"step":true} when a model step
+// starts, {"delta":"..."} for each piece of its text, then {"done":true,"reply":...,"pending":...} with the final
+// answer. A command or an approval question arrives as the done event alone.
+app.post('/ui/api/assistant/stream', async (req, res) => {
+    if (!canUseAssistant(req)) return res.status(403).json({ error: 'the assistant is for its owner' });
+    const text = req.body && req.body.text;
+    if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'send {"text": "..."}' });
+    const conversation = assistantWebKey(req);
+    res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' });
+    const send = (event) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`); };
+    try {
+        const reply = await assistantApp.handle(conversation, text, {
+            owner: personOf(req) || undefined,
+            context: req.body.context,
+            onStep: () => send({ step: true }),
+            onDelta: (delta) => send({ delta }),
+        });
+        send({ done: true, conversation, reply, pending: assistantApp.pending(conversation) });
+    } catch (err) {
+        send({ done: true, error: err.message });
+    }
+    res.end();
+});
 // With logins on, the Usage page counts only the signed-in person's own requests, admins' included (the All users view
 // has everyone's). The routing log is each member's own too; admins see the whole install's, to run it.
 const ownScope = (req) => (req.harnessLogin && req.harnessUser ? { user: req.harnessUser.name } : {});

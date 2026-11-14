@@ -125,8 +125,14 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
         return null;
     }
 
-    async function chat(key, message, owner, page = null) {
+    async function chat(key, message, owner, page = null, stream = null) {
         const s = load();
+        // streaming: each model step starts with onStep (so a page can drop text from a step that ended in a tool
+        // call), and its text arrives through onDelta
+        const askFn = stream ? (msgs, opts) => {
+            if (stream.onStep) stream.onStep();
+            return ask(msgs, { ...opts, onDelta: stream.onDelta });
+        } : ask;
         const history = s.conversations[key] || [];
         const pending = s.pending[key];
         const word = message.toLowerCase();
@@ -138,7 +144,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
         try {
             if (manager && manager.start) await manager.start();
             if (pending) {
-                out = await tooling.resume({ pending, approve: word === '/yes', ask, manager, owner, conversation: key });
+                out = await tooling.resume({ pending, approve: word === '/yes', ask: askFn, manager, owner, conversation: key });
             } else {
                 const today = new Date(now()).toISOString().slice(0, 10);
                 const messages = [
@@ -146,7 +152,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
                     ...history.map(({ role, content }) => ({ role, content })),
                     { role: 'user', content: message },
                 ];
-                out = await tooling.drive({ messages, ask, manager, owner, conversation: key });
+                out = await tooling.drive({ messages, ask: askFn, manager, owner, conversation: key });
             }
         } catch (err) {
             return `I could not get an answer just now (${err.message}). Try again in a moment.`;
@@ -168,7 +174,8 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
     }
 
     /** Answers one message in `conversation` (any string: "web:Skyler", "telegram:123"). Resolves to the text to send back. */
-    function handle(conversation, text, { owner: who, context = null } = {}) {
+    // onDelta / onStep: stream the model's text as it arrives (see chat); commands and approval questions don't stream
+    function handle(conversation, text, { owner: who, context = null, onDelta = null, onStep = null } = {}) {
         const key = String(conversation || 'web').slice(0, 120);
         const message = String(text || '').trim().slice(0, MAX_TEXT_CHARS);
         if (!message) return Promise.resolve('');
@@ -178,7 +185,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
                 const out = command(key, cmd[1].toLowerCase(), cmd[2].trim());
                 if (out !== null) return out;
             }
-            return chat(key, message, who || owner, pageContext(context));
+            return chat(key, message, who || owner, pageContext(context), typeof onDelta === 'function' ? { onDelta, onStep } : null);
         });
     }
 
@@ -216,22 +223,73 @@ function errorText(body) {
  * The model call for the assistant: a loopback POST to this Interceptor's /v1/chat/completions, signed as the
  * the person it bills (the logged-in owner on the web page, else ASSISTANT_OWNER), so routing, usage and their credential apply as for any chat.
  */
+/**
+ * Reads an OpenAI chat-completions event stream ("data: {json}" lines, ending with "data: [DONE]") into
+ * { content, tool_calls }, calling onDelta with each piece of answer text as it arrives. `body` is any async
+ * iterable of bytes or strings (a fetch Response body). Tool calls arrive in pieces and are joined by index.
+ */
+async function readCompletionStream(body, onDelta = () => {}) {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let content = '';
+    const calls = [];
+    const byIndex = new Map();
+    const take = (line) => {
+        if (!line.startsWith('data:')) return;
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') return;
+        let j;
+        try { j = JSON.parse(data); } catch { return; }
+        if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+        const d = (j.choices && j.choices[0] && j.choices[0].delta) || {};
+        if (typeof d.content === 'string' && d.content) {
+            content += d.content;
+            onDelta(d.content);
+        }
+        for (const t of d.tool_calls || []) {
+            const k = t.index ?? 0;
+            let call = byIndex.get(k);
+            if (!call || (t.id && call.id && t.id !== call.id)) {
+                call = { id: '', type: 'function', function: { name: '', arguments: '' } };
+                calls.push(call);
+                byIndex.set(k, call);
+            }
+            if (t.id) call.id = t.id;
+            const fn = t.function || {};
+            if (fn.name && fn.name !== call.function.name) call.function.name += fn.name;
+            if (fn.arguments) call.function.arguments += fn.arguments;
+        }
+    };
+    for await (const chunk of body) {
+        buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) take(line.trim());
+    }
+    take(buffer.trim());
+    return { content, tool_calls: calls };
+}
+
 function loopbackAsk({ owner, port = 3000, profile = '', fetchImpl = fetch, timeoutMs = Number(process.env.ASSISTANT_TIMEOUT_MS) || 300000 }) {
-    return async (messages, { owner: who, tools } = {}) => {
+    // onDelta: stream the answer and hand each piece of text to it as it arrives (the floating assistant)
+    return async (messages, { owner: who, tools, onDelta } = {}) => {
         const headers = { 'content-type': 'application/json', ...internalAuth.headersFor(who || owner) };
         if (profile) headers['x-harness-profile'] = profile;
+        const stream = typeof onDelta === 'function';
         const res = await fetchImpl(`http://127.0.0.1:${port}/v1/chat/completions`, {
             method: 'POST',
             headers,
-            body: JSON.stringify(tools && tools.length ? { messages, stream: false, tools, tool_choice: 'auto' } : { messages, stream: false }),
+            body: JSON.stringify(tools && tools.length ? { messages, stream, tools, tool_choice: 'auto' } : { messages, stream }),
             signal: AbortSignal.timeout(timeoutMs),
         });
+        if (!res.ok) throw new Error(`the harness answered ${res.status}: ${errorText(await res.text())}`);
+        // a server that answers a stream request with plain JSON is read as plain JSON
+        if (stream && res.body && /event-stream/.test(res.headers.get('content-type') || '')) return readCompletionStream(res.body, onDelta);
         const text = await res.text();
-        if (!res.ok) throw new Error(`the harness answered ${res.status}: ${errorText(text)}`);
         const body = JSON.parse(text);
         const msg = (body.choices && body.choices[0] && body.choices[0].message) || {};
         return { content: msg.content || '', tool_calls: msg.tool_calls || [] };
     };
 }
 
-module.exports = { createAssistant, fileStore, memoryStore, loopbackAsk, systemPrompt, pageContext, HELP, MAX_HISTORY };
+module.exports = { createAssistant, fileStore, memoryStore, loopbackAsk, readCompletionStream, systemPrompt, pageContext, HELP, MAX_HISTORY };

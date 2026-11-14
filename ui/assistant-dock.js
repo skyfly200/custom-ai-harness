@@ -9,7 +9,11 @@
 //
 // The button is a round orb with an icon (a chat bubble with a spark) that turns into a close icon while the panel is
 // open. It sits above a bar that covers the bottom-left corner (the chat composer, the chat sidebar's footer), and a
-// dot on it shows that the assistant is waiting for you to allow or decline a tool call.
+// dot on it shows that the assistant is waiting for you to allow or decline a tool call; a blue dot, that a reply came
+// in while the panel was shut. Alt+A opens and closes the panel from anywhere but a text field.
+//
+// Replies stream in as the model writes them (POST api/assistant/stream) and are drawn as Markdown with
+// ui/markdown.js, which escapes every piece of model text before it adds a tag; links open only http(s) and mailto.
 'use strict';
 
 /** What to send with a message: the page path (with the hash, so the chat id counts), its title and the selection. */
@@ -44,7 +48,35 @@ function liftFor(rects, viewportHeight, x = GAP + 22) {
   return Math.min(lift, Math.round(viewportHeight / 2)); // never push it off the top half
 }
 
-if (typeof module !== 'undefined') module.exports = { gatherContext, liftFor, ICONS, GAP };
+/** Alt+A (by key position, so a Mac's Option+A counts too), outside text fields, toggles the panel. */
+function isShortcut(e) {
+  if (!e || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+  if (e.code !== 'KeyA' && String(e.key || '').toLowerCase() !== 'a') return false;
+  const t = e.target;
+  const editable = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''));
+  return !editable;
+}
+const SHORTCUT_LABEL = 'Alt+A';
+
+/** Splits server-sent events into their JSON payloads. Returns the events and the unfinished tail to keep. */
+function parseEvents(buffer) {
+  const lines = String(buffer).split('\n');
+  const rest = lines.pop();
+  const events = [];
+  for (const line of lines) {
+    if (!line.startsWith('data:')) continue;
+    try { events.push(JSON.parse(line.slice(5).trim())); } catch { /* a partial or foreign line */ }
+  }
+  return { events, rest };
+}
+
+/** True when the newest assistant message is later than the time the panel was last seen open. */
+function hasUnread(messages, seenAt) {
+  const last = [...(messages || [])].reverse().find((m) => m && m.role !== 'user');
+  return Boolean(last && Number(last.at) > (Number(seenAt) || 0));
+}
+
+if (typeof module !== 'undefined') module.exports = { gatherContext, liftFor, ICONS, GAP, isShortcut, parseEvents, hasUnread, SHORTCUT_LABEL };
 
 if (typeof document !== 'undefined') (() => {
   const script = document.currentScript;
@@ -69,6 +101,7 @@ if (typeof document !== 'undefined') (() => {
     .ad-btn:hover { transform: scale(1.06); box-shadow: 0 6px 18px rgba(0,0,0,.3), 0 0 24px -4px var(--glow-b, #ec4899); }
     .ad-btn:focus-visible { outline: 3px solid var(--glow-d, #06b6d4); outline-offset: 3px; }
     .ad-btn .ad-dot { position: absolute; top: 1px; right: 1px; width: 12px; height: 12px; border-radius: 50%; background: #f59e0b; border: 2px solid #fff; box-sizing: border-box; }
+    .ad-btn .ad-dot.unread { background: var(--glow-d, #06b6d4); }
     .ad-btn .ad-dot[hidden] { display: none; }
     .ad-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
     @media (prefers-reduced-motion: reduce) { .ad-btn { transition: none; } .ad-btn:hover { transform: none; } }
@@ -87,6 +120,22 @@ if (typeof document !== 'undefined') (() => {
     .ad-msg.user { align-self: flex-end; background: rgba(99,102,241,.18); }
     .ad-msg.assistant { align-self: flex-start; background: rgba(127,127,127,.12); }
     .ad-msg.error { color: #b91c1c; }
+    .ad-msg.md { white-space: normal; }
+    .ad-msg.md > :first-child { margin-top: 0; } .ad-msg.md > :last-child { margin-bottom: 0; }
+    .ad-msg.md p, .ad-msg.md ul, .ad-msg.md ol, .ad-msg.md blockquote, .ad-msg.md .code, .ad-msg.md .table-scroll { margin: 0 0 6px; }
+    .ad-msg.md ul, .ad-msg.md ol { padding-left: 20px; }
+    .ad-msg.md h1, .ad-msg.md h2, .ad-msg.md h3, .ad-msg.md h4 { font-size: 14px; margin: 8px 0 4px; }
+    .ad-msg.md blockquote { padding-left: 8px; border-left: 3px solid rgba(127,127,127,.4); opacity: .85; }
+    .ad-msg.md a { color: inherit; text-decoration: underline; }
+    .ad-msg.md code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .ad-msg.md :not(pre) > code { padding: 0 4px; border-radius: 4px; background: rgba(127,127,127,.18); }
+    .ad-msg.md .code { border-radius: 8px; overflow: hidden; border: 1px solid rgba(127,127,127,.3); }
+    .ad-msg.md .code-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 6px; font-size: 11px; opacity: .8; }
+    .ad-msg.md .code-head button { padding: 1px 6px; font-size: 11px; }
+    .ad-msg.md pre { margin: 0; padding: 6px 8px; overflow-x: auto; white-space: pre; background: rgba(127,127,127,.1); }
+    .ad-msg.md .table-scroll { overflow-x: auto; }
+    .ad-msg.md table { border-collapse: collapse; font-size: 12px; }
+    .ad-msg.md th, .ad-msg.md td { padding: 3px 6px; border: 1px solid rgba(127,127,127,.35); }
     .ad-ask { display: flex; flex-direction: column; gap: 6px; padding: 8px 9px; border-radius: 10px; border: 1px solid rgba(245,158,11,.6); background: rgba(245,158,11,.12); }
     .ad-ask[hidden] { display: none; }
     .ad-ask p { margin: 0; word-break: break-word; }
@@ -101,7 +150,8 @@ if (typeof document !== 'undefined') (() => {
     :root[data-theme="light"] .ad-panel { --ad-bg: #fff; --ad-fg: #1b1630; }
   `;
 
-  const btn = el('button', { className: 'ad-btn', type: 'button', hidden: true, title: 'Assistant' });
+  const btn = el('button', { className: 'ad-btn', type: 'button', hidden: true, title: `Assistant (${SHORTCUT_LABEL})` });
+  btn.setAttribute('aria-keyshortcuts', 'Alt+A');
   btn.innerHTML = `${ICONS.assistant}<span class="ad-sr">Open the assistant</span><span class="ad-dot" hidden></span>`;
   btn.setAttribute('aria-expanded', 'false');
   btn.setAttribute('aria-controls', 'ad-panel');
@@ -131,12 +181,38 @@ if (typeof document !== 'undefined') (() => {
   const dot = btn.querySelector('.ad-dot');
   const srLabel = btn.querySelector('.ad-sr');
 
+  // Markdown for the assistant's words: markdown.js is on the chat page already; elsewhere it is loaded once, and the
+  // replies already shown are redrawn when it arrives. Until then (or if it fails) replies are plain text.
+  let md = window.Markdown || null;
+  const words = new WeakMap(); // bubble -> its text, to redraw it
+  function draw(div, text) {
+    words.set(div, text);
+    const asMd = md && div.classList.contains('assistant') && !div.classList.contains('error') && !div.classList.contains('pending');
+    div.classList.toggle('md', Boolean(asMd));
+    if (asMd) div.innerHTML = md.render(text); // markdown.js escapes all of the text before it adds any tag
+    else div.textContent = text;
+  }
+  if (!md) {
+    const s = el('script', { src: new URL('markdown.js', script.src).href, async: true });
+    s.onload = () => { md = window.Markdown || null; for (const div of log.querySelectorAll('.ad-msg.assistant')) if (words.has(div)) draw(div, words.get(div)); };
+    document.head.append(s);
+  }
+  const stuckToBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   const bubble = (role, text) => {
-    const div = el('div', { className: `ad-msg ${role}`, textContent: text });
+    const div = el('div', { className: `ad-msg ${role}` });
+    draw(div, text);
     log.append(div);
     log.scrollTop = log.scrollHeight;
     return div;
   };
+  // the Copy button on a code block in a reply
+  log.addEventListener('click', async (e) => {
+    const b = e.target.closest('.copy-code');
+    if (!b) return;
+    const code = b.closest('.code')?.querySelector('pre')?.textContent || '';
+    try { await navigator.clipboard.writeText(code); b.textContent = 'Copied'; } catch { b.textContent = 'Could not copy'; }
+    setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+  });
   const setNote = (text) => { note.textContent = text || ''; note.hidden = !text; };
   const contextLabel = () => {
     const c = gatherContext({ pathname: location.pathname, hash: location.hash, title: document.title });
@@ -145,19 +221,36 @@ if (typeof document !== 'undefined') (() => {
   };
 
   // A tool call waiting for /yes or /no: the question with Allow and Decline in the panel, and a dot on the button.
+  // A reply that came in while the panel was shut: a blue dot until the panel is next opened. "Seen" is kept per
+  // browser, so opening the panel in one tab clears the dot in the others.
+  const SEEN_KEY = 'assistantDock.seenAt';
   let waiting = null;
+  let unread = false;
+  let shown = -1;       // how many saved messages the log is drawing
+  let sending = false;  // a message is on its way: leave the log alone
+  // A browser that has never opened the panel starts as having seen everything, so old replies don't light the dot.
+  const seenAt = () => {
+    try {
+      const v = localStorage.getItem(SEEN_KEY);
+      if (v === null) { localStorage.setItem(SEEN_KEY, String(Date.now())); return Date.now(); }
+      return Number(v) || 0;
+    } catch { return Date.now(); }
+  };
+  const markSeen = () => { unread = false; try { localStorage.setItem(SEEN_KEY, String(Date.now())); } catch {} syncLabel(); };
+  function setUnread(on) { unread = Boolean(on) && panel.hidden; syncLabel(); }
   function setPending(question) {
     waiting = question || null;
     ask.hidden = !waiting;
     ask.querySelector('p').textContent = waiting || '';
-    dot.hidden = !waiting;
-    btn.title = waiting ? 'Assistant: waiting for your approval' : 'Assistant';
     syncLabel();
     if (waiting) log.scrollTop = log.scrollHeight;
   }
   function syncLabel() {
     const open = !panel.hidden;
-    srLabel.textContent = open ? 'Close the assistant' : waiting ? 'Open the assistant (waiting for your approval)' : 'Open the assistant';
+    dot.hidden = !(waiting || unread);
+    dot.classList.toggle('unread', !waiting && unread);
+    btn.title = `${waiting ? 'Assistant: waiting for your approval' : unread ? 'Assistant: new reply' : 'Assistant'} (${SHORTCUT_LABEL})`;
+    srLabel.textContent = open ? 'Close the assistant' : waiting ? 'Open the assistant (waiting for your approval)' : unread ? 'Open the assistant (new reply)' : 'Open the assistant';
     btn.innerHTML = ''; // swap the icon, keep the label and the dot
     btn.insertAdjacentHTML('afterbegin', open ? ICONS.close : ICONS.assistant);
     btn.append(srLabel, dot);
@@ -166,7 +259,7 @@ if (typeof document !== 'undefined') (() => {
   function open() {
     panel.hidden = false;
     btn.setAttribute('aria-expanded', 'true');
-    syncLabel();
+    markSeen();
     contextLabel();
     ta.focus();
   }
@@ -178,7 +271,10 @@ if (typeof document !== 'undefined') (() => {
   }
   btn.addEventListener('click', () => (panel.hidden ? open() : close()));
   q('.ad-x').addEventListener('click', close);
-  addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) close(); });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !panel.hidden) close();
+    else if (isShortcut(e) && !btn.hidden) { e.preventDefault(); panel.hidden ? open() : close(); }
+  });
 
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); q('form').requestSubmit(); }
@@ -231,33 +327,86 @@ if (typeof document !== 'undefined') (() => {
     });
   }
 
+  // Sends a message and streams the reply into its bubble. Falls back to the plain route on a server without
+  // the stream route. The final text from the server replaces what streamed, since a step that ended in a tool
+  // call can leave text the answer does not keep.
+  async function post(route, text, context) {
+    return fetch(api(route), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, context }),
+    });
+  }
   async function send(text) {
+    sending = true;
     sendBtn.disabled = true;
     for (const b of ask.querySelectorAll('button')) b.disabled = true;
     setNote('');
     bubble('user', text);
     const pending = bubble('assistant', 'Thinking…');
     pending.classList.add('pending');
+    draw(pending, 'Thinking…');
     const context = gatherContext({ pathname: location.pathname, hash: location.hash, title: document.title, selection: lastSelection });
-    try {
-      const res = await fetch(api('assistant/message'), {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, context }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-      pending.textContent = body.reply;
+    let streamed = '';
+    let queued = false;
+    let finished = false; // once the final text is in, a late frame must not paint the streamed text over it
+    const paint = () => {
+      queued = false;
+      if (finished) return;
+      const follow = stuckToBottom();
       pending.classList.remove('pending');
+      draw(pending, streamed || 'Thinking…');
+      if (!streamed) pending.classList.add('pending');
+      if (follow) log.scrollTop = log.scrollHeight;
+    };
+    const finish = (body) => {
+      finished = true;
+      if (body.error) throw new Error(body.error);
+      pending.classList.remove('pending');
+      draw(pending, String(body.reply ?? ''));
+      log.scrollTop = log.scrollHeight;
       setPending(body.pending);
+      if (panel.hidden) setUnread(true); else markSeen();
+    };
+    try {
+      let res = await post('assistant/stream', text, context);
+      if (res.status === 404) res = await post('assistant/message', text, context);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      if (!/event-stream/.test(res.headers.get('content-type') || '') || !res.body) return finish(await res.json());
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let done = null;
+      for (;;) {
+        const { value, done: end } = await reader.read();
+        if (end) break;
+        const parsed = parseEvents(buffer + decoder.decode(value, { stream: true }));
+        buffer = parsed.rest;
+        for (const ev of parsed.events) {
+          if (ev.step) streamed = '';
+          else if (typeof ev.delta === 'string') streamed += ev.delta;
+          else if (ev.done) done = ev;
+          if (!queued) { queued = true; requestAnimationFrame(paint); }
+        }
+      }
+      const tail = parseEvents(`${buffer}\n`).events.find((ev) => ev.done);
+      if (tail) done = tail;
+      if (!done) throw new Error('the reply stopped before it finished');
+      finish(done);
     } catch (err) {
-      pending.textContent = `Could not send: ${err.message}`;
+      pending.classList.remove('pending');
       pending.classList.add('error');
+      draw(pending, `Could not send: ${err.message}`);
     } finally {
+      sending = false;
+      shown = -1; // the next look at the history redraws it from the server's copy
       sendBtn.disabled = false;
       for (const b of ask.querySelectorAll('button')) b.disabled = false;
-      ta.focus();
+      if (!panel.hidden) ta.focus();
     }
   }
 
@@ -275,14 +424,30 @@ if (typeof document !== 'undefined') (() => {
     try {
       const info = await fetch(api('assistant'), { credentials: 'same-origin' });
       if (!info.ok) return; // not the owner, or the assistant is off here: no button
-      const history = await (await fetch(api('assistant/history'), { credentials: 'same-origin' })).json();
-      for (const m of history.messages || []) bubble(m.role === 'user' ? 'user' : 'assistant', m.content);
-      if (!(history.messages || []).length) bubble('assistant', 'Hi. Ask about this page, or anything else. The conversation is the same as on the Assistant page.');
       document.head.append(style);
       document.body.append(btn, panel);
-      setPending(history.pending);
+      await loadHistory();
       placeButton();
       btn.hidden = false;
     } catch { /* offline or no assistant: stay hidden */ }
   })();
+
+  // The conversation, drawn fresh. Run on load, and again when the tab comes back into view, so a reply sent from
+  // the Assistant page or another tab shows here (with the blue dot while the panel is shut).
+  async function loadHistory() {
+    const history = await (await fetch(api('assistant/history'), { credentials: 'same-origin' })).json();
+    const messages = history.messages || [];
+    if (messages.length !== shown) {
+      shown = messages.length;
+      log.replaceChildren();
+      for (const m of messages) bubble(m.role === 'user' ? 'user' : 'assistant', m.content);
+      if (!messages.length) bubble('assistant', 'Hi. Ask about this page, or anything else. The conversation is the same as on the Assistant page.');
+    }
+    setPending(history.pending);
+    if (panel.hidden) setUnread(hasUnread(messages, seenAt()));
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !btn.hidden && !sending) loadHistory().catch(() => {});
+  });
+  addEventListener('storage', (e) => { if (e.key === SEEN_KEY && unread) setUnread(false); });
 })();

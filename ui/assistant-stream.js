@@ -21,15 +21,23 @@ function parseEvents(buffer) {
 }
 
 /**
+ * The words for a failed request: the server's own message when it sent one (JSON), else what the status means. A
+ * proxy in front of the app (Fly, Cloudflare) answers 502 to a plain-text page, so that case gets a plain explanation.
+ */
+async function answerError(res) {
+  const body = await res.json().catch(() => null);
+  if (body && body.error) return String(body.error);
+  if ([502, 503, 504].includes(res.status)) return `the server did not answer (HTTP ${res.status}). It may be restarting or waking from sleep; try again in a moment.`;
+  return `HTTP ${res.status}`;
+}
+
+/**
  * Reads a fetch Response from the stream route (or, from a server without it, the plain JSON route) and resolves
  * to the final event: { reply, pending } or throws its error. `onText(text)` gets the current step's text each
  * time it grows or a new step starts.
  */
 async function readReply(res, { onText = () => {} } = {}) {
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await answerError(res));
   const type = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
   if (!/event-stream/.test(type) || !res.body) {
     const body = await res.json();
@@ -62,7 +70,7 @@ async function readReply(res, { onText = () => {} } = {}) {
 /** True for the error a fetch or a read throws once its signal is aborted (the Stop button). */
 const isAbort = (err) => Boolean(err && (err.name === 'AbortError' || err.code === 20));
 
-const AssistantStream = { parseEvents, readReply, isAbort };
+const AssistantStream = { parseEvents, readReply, isAbort, answerError };
 if (typeof module !== 'undefined') module.exports = AssistantStream;
 if (typeof window !== 'undefined') window.AssistantStream = AssistantStream;
 })();

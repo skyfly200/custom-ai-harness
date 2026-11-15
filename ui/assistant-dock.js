@@ -16,6 +16,9 @@
 // drawn as Markdown with ui/markdown.js, which escapes every piece of model text before it adds a tag; links open only
 // http(s) and mailto. While a reply streams, the send button is a Stop button: it ends the reply where it is, and the
 // server keeps the words written so far.
+// Everything here sits in one function scope: the page's own scripts (chat.js declares a global ICONS) must not clash
+// with the dock's names, or the whole script fails and the button never appears.
+(() => {
 'use strict';
 
 /** What to send with a message: the page path (with the hash, so the chat id counts), its title and the selection. */
@@ -67,9 +70,9 @@ function hasUnread(messages, seenAt) {
 }
 
 if (typeof module !== 'undefined') {
-  // reading the stream lives in ui/assistant-stream.js, shared with the Assistant page
-  const { parseEvents } = require('./assistant-stream.js');
-  module.exports = { gatherContext, liftFor, ICONS, GAP, isShortcut, parseEvents, hasUnread, SHORTCUT_LABEL };
+  // reading the stream, and the words for a failed request, live in ui/assistant-stream.js (shared with the page)
+  const { parseEvents, answerError } = require('./assistant-stream.js');
+  module.exports = { gatherContext, liftFor, ICONS, GAP, isShortcut, parseEvents, hasUnread, answerError, SHORTCUT_LABEL };
 }
 
 if (typeof document !== 'undefined') (() => {
@@ -140,6 +143,14 @@ if (typeof document !== 'undefined') (() => {
     .ad-form textarea { flex: 1; resize: none; min-height: 36px; max-height: 120px; font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid rgba(127,127,127,.4); background: transparent; color: inherit; box-sizing: border-box; }
     .ad-form button:disabled { opacity: .5; cursor: default; }
     .ad-note { font-size: 12px; opacity: .8; }
+    .ad-status { font-size: 12px; display: flex; align-items: center; gap: 6px; opacity: .85; }
+    .ad-status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #16a34a; flex: none; }
+    .ad-status.busy::before { background: #f59e0b; animation: ad-pulse 1s ease-in-out infinite; }
+    .ad-status.wait::before { background: #f59e0b; }
+    .ad-status.error { color: #b91c1c; opacity: 1; }
+    .ad-status.error::before { background: #b91c1c; }
+    @keyframes ad-pulse { 50% { opacity: .3; } }
+    @media (prefers-reduced-motion: reduce) { .ad-status.busy::before { animation: none; } }
     @media (prefers-color-scheme: dark) { .ad-panel { --ad-bg: #1e1b2e; --ad-fg: #ece9f7; } }
     :root[data-theme="dark"] .ad-panel { --ad-bg: #1e1b2e; --ad-fg: #ece9f7; }
     :root[data-theme="light"] .ad-panel { --ad-bg: #fff; --ad-fg: #1b1630; }
@@ -156,6 +167,7 @@ if (typeof document !== 'undefined') (() => {
   panel.innerHTML = `
     <div class="ad-head"><strong>Assistant</strong><a href="${pageUrl}">Full page</a><button type="button" class="ad-x ad-icon" aria-label="Close" title="Close">${ICONS.close}</button></div>
     <div class="ad-ctx"></div>
+    <div class="ad-status ready" role="status">Ready</div>
     <div class="ad-log" aria-live="polite"></div>
     <div class="ad-ask" role="group" aria-label="Approval needed" hidden>
       <p></p>
@@ -217,6 +229,9 @@ if (typeof document !== 'undefined') (() => {
     setTimeout(() => { b.textContent = 'Copy'; }, 1500);
   });
   const setNote = (text) => { note.textContent = text || ''; note.hidden = !text; };
+  // What the assistant is doing right now: ready, thinking, waiting for an approval, listening, or an error
+  const statusEl = q('.ad-status');
+  const setStatus = (kind, text) => { statusEl.className = `ad-status ${kind}`; statusEl.textContent = text; };
   const contextLabel = () => {
     const c = gatherContext({ pathname: location.pathname, hash: location.hash, title: document.title });
     const label = document.title ? `On: ${document.title}` : `On: ${c.page}`;
@@ -324,9 +339,10 @@ if (typeof document !== 'undefined') (() => {
         }
       };
       rec.onerror = (e) => setNote(`Speech: ${e.error || 'error'}`);
-      rec.onend = () => { rec = null; micState(false); };
+      rec.onend = () => { rec = null; micState(false); setStatus('ready', 'Ready'); };
       rec.start();
       micState(true);
+      setStatus('busy', 'Listening… speak, then tap stop');
     });
   }
 
@@ -355,6 +371,7 @@ if (typeof document !== 'undefined') (() => {
     setSendButton(true);
     for (const b of ask.querySelectorAll('button')) b.disabled = true;
     setNote('');
+    setStatus('busy', 'Thinking…');
     bubble('user', text);
     const pending = bubble('assistant', 'Thinking…');
     pending.classList.add('pending');
@@ -386,6 +403,8 @@ if (typeof document !== 'undefined') (() => {
       draw(pending, String(body.reply ?? ''));
       log.scrollTop = log.scrollHeight;
       setPending(body.pending);
+      if (body.pending) setStatus('wait', 'Waiting for your approval');
+      else setStatus('ready', 'Ready');
       if (panel.hidden) setUnread(true); else markSeen();
     } catch (err) {
       finished = true;
@@ -393,9 +412,11 @@ if (typeof document !== 'undefined') (() => {
       if (lib && lib.isAbort(err)) {
         if (streamed) { draw(pending, streamed); pending.classList.add('stopped'); } else pending.remove();
         setPending(null); // a stopped /yes or /no is answered; the history has the rest
+        setStatus('ready', 'Stopped');
       } else {
         pending.classList.add('error');
         draw(pending, `Could not send: ${err.message}`);
+        setStatus('error', 'Could not send. Details are in the panel.');
       }
     } finally {
       sending = false;
@@ -454,4 +475,6 @@ if (typeof document !== 'undefined') (() => {
     if (document.visibilityState === 'visible' && !btn.hidden && !sending) loadHistory().catch(() => {});
   });
   addEventListener('storage', (e) => { if (e.key === SEEN_KEY && unread) setUnread(false); });
+})();
+
 })();

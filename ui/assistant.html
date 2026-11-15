@@ -29,6 +29,10 @@
   <div class="split">
     <section class="card thread" aria-label="Conversation">
       <div id="log" class="log" aria-live="polite"></div>
+      <div id="ask" class="ask hidden" role="group" aria-label="Approval needed">
+        <p id="askText"></p>
+        <div><button id="allow" class="primary" type="button">Allow</button> <button id="decline" type="button">Decline</button></div>
+      </div>
       <form id="form" class="composer" autocomplete="off">
         <textarea id="text" rows="2" maxlength="8000" placeholder="Ask anything, or send /help" aria-label="Message"></textarea>
         <button id="send" class="primary" type="submit">Send</button>

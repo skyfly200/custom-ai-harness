@@ -15,6 +15,11 @@
 .assistant-page .bubble.pending { color: var(--muted); font-style: italic; }
 .assistant-page .bubble.error { color: var(--bad); }
 
+/* a tool call waiting for /yes or /no: the question with Allow and Decline */
+.assistant-page .ask { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--glow-a, #f59e0b) 60%, transparent); background: color-mix(in srgb, var(--glow-a, #f59e0b) 12%, transparent); font-size: 14px; }
+.assistant-page .ask.hidden { display: none; }
+.assistant-page .ask p { margin: 0; overflow-wrap: anywhere; }
+
 .assistant-page .composer { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
 .assistant-page .composer textarea { width: 100%; resize: vertical; min-height: 44px; font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: inherit; box-sizing: border-box; }
 .assistant-page .composer button:disabled { opacity: .6; cursor: default; }

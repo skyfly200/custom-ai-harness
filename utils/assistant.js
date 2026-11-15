@@ -188,6 +188,11 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
         owner,
         notes: () => load().notes.slice(),
         history: (conversation) => (load().conversations[String(conversation)] || []).slice(),
+        /** The tool call waiting for /yes or /no in `conversation`, as the approval question, or null when none waits. */
+        pending: (conversation) => {
+            const waiting = load().pending[String(conversation)];
+            return waiting ? tooling.describePending(waiting) : null;
+        },
         summary: () => {
             const s = load();
             return { name, owner, notes: s.notes.length, conversations: Object.keys(s.conversations).length };

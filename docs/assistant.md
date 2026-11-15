@@ -4,7 +4,9 @@ A personal assistant is one agent that keeps notes and remembers each conversati
 
 ## Floating assistant
 
-Every page with the site menu has an **Assistant** button in the bottom-left corner. It opens the same conversation as the Assistant page, so a message sent from either shows in both. Each message also carries the page you are on (its path, title, and any text you had selected). The panel shows that as "On: ...", and the model sees it for that one turn only; it is not saved in the history. Only the owner (or an admin, with logins on) gets the button.
+Every page with the site menu has a round **Assistant** button (an orb with a chat-bubble icon) in the bottom-left corner. It opens the same conversation as the Assistant page, so a message sent from either shows in both. While the panel is open the button shows a close icon. The button moves up out of the way of a bar that covers that corner, such as the chat composer or the chat sidebar's footer; give any other element `data-assistant-avoid` to have it do the same. Each message also carries the page you are on (its path, title, and any text you had selected). The panel shows that as "On: ...", and the model sees it for that one turn only; it is not saved in the history. Only the owner (or an admin, with logins on) gets the button.
+
+When the assistant is waiting for you to allow a tool call, the button has an amber dot, and the panel and the Assistant page show the request with **Allow** and **Decline** buttons. They send `/yes` and `/no` for you; typing them still works.
 
 ## Commands
 
@@ -74,7 +76,7 @@ Discord needs no public address: the server keeps an outbound connection to Disc
 
 ## Not built yet
 
-- Shell and repo tools are still not offered to the assistant. Skills the assistant saves are not shown on the Skills page yet (`GET /ui/api/assistant/skills`). Google Calendar, Gmail, Docs, Trello and text services need MCP servers configured before the assistant can use them.
+- Shell and repo tools are still not offered to the assistant. Google Calendar, Gmail, Docs, Trello and text services need MCP servers configured before the assistant can use them.
 - Telegram, Slack and Discord are stub-tested only; they have not been run against the real APIs.
 - Notes are one shared list for the owner; there is no per-channel separation or search.
 

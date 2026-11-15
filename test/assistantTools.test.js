@@ -89,6 +89,21 @@ test('while an approval is waiting, other messages are held and the model is not
     assert.equal(model.seen.length, 1);
 });
 
+test('pending() names the waiting call for the page, per conversation, and clears once answered', async () => {
+    const manager = fakeManager();
+    const model = scripted([
+        { content: '', tool_calls: [toolCall('m1', 'mail_send', '{"to":"a@example.com"}')] },
+        'Sent.',
+    ]);
+    const a = assistant.createAssistant({ store: assistant.memoryStore(), ask: model.ask, tools: manager, owner: 'S' });
+    assert.equal(a.pending('web:S'), null);
+    await a.handle('web:S', 'email a@example.com');
+    assert.equal(a.pending('web:S'), 'I need your approval to run mail_send {"to":"a@example.com"}.');
+    assert.equal(a.pending('telegram:42'), null, 'another conversation has nothing waiting');
+    await a.handle('web:S', '/yes');
+    assert.equal(a.pending('web:S'), null);
+});
+
 test('a bad argument string becomes an error the model sees, and the tool is not called', async () => {
     const manager = fakeManager();
     const model = scripted([

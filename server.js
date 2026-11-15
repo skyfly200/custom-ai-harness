@@ -515,8 +515,13 @@ app.post('/ui/api/assistant/message', async (req, res) => {
     const conversation = assistantWebKey(req);
     // the logged-in owner's key pays (ASSISTANT_OWNER when logins are off)
     // context: the page the person is on (from the floating assistant), used for this turn only
-    const reply = await assistantApp.handle(conversation, text, { owner: personOf(req) || undefined, context: req.body.context });
-    res.json({ conversation, reply, pending: assistantApp.pending(conversation) });
+    try {
+        const reply = await assistantApp.handle(conversation, text, { owner: personOf(req) || undefined, context: req.body.context });
+        res.json({ conversation, reply, pending: assistantApp.pending(conversation) });
+    } catch (err) {
+        // always JSON, so the page can say what failed rather than only the status code
+        res.status(500).json({ error: `The assistant could not answer: ${err.message}` });
+    }
 });
 // The same as /message, streamed as server-sent events (the floating assistant): {"step":true} when a model step
 // starts, {"delta":"..."} for each piece of its text, then {"done":true,"reply":...,"pending":...} with the final

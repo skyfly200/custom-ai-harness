@@ -115,3 +115,22 @@ test('a reply is unread when it is newer than the last time the panel was open',
     assert.equal(hasUnread([], 0), false);
     assert.equal(hasUnread(undefined, 0), false);
 });
+
+test('the dock loads beside a page script that declares the same top-level names (chat.js has a global ICONS)', () => {
+    const vm = require('node:vm');
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const ctx = vm.createContext({ console });
+    vm.runInContext('const ICONS = { chat: "x" }; const GAP = 1; function liftFor() {}', ctx);
+    const dock = fs.readFileSync(path.join(__dirname, '..', 'ui', 'assistant-dock.js'), 'utf8');
+    assert.doesNotThrow(() => vm.runInContext(dock, ctx));
+});
+
+test('a failed request says what a proxy 502 usually means, and uses the server message when it sent one', async () => {
+    const { answerError } = require('../ui/assistant-dock.js');
+    const plain = new Response('<html>Bad Gateway</html>', { status: 502, headers: { 'content-type': 'text/html' } });
+    assert.match(await answerError(plain), /did not answer \(HTTP 502\)/);
+    const json = new Response(JSON.stringify({ error: 'The assistant could not answer: boom' }), { status: 500, headers: { 'content-type': 'application/json' } });
+    assert.equal(await answerError(json), 'The assistant could not answer: boom');
+    assert.equal(await answerError(new Response('', { status: 404 })), 'HTTP 404');
+});

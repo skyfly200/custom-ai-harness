@@ -1,6 +1,7 @@
 // The assistant page: a conversation with the owner's assistant (utils/assistant.js), its notes and its channels.
 // Replies are drawn as Markdown with ui/markdown.js, which escapes every piece of model text before it adds a tag
-// (links open only http(s) and mailto); your own messages and the notes stay plain text.
+// (links open only http(s) and mailto); your own messages and the notes stay plain text. Replies stream in as the
+// model writes them (ui/assistant-stream.js), and Stop ends one where it is.
 (() => {
     const $ = (id) => document.getElementById(id);
     const log = $('log');
@@ -85,13 +86,25 @@
     async function loadHistory() {
         const { messages, pending } = await api('api/assistant/history');
         log.replaceChildren();
-        for (const m of messages) bubble(m.role === 'user' ? 'user' : 'assistant', m.content);
+        for (const m of messages) bubble(m.role === 'user' ? 'user' : 'assistant', m.content, m.stopped ? 'stopped' : '');
         if (!messages.length) bubble('assistant', 'Hello. Ask me anything, or send /help for the commands.');
         setPending(pending);
     }
 
+    // While a reply streams, Send is a Stop button; Enter waits, so a half-typed next message is not lost.
+    let controller = null;
+    function setStreaming(on) {
+        send.textContent = on ? 'Stop' : 'Send';
+        send.setAttribute('aria-label', on ? 'Stop the reply' : 'Send');
+    }
+    send.addEventListener('click', (event) => {
+        if (!controller) return;
+        event.preventDefault();
+        controller.abort();
+    });
     form.addEventListener('submit', (event) => {
         event.preventDefault();
+        if (controller) return;
         const message = text.value.trim();
         if (!message) return;
         text.value = '';
@@ -100,28 +113,63 @@
     $('allow').addEventListener('click', () => sendMessage('/yes'));
     $('decline').addEventListener('click', () => sendMessage('/no'));
 
+    // Streams the reply into its bubble (ui/assistant-stream.js reads the events; a server without the stream route
+    // gets the plain one). The final text replaces what streamed, since a step that ended in a tool call can leave
+    // text the answer does not keep. Stop keeps what streamed, as the server does.
+    const post = (route, message, signal) => fetch(route, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: message }),
+        signal,
+    });
     async function sendMessage(message) {
-        send.disabled = true;
+        if (controller) return;
+        const lib = window.AssistantStream;
+        controller = new AbortController();
+        setStreaming(true);
         $('allow').disabled = true;
         $('decline').disabled = true;
         bubble('user', message);
         const pending = bubble('assistant', 'Thinking…', 'pending');
         status.textContent = '';
+        let streamed = '';
+        let queued = false;
+        let finished = false; // a late frame must not paint the streamed text over the final reply
+        const paint = () => {
+            queued = false;
+            if (finished) return;
+            const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+            pending.classList.toggle('pending', !streamed);
+            draw(pending, streamed || 'Thinking…');
+            if (follow) log.scrollTop = log.scrollHeight;
+        };
         try {
-            const { reply, pending: waiting } = await api('api/assistant/message', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ text: message }),
+            const { signal } = controller;
+            let res = await post('api/assistant/stream', message, signal);
+            if (res.status === 404) res = await post('api/assistant/message', message, signal);
+            const { reply, pending: waiting } = await lib.readReply(res, {
+                onText: (t) => { streamed = t; if (!queued) { queued = true; requestAnimationFrame(paint); } },
             });
+            finished = true;
             pending.classList.remove('pending');
-            draw(pending, reply);
+            draw(pending, String(reply ?? ''));
+            log.scrollTop = log.scrollHeight;
             setPending(waiting);
             if (/^Saved note|^Forgot note|^Started a new/.test(reply)) refresh().catch(() => {});
         } catch (err) {
-            pending.classList.add('error');
-            draw(pending, `Could not send: ${err.message}`);
+            finished = true;
+            pending.classList.remove('pending');
+            if (lib.isAbort(err)) {
+                if (streamed) { draw(pending, streamed); pending.classList.add('stopped'); } else pending.remove();
+                setPending(null); // a stopped /yes or /no is answered; the history has the rest
+            } else {
+                pending.classList.add('error');
+                draw(pending, `Could not send: ${err.message}`);
+            }
         } finally {
-            send.disabled = false;
+            controller = null;
+            setStreaming(false);
             $('allow').disabled = false;
             $('decline').disabled = false;
             text.focus();

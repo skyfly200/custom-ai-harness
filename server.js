@@ -528,12 +528,16 @@ app.post('/ui/api/assistant/stream', async (req, res) => {
     const conversation = assistantWebKey(req);
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' });
     const send = (event) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`); };
+    // Stop: the page aborts its request, the connection closes, and the model call stops (the words so far are kept)
+    const stop = new AbortController();
+    res.on('close', () => { if (!res.writableFinished) stop.abort(); });
     try {
         const reply = await assistantApp.handle(conversation, text, {
             owner: personOf(req) || undefined,
             context: req.body.context,
             onStep: () => send({ step: true }),
             onDelta: (delta) => send({ delta }),
+            signal: stop.signal,
         });
         send({ done: true, conversation, reply, pending: assistantApp.pending(conversation) });
     } catch (err) {

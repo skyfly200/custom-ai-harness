@@ -14,8 +14,16 @@ const MAX_HISTORY = 40; // messages kept per conversation
 const MAX_NOTES = 200;
 const MAX_NOTE_CHARS = 500;
 const MAX_TEXT_CHARS = 8000;
+const STOPPED = 'Stopped before the reply started.';
 const HELP = 'Commands: /reset (start a new conversation; notes are kept), /remember TEXT (save a note), '
-    + '/notes (list notes), /forget N (drop note N), /help.';
+    + '/notes (list notes), /notes WORDS (the notes with all those words), /forget N (drop note N), /help.';
+
+/** The notes that have every word of `query` in them, ignoring case and accents; every note for an empty query. */
+function findNotes(notes, query) {
+    const fold = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const words = fold(query).split(/\s+/).filter(Boolean);
+    return (notes || []).filter((note) => words.every((w) => fold(note.text).includes(w)));
+}
 
 const emptyState = () => ({ nextNoteId: 1, notes: [], conversations: {}, pending: {} });
 
@@ -112,7 +120,10 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
             return `Saved note ${note.id}.`;
         }
         if (cmd === 'notes') {
-            return s.notes.length ? s.notes.map((note) => `${note.id}. ${note.text}`).join('\n') : 'No notes yet. Use /remember TEXT to add one.';
+            if (!s.notes.length) return 'No notes yet. Use /remember TEXT to add one.';
+            const found = findNotes(s.notes, arg);
+            if (!found.length) return `No notes match "${arg}". Send /notes to list them all.`;
+            return found.map((note) => `${note.id}. ${note.text}`).join('\n');
         }
         if (cmd === 'forget') {
             const id = Number(arg);
@@ -128,10 +139,15 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
     async function chat(key, message, owner, page = null, stream = null) {
         const s = load();
         // streaming: each model step starts with onStep (so a page can drop text from a step that ended in a tool
-        // call), and its text arrives through onDelta
+        // call), and its text arrives through onDelta. `signal` (the Stop button) aborts the model call; the text
+        // of the step under way is kept as a stopped reply.
+        const signal = stream && stream.signal;
+        let partial = '';
         const askFn = stream ? (msgs, opts) => {
+            if (signal && signal.aborted) return Promise.reject(Object.assign(new Error('stopped'), { name: 'AbortError' }));
+            partial = '';
             if (stream.onStep) stream.onStep();
-            return ask(msgs, { ...opts, onDelta: stream.onDelta });
+            return ask(msgs, { ...opts, signal, onDelta: (d) => { partial += d; stream.onDelta(d); } });
         } : ask;
         const history = s.conversations[key] || [];
         const pending = s.pending[key];
@@ -155,6 +171,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
                 out = await tooling.drive({ messages, ask: askFn, manager, owner, conversation: key });
             }
         } catch (err) {
+            if (signal && signal.aborted) return keepStopped(key, history, message, partial, Boolean(pending));
             return `I could not get an answer just now (${err.message}). Try again in a moment.`;
         }
         if (out.pending) {
@@ -173,9 +190,26 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
         return reply;
     }
 
+    // A reply stopped part way: the words written so far are kept, marked stopped, so the conversation reads as it
+    // did on screen. Nothing was written: the turn is dropped. A stopped /yes or /no has been answered (an allowed
+    // call may already have run), so its question is cleared rather than asked again.
+    function keepStopped(key, history, message, partial, answered) {
+        const s = load();
+        if (answered) delete s.pending[key];
+        const text = String(partial || '').trim();
+        if (!text) { if (answered) persist(); return STOPPED; }
+        const stamp = now();
+        const turn = [...history, { role: 'user', content: message, at: stamp }, { role: 'assistant', content: text, at: stamp, stopped: true }].slice(-maxHistory);
+        while (turn.length && turn[0].role !== 'user') turn.shift();
+        s.conversations[key] = turn;
+        persist();
+        return text;
+    }
+
     /** Answers one message in `conversation` (any string: "web:Skyler", "telegram:123"). Resolves to the text to send back. */
-    // onDelta / onStep: stream the model's text as it arrives (see chat); commands and approval questions don't stream
-    function handle(conversation, text, { owner: who, context = null, onDelta = null, onStep = null } = {}) {
+    // onDelta / onStep: stream the model's text as it arrives (see chat); commands and approval questions don't stream.
+    // signal: an AbortSignal that stops a streamed reply (the page's Stop button closes the connection).
+    function handle(conversation, text, { owner: who, context = null, onDelta = null, onStep = null, signal = null } = {}) {
         const key = String(conversation || 'web').slice(0, 120);
         const message = String(text || '').trim().slice(0, MAX_TEXT_CHARS);
         if (!message) return Promise.resolve('');
@@ -185,7 +219,7 @@ function createAssistant({ store, ask, owner = 'you', name = 'Assistant', now = 
                 const out = command(key, cmd[1].toLowerCase(), cmd[2].trim());
                 if (out !== null) return out;
             }
-            return chat(key, message, who || owner, pageContext(context), typeof onDelta === 'function' ? { onDelta, onStep } : null);
+            return chat(key, message, who || owner, pageContext(context), typeof onDelta === 'function' ? { onDelta, onStep, signal } : null);
         });
     }
 
@@ -272,7 +306,8 @@ async function readCompletionStream(body, onDelta = () => {}) {
 
 function loopbackAsk({ owner, port = 3000, profile = '', fetchImpl = fetch, timeoutMs = Number(process.env.ASSISTANT_TIMEOUT_MS) || 300000 }) {
     // onDelta: stream the answer and hand each piece of text to it as it arrives (the floating assistant)
-    return async (messages, { owner: who, tools, onDelta } = {}) => {
+    // signal: abort the call (the Stop button), alongside the timeout
+    return async (messages, { owner: who, tools, onDelta, signal } = {}) => {
         const headers = { 'content-type': 'application/json', ...internalAuth.headersFor(who || owner) };
         if (profile) headers['x-harness-profile'] = profile;
         const stream = typeof onDelta === 'function';
@@ -280,7 +315,7 @@ function loopbackAsk({ owner, port = 3000, profile = '', fetchImpl = fetch, time
             method: 'POST',
             headers,
             body: JSON.stringify(tools && tools.length ? { messages, stream, tools, tool_choice: 'auto' } : { messages, stream }),
-            signal: AbortSignal.timeout(timeoutMs),
+            signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
         });
         if (!res.ok) throw new Error(`the harness answered ${res.status}: ${errorText(await res.text())}`);
         // a server that answers a stream request with plain JSON is read as plain JSON
@@ -292,4 +327,4 @@ function loopbackAsk({ owner, port = 3000, profile = '', fetchImpl = fetch, time
     };
 }
 
-module.exports = { createAssistant, fileStore, memoryStore, loopbackAsk, readCompletionStream, systemPrompt, pageContext, HELP, MAX_HISTORY };
+module.exports = { createAssistant, fileStore, memoryStore, loopbackAsk, readCompletionStream, systemPrompt, pageContext, HELP, MAX_HISTORY, STOPPED, findNotes };

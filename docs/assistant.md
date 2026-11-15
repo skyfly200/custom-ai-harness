@@ -6,7 +6,7 @@ A personal assistant is one agent that keeps notes and remembers each conversati
 
 Every page with the site menu has a round **Assistant** button (an orb with a chat-bubble icon) in the bottom-left corner. It opens the same conversation as the Assistant page, so a message sent from either shows in both. While the panel is open the button shows a close icon. The button moves up out of the way of a bar that covers that corner, such as the chat composer or the chat sidebar's footer; give any other element `data-assistant-avoid` to have it do the same. Each message also carries the page you are on (its path, title, and any text you had selected). The panel shows that as "On: ...", and the model sees it for that one turn only; it is not saved in the history. Only the owner (or an admin, with logins on) gets the button.
 
-Press **Alt+A** (Option+A on a Mac) to open or close the panel from anywhere except a text field. Replies stream into the panel as the model writes them, and are drawn as Markdown (lists, code with a Copy button, tables, links) on the panel and the Assistant page. When a reply comes in while the panel is shut, for example one sent from the Assistant page or another tab, the button gets a blue dot until you next open the panel.
+Press **Alt+A** (Option+A on a Mac) to open or close the panel from anywhere except a text field. Replies stream into the panel and onto the Assistant page as the model writes them. While one streams, the send button is a **Stop** button: it ends the reply where it is, the server stops the model call, and the words so far are kept in the conversation, marked Stopped (a stopped `/yes` or `/no` counts as answered, so the question is not asked again). Replies are drawn as Markdown (lists, code with a Copy button, tables, links) on the panel and the Assistant page. When a reply comes in while the panel is shut, for example one sent from the Assistant page or another tab, the button gets a blue dot until you next open the panel.
 
 When the assistant is waiting for you to allow a tool call, the button has an amber dot, and the panel and the Assistant page show the request with **Allow** and **Decline** buttons. They send `/yes` and `/no` for you; typing them still works.
 
@@ -16,6 +16,7 @@ When the assistant is waiting for you to allow a tool call, the button has an am
 |---|---|
 | `/remember TEXT` | Saves a note. Notes go into the assistant's instructions in every conversation. |
 | `/notes` | Lists the notes with their numbers. |
+| `/notes WORDS` | Lists the notes that have all those words (case and accents don't matter). |
 | `/forget N` | Drops note N. |
 | `/reset` | Starts a new conversation. Notes are kept. |
 | `/help` | Lists the commands. |
@@ -82,4 +83,4 @@ Discord needs no public address: the server keeps an outbound connection to Disc
 - Telegram, Slack and Discord are stub-tested only; they have not been run against the real APIs.
 - Notes are one shared list for the owner; there is no per-channel separation or search.
 
-Code: `utils/assistant.js` (notes, conversations, page context, loopback call), `ui/assistant-dock.js` (the floating button, added by `ui/nav.js`), `utils/assistantChannels.js` (Telegram and Slack), `ui/assistant.html`, and the routes in `server.js` (`/ui/api/assistant*`; `POST /ui/api/assistant/stream` is the streamed form of `/message`). Tests: `test/assistant.test.js`, `test/assistantChannels.test.js`, `test/assistantDock.test.js`, `test/assistantStream.test.js`.
+Code: `utils/assistant.js` (notes, conversations, page context, loopback call), `ui/assistant-dock.js` (the floating button, added by `ui/nav.js`), `ui/assistant-stream.js` (reads a streamed reply, for the panel and the page), `utils/assistantChannels.js` (Telegram and Slack), `ui/assistant.html`, and the routes in `server.js` (`/ui/api/assistant*`; `POST /ui/api/assistant/stream` is the streamed form of `/message`). Tests: `test/assistant.test.js`, `test/assistantChannels.test.js`, `test/assistantDock.test.js`, `test/assistantStream.test.js`, `test/assistantStop.test.js`.

@@ -6,6 +6,8 @@ A personal assistant is one agent that keeps notes and remembers each conversati
 
 Every page with the site menu has a round **Assistant** button (an orb with a chat-bubble icon) in the bottom-left corner. It opens the same conversation as the Assistant page, so a message sent from either shows in both. While the panel is open the button shows a close icon. The button moves up out of the way of a bar that covers that corner, such as the chat composer or the chat sidebar's footer; give any other element `data-assistant-avoid` to have it do the same. Each message also carries the page you are on (its path, title, and any text you had selected). The panel shows that as "On: ...", and the model sees it for that one turn only; it is not saved in the history. Only the owner (or an admin, with logins on) gets the button.
 
+Press **Alt+A** (Option+A on a Mac) to open or close the panel from anywhere except a text field. Replies stream into the panel as the model writes them, and are drawn as Markdown (lists, code with a Copy button, tables, links) on the panel and the Assistant page. When a reply comes in while the panel is shut, for example one sent from the Assistant page or another tab, the button gets a blue dot until you next open the panel.
+
 When the assistant is waiting for you to allow a tool call, the button has an amber dot, and the panel and the Assistant page show the request with **Allow** and **Decline** buttons. They send `/yes` and `/no` for you; typing them still works.
 
 ## Commands
@@ -72,7 +74,7 @@ Discord needs no public address: the server keeps an outbound connection to Disc
 
 - Channel routes sit before the login gate, and each checks its own proof: Telegram a secret header, Slack a signature over the raw body with a five-minute clock window. Messages from anyone else are ignored.
 - The model call is a loopback request signed with the per-process secret in `utils/internalAuth.js`, so it cannot be forged from outside.
-- Notes and replies are plain text in the web page; nothing a model writes is rendered as HTML.
+- Replies are drawn as Markdown by `ui/markdown.js`, which escapes every piece of the model's text before it adds a tag, and links open only `http(s)` and `mailto`. Notes and your own messages stay plain text. Nothing a model writes is inserted as raw HTML.
 
 ## Not built yet
 
@@ -80,4 +82,4 @@ Discord needs no public address: the server keeps an outbound connection to Disc
 - Telegram, Slack and Discord are stub-tested only; they have not been run against the real APIs.
 - Notes are one shared list for the owner; there is no per-channel separation or search.
 
-Code: `utils/assistant.js` (notes, conversations, page context, loopback call), `ui/assistant-dock.js` (the floating button, added by `ui/nav.js`), `utils/assistantChannels.js` (Telegram and Slack), `ui/assistant.html`, and the routes in `server.js` (`/ui/api/assistant*`). Tests: `test/assistant.test.js`, `test/assistantChannels.test.js`, `test/assistantDock.test.js`.
+Code: `utils/assistant.js` (notes, conversations, page context, loopback call), `ui/assistant-dock.js` (the floating button, added by `ui/nav.js`), `utils/assistantChannels.js` (Telegram and Slack), `ui/assistant.html`, and the routes in `server.js` (`/ui/api/assistant*`; `POST /ui/api/assistant/stream` is the streamed form of `/message`). Tests: `test/assistant.test.js`, `test/assistantChannels.test.js`, `test/assistantDock.test.js`, `test/assistantStream.test.js`.

@@ -81,3 +81,37 @@ test('the button is an icon: every icon is an inline, decorative svg in the line
     }
     assert.ok(ICONS.assistant && ICONS.close, 'an icon for closed and one for open');
 });
+
+test('Alt+A opens the panel, by key position too (a Mac types å), but not while typing in a field', () => {
+    const { isShortcut } = require('../ui/assistant-dock.js');
+    const page = { tagName: 'DIV' };
+    assert.equal(isShortcut({ altKey: true, code: 'KeyA', key: 'a', target: page }), true);
+    assert.equal(isShortcut({ altKey: true, code: 'KeyA', key: 'å', target: page }), true);
+    assert.equal(isShortcut({ altKey: true, code: 'KeyA', key: 'a', target: { tagName: 'TEXTAREA' } }), false);
+    assert.equal(isShortcut({ altKey: true, code: 'KeyA', key: 'a', target: { tagName: 'P', isContentEditable: true } }), false);
+    assert.equal(isShortcut({ altKey: true, ctrlKey: true, code: 'KeyA', key: 'a', target: page }), false);
+    assert.equal(isShortcut({ altKey: true, shiftKey: true, code: 'KeyA', key: 'A', target: page }), false);
+    assert.equal(isShortcut({ code: 'KeyA', key: 'a', target: page }), false);
+    assert.equal(isShortcut({ altKey: true, code: 'KeyB', key: 'b', target: page }), false);
+});
+
+test('the stream reader keeps the unfinished line for the next chunk and skips foreign lines', () => {
+    const { parseEvents } = require('../ui/assistant-dock.js');
+    const a = parseEvents('data: {"step":true}\n\ndata: {"delta":"Hel');
+    assert.deepEqual(a.events, [{ step: true }]);
+    assert.equal(a.rest, 'data: {"delta":"Hel');
+    const b = parseEvents(`${a.rest}lo"}\n\n: comment\nevent: x\ndata: {"done":true,"reply":"Hello"}\n`);
+    assert.deepEqual(b.events, [{ delta: 'Hello' }, { done: true, reply: 'Hello' }]);
+    assert.equal(b.rest, '');
+});
+
+test('a reply is unread when it is newer than the last time the panel was open', () => {
+    const { hasUnread } = require('../ui/assistant-dock.js');
+    const msgs = [{ role: 'user', content: 'hi', at: 100 }, { role: 'assistant', content: 'hello', at: 200 }];
+    assert.equal(hasUnread(msgs, 150), true);
+    assert.equal(hasUnread(msgs, 200), false);
+    assert.equal(hasUnread(msgs, 0), true);
+    assert.equal(hasUnread([{ role: 'user', content: 'hi', at: 300 }], 0), false, 'only the assistant\'s words count');
+    assert.equal(hasUnread([], 0), false);
+    assert.equal(hasUnread(undefined, 0), false);
+});

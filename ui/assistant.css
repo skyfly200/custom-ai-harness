@@ -14,6 +14,21 @@
 .assistant-page .bubble.assistant { align-self: flex-start; }
 .assistant-page .bubble.pending { color: var(--muted); font-style: italic; }
 .assistant-page .bubble.error { color: var(--bad); }
+.assistant-page .bubble.md { white-space: normal; }
+.assistant-page .bubble.md > :first-child { margin-top: 0; } .assistant-page .bubble.md > :last-child { margin-bottom: 0; }
+.assistant-page .bubble.md p, .assistant-page .bubble.md ul, .assistant-page .bubble.md ol, .assistant-page .bubble.md blockquote, .assistant-page .bubble.md .code, .assistant-page .bubble.md .table-scroll { margin: 0 0 8px; }
+.assistant-page .bubble.md ul, .assistant-page .bubble.md ol { padding-left: 22px; }
+.assistant-page .bubble.md h1, .assistant-page .bubble.md h2, .assistant-page .bubble.md h3, .assistant-page .bubble.md h4 { font-size: 15px; margin: 10px 0 6px; }
+.assistant-page .bubble.md blockquote { padding-left: 10px; border-left: 3px solid var(--border); color: var(--muted); }
+.assistant-page .bubble.md a { color: var(--accent); }
+.assistant-page .bubble.md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.assistant-page .bubble.md :not(pre) > code { padding: 0 4px; border-radius: 4px; border: 1px solid var(--border); }
+.assistant-page .bubble.md .code { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.assistant-page .bubble.md .code-head { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; font-size: 12px; color: var(--muted); }
+.assistant-page .bubble.md pre { margin: 0; padding: 8px 10px; overflow-x: auto; white-space: pre; }
+.assistant-page .bubble.md .table-scroll { overflow-x: auto; }
+.assistant-page .bubble.md table { border-collapse: collapse; }
+.assistant-page .bubble.md th, .assistant-page .bubble.md td { padding: 4px 8px; border: 1px solid var(--border); }
 
 /* a tool call waiting for /yes or /no: the question with Allow and Decline */
 .assistant-page .ask { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--glow-a, #f59e0b) 60%, transparent); background: color-mix(in srgb, var(--glow-a, #f59e0b) 12%, transparent); font-size: 14px; }

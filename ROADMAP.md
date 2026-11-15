@@ -127,10 +127,11 @@ One agent with notes and a memory, on the web, Telegram, Slack and Discord ([doc
 
 * ✅ **Floating assistant on every page:** a round orb button with an icon in the bottom-left corner (`ui/assistant-dock.js`), shared conversation with the Assistant page, the page you are on sent for that turn. It moves above the chat composer and the chat sidebar's footer, and shows a close icon while open.
 * ✅ **Allow and Decline for tool calls:** a dot on the button while a call waits for `/yes` or `/no`, and the request with Allow and Decline buttons in the panel and on the Assistant page (`pending` on `GET /ui/api/assistant/history` and `POST /ui/api/assistant/message`).
-* **Streamed replies in the panel:** the panel waits for the whole reply; stream it the way the chat page does.
-* **Markdown in replies:** replies are plain text; render them with `ui/markdown.js` (still never raw HTML from the model).
-* **A keyboard shortcut** to open and close the panel from any page.
-* **Unread dot:** show on the button when a reply arrived from the Assistant page or another tab since the panel was last open.
+* ✅ **Streamed replies in the panel:** `POST /ui/api/assistant/stream` sends each model step and its text as server-sent events; the final reply replaces what streamed. **Not done:** streaming on the Assistant page itself, and on Telegram, Slack and Discord (edit-in-place messages).
+* ✅ **Markdown in replies:** drawn with `ui/markdown.js` in the panel and on the Assistant page (still never raw HTML from the model).
+* ✅ **A keyboard shortcut:** Alt+A (Option+A on a Mac) opens and closes the panel from anywhere but a text field.
+* ✅ **Unread dot:** a blue dot on the button when a reply came in while the panel was shut; it rechecks when the tab comes back into view, and opening the panel in one tab clears it in the others.
+* **A Stop button** for a reply that is still streaming.
 * **Notes, per channel and searchable:** today notes are one shared list for the owner.
 * **Shell and repo tools for the assistant**, behind Allow like the harness tools.
 * **Test Telegram, Slack and Discord against the real APIs** (stub-tested only).

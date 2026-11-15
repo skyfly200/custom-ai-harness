@@ -11,9 +11,14 @@
 
     const api = async (path, options) => {
         const res = await fetch(path, { credentials: 'same-origin', ...options });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-        return body;
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+            // a proxy in front of the app answers 502 with a plain page: say what that usually means
+            if (body && body.error) throw new Error(body.error);
+            if ([502, 503, 504].includes(res.status)) throw new Error(`the server did not answer (HTTP ${res.status}). It may be restarting or waking from sleep; try again in a moment.`);
+            throw new Error(`HTTP ${res.status}`);
+        }
+        return body || {};
     };
 
     function bubble(role, content, extra) {

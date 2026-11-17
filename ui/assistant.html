@@ -24,7 +24,7 @@
   <script src="dialogs.js"></script>
   <script src="nav.js"></script>
 
-  <p class="muted lead">Your assistant keeps notes and remembers this conversation. The same assistant answers on Telegram and Slack when those are set up. Send <code>/remember TEXT</code> to save a note, <code>/notes</code> to list them, <code>/forget N</code> to drop one, and <code>/reset</code> to start a new conversation.</p>
+  <p class="muted lead">Your assistant keeps notes and remembers this conversation. The same assistant answers on Telegram and Slack when those are set up. Send <code>/remember TEXT</code> to save a note, <code>/notes</code> to list them (<code>/notes WORDS</code> to search), <code>/forget N</code> to drop one, and <code>/reset</code> to start a new conversation.</p>
 
   <div class="split">
     <section class="card thread" aria-label="Conversation">
@@ -50,6 +50,7 @@
   </div>
 </main>
 <script src="markdown.js"></script>
+<script src="assistant-stream.js"></script>
 <script src="assistant.js"></script>
 <script src="sleepcard.js" defer></script>
 </body>

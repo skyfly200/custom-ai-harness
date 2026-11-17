@@ -14,6 +14,7 @@
 .assistant-page .bubble.assistant { align-self: flex-start; }
 .assistant-page .bubble.pending { color: var(--muted); font-style: italic; }
 .assistant-page .bubble.error { color: var(--bad); }
+.assistant-page .bubble.stopped::after { content: 'Stopped'; display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
 .assistant-page .bubble.md { white-space: normal; }
 .assistant-page .bubble.md > :first-child { margin-top: 0; } .assistant-page .bubble.md > :last-child { margin-bottom: 0; }
 .assistant-page .bubble.md p, .assistant-page .bubble.md ul, .assistant-page .bubble.md ol, .assistant-page .bubble.md blockquote, .assistant-page .bubble.md .code, .assistant-page .bubble.md .table-scroll { margin: 0 0 8px; }

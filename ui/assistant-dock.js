@@ -12,8 +12,10 @@
 // dot on it shows that the assistant is waiting for you to allow or decline a tool call; a blue dot, that a reply came
 // in while the panel was shut. Alt+A opens and closes the panel from anywhere but a text field.
 //
-// Replies stream in as the model writes them (POST api/assistant/stream) and are drawn as Markdown with
-// ui/markdown.js, which escapes every piece of model text before it adds a tag; links open only http(s) and mailto.
+// Replies stream in as the model writes them (POST api/assistant/stream, read by ui/assistant-stream.js) and are
+// drawn as Markdown with ui/markdown.js, which escapes every piece of model text before it adds a tag; links open only
+// http(s) and mailto. While a reply streams, the send button is a Stop button: it ends the reply where it is, and the
+// server keeps the words written so far.
 // Everything here sits in one function scope: the page's own scripts (chat.js declares a global ICONS) must not clash
 // with the dock's names, or the whole script fails and the button never appears.
 (() => {
@@ -61,36 +63,17 @@ function isShortcut(e) {
 }
 const SHORTCUT_LABEL = 'Alt+A';
 
-/**
- * The words for a failed request: the server's own message when it sent one (JSON), else what the status means. A
- * proxy in front of the app (Fly, Cloudflare) answers 502 to a plain-text page, so that case gets a plain explanation.
- */
-async function answerError(res) {
-  const body = await res.json().catch(() => null);
-  if (body && body.error) return String(body.error);
-  if ([502, 503, 504].includes(res.status)) return `the server did not answer (HTTP ${res.status}). It may be restarting or waking from sleep; try again in a moment.`;
-  return `HTTP ${res.status}`;
-}
-
-/** Splits server-sent events into their JSON payloads. Returns the events and the unfinished tail to keep. */
-function parseEvents(buffer) {
-  const lines = String(buffer).split('\n');
-  const rest = lines.pop();
-  const events = [];
-  for (const line of lines) {
-    if (!line.startsWith('data:')) continue;
-    try { events.push(JSON.parse(line.slice(5).trim())); } catch { /* a partial or foreign line */ }
-  }
-  return { events, rest };
-}
-
 /** True when the newest assistant message is later than the time the panel was last seen open. */
 function hasUnread(messages, seenAt) {
   const last = [...(messages || [])].reverse().find((m) => m && m.role !== 'user');
   return Boolean(last && Number(last.at) > (Number(seenAt) || 0));
 }
 
-if (typeof module !== 'undefined') module.exports = { gatherContext, liftFor, ICONS, GAP, isShortcut, parseEvents, hasUnread, answerError, SHORTCUT_LABEL };
+if (typeof module !== 'undefined') {
+  // reading the stream, and the words for a failed request, live in ui/assistant-stream.js (shared with the page)
+  const { parseEvents, answerError } = require('./assistant-stream.js');
+  module.exports = { gatherContext, liftFor, ICONS, GAP, isShortcut, parseEvents, hasUnread, answerError, SHORTCUT_LABEL };
+}
 
 if (typeof document !== 'undefined') (() => {
   const script = document.currentScript;
@@ -134,6 +117,7 @@ if (typeof document !== 'undefined') (() => {
     .ad-msg.user { align-self: flex-end; background: rgba(99,102,241,.18); }
     .ad-msg.assistant { align-self: flex-start; background: rgba(127,127,127,.12); }
     .ad-msg.error { color: #b91c1c; }
+    .ad-msg.stopped::after { content: 'Stopped'; display: block; margin-top: 4px; font-size: 11px; opacity: .65; }
     .ad-msg.md { white-space: normal; }
     .ad-msg.md > :first-child { margin-top: 0; } .ad-msg.md > :last-child { margin-bottom: 0; }
     .ad-msg.md p, .ad-msg.md ul, .ad-msg.md ol, .ad-msg.md blockquote, .ad-msg.md .code, .ad-msg.md .table-scroll { margin: 0 0 6px; }
@@ -220,6 +204,14 @@ if (typeof document !== 'undefined') (() => {
     s.onload = () => { md = window.Markdown || null; for (const div of log.querySelectorAll('.ad-msg.assistant')) if (words.has(div)) draw(div, words.get(div)); };
     document.head.append(s);
   }
+  // The stream reader (ui/assistant-stream.js), loaded once; a message waits for it.
+  const streamLib = window.AssistantStream ? Promise.resolve(window.AssistantStream) : new Promise((resolve, reject) => {
+    const s = el('script', { src: new URL('assistant-stream.js', script.src).href, async: true });
+    s.onload = () => (window.AssistantStream ? resolve(window.AssistantStream) : reject(new Error('the stream reader did not load')));
+    s.onerror = () => reject(new Error('the stream reader did not load'));
+    document.head.append(s);
+  });
+  streamLib.catch(() => {}); // reported when a message is sent
   const stuckToBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 40;
   const bubble = (role, text) => {
     const div = el('div', { className: `ad-msg ${role}` });
@@ -356,18 +348,27 @@ if (typeof document !== 'undefined') (() => {
 
   // Sends a message and streams the reply into its bubble. Falls back to the plain route on a server without
   // the stream route. The final text from the server replaces what streamed, since a step that ended in a tool
-  // call can leave text the answer does not keep.
-  async function post(route, text, context) {
+  // call can leave text the answer does not keep. Stop aborts the request: the bubble keeps what streamed.
+  async function post(route, text, context, signal) {
     return fetch(api(route), {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text, context }),
+      signal,
     });
+  }
+  let controller = null; // the reply being streamed, for the Stop button
+  function setSendButton(streaming) {
+    sendBtn.innerHTML = streaming ? ICONS.stop : ICONS.send;
+    const label = streaming ? 'Stop the reply' : 'Send';
+    sendBtn.title = label;
+    sendBtn.setAttribute('aria-label', label);
   }
   async function send(text) {
     sending = true;
-    sendBtn.disabled = true;
+    controller = new AbortController();
+    setSendButton(true);
     for (const b of ask.querySelectorAll('button')) b.disabled = true;
     setNote('');
     setStatus('busy', 'Thinking…');
@@ -388,9 +389,16 @@ if (typeof document !== 'undefined') (() => {
       if (!streamed) pending.classList.add('pending');
       if (follow) log.scrollTop = log.scrollHeight;
     };
-    const finish = (body) => {
+    let lib = null;
+    try {
+      lib = await streamLib;
+      const { signal } = controller;
+      let res = await post('assistant/stream', text, context, signal);
+      if (res.status === 404) res = await post('assistant/message', text, context, signal);
+      const body = await lib.readReply(res, {
+        onText: (t) => { streamed = t; if (!queued) { queued = true; requestAnimationFrame(paint); } },
+      });
       finished = true;
-      if (body.error) throw new Error(body.error);
       pending.classList.remove('pending');
       draw(pending, String(body.reply ?? ''));
       log.scrollTop = log.scrollHeight;
@@ -398,48 +406,37 @@ if (typeof document !== 'undefined') (() => {
       if (body.pending) setStatus('wait', 'Waiting for your approval');
       else setStatus('ready', 'Ready');
       if (panel.hidden) setUnread(true); else markSeen();
-    };
-    try {
-      let res = await post('assistant/stream', text, context);
-      if (res.status === 404) res = await post('assistant/message', text, context);
-      if (!res.ok) throw new Error(await answerError(res));
-      if (!/event-stream/.test(res.headers.get('content-type') || '') || !res.body) return finish(await res.json());
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let done = null;
-      for (;;) {
-        const { value, done: end } = await reader.read();
-        if (end) break;
-        const parsed = parseEvents(buffer + decoder.decode(value, { stream: true }));
-        buffer = parsed.rest;
-        for (const ev of parsed.events) {
-          if (ev.step) streamed = '';
-          else if (typeof ev.delta === 'string') streamed += ev.delta;
-          else if (ev.done) done = ev;
-          if (!queued) { queued = true; requestAnimationFrame(paint); }
-        }
-      }
-      const tail = parseEvents(`${buffer}\n`).events.find((ev) => ev.done);
-      if (tail) done = tail;
-      if (!done) throw new Error('the reply stopped before it finished');
-      finish(done);
     } catch (err) {
+      finished = true;
       pending.classList.remove('pending');
-      pending.classList.add('error');
-      draw(pending, `Could not send: ${err.message}`);
-      setStatus('error', 'Could not send. Details are in the panel.');
+      if (lib && lib.isAbort(err)) {
+        if (streamed) { draw(pending, streamed); pending.classList.add('stopped'); } else pending.remove();
+        setPending(null); // a stopped /yes or /no is answered; the history has the rest
+        setStatus('ready', 'Stopped');
+      } else {
+        pending.classList.add('error');
+        draw(pending, `Could not send: ${err.message}`);
+        setStatus('error', 'Could not send. Details are in the panel.');
+      }
     } finally {
       sending = false;
+      controller = null;
       shown = -1; // the next look at the history redraws it from the server's copy
-      sendBtn.disabled = false;
+      setSendButton(false);
       for (const b of ask.querySelectorAll('button')) b.disabled = false;
       if (!panel.hidden) ta.focus();
     }
   }
 
+  // While a reply streams, the send button stops it; Enter waits, so a half-typed next message is not lost.
+  sendBtn.addEventListener('click', (event) => {
+    if (!controller) return;
+    event.preventDefault();
+    controller.abort();
+  });
   q('form').addEventListener('submit', (event) => {
     event.preventDefault();
+    if (sending) return;
     const text = ta.value.trim();
     if (!text) return;
     ta.value = '';
@@ -468,7 +465,7 @@ if (typeof document !== 'undefined') (() => {
     if (messages.length !== shown) {
       shown = messages.length;
       log.replaceChildren();
-      for (const m of messages) bubble(m.role === 'user' ? 'user' : 'assistant', m.content);
+      for (const m of messages) bubble(m.role === 'user' ? 'user' : 'assistant', m.content).classList.toggle('stopped', Boolean(m.stopped));
       if (!messages.length) bubble('assistant', 'Hi. Ask about this page, or anything else. The conversation is the same as on the Assistant page.');
     }
     setPending(history.pending);

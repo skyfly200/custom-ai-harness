@@ -117,7 +117,7 @@ function answerProxyError(err, req, res) {
     const message = dropped
         ? `the Gateway (LiteLLM) dropped the connection (${code}): it restarted, or closed a connection the harness had pooled`
         : refused
-            ? `the Gateway (LiteLLM) is not answering (${code}); is it running?`
+            ? `the Gateway (LiteLLM) is not answering (${code}): it is still starting, has crashed, or was stopped. On this PC, check the gateway window of npm run all; on the hosted server, check fly logs`
             : `the Gateway call failed: ${err?.message || code || 'unknown error'}`;
     if (res && typeof res.writeHead === 'function' && !res.writableEnded) {
         if (!res.headersSent) {

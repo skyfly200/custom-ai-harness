@@ -39,7 +39,7 @@ test('a refused connection still says the Gateway is not running', () => {
     const { kind, message } = answerProxyError({ code: 'ECONNREFUSED' }, { url: '/v1/chat/completions' }, res);
     assert.equal(kind, KINDS.gatewayDown);
     assert.equal(res.status, 502);
-    assert.match(message, /is not answering \(ECONNREFUSED\); is it running\?/);
+    assert.match(message, /is not answering \(ECONNREFUSED\): it is still starting, has crashed/);
 });
 
 test('any other failure keeps its own words, as a 504', () => {

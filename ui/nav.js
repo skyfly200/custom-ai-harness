@@ -281,8 +281,9 @@
     if (!chat) { build(nav); renderBar(); }
     render();
     loadMe();
-    // The floating assistant (ui/assistant-dock.js) on every page with the nav; the Assistant page has its own.
-    if (!/\/assistant\.html$/.test(location.pathname) && !document.querySelector('script[data-assistant-dock]')) {
+    // The floating assistant (ui/assistant-dock.js) on every page with the nav except the chat page (its composer
+    // is the place to talk) and the Assistant page itself (which has the full conversation).
+    if (!chat && !/\/assistant\.html$/.test(location.pathname) && !document.querySelector('script[data-assistant-dock]')) {
       const dock = document.createElement('script');
       dock.src = 'assistant-dock.js';
       dock.defer = true;

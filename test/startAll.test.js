@@ -88,3 +88,9 @@ test('the Gateway falls back to this PC, not the Docker name, when the Langfuse 
     assert.match(gw.command, /gateway-start\.py/);
     assert.equal(gw.env.OPENROUTER_PROXY_URL, 'http://127.0.0.1:3000');
 });
+
+test('the Interceptor waits up to 90 s for a Gateway still loading, unless HARNESS_GATEWAY_WAIT_S says otherwise', () => {
+    const waitOf = (env) => buildCommands({ platform: 'linux', env, argv: [], exists: everything }).commands.find(c => c.name === 'interceptor').env.HARNESS_GATEWAY_WAIT_S;
+    assert.strictEqual(waitOf({}), '90');
+    assert.strictEqual(waitOf({ HARNESS_GATEWAY_WAIT_S: '0' }), '0');
+});

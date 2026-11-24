@@ -15,6 +15,8 @@ const path = require('path');
 const langfuse = require('../utils/langfuse');
 
 const ROOT = path.resolve(__dirname, '..');
+const RESTART_TRIES = 10;
+const RESTART_DELAY_MS = 2000;
 
 function venvBin(platform) {
     return platform === 'win32' ? path.join('.venv', 'Scripts') : path.join('.venv', 'bin');
@@ -96,7 +98,8 @@ function buildCommands(opts = {}) {
     const commands = [
         { name: 'gateway',     ...gateway, prefixColor: 'magenta' },
         { name: 'router',      command: `${python || 'python'} router.py`, env: { PYTHONUTF8: '1' }, prefixColor: 'cyan' },
-        { name: 'interceptor', command: 'node server.js', prefixColor: 'green' },
+        // Requests wait this long for a Gateway still loading (utils/gatewayWait.js) instead of getting "Gateway down"
+        { name: 'interceptor', command: 'node server.js', env: { HARNESS_GATEWAY_WAIT_S: env.HARNESS_GATEWAY_WAIT_S || '90' }, prefixColor: 'green' },
         { name: 'runner',      command: 'node runner/server.js', prefixColor: 'blue' },
     ];
 
@@ -151,7 +154,8 @@ async function main() {
     console.log(`[start-all] Starting ${commands.map(c => c.name).join(', ')}. Dashboard: http://localhost:3000/ui  (Ctrl+C stops all)`);
 
     const { concurrently } = await import('concurrently');
-    const { result } = concurrently(commands, { cwd: ROOT, killOthersOn: [], prefix: 'name' });
+    // A crashed part (LiteLLM, the Router, ...) is started again, up to RESTART_TRIES times, a couple of seconds apart
+    const { result } = concurrently(commands, { cwd: ROOT, killOthersOn: [], prefix: 'name', restartTries: RESTART_TRIES, restartDelay: RESTART_DELAY_MS });
     result.then(() => process.exit(0), () => process.exit(1));
 }
 

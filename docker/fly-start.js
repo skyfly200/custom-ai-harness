@@ -9,7 +9,10 @@
  * from the image the first time; when a later image carries a different copy, it is saved beside
  * the volume's as <name>.new and the volume's copy is left alone.
  *
- * If any of the three stops, the rest are stopped and this exits non-zero, so Fly restarts the Machine.
+ * The Gateway and Router are restarted in place when they crash (restartDelayMs: 1 s, doubling to 30 s; the count
+ * resets after a minute of running). Only the Interceptor or the runner stopping takes the Machine down, so a LiteLLM
+ * crash no longer stops the whole app and runs into Fly's restart limit. The Interceptor exiting stops everything,
+ * and this exits non-zero, so Fly restarts the Machine.
  * The Interceptor stops the Machine on purpose (the Stop button, or HARNESS_IDLE_STOP_MIN idle minutes) by sending
  * this process SIGTERM: everything is stopped and this exits 0, which the Machine's "on-failure" restart policy leaves stopped.
  */
@@ -41,7 +44,16 @@ function seed(appDir = APP, dataDir = DATA) {
     return notes;
 }
 
-/** The processes: Gateway, Router, Interceptor, and (HARNESS_RUNS=1) the task runner for Runs. */
+const RESTART_MIN_MS = 1000;
+const RESTART_MAX_MS = 30000;
+const RESET_AFTER_MS = 60000;
+
+/** Wait before restart number `attempt` (1, 2, 3...): 1 s, 2 s, 4 s ... capped at 30 s. */
+function restartDelayMs(attempt) {
+    return Math.min(RESTART_MAX_MS, RESTART_MIN_MS * 2 ** Math.max(0, attempt - 1));
+}
+
+/** The processes: Gateway, Router, Interceptor, and (HARNESS_RUNS=1) the task runner for Runs. `restart` ones are restarted when they crash. */
 function commands(dataDir = DATA, env = process.env) {
     const runs = /^(1|true|yes|on)$/i.test(env.HARNESS_RUNS || '');
     // Shared by the Interceptor and the runner for this boot only: the runner trusts the Interceptor's word about
@@ -61,9 +73,9 @@ function commands(dataDir = DATA, env = process.env) {
         OPENROUTER_PROXY_URL: 'http://127.0.0.1:3000',
     };
     const list = [
-        { name: 'gateway', cmd: 'python', args: ['docker/gateway-start.py'],
+        { name: 'gateway', restart: true, cmd: 'python', args: ['docker/gateway-start.py'],
           env: { GATEWAY_SOURCE: config, GATEWAY_TARGET: '/tmp/config.yaml', GATEWAY_HOST: '127.0.0.1', GATEWAY_PORT: '4000' } },
-        { name: 'router', cmd: 'python', args: ['router.py', '--config', path.join(dataDir, 'routellm-config.yaml'), '--host', '127.0.0.1', '--port', '6060'], env: {} },
+        { name: 'router', restart: true, cmd: 'python', args: ['router.py', '--config', path.join(dataDir, 'routellm-config.yaml'), '--host', '127.0.0.1', '--port', '6060'], env: {} },
         { name: 'interceptor', cmd: 'node', args: ['server.js'],
           env: { GATEWAY_URL: 'http://127.0.0.1:4000', ROUTER_URL: 'http://127.0.0.1:6060', OPENROUTER_PROXY_URL: 'http://127.0.0.1:3000',
                  HARNESS_STOP_VIA_PARENT: '1',
@@ -94,18 +106,28 @@ function main() {
         setTimeout(() => process.exit(code), 25000).unref(); // the runner saves running agents' work before it exits
         Promise.all(children.map((c) => new Promise((r) => (c.exitCode !== null ? r() : c.once('exit', r))))).then(() => process.exit(code));
     };
-    for (const c of commands()) {
+    const launch = (c, attempt = 0) => {
+        const started = Date.now();
         const child = spawn(c.cmd, c.args, { cwd: APP, env: c.env, stdio: 'inherit' });
         children.push(child);
         child.on('exit', (code, signal) => {
-            if (!stopping) console.error(`[fly-start] ${c.name} stopped (${signal || code}); stopping the rest`);
-            stopAll(stopping ? 0 : 1);
+            if (stopping) return;
+            if (!c.restart) {
+                console.error(`[fly-start] ${c.name} stopped (${signal || code}); stopping the rest`);
+                stopAll(1);
+                return;
+            }
+            const next = Date.now() - started > RESET_AFTER_MS ? 1 : attempt + 1;
+            const delay = restartDelayMs(next);
+            console.error(`[fly-start] ${c.name} stopped (${signal || code}); restarting it in ${delay / 1000} s (restart ${next})`);
+            setTimeout(() => { if (!stopping) launch(c, next); }, delay).unref();
         });
         child.on('error', (err) => { console.error(`[fly-start] ${c.name}: ${err.message}`); stopAll(1); });
-    }
+    };
+    for (const c of commands()) launch(c);
     for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => stopAll(0));
 }
 
 if (require.main === module) main();
 
-module.exports = { seed, commands };
+module.exports = { seed, commands, restartDelayMs };

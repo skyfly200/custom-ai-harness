@@ -72,3 +72,12 @@ test("the Gateway doesn't see the app's DATABASE_URL, LiteLLM would try to use i
     assert.strictEqual(gateway.env.DATABASE_URL, undefined);
     assert.strictEqual(interceptor.env.DATABASE_URL, 'postgres://neon');
 });
+
+test('a crashed Gateway or Router is restarted in place; the Interceptor and runner are not', () => {
+    const { restartDelayMs } = require('../docker/fly-start');
+    const list = commands('/vol', { PATH: 'x', HARNESS_RUNS: '1' });
+    assert.deepStrictEqual(list.filter((c) => c.restart).map((c) => c.name), ['gateway', 'router']);
+    assert.strictEqual(list.find((c) => c.name === 'interceptor').restart, undefined);
+    assert.strictEqual(list.find((c) => c.name === 'runner').restart, undefined);
+    assert.deepStrictEqual([1, 2, 3, 4, 5, 6, 20].map(restartDelayMs), [1000, 2000, 4000, 8000, 16000, 30000, 30000]);
+});

@@ -60,6 +60,12 @@ Reads run at once. Every create or change waits for `/yes`, like an MCP tool set
 
 The assistant can call the MCP tools that chat uses (`mcp-servers.json`, managed on the Tools page). It sees the same list, so adding a server there gives the assistant its tools too. Shell and repo tools are not offered to it.
 
+Three limits keep a long tool list from stopping the assistant:
+
+- It sends at most 128 tools (`ASSISTANT_MAX_TOOLS`): its own harness tools first, then the MCP tools in order. Many providers refuse a request with more, and the refusal would end every message. The cut is logged once.
+- After a wake, MCP servers that download their program connect one after another. The assistant waits up to 8 seconds for them (`ASSISTANT_MCP_WAIT_MS`), then answers with the tools that are ready. The others keep connecting and are offered on a later message.
+- Each MCP tool's parameters are sent as an object schema, because a provider refuses the whole request over one tool with another shape.
+
 A tool whose server is set to ask first (`askBefore`) does not run on its own. The assistant names the call and waits: send `/yes` to allow it or `/no` to decline. Until you answer, other messages in that conversation are held. Tools on servers that do not ask run straight away, up to six steps per message.
 
 ### Discord

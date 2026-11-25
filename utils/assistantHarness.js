@@ -149,15 +149,57 @@ function createHarnessTools({ profiles, skills, runnerUrl = () => process.env.RU
     };
 }
 
+// The assistant sends every connected MCP server's tools, not a chosen few like the chat page. Many providers refuse
+// a request with more than 128 tools (DeepSeek, OpenAI), and that refusal would end every message, so the list is
+// cut there: the harness's own tools first, then the MCP tools in order.
+const MAX_TOOLS = Math.max(1, Number(process.env.ASSISTANT_MAX_TOOLS) || 128);
+// After a wake the MCP servers that download their program connect one after another (up to two minutes each).
+// The assistant waits this long for them, then answers with the tools that are ready; the rest keep connecting
+// and join on a later message.
+const MCP_WAIT_MS = Math.max(0, Number(process.env.ASSISTANT_MCP_WAIT_MS ?? 8000));
+
+// A tool's parameters must be a JSON object schema, or the provider refuses the whole request
+function objectSchema(parameters) {
+    if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return { type: 'object', properties: {} };
+    const out = { ...parameters };
+    delete out.$schema;
+    if (out.type !== 'object') out.type = 'object';
+    if (!out.properties || typeof out.properties !== 'object' || Array.isArray(out.properties)) out.properties = {};
+    return out;
+}
+
 /** One tool manager over the MCP tools and the harness tools, for the assistant's loop. */
-function combine(mcp, harness) {
+function combine(mcp, harness, { maxTools = MAX_TOOLS, waitMs = MCP_WAIT_MS, log = console.warn } = {}) {
     const pick = (name) => (harness.has(name) ? harness : mcp);
+    let warned = '';
+    const warnOnce = (msg) => { if (msg !== warned) { warned = msg; log(`[assistant] ${msg}`); } };
     return {
-        start: async () => { if (mcp && mcp.start) await mcp.start(); },
-        definitions: () => [...harness.definitions(), ...(mcp ? mcp.definitions() : [])],
+        start: async () => {
+            if (!mcp || !mcp.start) return;
+            const loading = Promise.resolve(mcp.start()).catch((err) => warnOnce(`MCP tools failed to load: ${err.message}`));
+            let timer;
+            const waited = new Promise((resolve) => { timer = setTimeout(() => resolve('waited'), waitMs); });
+            const first = await Promise.race([loading.then(() => 'ready'), waited]);
+            clearTimeout(timer);
+            if (first === 'waited') warnOnce(`MCP servers still connecting after ${waitMs} ms; answering with the tools that are ready`);
+        },
+        definitions: () => {
+            const own = harness.definitions();
+            const seen = new Set(own.map((d) => d.function.name));
+            const extra = [];
+            for (const d of (mcp ? mcp.definitions() : [])) {
+                const name = d && d.function && d.function.name;
+                if (!name || seen.has(name)) continue;
+                seen.add(name);
+                extra.push({ ...d, function: { ...d.function, parameters: objectSchema(d.function.parameters) } });
+            }
+            const room = Math.max(0, maxTools - own.length);
+            if (extra.length > room) warnOnce(`${own.length + extra.length} tools is more than ${maxTools}; sending the first ${maxTools}`);
+            return [...own, ...extra.slice(0, room)];
+        },
         needsApproval: (name) => (harness.has(name) ? harness.needsApproval(name) : !!mcp && mcp.needsApproval(name)),
         call: (name, args, opts) => pick(name).call(name, args, opts),
     };
 }
 
-module.exports = { createHarnessTools, combine, DEFINITIONS, WRITE_TOOLS };
+module.exports = { createHarnessTools, combine, objectSchema, DEFINITIONS, WRITE_TOOLS, MAX_TOOLS };

@@ -128,3 +128,77 @@ test('combine sends MCP names to the MCP manager and reports its approvals', asy
     assert.equal(manager.needsApproval('list_apps'), false);
     assert.deepEqual(await manager.call('gmail_send', {}, { confirmed: true }), { text: 'ran gmail_send' });
 });
+
+const harnessOnly = () => createHarnessTools({ profiles: fakeProfiles(), fetchImpl: fakeRunner({}).fetchImpl });
+const mcpWith = (count, extra = {}) => ({
+    start: async () => {},
+    definitions: () => Array.from({ length: count }, (_, i) => ({ type: 'function', function: { name: `mcp__s__t${i}`, description: 't', parameters: { type: 'object', properties: {} } } })),
+    needsApproval: () => false,
+    call: async () => ({ text: '' }),
+    ...extra,
+});
+
+test('combine sends at most 128 tools, the harness tools first', () => {
+    const logs = [];
+    const manager = combine(mcpWith(300), harnessOnly(), { log: (m) => logs.push(m) });
+    const defs = manager.definitions();
+    assert.equal(defs.length, 128);
+    assert.equal(defs[0].function.name, 'list_routing_strategies');
+    assert.ok(defs.some((d) => d.function.name === 'save_skill'), 'every harness tool is kept');
+    assert.equal(defs.filter((d) => d.function.name.startsWith('mcp__')).length, 128 - harnessOnly().definitions().length);
+    manager.definitions();
+    assert.equal(logs.length, 1, 'the cut is logged once, not on every message');
+    assert.match(logs[0], /more than 128/);
+});
+
+test('combine keeps a short tool list whole', () => {
+    const defs = combine(mcpWith(5), harnessOnly(), { log: () => {} }).definitions();
+    assert.equal(defs.length, harnessOnly().definitions().length + 5);
+});
+
+test('combine gives every MCP tool an object schema', () => {
+    const mcp = mcpWith(0, {
+        definitions: () => [
+            { type: 'function', function: { name: 'a', parameters: undefined } },
+            { type: 'function', function: { name: 'b', parameters: { $schema: 'http://json-schema.org/draft-07/schema#', properties: { q: { type: 'string' } } } } },
+            { type: 'function', function: { name: 'c', parameters: { type: 'object', properties: [] } } },
+        ],
+    });
+    const defs = combine(mcp, harnessOnly(), { log: () => {} }).definitions().filter((d) => ['a', 'b', 'c'].includes(d.function.name));
+    assert.deepEqual(defs.map((d) => d.function.parameters), [
+        { type: 'object', properties: {} },
+        { type: 'object', properties: { q: { type: 'string' } } },
+        { type: 'object', properties: {} },
+    ]);
+});
+
+test('combine drops an MCP tool whose name a harness tool already has', () => {
+    const mcp = mcpWith(0, { definitions: () => [{ type: 'function', function: { name: 'list_apps', parameters: { type: 'object', properties: {} } } }] });
+    const defs = combine(mcp, harnessOnly(), { log: () => {} }).definitions();
+    assert.equal(defs.filter((d) => d.function.name === 'list_apps').length, 1);
+});
+
+test('the assistant answers with the harness tools while slow MCP servers still connect', async () => {
+    let finish;
+    const slow = mcpWith(3, { start: () => new Promise((resolve) => { finish = resolve; }), definitions: () => [] });
+    const logs = [];
+    const manager = combine(slow, harnessOnly(), { waitMs: 20, log: (m) => logs.push(m) });
+    let sent = null;
+    const ask = async (messages, { tools }) => { sent = tools; return 'Hi.'; };
+    const a = assistant.createAssistant({ store: assistant.memoryStore(), ask, owner: 'Skyler', tools: manager });
+    const started = Date.now();
+    assert.equal(await a.handle('web:Skyler', 'hello'), 'Hi.');
+    assert.ok(Date.now() - started < 2000, 'did not wait for the slow servers');
+    assert.ok(sent.some((d) => d.function.name === 'list_apps'));
+    assert.match(logs[0], /still connecting/);
+    finish();
+});
+
+test('a failed MCP load does not stop the assistant', async () => {
+    const broken = mcpWith(0, { start: async () => { throw new Error('bad config'); } });
+    const logs = [];
+    const manager = combine(broken, harnessOnly(), { waitMs: 1000, log: (m) => logs.push(m) });
+    const a = assistant.createAssistant({ store: assistant.memoryStore(), ask: async () => 'Still here.', owner: 'Skyler', tools: manager });
+    assert.equal(await a.handle('web:Skyler', 'hello'), 'Still here.');
+    assert.match(logs[0], /failed to load: bad config/);
+});
